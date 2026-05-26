@@ -4,6 +4,13 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.2.2](https://github.com/YusDyr/luci-app-trafficctl/compare/v1.2.1...v1.2.2) (2026-05-26)
+
+
+### CI
+
+* add release-please for automated changelog and releases ([f1c9834](https://github.com/YusDyr/luci-app-trafficctl/commit/f1c9834b37a19ae091b5c6b993e1309a06c74709))
+
 ## [1.2.1] — 2026-05-26
 
 ### Bug Fixes
