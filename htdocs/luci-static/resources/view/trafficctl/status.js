@@ -2,6 +2,8 @@
 'require view';
 'require rpc';
 'require fs';
+var TRAFFICCTL_BUILD = '20260526i';
+console.log('[trafficctl] build:' + TRAFFICCTL_BUILD);
 
 var STORAGE_KEY = 'trafficctl_opts';
 var RECENT_KEY = 'trafficctl_recent';
@@ -117,7 +119,7 @@ var callTelegramSet = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'telegram_config_set',
 	params: ['enabled', 'bot_token', 'chat_id', 'poll_interval',
-		'notify_new_device', 'notify_known_device',
+		'notify_new_device', 'notify_known_device', 'control_enabled', 'notify_template',
 		'btn_block_inet', 'btn_block_wifi', 'btn_limiter', 'btn_shaper']
 });
 
@@ -143,6 +145,10 @@ var callActivityLog = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'activity_log',
 	params: ['lines']
+});
+var callVersion = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'version'
 });
 
 var C = {
@@ -631,6 +637,8 @@ function injectStyles() {
 			'--tm-speed:     #3182ce;' +
 			'--tm-shape-fg:  #2b6cb0;' +
 			'--tm-hover:     #ebf8ff;' +
+			'--tm-section-action: #f0f4f8;' +
+			'--tm-section-data:   #ffffff;' +
 		'}' +
 		':root[data-darkmode="true"],' +
 		'html[data-darkmode="true"],' +
@@ -660,6 +668,8 @@ function injectStyles() {
 			'--tm-speed:     #63b3ed;' +
 			'--tm-shape-fg:  #63b3ed;' +
 			'--tm-hover:     #2d3748;' +
+			'--tm-section-action: #252a30;' +
+			'--tm-section-data:   #1e1e1e;' +
 		'}' +
 		'@keyframes tm-spin{to{transform:rotate(360deg)}}' +
 		'@keyframes tm-pulse{0%,100%{opacity:.5}50%{opacity:1}}' +
@@ -683,7 +693,36 @@ function injectStyles() {
 		'transform:translateX(-50%);padding:4px 8px;border-radius:4px;font-size:11px;font-weight:400;' +
 		'white-space:nowrap;background:var(--tm-th-bg);color:var(--tm-th-fg);' +
 		'pointer-events:none;opacity:0;transition:opacity .1s;z-index:999}' +
-		'[data-tip]:hover::after{opacity:1}';
+		'[data-tip]:hover::after{opacity:1}' +
+		'.tg-section{border-left:3px solid #0088cc;padding-left:12px;margin-top:4px}' +
+		'.tg-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px}' +
+		'.tg-row+.tg-row{margin-top:8px}' +
+		'.tg-input{font-size:12px;padding:4px 8px;background:var(--tm-bg);color:var(--tm-text);border:1px solid var(--tm-border);border-radius:4px;outline:none;transition:border-color .2s}' +
+		'.tg-input:focus{border-color:#0088cc}' +
+		'.tg-input--token{width:240px}' +
+		'.tg-input--chat{width:120px}' +
+		'.tg-input--template{width:100%;min-height:60px;resize:vertical;font-family:monospace;font-size:11px}' +
+		'.tg-btn{font-size:11px;padding:3px 10px;border:1px solid var(--tm-border);border-radius:4px;background:var(--tm-bg);color:var(--tm-text);cursor:pointer;transition:background .15s}' +
+		'.tg-btn:hover{background:var(--tm-hover)}' +
+		'.tg-btn--primary{background:#0088cc;color:#fff;border-color:#0088cc}' +
+		'.tg-btn--primary:hover{background:#006fa3}' +
+		'.tg-label{font-size:11px;color:var(--tm-text-mute);font-weight:500}' +
+		'.tg-status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-left:6px;vertical-align:middle}' +
+		'.tg-status-dot--on{background:var(--tm-state-ok)}' +
+		'.tg-status-dot--off{background:var(--tm-text-faint)}' +
+		'.tg-segmented{display:inline-flex;border:1px solid var(--tm-border);border-radius:6px;overflow:hidden;font-size:12px}' +
+		'.tg-segmented__item{padding:5px 14px;cursor:pointer;background:var(--tm-bg);color:var(--tm-text-mute);transition:background .15s,color .15s;user-select:none;border-right:1px solid var(--tm-border);border-top:none;border-bottom:none;border-left:none;font-family:inherit;font-size:inherit;line-height:inherit;outline:none}' +
+		'.tg-segmented__item:last-child{border-right:none}' +
+		'.tg-segmented__item--active{background:#0088cc;color:#fff}' +
+		'.tg-divider{font-size:11px;font-weight:600;color:var(--tm-text-mute);margin-top:12px;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--tm-border)}' +
+		'.tg-bubble{background:var(--tm-bg-alt);border:1px solid var(--tm-border);border-radius:12px 12px 12px 4px;padding:10px 14px;max-width:280px;font-size:12px;line-height:1.5;box-shadow:0 1px 2px rgba(0,0,0,0.06)}' +
+		'.tg-bubble--kbd{text-align:center;border-radius:12px}' +
+		'.tg-kbd-row{display:flex;gap:2px;justify-content:center;margin-top:4px}' +
+		'.tg-kbd-btn{background:#3390ec;color:#fff;border-radius:6px;padding:5px 10px;font-size:11px;flex:1;text-align:center;min-width:0}' +
+		'.tg-commands{background:var(--tm-bg-subtle);border:1px solid var(--tm-border);border-radius:4px;padding:8px 12px;font-family:monospace;font-size:11px;line-height:1.8}' +
+		'.tg-eye{cursor:pointer;font-size:14px;user-select:none;line-height:1}' +
+		'.tg-template-hint{font-size:10px;color:var(--tm-text-faint);margin-top:2px}' +
+		'.tg-save-status{font-size:11px;margin-left:8px;transition:opacity .3s}';
 	document.head.appendChild(s);
 }
 
@@ -884,13 +923,17 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
 	});
 
+	var hasSpeedData = Object.keys(speedMap).length > 0;
 	var thead = E('thead', {}, E('tr', {}, visibleCols.map(function(c) {
 		var arrow = c.key === sortCol ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
 		var compact = c.key === '_spark' || c.key === '_throttle_kbit' || c.key === '_drop_packets' || c.key === '_backlog';
 		var thStyle = TH + (c.key === '_spark' ? ';cursor:default;width:68px' : '') + (compact ? ';white-space:nowrap;width:1%' : '');
 		var attrs = { 'style': thStyle, 'data-col': c.key, 'data-num': c.num ? '1' : '0' };
 		if (c.tip) attrs['data-tip'] = c.tip;
-		var th = E('th', attrs, c.label + arrow);
+		var label = c.label + arrow;
+		if (c.key === '_speed' && !hasSpeedData) label = c.label + ' ';
+		var th = E('th', attrs);
+		th.innerHTML = label + ((c.key === '_speed' && !hasSpeedData) ? '<span class="tm-spinner"></span>' : '');
 		if (c.key !== '_spark') th.addEventListener('click', function() { onSort(c.key, c.num); });
 		return th;
 	})));
@@ -1778,9 +1821,12 @@ return view.extend({
 		var activityCheck = mkToggle('tm-activity', _('Activity'), opts.showActivity, function() {
 			var o = loadOpts(); o.showActivity = this.checked; saveOpts(o);
 			activityDiv.style.display = this.checked ? '' : 'none';
-			if (this.checked && !activityDiv._loaded) {
-				activityDiv._loaded = true;
-				loadActivityPanel(activityDiv);
+			if (this.checked) {
+				if (!activityDiv._loaded) {
+					activityDiv._loaded = true;
+					loadActivityPanel(activityDiv);
+				}
+				setTimeout(function() { activityDiv.scrollIntoView({behavior:'smooth',block:'start'}); }, 100);
 			}
 		});
 
@@ -2032,7 +2078,7 @@ return view.extend({
 
 		var rateLimitRow = E('div', {
 			'style': 'display:none;padding:12px 14px;border-radius:8px;margin-bottom:8px;' +
-				'border:1px solid var(--tm-border);background:var(--tm-opts-bg)'
+				'border:1px solid var(--tm-border);background:var(--tm-section-action)'
 		}, [
 			E('div', {'style':'display:flex;align-items:center;justify-content:space-between;margin-bottom:8px'}, [
 				E('span', {'style':'font-size:12px;font-weight:600;color:var(--tm-text)'}, '⚡ ' + _('Speed Limit')),
@@ -2111,6 +2157,7 @@ return view.extend({
 			rateLimitRow.style.display  = all ? 'none' : '';
 			rdnsCheck.style.display     = all ? 'none' : '';
 			extStatsCheck.style.display = all ? 'none' : '';
+			extStatsDiv.style.display   = (!all && loadOpts().extendedStats) ? '' : 'none';
 			if (typeof updateTableSectionMode === 'function') updateTableSectionMode();
 		}
 
@@ -2759,32 +2806,90 @@ return view.extend({
 			callTelegramGet().then(function(cfg) {
 				while (container.firstChild) container.removeChild(container.firstChild);
 
+				var section = E('div', {'class':'tg-section'});
+				container.appendChild(section);
+
+				// ── Auto-save with debounce ──
+				var saveTimer = null;
+				var setupDone = false;
+				var saveStatus = E('span', {'class':'tg-save-status'});
+				var doSave = function() {
+					if (!setupDone) return;
+					if (saveTimer) clearTimeout(saveTimer);
+					saveTimer = setTimeout(function() {
+						saveStatus.textContent = _('Saving…');
+						saveStatus.style.color = 'var(--tm-text-mute)';
+						var tk = tokenInput.value;
+						if (tk === '' && cfg.bot_token_set) tk = '***';
+						var inetEl = container.querySelector('#tm-tg-inet');
+						var wifiEl = container.querySelector('#tm-tg-wifi');
+						var limitEl = container.querySelector('#tm-tg-limit');
+						var shapeEl = container.querySelector('#tm-tg-shape');
+						callTelegramSet(
+							container.querySelector('#tm-tg-enabled').checked,
+							tk,
+							chatInput.value,
+							parseInt(cfg.poll_interval) || 3,
+							container.querySelector('#tm-tg-new').checked,
+							container.querySelector('#tm-tg-known').checked,
+							controlMode,
+							templateArea.value,
+							inetEl ? inetEl.checked : cfg.btn_block_inet,
+							wifiEl ? wifiEl.checked : cfg.btn_block_wifi,
+							limitEl ? limitEl.checked : cfg.btn_limiter,
+							shapeEl ? shapeEl.checked : cfg.btn_shaper
+						).then(function(res) {
+							if (res && res.ok) {
+								saveStatus.textContent = '✓';
+								saveStatus.style.color = 'var(--tm-state-ok)';
+								cfg.bot_token_set = !!(tk && tk !== '***') || cfg.bot_token_set;
+								if (tk && tk !== '***') {
+									tokenInput.value = '';
+									tokenInput.type = 'password';
+									tokenInput.placeholder = '••••••••  ✓ ' + _('saved');
+								}
+							} else {
+								saveStatus.textContent = '✗ ' + (res && res.msg || 'error');
+								saveStatus.style.color = 'var(--tm-blocked-fg)';
+							}
+						}).catch(function(e) {
+							saveStatus.textContent = '✗ ' + e.message;
+							saveStatus.style.color = 'var(--tm-blocked-fg)';
+						});
+					}, 600);
+				};
+
+				// ── Status dot ──
+				var dot = E('span', {
+					'class': 'tg-status-dot ' + (cfg.bot_running ? 'tg-status-dot--on' : 'tg-status-dot--off'),
+					'title': cfg.bot_running ? _('Bot is running') : _('Bot is stopped')
+				});
+
+				// ── Enabled toggle ──
+				var tgEnabled = mkToggle('tm-tg-enabled', _('Enabled'), cfg.enabled, doSave);
+				section.appendChild(E('div', {'class':'tg-row'}, [tgEnabled, dot, saveStatus]));
+
+				// ── Token + Chat ID ──
 				var tokenInput = E('input', {
 					'type': 'password',
-					'value': cfg.bot_token || '',
-					'placeholder': cfg.bot_token_set ? '••••••••' : _('Paste bot token'),
-					'style': 'font-size:12px;padding:3px 6px;width:260px;background:var(--tm-bg);color:var(--tm-text);border:1px solid var(--tm-border);border-radius:3px'
+					'class': 'tg-input tg-input--token',
+					'value': '',
+					'placeholder': cfg.bot_token_set ? '••••••••  ✓ ' + _('saved') : _('Paste bot token')
 				});
-				var eyeBtn = E('span', {
-					'style': 'cursor:pointer;font-size:14px;margin-left:4px;user-select:none',
-					'title': _('Show/hide token')
-				}, '👁');
+				tokenInput.addEventListener('change', doSave);
+				var eyeBtn = E('span', {'class':'tg-eye','title':_('Show/hide token')}, '👁');
 				eyeBtn.addEventListener('click', function() {
 					tokenInput.type = tokenInput.type === 'password' ? 'text' : 'password';
 				});
-
 				var chatInput = E('input', {
 					'type': 'text',
+					'class': 'tg-input tg-input--chat',
 					'value': cfg.chat_id || '',
-					'placeholder': _('Chat ID'),
-					'style': 'font-size:12px;padding:3px 6px;width:120px;background:var(--tm-bg);color:var(--tm-text);border:1px solid var(--tm-border);border-radius:3px'
+					'placeholder': _('Chat ID')
 				});
-
-				var testResult = E('span', {'style':'font-size:12px;margin-left:8px'});
-				var testBtn = E('button', {
-					'class': 'cbi-button',
-					'style': 'font-size:11px;padding:2px 10px'
-				}, _('Test'));
+				chatInput.addEventListener('change', doSave);
+				var testResult = E('span', {'style':'font-size:11px;margin-left:4px'});
+				var testBtn = E('button', {'class':'tg-btn'}, _('Test'));
 				testBtn.addEventListener('click', function() {
 					testBtn.disabled = true;
 					testResult.textContent = _('Sending…');
@@ -2798,71 +2903,199 @@ return view.extend({
 						testResult.style.color = 'var(--tm-blocked-fg)';
 					}).then(function() { testBtn.disabled = false; });
 				});
-
-				var tgEnabled = mkToggle('tm-tg-enabled', _('Enabled'), cfg.enabled, function() {});
-				var notifyNew = mkToggle('tm-tg-new', _('New devices'), cfg.notify_new_device, function() {});
-				var notifyKnown = mkToggle('tm-tg-known', _('Known devices'), cfg.notify_known_device, function() {});
-				var btnInet = mkToggle('tm-tg-inet', _('Block Internet'), cfg.btn_block_inet, function() {});
-				var btnWifi = mkToggle('tm-tg-wifi', _('Block WiFi'), cfg.btn_block_wifi, function() {});
-				var btnLimit = mkToggle('tm-tg-limit', _('Limiter'), cfg.btn_limiter, function() {});
-				var btnShape = mkToggle('tm-tg-shape', _('Shaper'), cfg.btn_shaper, function() {});
-
-				var saveResult = E('span', {'style':'font-size:12px;margin-left:8px'});
-				var saveBtn = E('button', {
-					'class': 'cbi-button cbi-button-action',
-					'style': 'font-size:12px;padding:3px 12px'
-				}, _('Save'));
-				saveBtn.addEventListener('click', function() {
-					saveBtn.disabled = true;
-					saveResult.textContent = _('Saving…');
-					saveResult.style.color = C.textMute;
-					var tk = tokenInput.value;
-					if (tk === '' && cfg.bot_token_set) tk = '***';
-					callTelegramSet(
-						container.querySelector('#tm-tg-enabled').checked,
-						tk,
-						chatInput.value,
-						parseInt(cfg.poll_interval) || 3,
-						container.querySelector('#tm-tg-new').checked,
-						container.querySelector('#tm-tg-known').checked,
-						container.querySelector('#tm-tg-inet').checked,
-						container.querySelector('#tm-tg-wifi').checked,
-						container.querySelector('#tm-tg-limit').checked,
-						container.querySelector('#tm-tg-shape').checked
-					).then(function(res) {
-						saveResult.textContent = (res && res.ok) ? '✓ Saved' : '✗ ' + (res && res.msg || 'error');
-						saveResult.style.color = (res && res.ok) ? 'var(--tm-state-ok)' : 'var(--tm-blocked-fg)';
-						if (res && res.ok) {
-							cfg.bot_token_set = !!(tk && tk !== '***') || cfg.bot_token_set;
-							if (tk && tk !== '***') {
-								tokenInput.value = '***';
-								tokenInput.type = 'password';
-							}
-						}
-					}).catch(function(e) {
-						saveResult.textContent = '✗ ' + e.message;
-						saveResult.style.color = 'var(--tm-blocked-fg)';
-					}).then(function() { saveBtn.disabled = false; });
-				});
-
-				var gap = 'display:flex;flex-wrap:wrap;align-items:center;gap:6px';
-
-				container.appendChild(E('div', {'style':gap}, [tgEnabled]));
-				container.appendChild(E('div', {'style':gap+';margin-top:6px'}, [
-					mkLabel(_('Token:')), tokenInput, eyeBtn,
-					E('span', {'style':'margin-left:8px'}),
-					mkLabel(_('Chat ID:')), chatInput,
+				section.appendChild(E('div', {'class':'tg-row'}, [
+					E('span', {'class':'tg-label'}, _('Token:')), tokenInput, eyeBtn,
+					E('span', {'style':'width:12px'}),
+					E('span', {'class':'tg-label'}, _('Chat ID:')), chatInput,
 					testBtn, testResult
 				]));
-				container.appendChild(E('div', {'style':'margin-top:8px'}, [
-					E('div', {'style':'font-size:11px;color:'+C.textMute+';margin-bottom:4px'}, _('Notifications')),
-					E('div', {'style':gap}, [notifyNew, notifyKnown])
+
+				// ── Mode segmented control ──
+				var controlMode = cfg.control_enabled !== false;
+				var controlSection = E('div', {});
+				function setMode(ctrl) {
+					controlMode = ctrl;
+					segControl.className = 'tg-segmented__item' + (ctrl ? ' tg-segmented__item--active' : '');
+					segNotify.className = 'tg-segmented__item' + (!ctrl ? ' tg-segmented__item--active' : '');
+					controlSection.style.display = ctrl ? '' : 'none';
+					doSave();
+				}
+
+				var segNotify = document.createElement('div');
+				segNotify.className = 'tg-segmented__item' + (!controlMode ? ' tg-segmented__item--active' : '');
+				segNotify.textContent = '🔔 ' + _('Notifications only');
+				segNotify.onclick = function() { setMode(false); };
+
+				var segControl = document.createElement('div');
+				segControl.className = 'tg-segmented__item' + (controlMode ? ' tg-segmented__item--active' : '');
+				segControl.textContent = '🎛 ' + _('Full control');
+				segControl.onclick = function() { setMode(true); };
+
+				var segmented = E('div', {'class':'tg-segmented'}, [segNotify, segControl]);
+
+				section.appendChild(E('div', {'class':'tg-row'}, [segmented]));
+
+				// ── Notifications ──
+				section.appendChild(E('div', {'class':'tg-divider'}, _('Notifications')));
+				var notifyNew = mkToggle('tm-tg-new', _('New devices'), cfg.notify_new_device, doSave);
+				var notifyKnown = mkToggle('tm-tg-known', _('Known devices'), cfg.notify_known_device, doSave);
+				section.appendChild(E('div', {'class':'tg-row'}, [notifyNew, notifyKnown]));
+
+				// ── Custom template ──
+				var templateArea = E('textarea', {
+					'class': 'tg-input tg-input--template',
+					'placeholder': '🆕 New device\\n{{ name }} ({{ ip }})\\nMAC: {{ mac }}\\nLink: {{ link }}'
+				}, cfg.notify_template || '');
+				templateArea.addEventListener('input', function() { renderPreview(); doSave(); });
+
+				var previewBubble = E('div', {'class':'tg-bubble'});
+				var defaultTpl = '🆕 <b>New device</b>\n{{ name }} ({{ ip }})\nMAC: <code>{{ mac }}</code>\nLink: {{ link }}';
+				var renderPreview = function() {
+					var tpl = templateArea.value || defaultTpl;
+					var txt = tpl
+						.replace(/\{\{\s*name\s*\}\}/g, 'MacBookPro')
+						.replace(/\{\{\s*ip\s*\}\}/g, '192.168.0.100')
+						.replace(/\{\{\s*mac\s*\}\}/g, 'aa:bb:cc:dd:ee:ff')
+						.replace(/\{\{\s*link\s*\}\}/g, '5G')
+						.replace(/\{\{\s*date\s*\}\}/g, new Date().toISOString().slice(0,10))
+						.replace(/\{\{\s*time\s*\}\}/g, new Date().toTimeString().slice(0,5))
+						.replace(/\{\{\s*datetime\s*\}\}/g, new Date().toISOString().slice(0,10) + ' ' + new Date().toTimeString().slice(0,5))
+						.replace(/\{\{\s*router\s*\}\}/g, 'OpenWrt')
+						.replace(/\{\{\s*ssid\s*\}\}/g, 'MyNetwork_5G')
+						.replace(/\{\{\s*signal\s*\}\}/g, '-52')
+						.replace(/\{\{\s*freq\s*\}\}/g, '5GHz')
+						.replace(/\{\{\s*iface\s*\}\}/g, 'wlan1')
+						.replace(/\{\{\s*clients\s*\}\}/g, '12')
+						.replace(/\{\{\s*uptime\s*\}\}/g, '3d 5h')
+						.replace(/\{\{\s*wan_ip\s*\}\}/g, '85.192.48.1')
+						.replace(/\{\{\s*load\s*\}\}/g, '0.42')
+						.replace(/\{\{\s*conns\s*\}\}/g, '47');
+					previewBubble.innerHTML = txt.replace(/\\n/g, '<br>').replace(/\n/g, '<br>');
+				};
+				renderPreview();
+
+				var varRef = E('div', {'style':'font-size:12px;line-height:1.7;color:var(--tm-text)'}, [
+					E('div', {'style':'font-weight:600;margin-bottom:4px'}, _('Variables')),
+					E('div', {}, [E('code', {}, '{{ name }}'), document.createTextNode(' — ' + _('device hostname'))]),
+					E('div', {}, [E('code', {}, '{{ ip }}'), document.createTextNode(' — ' + _('IP address'))]),
+					E('div', {}, [E('code', {}, '{{ mac }}'), document.createTextNode(' — ' + _('MAC address'))]),
+					E('div', {}, [E('code', {}, '{{ link }}'), document.createTextNode(' — ' + _('connection type (5G, LAN)'))]),
+					E('div', {}, [E('code', {}, '{{ date }}'), document.createTextNode(' — ' + _('date (2026-05-26)'))]),
+					E('div', {}, [E('code', {}, '{{ time }}'), document.createTextNode(' — ' + _('time (14:32)'))]),
+					E('div', {}, [E('code', {}, '{{ datetime }}'), document.createTextNode(' — ' + _('date + time'))]),
+					E('div', {}, [E('code', {}, '{{ router }}'), document.createTextNode(' — ' + _('router hostname'))]),
+					E('div', {}, [E('code', {}, '{{ ssid }}'), document.createTextNode(' — ' + _('WiFi SSID'))]),
+					E('div', {}, [E('code', {}, '{{ signal }}'), document.createTextNode(' — ' + _('WiFi signal (dBm)'))]),
+					E('div', {}, [E('code', {}, '{{ freq }}'), document.createTextNode(' — ' + _('WiFi band (2.4/5GHz)'))]),
+					E('div', {}, [E('code', {}, '{{ iface }}'), document.createTextNode(' — ' + _('network interface'))]),
+					E('div', {}, [E('code', {}, '{{ clients }}'), document.createTextNode(' — ' + _('total connected clients'))]),
+					E('div', {}, [E('code', {}, '{{ uptime }}'), document.createTextNode(' — ' + _('router uptime'))]),
+					E('div', {}, [E('code', {}, '{{ wan_ip }}'), document.createTextNode(' — ' + _('WAN IP'))]),
+					E('div', {}, [E('code', {}, '{{ load }}'), document.createTextNode(' — ' + _('CPU load (1 min)'))]),
+					E('div', {}, [E('code', {}, '{{ conns }}'), document.createTextNode(' — ' + _('device connections'))]),
+					E('div', {'style':'margin-top:6px;color:var(--tm-text-mute);font-size:11px'}, [
+						document.createTextNode(_('HTML:') + ' '),
+						E('code', {}, '<b>'), document.createTextNode(' '),
+						E('code', {}, '<i>'), document.createTextNode(' '),
+						E('code', {}, '<code>'), document.createTextNode(' '),
+						E('code', {}, '<a href="">'),
+						document.createTextNode('. \\n = ' + _('line break'))
+					])
+				]);
+
+				var templateToggle = E('span', {
+					'style': 'font-size:12px;cursor:pointer;color:var(--tm-text-mute);user-select:none'
+				}, '▸ ' + _('Customize message'));
+				var templateBody = E('div', {'style':'display:none;margin-top:6px'});
+				templateBody.appendChild(E('div', {'style':'display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap'}, [
+					E('div', {'style':'flex:1;min-width:200px'}, [templateArea]),
+					varRef
 				]));
-				container.appendChild(E('div', {'style':'margin-top:6px'}, [
-					E('div', {'style':'font-size:11px;color:'+C.textMute+';margin-bottom:4px'}, _('Action buttons in bot')),
-					E('div', {'style':gap}, [btnInet, btnWifi, btnLimit, btnShape])
+				templateBody.appendChild(E('div', {'style':'margin-top:8px'}, [
+					E('span', {'class':'tg-label','style':'display:block;margin-bottom:4px'}, _('Preview:')),
+					previewBubble
 				]));
-				container.appendChild(E('div', {'style':'margin-top:8px'}, [saveBtn, saveResult]));
+				templateToggle.addEventListener('click', function() {
+					var show = templateBody.style.display === 'none';
+					templateBody.style.display = show ? '' : 'none';
+					templateToggle.textContent = (show ? '▾ ' : '▸ ') + _('Customize message');
+				});
+				section.appendChild(E('div', {'style':'margin-top:8px'}, [templateToggle, templateBody]));
+
+				// ── Control section (conditionally visible) ──
+				controlSection.appendChild(E('div', {'class':'tg-divider'}, _('Control')));
+				var btnInet = mkToggle('tm-tg-inet', _('Block Internet'), cfg.btn_block_inet, function() { updateKbd(); doSave(); });
+				var btnWifi = mkToggle('tm-tg-wifi', _('Block WiFi'), cfg.btn_block_wifi, function() { updateKbd(); doSave(); });
+				var btnLimit = mkToggle('tm-tg-limit', _('Limiter'), cfg.btn_limiter, function() { updateKbd(); doSave(); });
+				var btnShape = mkToggle('tm-tg-shape', _('Shaper'), cfg.btn_shaper, function() { updateKbd(); doSave(); });
+				controlSection.appendChild(E('div', {'class':'tg-row'}, [btnInet, btnWifi, btnLimit, btnShape]));
+
+				// Dynamic keyboard preview
+				var kbdBubble = E('div', {'class':'tg-bubble tg-bubble--kbd'});
+				var updateKbd = function() {
+					while (kbdBubble.firstChild) kbdBubble.removeChild(kbdBubble.firstChild);
+					var inetEl = controlSection.querySelector('#tm-tg-inet');
+					var wifiEl = controlSection.querySelector('#tm-tg-wifi');
+					var limitEl = controlSection.querySelector('#tm-tg-limit');
+					var shapeEl = controlSection.querySelector('#tm-tg-shape');
+					var inetOn = inetEl ? inetEl.checked : cfg.btn_block_inet;
+					var wifiOn = wifiEl ? wifiEl.checked : cfg.btn_block_wifi;
+					var limitOn = limitEl ? limitEl.checked : cfg.btn_limiter;
+					var shapeOn = shapeEl ? shapeEl.checked : cfg.btn_shaper;
+					if (!inetOn && !wifiOn && !limitOn && !shapeOn) {
+						kbdBubble.appendChild(E('div', {'style':'font-size:11px;color:var(--tm-text-faint);padding:4px'}, _('No action buttons enabled')));
+						return;
+					}
+					var row1 = [];
+					if (inetOn) row1.push(E('span', {'class':'tg-kbd-btn'}, '⏸ Block Internet'));
+					if (wifiOn) row1.push(E('span', {'class':'tg-kbd-btn'}, '📵 Block WiFi'));
+					if (row1.length) kbdBubble.appendChild(E('div', {'class':'tg-kbd-row'}, row1));
+					if (limitOn) {
+						var limitBtns = [];
+						RATE_PRESETS.forEach(function(p) {
+							if (p.v === '0' || p.v === 'custom') return;
+							limitBtns.push(E('span', {'class':'tg-kbd-btn'}, '⚡ ' + p.l.replace(' Mbit/s', 'M').replace(/\s/g, '')));
+						});
+						for (var li = 0; li < limitBtns.length; li += 3) {
+							kbdBubble.appendChild(E('div', {'class':'tg-kbd-row'}, limitBtns.slice(li, li + 3)));
+						}
+					}
+					if (shapeOn) {
+						var shapeBtns = [];
+						RATE_PRESETS.forEach(function(p) {
+							if (p.v === '0' || p.v === 'custom') return;
+							shapeBtns.push(E('span', {'class':'tg-kbd-btn'}, '🔧 ' + p.l.replace(' Mbit/s', 'M').replace(/\s/g, '')));
+						});
+						for (var si = 0; si < shapeBtns.length; si += 3) {
+							kbdBubble.appendChild(E('div', {'class':'tg-kbd-row'}, shapeBtns.slice(si, si + 3)));
+						}
+					}
+					kbdBubble.appendChild(E('div', {'class':'tg-kbd-row'}, [
+						E('span', {'class':'tg-kbd-btn'}, '⬅️ Back')
+					]));
+				};
+				updateKbd();
+
+				controlSection.appendChild(E('div', {'style':'margin-top:8px'}, [
+					E('span', {'class':'tg-label','style':'display:block;margin-bottom:4px'}, _('Inline keyboard preview:')),
+					kbdBubble
+				]));
+
+				// Commands + flow explanation
+				controlSection.appendChild(E('div', {'style':'margin-top:10px'}, [
+					E('span', {'class':'tg-label','style':'display:block;margin-bottom:4px'}, _('Bot commands:')),
+					E('div', {'class':'tg-commands'}, [
+						E('div', {}, [E('code', {}, '/devices'), document.createTextNode(' — ' + _('device list → tap device → action buttons'))]),
+						E('div', {}, [E('code', {}, '/status'), document.createTextNode(' — ' + _('all active blocks, limits, and shapes'))]),
+						E('div', {}, [E('code', {}, '/help'), document.createTextNode(' — ' + _('command list and bot mode'))])
+					]),
+					E('div', {'style':'font-size:10px;color:var(--tm-text-faint);margin-top:4px'},
+						_('Flow: /devices → select device → inline keyboard with enabled actions above'))
+				]));
+
+				if (!controlMode) controlSection.style.display = 'none';
+				section.appendChild(controlSection);
+				setupDone = true;
 			}).catch(function(e) {
 				statusSpan.textContent = '✗ ' + e.message;
 				statusSpan.style.color = 'var(--tm-blocked-fg)';
@@ -2873,20 +3106,11 @@ return view.extend({
 		settingsBody.appendChild(tgSection.el);
 
 		var displaySection = mkCollapsible(_('Display'), E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding-top:4px'}, [
-			showStats, showConns, extStatsCheck, rdnsCheck, activityCheck
+			showStats, showConns, extStatsCheck, rdnsCheck, activityCheck,
+			sep(),
+			E('span', {'data-tip':_('Auto-refresh interval for summary table')}, [mkLabel(_('Refresh')+':'), refreshPick.el])
 		]), false);
 		settingsBody.appendChild(displaySection.el);
-
-		var speedSection = mkCollapsible(_('Speed Monitoring'), E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding-top:4px'}, [
-			E('span', {'data-tip':_('Auto-refresh interval for summary table')}, [mkLabel(_('Refresh')+':'), refreshPick.el]),
-			sep(),
-			E('span', {'data-tip':_('Polling interval for per-device speed graph')}, [mkLabel(_('Poll')+':'), pollIntervalPick.el]),
-			sep(),
-			E('span', {'data-tip':_('Time window for speed averaging')}, [mkLabel(_('Window')+':'), avgWindowPick.el]),
-			sep(),
-			E('span', {'data-tip':_('Simple = arithmetic mean, EWMA = exponential weighted moving average')}, [mkLabel(_('Method')+':'), avgMethodPick.el])
-		]), false);
-		settingsBody.appendChild(speedSection.el);
 
 		// ── Logging & Persistence section (lazy-loaded) ────────────────────
 		var loggingSection = mkCollapsible(_('Logging & Persistence'), null, false);
@@ -2906,49 +3130,48 @@ return view.extend({
 				while (container.firstChild) container.removeChild(container.firstChild);
 				var gap = 'display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding-top:4px';
 
-				var logEnabled = mkToggle('tm-log-enabled', _('Logging'), cfg.enabled, function() {});
-				var logSyslog = mkToggle('tm-log-syslog', _('Syslog'), cfg.syslog, function() {});
-				var persistRules = mkToggle('tm-persist-rules', _('Persist rules'), cfg.persist_rules, function() {});
+				var logStatus = E('span', {'class':'tg-save-status'});
+				var logTimer = null;
+				var doLogSave = function() {
+					if (logTimer) clearTimeout(logTimer);
+					logTimer = setTimeout(function() {
+						logStatus.textContent = _('Saving…');
+						logStatus.style.color = 'var(--tm-text-mute)';
+						callLoggingSet(
+							container.querySelector('#tm-log-enabled').checked,
+							null, null,
+							container.querySelector('#tm-log-syslog').checked,
+							container.querySelector('#tm-log-blocks').checked,
+							container.querySelector('#tm-log-ratelimits').checked,
+							container.querySelector('#tm-log-shapes').checked,
+							container.querySelector('#tm-log-telegram').checked,
+							container.querySelector('#tm-log-config').checked,
+							container.querySelector('#tm-persist-rules').checked
+						).then(function(res) {
+							logStatus.textContent = (res && res.ok) ? '✓' : '✗';
+							logStatus.style.color = (res && res.ok) ? 'var(--tm-state-ok)' : 'var(--tm-blocked-fg)';
+						}).catch(function(e) {
+							logStatus.textContent = '✗';
+							logStatus.style.color = 'var(--tm-blocked-fg)';
+						});
+					}, 400);
+				};
 
-				var logBlocks = mkToggle('tm-log-blocks', _('Blocks'), cfg.log_blocks, function() {});
-				var logRatelimits = mkToggle('tm-log-ratelimits', _('Ratelimits'), cfg.log_ratelimits, function() {});
-				var logShapes = mkToggle('tm-log-shapes', _('Shapes'), cfg.log_shapes, function() {});
-				var logTelegram = mkToggle('tm-log-telegram', _('Telegram'), cfg.log_telegram, function() {});
-				var logConfig = mkToggle('tm-log-config', _('Config'), cfg.log_config, function() {});
+				var logEnabled = mkToggle('tm-log-enabled', _('Logging'), cfg.enabled, doLogSave);
+				var logSyslog = mkToggle('tm-log-syslog', _('Syslog'), cfg.syslog, doLogSave);
+				var persistRules = mkToggle('tm-persist-rules', _('Persist rules'), cfg.persist_rules, doLogSave);
 
-				var saveResult = E('span', {'style':'font-size:12px;margin-left:8px'});
-				var saveBtn = E('button', {
-					'class': 'cbi-button cbi-button-action',
-					'style': 'font-size:12px;padding:3px 12px'
-				}, _('Save'));
-				saveBtn.addEventListener('click', function() {
-					saveBtn.disabled = true;
-					saveResult.textContent = _('Saving…');
-					callLoggingSet(
-						container.querySelector('#tm-log-enabled').checked,
-						null, null,
-						container.querySelector('#tm-log-syslog').checked,
-						container.querySelector('#tm-log-blocks').checked,
-						container.querySelector('#tm-log-ratelimits').checked,
-						container.querySelector('#tm-log-shapes').checked,
-						container.querySelector('#tm-log-telegram').checked,
-						container.querySelector('#tm-log-config').checked,
-						container.querySelector('#tm-persist-rules').checked
-					).then(function(res) {
-						saveResult.textContent = (res && res.ok) ? '✓ Saved' : '✗ ' + (res && res.msg || 'error');
-						saveResult.style.color = (res && res.ok) ? 'var(--tm-state-ok)' : 'var(--tm-blocked-fg)';
-					}).catch(function(e) {
-						saveResult.textContent = '✗ ' + e.message;
-						saveResult.style.color = 'var(--tm-blocked-fg)';
-					}).then(function() { saveBtn.disabled = false; });
-				});
+				var logBlocks = mkToggle('tm-log-blocks', _('Blocks'), cfg.log_blocks, doLogSave);
+				var logRatelimits = mkToggle('tm-log-ratelimits', _('Ratelimits'), cfg.log_ratelimits, doLogSave);
+				var logShapes = mkToggle('tm-log-shapes', _('Shapes'), cfg.log_shapes, doLogSave);
+				var logTelegram = mkToggle('tm-log-telegram', _('Telegram'), cfg.log_telegram, doLogSave);
+				var logConfig = mkToggle('tm-log-config', _('Config'), cfg.log_config, doLogSave);
 
-				container.appendChild(E('div', {'style':gap}, [logEnabled, logSyslog, persistRules]));
+				container.appendChild(E('div', {'style':gap}, [logEnabled, logSyslog, persistRules, logStatus]));
 				container.appendChild(E('div', {'style':'margin-top:6px'}, [
 					E('div', {'style':'font-size:11px;color:'+C.textMute+';margin-bottom:4px'}, _('Log categories')),
 					E('div', {'style':gap}, [logBlocks, logRatelimits, logShapes, logTelegram, logConfig])
 				]));
-				container.appendChild(E('div', {'style':'margin-top:8px'}, [saveBtn, saveResult]));
 			}).catch(function(e) {
 				statusSpan.textContent = '✗ ' + e.message;
 				statusSpan.style.color = 'var(--tm-blocked-fg)';
@@ -2961,12 +3184,19 @@ return view.extend({
 			sep(),
 			E('span', {'data-tip':_('Group connections table rows')}, [mkLabel(_('Group')+':'), groupPick.el])
 		]);
-		var tableSection = mkCollapsible(_('Connections table'), E('div', {'style':'padding-top:4px'}, [
+		var tableSection = mkCollapsible(_('Table & Speed'), E('div', {'style':'padding-top:4px'}, [
+			E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:8px'}, [
+				E('span', {'data-tip':_('Polling interval for per-device speed graph')}, [mkLabel(_('Poll')+':'), pollIntervalPick.el]),
+				sep(),
+				E('span', {'data-tip':_('Time window for speed averaging')}, [mkLabel(_('Window')+':'), avgWindowPick.el]),
+				sep(),
+				E('span', {'data-tip':_('Simple = arithmetic mean, EWMA = exponential weighted moving average')}, [mkLabel(_('Method')+':'), avgMethodPick.el])
+			]),
 			E('div', {'style':'font-size:11px;color:var(--tm-text-mute);margin-bottom:4px'}, _('Visible columns')),
 			colChipsContainer,
 			connColChipsContainer,
 			connFiltersRow
-		]), false);
+		]), true);
 		settingsBody.appendChild(tableSection.el);
 
 		function updateTableSectionMode() {
@@ -2977,7 +3207,7 @@ return view.extend({
 		}
 		updateTableSectionMode();
 
-		var settingsPanel = E('div', {'style':'border-radius:4px;margin-bottom:10px;'+ob}, [
+		var settingsPanel = E('div', {'style':'border-radius:8px;margin-bottom:10px;background:var(--tm-section-action);border:1px solid var(--tm-border)'}, [
 			settingsToggle, settingsBody
 		]);
 
@@ -3023,6 +3253,13 @@ return view.extend({
 			loadActivityPanel(activityDiv);
 		}
 
+		callVersion().then(function(res) {
+			var el = document.getElementById('tm-version-footer');
+			if (el && res && res.version) {
+				el.textContent = 'trafficctl v' + res.version + ' (' + TRAFFICCTL_BUILD + ')';
+			}
+		});
+
 		return E('div', {'class':'cbi-map', 'style':'color:'+C.hostname}, [
 			E('h2', {'style':'color:'+C.hostname}, _('Traffic Control')),
 			E('div', {'class':'cbi-section'}, [
@@ -3030,14 +3267,16 @@ return view.extend({
 						E('div', {'style':'display:flex;align-items:center;gap:10px;flex-wrap:wrap'}, [searchSelect.el, actionRow]),
 						quickBar
 					]),
-				rateLimitRow,
 				statusDiv,
-				activityDiv,
+				rateLimitRow,
+				settingsPanel,
 				statsDiv,
 				extStatsDiv,
-				settingsPanel,
-				connsDiv
-			])
+				connsDiv,
+				activityDiv
+			]),
+			E('div', {'id':'tm-version-footer','style':'text-align:right;font-size:10px;color:var(--tm-text-faint);padding:8px 4px 0;user-select:all'},
+				'trafficctl (' + TRAFFICCTL_BUILD + ')')
 		]);
 	},
 

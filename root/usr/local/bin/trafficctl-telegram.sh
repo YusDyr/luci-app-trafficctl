@@ -16,6 +16,8 @@ TG_CHAT_ID=""
 TG_POLL=3
 TG_NOTIFY_NEW=1
 TG_NOTIFY_KNOWN=0
+TG_CONTROL=1
+TG_NOTIFY_TEMPLATE=""
 TG_BTN_INET=1
 TG_BTN_WIFI=1
 TG_BTN_LIMIT=1
@@ -30,6 +32,8 @@ load_config() {
 	TG_POLL=$(uci -q get trafficctl.telegram.poll_interval || echo 3)
 	TG_NOTIFY_NEW=$(uci -q get trafficctl.telegram.notify_new_device || echo 1)
 	TG_NOTIFY_KNOWN=$(uci -q get trafficctl.telegram.notify_known_device || echo 0)
+	TG_CONTROL=$(uci -q get trafficctl.telegram.control_enabled || echo 1)
+	TG_NOTIFY_TEMPLATE=$(uci -q get trafficctl.telegram.notify_template)
 	TG_BTN_INET=$(uci -q get trafficctl.telegram.btn_block_inet || echo 1)
 	TG_BTN_WIFI=$(uci -q get trafficctl.telegram.btn_block_wifi || echo 1)
 	TG_BTN_LIMIT=$(uci -q get trafficctl.telegram.btn_limiter || echo 1)
@@ -222,6 +226,95 @@ resolve_mac_info() {
 ONLINE_STATE_FILE="/tmp/trafficctl_tg_online"
 DHCP_TRIGGER_FILE="/tmp/trafficctl_tg_newdev"
 
+get_wifi_info() {
+	local mac="$1" iw_out="" iface="" ssid="" signal="" freq=""
+	for iface in /sys/class/net/wlan*/phy80211; do
+		[ -d "$iface" ] || continue
+		iface=$(basename "$(dirname "$iface")")
+		iw_out=$(iw dev "$iface" station get "$mac" 2>/dev/null) && break
+	done
+	if [ -n "$iw_out" ]; then
+		signal=$(echo "$iw_out" | awk '/signal:/{print $2}')
+		freq=$(iw dev "$iface" info 2>/dev/null | awk '/channel/{if($4>5000)print "5GHz";else print "2.4GHz"}')
+		ssid=$(iw dev "$iface" info 2>/dev/null | awk '/ssid/{print $2}')
+	fi
+	printf '%s\t%s\t%s\t%s' "$iface" "$ssid" "$signal" "$freq"
+}
+
+get_device_conns() {
+	local ip="$1"
+	cat /proc/net/nf_conntrack 2>/dev/null | grep -c "src=$ip " 2>/dev/null || echo 0
+}
+
+get_router_vars() {
+	local uptime_s up_d up_h up_m __ip
+	uptime_s=$(awk '{print int($1)}' /proc/uptime)
+	up_d=$((uptime_s / 86400))
+	up_h=$(( (uptime_s % 86400) / 3600 ))
+	up_m=$(( (uptime_s % 3600) / 60 ))
+	if [ "$up_d" -gt 0 ]; then
+		TVAR_UPTIME="${up_d}d ${up_h}h"
+	elif [ "$up_h" -gt 0 ]; then
+		TVAR_UPTIME="${up_h}h ${up_m}m"
+	else
+		TVAR_UPTIME="${up_m}m"
+	fi
+	TVAR_DATE=$(date '+%Y-%m-%d')
+	TVAR_TIME=$(date '+%H:%M')
+	TVAR_DATETIME=$(date '+%Y-%m-%d %H:%M')
+	TVAR_ROUTER=$(uci -q get system.@system[0].hostname || cat /proc/sys/kernel/hostname)
+	. /lib/functions/network.sh
+	network_get_ipaddr __ip wan
+	TVAR_WAN_IP="$__ip"
+	TVAR_LOAD=$(awk '{print $1}' /proc/loadavg)
+	TVAR_CLIENTS=$(wc -l < /tmp/dhcp.leases 2>/dev/null || echo 0)
+}
+
+format_new_device_msg() {
+	local name="$1" ip="$2" mac="$3" link="$4"
+	if [ -n "$TG_NOTIFY_TEMPLATE" ]; then
+		get_router_vars
+		local wifi_info iface ssid signal freq conns
+		wifi_info=$(get_wifi_info "$mac")
+		iface=$(printf '%s' "$wifi_info" | cut -f1)
+		ssid=$(printf '%s' "$wifi_info" | cut -f2)
+		signal=$(printf '%s' "$wifi_info" | cut -f3)
+		freq=$(printf '%s' "$wifi_info" | cut -f4)
+		conns=$(get_device_conns "$ip")
+
+		printf '%s' "$TG_NOTIFY_TEMPLATE" | \
+			awk -v n="$name" -v i="$ip" -v m="$mac" -v l="$link" \
+			    -v dt="$TVAR_DATE" -v tm="$TVAR_TIME" -v dtm="$TVAR_DATETIME" \
+			    -v rtr="$TVAR_ROUTER" -v ssid="$ssid" -v sig="$signal" \
+			    -v freq="$freq" -v iface="$iface" -v clients="$TVAR_CLIENTS" \
+			    -v up="$TVAR_UPTIME" -v wan="$TVAR_WAN_IP" -v load="$TVAR_LOAD" \
+			    -v conns="$conns" '{
+				gsub(/\{\{\s*name\s*\}\}/, n)
+				gsub(/\{\{\s*ip\s*\}\}/, i)
+				gsub(/\{\{\s*mac\s*\}\}/, m)
+				gsub(/\{\{\s*link\s*\}\}/, l)
+				gsub(/\{\{\s*date\s*\}\}/, dt)
+				gsub(/\{\{\s*time\s*\}\}/, tm)
+				gsub(/\{\{\s*datetime\s*\}\}/, dtm)
+				gsub(/\{\{\s*router\s*\}\}/, rtr)
+				gsub(/\{\{\s*ssid\s*\}\}/, ssid)
+				gsub(/\{\{\s*signal\s*\}\}/, sig)
+				gsub(/\{\{\s*freq\s*\}\}/, freq)
+				gsub(/\{\{\s*iface\s*\}\}/, iface)
+				gsub(/\{\{\s*clients\s*\}\}/, clients)
+				gsub(/\{\{\s*uptime\s*\}\}/, up)
+				gsub(/\{\{\s*wan_ip\s*\}\}/, wan)
+				gsub(/\{\{\s*load\s*\}\}/, load)
+				gsub(/\{\{\s*conns\s*\}\}/, conns)
+				gsub(/\\n/, "\n")
+				print
+			}'
+	else
+		printf '🆕 <b>New device</b>\n%s (%s)\nMAC: <code>%s</code>\nLink: %s' \
+			"$name" "$ip" "$mac" "$link"
+	fi
+}
+
 process_dhcp_triggers() {
 	[ -f "$DHCP_TRIGGER_FILE" ] || return 0
 	local tmpf="${DHCP_TRIGGER_FILE}.proc"
@@ -234,8 +327,7 @@ process_dhcp_triggers() {
 		if ! is_known_mac "$mac"; then
 			add_known_mac "$mac" "${name:-unknown}" "${ip:-?}"
 			if [ "$TG_NOTIFY_NEW" = "1" ]; then
-				tg_send "$(printf '🆕 <b>New device</b>\n%s (%s)\nMAC: <code>%s</code>\nLink: dhcp' \
-					"${name:-unknown}" "${ip:-?}" "$mac")"
+				tg_send "$(format_new_device_msg "${name:-unknown}" "${ip:-?}" "$mac" "dhcp")"
 			fi
 		fi
 	done < "$tmpf"
@@ -257,8 +349,7 @@ check_new_devices() {
 			conn_type=$(printf '%s' "$info" | cut -f3)
 			add_known_mac "$mac" "${name:-unknown}" "${ip:-?}"
 			if [ "$TG_NOTIFY_NEW" = "1" ]; then
-				tg_send "$(printf '🆕 <b>New device</b>\n%s (%s)\nMAC: <code>%s</code>\nLink: %s' \
-					"${name:-unknown}" "${ip:-?}" "$mac" "${conn_type:-?}")"
+				tg_send "$(format_new_device_msg "${name:-unknown}" "${ip:-?}" "$mac" "${conn_type:-?}")"
 			fi
 		elif [ "$TG_NOTIFY_KNOWN" = "1" ]; then
 			if [ -f "$ONLINE_STATE_FILE" ] && ! grep -q "$mac" "$ONLINE_STATE_FILE" 2>/dev/null; then
@@ -346,7 +437,8 @@ build_action_keyboard() {
 		if [ "${rl_kbit:-0}" -gt 0 ] 2>/dev/null; then
 			rows="${rows}[{\"text\":\"⚡ Limit: ${rl_kbit} kbit/s — Remove\",\"callback_data\":\"act:unlimit:${ip}\"}],"
 		else
-			rows="${rows}[{\"text\":\"⚡ 5M\",\"callback_data\":\"act:limit:${ip}:5000\"},{\"text\":\"⚡ 10M\",\"callback_data\":\"act:limit:${ip}:10000\"},{\"text\":\"⚡ 50M\",\"callback_data\":\"act:limit:${ip}:50000\"}],"
+			rows="${rows}[{\"text\":\"⚡ 1M\",\"callback_data\":\"act:limit:${ip}:1000\"},{\"text\":\"⚡ 2M\",\"callback_data\":\"act:limit:${ip}:2000\"},{\"text\":\"⚡ 5M\",\"callback_data\":\"act:limit:${ip}:5000\"}],"
+			rows="${rows}[{\"text\":\"⚡ 10M\",\"callback_data\":\"act:limit:${ip}:10000\"},{\"text\":\"⚡ 25M\",\"callback_data\":\"act:limit:${ip}:25000\"},{\"text\":\"⚡ 50M\",\"callback_data\":\"act:limit:${ip}:50000\"},{\"text\":\"⚡ 100M\",\"callback_data\":\"act:limit:${ip}:100000\"}],"
 		fi
 	fi
 
@@ -355,7 +447,8 @@ build_action_keyboard() {
 		if [ "${shape_kbit:-0}" -gt 0 ] 2>/dev/null; then
 			rows="${rows}[{\"text\":\"🔧 Shape: ${shape_kbit} kbit/s — Remove\",\"callback_data\":\"act:unshape:${ip}\"}],"
 		else
-			rows="${rows}[{\"text\":\"🔧 5M\",\"callback_data\":\"act:shape:${ip}:5000\"},{\"text\":\"🔧 10M\",\"callback_data\":\"act:shape:${ip}:10000\"},{\"text\":\"🔧 50M\",\"callback_data\":\"act:shape:${ip}:50000\"}],"
+			rows="${rows}[{\"text\":\"🔧 1M\",\"callback_data\":\"act:shape:${ip}:1000\"},{\"text\":\"🔧 2M\",\"callback_data\":\"act:shape:${ip}:2000\"},{\"text\":\"🔧 5M\",\"callback_data\":\"act:shape:${ip}:5000\"}],"
+			rows="${rows}[{\"text\":\"🔧 10M\",\"callback_data\":\"act:shape:${ip}:10000\"},{\"text\":\"🔧 25M\",\"callback_data\":\"act:shape:${ip}:25000\"},{\"text\":\"🔧 50M\",\"callback_data\":\"act:shape:${ip}:50000\"},{\"text\":\"🔧 100M\",\"callback_data\":\"act:shape:${ip}:100000\"}],"
 		fi
 	fi
 
@@ -368,7 +461,11 @@ build_action_keyboard() {
 # ── command handlers ────────────────────────────────────────────────────────
 
 handle_help() {
-	tg_send "$(printf '<b>TrafficCtl Bot</b>\n\n/devices — active devices list\n/status — blocked/limited summary\n/help — this message')"
+	if [ "$TG_CONTROL" = "1" ]; then
+		tg_send "$(printf '<b>TrafficCtl Bot</b>\n\n/devices — active devices with action buttons\n/status — blocked/limited summary\n/help — this message')"
+	else
+		tg_send "$(printf '<b>TrafficCtl Bot</b> (notifications only)\n\n/devices — active devices list\n/status — blocked/limited summary\n/help — this message\n\n<i>Control disabled — enable in LuCI settings</i>')"
+	fi
 }
 
 handle_devices() {
@@ -380,9 +477,18 @@ handle_devices() {
 	fi
 	local count
 	count=$(echo "$devices" | jsonfilter -e '@[*].ip' 2>/dev/null | wc -l)
-	local kb
-	kb=$(build_device_keyboard "$devices")
-	tg_send "$(printf '<b>Active devices: %d</b>\nSelect a device:' "$count")" "$kb"
+	if [ "$TG_CONTROL" = "1" ]; then
+		local kb
+		kb=$(build_device_keyboard "$devices")
+		tg_send "$(printf '<b>Active devices: %d</b>\nSelect a device:' "$count")" "$kb"
+	else
+		local list="" ip name
+		for ip in $(echo "$devices" | jsonfilter -e '@[*].ip' 2>/dev/null); do
+			name=$(get_device_field "$devices" "$ip" "name")
+			list="${list}• ${name:-?} (${ip})\n"
+		done
+		tg_send "$(printf '<b>Active devices: %d</b>\n%b' "$count" "$list")"
+	fi
 }
 
 handle_devices_edit() {
@@ -431,6 +537,11 @@ handle_status() {
 handle_callback() {
 	local cb_id="$1" data="$2" msg_id="$3"
 	local verb ip param result msg devices name
+
+	if [ "$TG_CONTROL" != "1" ]; then
+		tg_answer_cb "$cb_id" "Control disabled"
+		return
+	fi
 
 	verb=$(echo "$data" | cut -d: -f2)
 	ip=$(echo "$data" | cut -d: -f3)

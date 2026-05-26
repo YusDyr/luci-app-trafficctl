@@ -44,11 +44,12 @@ list)
 	printf '"config_get":{},'
 	printf '"config_set":{"enabled":"bool","default_mode":"str"},'
 	printf '"telegram_config_get":{},'
-	printf '"telegram_config_set":{"enabled":"bool","bot_token":"str","chat_id":"str","poll_interval":"int","notify_new_device":"bool","notify_known_device":"bool","btn_block_inet":"bool","btn_block_wifi":"bool","btn_limiter":"bool","btn_shaper":"bool"},'
+	printf '"telegram_config_set":{"enabled":"bool","bot_token":"str","chat_id":"str","poll_interval":"int","notify_new_device":"bool","notify_known_device":"bool","control_enabled":"bool","notify_template":"str","btn_block_inet":"bool","btn_block_wifi":"bool","btn_limiter":"bool","btn_shaper":"bool"},'
 	printf '"telegram_test":{"bot_token":"str","chat_id":"str"},'
 	printf '"logging_config_get":{},'
 	printf '"logging_config_set":{"enabled":"bool","log_file":"str","max_lines":"int","syslog":"bool","log_blocks":"bool","log_ratelimits":"bool","log_shapes":"bool","log_telegram":"bool","log_config":"bool"},'
-	printf '"activity_log":{"lines":"int"}'
+	printf '"activity_log":{"lines":"int"},'
+	printf '"version":{}'
 	printf '}'
 	;;
 call)
@@ -192,7 +193,7 @@ call)
 		;;
 	telegram_config_get)
 		uci -q get trafficctl.telegram >/dev/null 2>&1 || {
-			echo '{"enabled":false,"bot_token":"","bot_token_set":false,"chat_id":"","poll_interval":3,"notify_new_device":true,"notify_known_device":false,"btn_block_inet":true,"btn_block_wifi":true,"btn_limiter":true,"btn_shaper":true}'
+			echo '{"enabled":false,"bot_token":"","bot_token_set":false,"chat_id":"","poll_interval":3,"notify_new_device":true,"notify_known_device":false,"control_enabled":true,"notify_template":"","btn_block_inet":true,"btn_block_wifi":true,"btn_limiter":true,"btn_shaper":true,"bot_running":false}'
 			exit 0
 		}
 		tg_enabled=$(uci -q get trafficctl.telegram.enabled)
@@ -201,6 +202,8 @@ call)
 		tg_poll=$(uci -q get trafficctl.telegram.poll_interval)
 		tg_nn=$(uci -q get trafficctl.telegram.notify_new_device)
 		tg_nk=$(uci -q get trafficctl.telegram.notify_known_device)
+		tg_ctrl=$(uci -q get trafficctl.telegram.control_enabled)
+		tg_tmpl=$(uci -q get trafficctl.telegram.notify_template)
 		tg_bi=$(uci -q get trafficctl.telegram.btn_block_inet)
 		tg_bw=$(uci -q get trafficctl.telegram.btn_block_wifi)
 		tg_bl=$(uci -q get trafficctl.telegram.btn_limiter)
@@ -211,16 +214,22 @@ call)
 			tg_token_set=true
 			tg_token_display="***"
 		fi
-		printf '{"enabled":%s,"bot_token":"%s","bot_token_set":%s,"chat_id":"%s","poll_interval":%d,"notify_new_device":%s,"notify_known_device":%s,"btn_block_inet":%s,"btn_block_wifi":%s,"btn_limiter":%s,"btn_shaper":%s}' \
+		tg_running=false
+		pgrep -f "trafficctl-telegram.sh" >/dev/null 2>&1 && tg_running=true
+		tg_tmpl_esc=$(printf '%s' "${tg_tmpl:-}" | sed 's/\\/\\\\/g;s/"/\\"/g;s/	/\\t/g')
+		printf '{"enabled":%s,"bot_token":"%s","bot_token_set":%s,"chat_id":"%s","poll_interval":%d,"notify_new_device":%s,"notify_known_device":%s,"control_enabled":%s,"notify_template":"%s","btn_block_inet":%s,"btn_block_wifi":%s,"btn_limiter":%s,"btn_shaper":%s,"bot_running":%s}' \
 			"$([ "$tg_enabled" = "1" ] && echo true || echo false)" \
 			"$tg_token_display" "$tg_token_set" "${tg_chat_id:-}" \
 			"${tg_poll:-3}" \
 			"$([ "${tg_nn:-1}" != "0" ] && echo true || echo false)" \
 			"$([ "$tg_nk" = "1" ] && echo true || echo false)" \
+			"$([ "${tg_ctrl:-1}" != "0" ] && echo true || echo false)" \
+			"$tg_tmpl_esc" \
 			"$([ "${tg_bi:-1}" != "0" ] && echo true || echo false)" \
 			"$([ "${tg_bw:-1}" != "0" ] && echo true || echo false)" \
 			"$([ "${tg_bl:-1}" != "0" ] && echo true || echo false)" \
-			"$([ "${tg_bs:-1}" != "0" ] && echo true || echo false)"
+			"$([ "${tg_bs:-1}" != "0" ] && echo true || echo false)" \
+			"$tg_running"
 		;;
 	telegram_config_set)
 		read -r input
@@ -237,7 +246,9 @@ call)
 		[ -n "$val" ] && uci set trafficctl.telegram.chat_id="$val"
 		val=$(echo "$input" | jsonfilter -e '@.poll_interval' 2>/dev/null)
 		[ -n "$val" ] && uci set trafficctl.telegram.poll_interval="$val"
-		for opt in notify_new_device notify_known_device btn_block_inet btn_block_wifi btn_limiter btn_shaper; do
+		val=$(echo "$input" | jsonfilter -e '@.notify_template' 2>/dev/null)
+		uci set trafficctl.telegram.notify_template="$val"
+		for opt in notify_new_device notify_known_device control_enabled btn_block_inet btn_block_wifi btn_limiter btn_shaper; do
 			val=$(echo "$input" | jsonfilter -e "@.$opt" 2>/dev/null)
 			[ -n "$val" ] && uci set "trafficctl.telegram.$opt=$([ "$val" = "true" ] && echo 1 || echo 0)"
 		done
@@ -320,6 +331,12 @@ call)
 		else
 			echo '{"ok":true,"lines":[]}'
 		fi
+		;;
+	version)
+		local ver
+		ver=$(opkg info luci-app-trafficctl 2>/dev/null | awk '/^Version:/{print $2}')
+		[ -z "$ver" ] && ver="dev"
+		printf '{"version":"%s"}' "$ver"
 		;;
 	*)
 		echo '{"error":"unknown method"}'
