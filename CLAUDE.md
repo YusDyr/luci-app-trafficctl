@@ -133,7 +133,8 @@ Elements hidden with an **inline style** (`style="display:none"` in the `E()` ca
 - Pointer cursor on interactive elements
 - iOS-style toggles for boolean options
 - Chip/pill style for column visibility toggles
-- Recent devices quick-access bar (localStorage, MRU order, max 6)
+- Recent devices quick-access bar (localStorage, MRU order, max 6, stores `{ip,name}`)
+- Device picker (`searchSelect`) is seeded from DHCP leases at render time but must be kept current via `searchSelect.updateDevices(rows)` after each `callTrafficctl()` poll — otherwise only DHCP-known devices appear
 - Command palette style search (filter by name/IP/MAC)
 - Interactive graph popup on sparkline hover (crosshair, DL+UL, gradient fill, limit line)
 - `fmtSpeed()`: no ".0" for whole numbers, SI units (×1000)
