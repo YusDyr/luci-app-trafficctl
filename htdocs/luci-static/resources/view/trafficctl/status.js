@@ -1511,7 +1511,7 @@ function buildSearchSelect(devices, placeholder, onSelect) {
 		} else {
 			addToRecent(value);
 			input.value = label.replace(/\s+\(.*\)$/, '');
-			clearBtn.style.display = '';
+			clearBtn.style.display = 'inline';
 		}
 		dropdown.style.display = 'none';
 		if (!silent) onSelect(value);
