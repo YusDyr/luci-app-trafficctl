@@ -60,7 +60,7 @@ tctl_block_add() {
     local ip="$1" comment="$2"
 
     if [ "$TCTL_FW" = "nft" ]; then
-        nft add rule inet fw4 forward "ip saddr $ip counter drop comment \"$comment\""
+        nft insert rule inet fw4 forward "ip saddr $ip counter drop comment \"$comment\""
     else
         iptables -I FORWARD -s "$ip" -j DROP -m comment --comment "$comment"
     fi
@@ -158,14 +158,13 @@ tctl_persist_save() {
     local tmp="${TCTL_RULES_FILE}.tmp"
     # Remove existing entry for same ip+type, append new one
     awk -v ip="$ip" -v t="$type" -v p="$param" '
-    BEGIN { found=0 }
     {
-        gsub(/^\[|\]$/,"")
-        n=split($0, items, /},{/)
+        gsub(/^\[/,""); gsub(/\]$/,"")
+        n=split($0, items, "},{")
         printf "["
         first=1
         for (i=1; i<=n; i++) {
-            gsub(/^{|}$/,"",items[i])
+            sub(/^\{/,"",items[i]); sub(/\}$/,"",items[i])
             if (items[i] ~ "\"ip\":\"" ip "\"" && items[i] ~ "\"type\":\"" t "\"") continue
             if (!first) printf ","
             printf "{%s}", items[i]
@@ -183,12 +182,12 @@ tctl_persist_remove() {
     local tmp="${TCTL_RULES_FILE}.tmp"
     awk -v ip="$ip" -v t="$type" '
     {
-        gsub(/^\[|\]$/,"")
-        n=split($0, items, /},{/)
+        gsub(/^\[/,""); gsub(/\]$/,"")
+        n=split($0, items, "},{")
         printf "["
         first=1
         for (i=1; i<=n; i++) {
-            gsub(/^{|}$/,"",items[i])
+            sub(/^\{/,"",items[i]); sub(/\}$/,"",items[i])
             if (items[i] ~ "\"ip\":\"" ip "\"" && items[i] ~ "\"type\":\"" t "\"") continue
             if (!first) printf ","
             printf "{%s}", items[i]
