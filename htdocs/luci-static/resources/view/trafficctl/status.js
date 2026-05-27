@@ -137,7 +137,7 @@ var callTelegramSet = rpc.declare({
 var callTelegramTest = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'telegram_test',
-	params: ['bot_token', 'chat_id']
+	params: ['bot_token', 'chat_id', 'message']
 });
 
 var callLoggingGet = rpc.declare({
@@ -2823,7 +2823,7 @@ return view.extend({
 					testResult.textContent = _('Sending…');
 					testResult.style.color = C.textMute;
 					var tk = tokenInput.value || '***';
-					callTelegramTest(tk, chatInput.value).then(function(res) {
+					callTelegramTest(tk, chatInput.value, templateArea.value || '').then(function(res) {
 						testResult.textContent = (res && res.ok) ? '✓ ' + (res.msg || 'OK') : '✗ ' + (res && res.msg || 'error');
 						testResult.style.color = (res && res.ok) ? 'var(--tm-state-ok)' : 'var(--tm-blocked-fg)';
 					}).catch(function(e) {
@@ -2841,11 +2841,14 @@ return view.extend({
 				// ── Mode segmented control ──
 				var controlMode = cfg.control_enabled !== false;
 				var controlSection = E('div', {});
+				var notifySection = E('div', {});
+				if (controlMode) notifySection.style.display = 'none';
 				function setMode(ctrl) {
 					controlMode = ctrl;
 					segControl.className = 'tg-segmented__item' + (ctrl ? ' tg-segmented__item--active' : '');
 					segNotify.className = 'tg-segmented__item' + (!ctrl ? ' tg-segmented__item--active' : '');
 					controlSection.style.display = ctrl ? '' : 'none';
+					notifySection.style.display = ctrl ? 'none' : '';
 					doSave();
 				}
 
@@ -2864,10 +2867,10 @@ return view.extend({
 				section.appendChild(E('div', {'class':'tg-row'}, [segmented]));
 
 				// ── Notifications ──
-				section.appendChild(E('div', {'class':'tg-divider'}, _('Notifications')));
+				notifySection.appendChild(E('div', {'class':'tg-divider'}, _('Notifications')));
 				var notifyNew = mkToggle('tm-tg-new', _('New devices'), cfg.notify_new_device, doSave);
 				var notifyKnown = mkToggle('tm-tg-known', _('Known devices'), cfg.notify_known_device, doSave);
-				section.appendChild(E('div', {'class':'tg-row'}, [notifyNew, notifyKnown]));
+				notifySection.appendChild(E('div', {'class':'tg-row'}, [notifyNew, notifyKnown]));
 
 				// ── Custom template ──
 				var templateArea = E('textarea', {
@@ -2948,7 +2951,8 @@ return view.extend({
 					templateBody.style.display = show ? '' : 'none';
 					templateToggle.textContent = (show ? '▾ ' : '▸ ') + _('Customize message');
 				});
-				section.appendChild(E('div', {'style':'margin-top:8px'}, [templateToggle, templateBody]));
+				notifySection.appendChild(E('div', {'style':'margin-top:8px'}, [templateToggle, templateBody]));
+				section.appendChild(notifySection);
 
 				// ── Control section (conditionally visible) ──
 				controlSection.appendChild(E('div', {'class':'tg-divider'}, _('Control')));

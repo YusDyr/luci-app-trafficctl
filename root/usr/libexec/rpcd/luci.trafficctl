@@ -45,7 +45,7 @@ list)
 	printf '"config_set":{"enabled":"bool","default_mode":"str"},'
 	printf '"telegram_config_get":{},'
 	printf '"telegram_config_set":{"enabled":"bool","bot_token":"str","chat_id":"str","poll_interval":"int","notify_new_device":"bool","notify_known_device":"bool","control_enabled":"bool","notify_template":"str","btn_block_inet":"bool","btn_block_wifi":"bool","btn_limiter":"bool","btn_shaper":"bool"},'
-	printf '"telegram_test":{"bot_token":"str","chat_id":"str"},'
+	printf '"telegram_test":{"bot_token":"str","chat_id":"str","message":"str"},'
 	printf '"logging_config_get":{},'
 	printf '"logging_config_set":{"enabled":"bool","log_file":"str","max_lines":"int","syslog":"bool","log_blocks":"bool","log_ratelimits":"bool","log_shapes":"bool","log_telegram":"bool","log_config":"bool"},'
 	printf '"activity_log":{"lines":"int"},'
@@ -264,13 +264,14 @@ call)
 		read -r input
 		token=$(echo "$input" | jsonfilter -e '@.bot_token' 2>/dev/null)
 		chat_id=$(echo "$input" | jsonfilter -e '@.chat_id' 2>/dev/null)
+		msg=$(echo "$input" | jsonfilter -e '@.message' 2>/dev/null)
 		if [ "$token" = "***" ] || [ -z "$token" ]; then
 			token=$(uci -q get trafficctl.telegram.bot_token)
 		fi
 		if [ -z "$token" ] || [ -z "$chat_id" ]; then
 			echo '{"ok":false,"msg":"token and chat_id required"}'
 		else
-			"$SCRIPTS/trafficctl-telegram-test.sh" "$token" "$chat_id"
+			"$SCRIPTS/trafficctl-telegram-test.sh" "$token" "$chat_id" "$msg"
 		fi
 		;;
 	logging_config_get)
