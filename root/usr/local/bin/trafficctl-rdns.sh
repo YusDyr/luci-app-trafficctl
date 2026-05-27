@@ -20,9 +20,9 @@ fi
 
 HOST=""
 if command -v dig >/dev/null 2>&1; then
-    HOST=$(dig +short +time=1 +tries=1 -x "$IP" 2>/dev/null | grep -v '^;;' | head -1 | sed 's/\.$//')
+    HOST=$(timeout 3 dig -4 +short +time=1 +tries=1 -x "$IP" 2>/dev/null | grep -v '^;;' | head -1 | sed 's/\.$//')
 elif command -v nslookup >/dev/null 2>&1; then
-    HOST=$(nslookup "$IP" 2>/dev/null | grep 'name =' | awk '{print $NF}' | sed 's/\.$//')
+    HOST=$(timeout 3 nslookup "$IP" 2>/dev/null | grep 'name =' | awk '{print $NF}' | sed 's/\.$//')
 fi
 
 # Validate hostname (only allow safe chars)

@@ -1828,6 +1828,42 @@ return view.extend({
 		var statsDiv  = E('div', { 'style': 'margin:8px 0' + (opts.showStats===false?';display:none':'') });
 		var connsDiv  = E('div', { 'style': opts.showConns===false?'display:none':'' });
 
+		var _rdnsQueue   = [];
+		var _rdnsFlying  = 0;
+		var _rdnsMax     = 4;
+		var _rdnsDispatch = function() {
+			while (_rdnsFlying < _rdnsMax && _rdnsQueue.length > 0) {
+				var item = _rdnsQueue.shift();
+				if (item.gen !== self._queryGen) continue;
+				(function(it) {
+					_rdnsFlying++;
+					callRdns(it.dst).then(function(res) {
+						_rdnsFlying--;
+						_rdnsDispatch();
+						if (it.gen !== self._queryGen) return;
+						var host = (res && res.host) ? res.host : null;
+						self._rdnsCache[it.dst] = host || null;
+						Array.prototype.forEach.call(
+							connsDiv.querySelectorAll('td[data-dst="'+it.dst+'"]'),
+							function(cell) {
+								if (host) { cell.textContent = host; cell.style.color = C.hostname; }
+								else { cell.innerHTML = '<span style="color:'+C.textFaint+'">—</span>'; }
+							}
+						);
+					}).catch(function() {
+						_rdnsFlying--;
+						_rdnsDispatch();
+						if (it.gen !== self._queryGen) return;
+						self._rdnsCache[it.dst] = null;
+						Array.prototype.forEach.call(
+							connsDiv.querySelectorAll('td[data-dst="'+it.dst+'"]'),
+							function(cell) { cell.innerHTML = '<span style="color:'+C.textFaint+'">—</span>'; }
+						);
+					});
+				})(item);
+			}
+		};
+
 		// Speed graph popup on spark cell hover
 		var graphPopup = E('div', {'class':'tm-graph-popup'});
 		document.body.appendChild(graphPopup);
@@ -2279,6 +2315,7 @@ return view.extend({
 			var o = loadOpts();
 			var proto = (o.proto && o.proto !== 'all') ? o.proto : '';
 			self._queryGen++;
+			_rdnsQueue.length = 0;
 			var gen = self._queryGen;
 
 			setStatus(statusDiv, 'loading', _('Running…'));
@@ -2405,29 +2442,8 @@ return view.extend({
 									);
 									return;
 								}
-								callRdns(dst).then(function(res) {
-									if (gen !== self._queryGen) return;
-									var host = (res && res.host) ? res.host : null;
-									self._rdnsCache[dst] = host || null;
-									Array.prototype.forEach.call(
-										connsDiv.querySelectorAll('td[data-dst="'+dst+'"]'),
-										function(cell) {
-											if (host) {
-												cell.textContent = host;
-												cell.style.color = C.hostname;
-											} else {
-												cell.innerHTML = '<span style="color:'+C.textFaint+'">—</span>';
-											}
-										}
-									);
-								}).catch(function() {
-									if (gen !== self._queryGen) return;
-									self._rdnsCache[dst] = null;
-									Array.prototype.forEach.call(
-										connsDiv.querySelectorAll('td[data-dst="'+dst+'"]'),
-										function(cell) { cell.innerHTML = '<span style="color:'+C.textFaint+'">—</span>'; }
-									);
-								});
+								_rdnsQueue.push({dst: dst, gen: gen});
+								_rdnsDispatch();
 							});
 						}
 					}
