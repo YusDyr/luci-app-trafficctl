@@ -151,6 +151,11 @@ var callVersion = rpc.declare({
 	method: 'version'
 });
 
+var callConfigGet = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'config_get'
+});
+
 var C = {
 	thBg:          'var(--tm-th-bg)',
 	thFg:          'var(--tm-th-fg)',
@@ -3260,9 +3265,124 @@ return view.extend({
 			}
 		});
 
+		var docsUrl = 'https://openwrt.org/docs/guide-user/perf_and_log/flow_offloading';
+
+		var mkOffloadBanner = function(mode) {
+			if (!mode || mode === 'none') return null;
+
+			var bg, border, icon, body;
+			var para = function(text) { return E('p', {'style': 'margin:6px 0'}, text); };
+			var bold = function(text) { return E('strong', {}, text); };
+			var link = function(url, text) {
+				return E('a', {'href': url, 'target': '_blank',
+					'style': 'color:inherit;text-decoration:underline'}, text);
+			};
+
+			var openwrtUrl = 'https://openwrt.org/docs/guide-user/perf_and_log/flow_offloading';
+			var kernelUrl  = 'https://docs.kernel.org/networking/nf_flowtable.html#hardware-offload';
+			var nftUrl     = 'https://wiki.nftables.org/wiki-nftables/index.php/Flowtables';
+
+			var sep = E('span', {'style': 'opacity:0.35;margin:0 6px'}, '|');
+			var docLinks = para([
+				link(openwrtUrl, 'OpenWrt: Flow offloading ↗'), sep.cloneNode(true),
+				link(kernelUrl,  'Linux kernel: nf_flowtable ↗'), sep.cloneNode(true),
+				link(nftUrl,     'nftables: Flowtables ↗')
+			]);
+
+			if (mode === 'hardware-counter') {
+				bg     = 'rgba(41,128,185,0.10)';
+				border = '#2980b9';
+				icon   = '✔️';
+				body   = E('div', {}, [
+					para(bold(_('Hardware flow offloading is active — all features work.'))),
+					para([_('The router offloads packet forwarding to the hardware (NIC/SoC) for higher throughput. ' +
+						  'The flowtable '),
+						E('code', {}, 'counter'),
+						_(' flag (Linux 5.7+ / OpenWrt 22.03+ with fw4) keeps conntrack byte counts ' +
+						  'in sync — monitoring, shaping, and rate limiting all work normally.')]),
+					docLinks,
+				]);
+			} else if (mode === 'hardware') {
+				bg     = 'rgba(211,84,0,0.10)';
+				border = '#d35400';
+				icon   = '⚠️';
+				body   = E('div', {}, [
+					para(bold(_('Hardware flow offloading is active.'))),
+					para(_('The router offloads established connections from the CPU to the hardware (NIC/SoC), ' +
+						  'achieving 2–3× higher throughput and lower CPU usage.')),
+					para(_('In this mode the kernel\'s conntrack, firewall, and tc are bypassed for offloaded flows:')),
+					E('ul', {'style': 'margin:4px 0 4px 18px;padding:0'}, [
+						E('li', {}, _('Speed monitoring — conntrack byte counters are not updated')),
+						E('li', {}, _('Traffic shaping (tc/HTB) — bypassed for offloaded flows')),
+						E('li', {}, _('Rate limiting — applies only to new connections')),
+					]),
+					para([_('WiFi blocking and internet blocking of new connections still work. '),
+						_('Shaped devices are usually not offloaded (kernel detects the HTB qdisc).')]),
+					para(bold(_('How to get full functionality without disabling offload:'))),
+					para([_('The flowtable '),
+						E('code', {}, 'counter'),
+						_(' flag (Linux 5.7+, set automatically by fw4/nftables) periodically syncs ' +
+						  'hardware byte counts back to conntrack — trafficctl detects this and all features work normally.')]),
+					para(_('If your current firmware uses fw3 (iptables) or ships a kernel older than 5.7, ' +
+						  'a router with modern OpenWrt and fw4 support will have this working out of the box.')),
+					docLinks,
+				]);
+			} else {
+				bg     = 'rgba(243,156,18,0.10)';
+				border = '#f39c12';
+				icon   = 'ℹ️';
+				body   = E('div', {}, [
+					para(bold(_('Software flow offloading is active.'))),
+					para(_('The kernel fast-paths established connections through a flowtable, ' +
+						  'bypassing conntrack byte updates for higher throughput.')),
+					para(_('Speed is measured via nftables counters installed at a higher priority ' +
+						  '(before the flowtable), so graphs are accurate.')),
+					para(_('Traffic shaping and blocking are not affected.')),
+					docLinks,
+				]);
+			}
+
+			var banner = E('div', {
+				'style': 'padding:10px 14px;margin-bottom:8px;border-radius:6px;' +
+					'border:1px solid ' + border + ';background:' + bg + ';font-size:13px;line-height:1.5'
+			}, [
+				E('div', {'style': 'display:flex;justify-content:space-between;align-items:flex-start'}, [
+					E('span', {'style': 'font-size:15px;margin-right:8px'}, icon),
+					E('div', {'style': 'flex:1'}, body),
+					E('span', {
+						'style': 'cursor:pointer;opacity:0.5;padding:0 0 0 10px;font-size:18px;line-height:1;flex-shrink:0',
+						'title': _('Dismiss')
+					}, '×')
+				])
+			]);
+			banner.firstChild.lastChild.addEventListener('click', function() {
+				banner.style.display = 'none';
+			});
+			return banner;
+		};
+
+		var offloadBanner = E('div', {'id': 'tm-offload-banner', 'style': 'display:none'});
+
+		// Debug: add ?offload_debug=1 to URL to preview all banner types at once
+		if (window.location.search.indexOf('offload_debug') !== -1) {
+			['hardware-counter', 'software', 'hardware'].forEach(function(mode) {
+				var b = mkOffloadBanner(mode);
+				if (b) offloadBanner.appendChild(b);
+			});
+			offloadBanner.style.display = '';
+		} else {
+			callConfigGet().then(function(cfg) {
+				var b = mkOffloadBanner(cfg && cfg.offload_mode);
+				if (!b) return;
+				offloadBanner.appendChild(b);
+				offloadBanner.style.display = '';
+			});
+		}
+
 		return E('div', {'class':'cbi-map', 'style':'color:'+C.hostname}, [
 			E('h2', {'style':'color:'+C.hostname}, _('Traffic Control')),
 			E('div', {'class':'cbi-section'}, [
+				offloadBanner,
 				E('div', {'style':'margin-bottom:10px'}, [
 						E('div', {'style':'display:flex;align-items:center;gap:10px;flex-wrap:wrap'}, [searchSelect.el, actionRow]),
 						quickBar

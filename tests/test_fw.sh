@@ -51,6 +51,40 @@ assert_eq "wan device fallback" "wan" "$(tctl_get_wan_device)"
 
 assert_eq "firewall mode is iptables when nft unavailable" "iptables" "$TCTL_FW"
 
+# --- tctl_get_offload_mode ---
+# Each case runs in a subshell with stubbed uci/nft, sources the library fresh,
+# then returns the mode string which assert_eq compares.
+
+_offload_mode() {
+    local sw="$1" hw="$2" nft_out="$3"
+    (
+        _sw="$sw"; _hw="$hw"; _nft_out="$nft_out"
+        uci() {
+            case "$3" in
+                "firewall.@defaults[0].flow_offloading")    echo "$_sw" ;;
+                "firewall.@defaults[0].flow_offloading_hw") echo "$_hw" ;;
+            esac
+        }
+        nft() {
+            [ "$1" = "list" ] && [ "$2" = "flowtables" ] || return 1
+            [ -n "$_nft_out" ] || return 1
+            printf '%s\n' "$_nft_out"
+        }
+        export -f uci nft
+        . "$(dirname "$0")/../root/usr/local/bin/trafficctl-fw.sh"
+        tctl_get_offload_mode
+    )
+}
+
+assert_eq "offload_mode: none (both disabled)" \
+    "none" "$(_offload_mode 0 0 "")"
+assert_eq "offload_mode: software" \
+    "software" "$(_offload_mode 1 0 "")"
+assert_eq "offload_mode: hardware (no counter flag in flowtable)" \
+    "hardware" "$(_offload_mode 0 1 "flowtable ft { hook ingress priority 0; devices = { eth0 }; }")"
+assert_eq "offload_mode: hardware-counter (counter flag present)" \
+    "hardware-counter" "$(_offload_mode 0 1 "flowtable ft { flags { offload, counter }; devices = { eth0 }; }")"
+
 # --- Results ---
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"

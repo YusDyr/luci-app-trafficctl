@@ -178,9 +178,11 @@ call)
 	config_get)
 		enabled=$(uci -q get trafficctl.main.enabled)
 		mode=$(uci -q get trafficctl.main.default_mode)
-		printf '{"enabled":%s,"default_mode":"%s"}' \
+		offload=$(tctl_get_offload_mode)
+		printf '{"enabled":%s,"default_mode":"%s","offload_mode":"%s"}' \
 			"$([ "$enabled" = "1" ] && echo true || echo false)" \
-			"${mode:-limiter}"
+			"${mode:-limiter}" \
+			"$offload"
 		;;
 	config_set)
 		read -r input
@@ -333,7 +335,6 @@ call)
 		fi
 		;;
 	version)
-		local ver
 		ver=$(opkg info luci-app-trafficctl 2>/dev/null | awk '/^Version:/{print $2}')
 		[ -z "$ver" ] && ver="dev"
 		printf '{"version":"%s"}' "$ver"

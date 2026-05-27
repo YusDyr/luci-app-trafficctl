@@ -18,6 +18,8 @@ jobs:
       - uses: actions/checkout@v6
       - name: Shell unit tests
         run: bash tests/test_fw.sh
+      - name: nft bytes parser tests
+        run: bash tests/test_bytes_nft.sh
       - name: Telegram unit tests
         run: bash tests/test_telegram.sh
       - name: Security tests

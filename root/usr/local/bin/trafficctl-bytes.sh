@@ -5,6 +5,8 @@
 
 . /usr/local/bin/trafficctl-fw.sh
 
+[ "$(tctl_get_offload_mode)" = "software" ] && [ "$TCTL_FW" = "nft" ] && exec /usr/local/bin/trafficctl-bytes-nft.sh
+
 LAN_DEV=$(tctl_get_lan_device)
 LAN_SUBNET=$(ip -4 addr show dev "$LAN_DEV" 2>/dev/null | grep -oE 'inet [0-9.]+' | head -1 | awk '{print $2}')
 LAN_PREFIX=$(echo "$LAN_SUBNET" | cut -d. -f1-3)

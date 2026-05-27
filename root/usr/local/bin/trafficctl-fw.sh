@@ -254,3 +254,25 @@ tctl_log() {
         logger -t "$TCTL_LOG_TAG" "$ts src=$src user=$user via=$via action=$action target=$target${detail:+ detail=$detail}"
     fi
 }
+
+# ── Flow Offload Detection ─────────────────────────────────────────────────
+
+tctl_get_offload_mode() {
+    local sw hw
+    sw=$(uci -q get firewall.@defaults[0].flow_offloading 2>/dev/null)
+    hw=$(uci -q get firewall.@defaults[0].flow_offloading_hw 2>/dev/null)
+    if [ "$hw" = "1" ]; then
+        # kernel 5.7+ supports counter sync on flowtables (docs.kernel.org/networking/nf_flowtable.html).
+        # OpenWrt 22.03+ fw4 sets the counter flag by default, syncing hardware
+        # byte counts back to conntrack — monitoring works.
+        if nft list flowtables 2>/dev/null | grep -q "counter"; then
+            echo "hardware-counter"
+        else
+            echo "hardware"
+        fi
+    elif [ "$sw" = "1" ]; then
+        echo "software"
+    else
+        echo "none"
+    fi
+}
