@@ -171,35 +171,6 @@ var callConfigGet = rpc.declare({
 	method: 'config_get'
 });
 
-var C = {
-	thBg:          'var(--tm-th-bg)',
-	thFg:          'var(--tm-th-fg)',
-	rowEven:       'var(--tm-bg)',
-	rowOdd:        'var(--tm-bg-alt)',
-	proto:         'var(--tm-proto)',
-	hostname:      'var(--tm-text)',
-	service:       'var(--tm-service)',
-	stateOk:       'var(--tm-state-ok)',
-	stateWait:     'var(--tm-state-wait)',
-	stateClose:    'var(--tm-state-close)',
-	optsBg:        'var(--tm-bg-subtle)',
-	optsBorder:    'var(--tm-border)',
-	infoBg:        'var(--tm-info-bg)',
-	infoBorder:    'var(--tm-info-border)',
-	infoFg:        'var(--tm-info-fg)',
-	blockedBg:     'var(--tm-blocked-bg)',
-	blockedBorder: 'var(--tm-blocked-border)',
-	blockedFg:     'var(--tm-blocked-fg)',
-	rateFg:        'var(--tm-rate-fg)',
-	textMute:      'var(--tm-text-mute)',
-	textFaint:     'var(--tm-text-faint)',
-	border:        'var(--tm-border)',
-	speedFg:       'var(--tm-speed)',
-	mac:           'var(--tm-text-mute)',
-	dropFg:        'var(--tm-drop-fg)',
-	shapeFg:       'var(--tm-shape-fg)'
-};
-
 var RATE_PRESETS = [
 	{v:'0',      l: _('Off')},
 	{v:'1000',   l:'1 Mbit/s'},
@@ -792,15 +763,13 @@ function buildGroupedTable(groups, sortCol, sortDir) {
 		return E('th', { 'class': 'tm-th', 'data-col': c.key, 'data-num': c.num ? '1' : '0' }, c.label + arrow);
 	})));
 
-	var tbody = E('tbody', {}, sorted.map(function(r, i) {
-		var bg = i%2===0 ? C.rowEven : C.rowOdd;
-		var td = 'padding:6px 12px;border-bottom:1px solid '+C.border+';color:'+C.hostname+';font-size:12px;background:'+bg;
+	var tbody = E('tbody', {}, sorted.map(function(r) {
 		return E('tr', { 'class': 'tm-row' }, [
-			E('td', { 'style': td+';font-weight:500;color:'+C.proto }, escHtml(r.key)),
-			E('td', { 'style': td+';text-align:right;font-weight:600' }, String(r.count)),
-			E('td', { 'style': td+';text-align:right;color:'+C.proto }, String(r.tcp)),
-			E('td', { 'style': td+';text-align:right;color:'+C.stateClose }, String(r.udp)),
-			E('td', { 'style': td+';text-align:right;font-family:monospace;font-weight:500' }, fmtBytes(r.bytes))
+			E('td', { 'class': 'tm-td tm-td--medium tm-c-proto' }, escHtml(r.key)),
+			E('td', { 'class': 'tm-td tm-td--right tm-td--bold' }, String(r.count)),
+			E('td', { 'class': 'tm-td tm-td--right tm-c-proto' }, String(r.tcp)),
+			E('td', { 'class': 'tm-td tm-td--right tm-c-close' }, String(r.udp)),
+			E('td', { 'class': 'tm-td tm-td--right tm-td--mono tm-td--medium' }, fmtBytes(r.bytes))
 		]);
 	}));
 
@@ -834,9 +803,7 @@ function buildTable(conns, sortCol, sortDir, rdnsMode, hiddenCols) {
 
 	var tbody = E('tbody', {}, sorted.map(function(r, i) {
 		var state = escHtml(r.state || '');
-		var sc = state === 'ESTABLISHED' ? C.stateOk : state === 'TIME_WAIT' ? C.stateWait : state === 'CLOSE_WAIT' ? C.stateClose : C.hostname;
-		var bg = i%2===0 ? C.rowEven : C.rowOdd;
-		var td = 'padding:5px 12px;border-bottom:1px solid '+C.border+';color:'+C.hostname+';font-size:12px;background:'+bg;
+		var scCls = state === 'ESTABLISHED' ? ' tm-c-ok' : state === 'TIME_WAIT' ? ' tm-c-wait' : state === 'CLOSE_WAIT' ? ' tm-c-close' : '';
 
 		var dst = r.dst || '';
 		var dstEl = dst
@@ -844,23 +811,23 @@ function buildTable(conns, sortCol, sortDir, rdnsMode, hiddenCols) {
 			           'class':'tm-link', 'onclick': 'event.stopPropagation()' }, dst)
 			: '';
 
-		var hostCell = E('td', { 'style': td+';color:'+C.hostname, 'data-dst': dst });
+		var hostCell = E('td', { 'class': 'tm-td tm-td--compact', 'data-dst': dst });
 		if (r.host) {
 			hostCell.textContent = r.host;
 		} else if (rdnsMode && !PRIVATE_RE.test(dst)) {
-			hostCell.innerHTML = '<span style="color:'+C.textFaint+';font-style:italic">' + _('resolving…') + '</span>';
+			hostCell.innerHTML = '<span class="tm-c-faint" style="font-style:italic">' + _('resolving…') + '</span>';
 		} else {
 			hostCell.textContent = '—';
 		}
 
 		var cellMap = {
-			proto: E('td', { 'style': td+';color:'+C.proto+';font-weight:600' }, r.proto || ''),
-			dst: E('td', { 'style': td+';font-family:monospace' }, dstEl),
+			proto: E('td', { 'class': 'tm-td tm-td--compact tm-td--bold tm-c-proto' }, r.proto || ''),
+			dst: E('td', { 'class': 'tm-td tm-td--compact tm-td--mono' }, dstEl),
 			host: hostCell,
-			port: E('td', { 'style': td+';text-align:right;font-family:monospace' }, String(r.port || '')),
-			service: E('td', { 'style': td+';color:'+C.service }, escHtml(r.service || (SERVICE_PORTS[r.port]||''))),
-			bytes: E('td', { 'style': td+';text-align:right;font-family:monospace;font-weight:500'}, fmtBytes(r.bytes)),
-			state: E('td', { 'style': td+';color:'+sc+';font-weight:500' }, state)
+			port: E('td', { 'class': 'tm-td tm-td--compact tm-td--right tm-td--mono' }, String(r.port || '')),
+			service: E('td', { 'class': 'tm-td tm-td--compact tm-c-service' }, escHtml(r.service || (SERVICE_PORTS[r.port]||''))),
+			bytes: E('td', { 'class': 'tm-td tm-td--compact tm-td--right tm-td--mono tm-td--medium' }, fmtBytes(r.bytes)),
+			state: E('td', { 'class': 'tm-td tm-td--compact tm-td--medium' + scCls }, state)
 		};
 		var cells = cols.map(function(c) { return cellMap[c.key]; });
 		return E('tr', { 'class': 'tm-row' }, cells);
@@ -953,35 +920,32 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 	})));
 
 	var tbody = E('tbody', {}, sorted.map(function(r, i) {
-		var bg = i%2===0 ? C.rowEven : C.rowOdd;
-		var td = 'padding:6px 12px;border-bottom:1px solid '+C.border+';color:'+C.hostname+';font-size:12px;background:'+bg;
-
 		var sd = speedMap[r.ip];
 		var cellMap = {};
 
-		cellMap.name = E('td', { 'style': td+';font-weight:600;color:'+C.proto }, escHtml(r.name));
-		cellMap.ip = E('td', { 'style': td+';font-family:monospace' }, escHtml(r.ip));
+		cellMap.name = E('td', { 'class': 'tm-td tm-td--bold tm-c-proto' }, escHtml(r.name));
+		cellMap.ip = E('td', { 'class': 'tm-td tm-td--mono' }, escHtml(r.ip));
 		var macEl = r.mac ? E('a', { 'href':'/cgi-bin/luci/admin/network/dhcp','target':'_blank','rel':'noopener','class':'tm-link','title':_('Open DHCP/DNS bindings'),'onclick':'event.stopPropagation()' }, r.mac) : '';
-		cellMap.mac = E('td', { 'style': td+';font-family:monospace;color:'+C.mac+';font-size:11px' }, macEl || '');
+		cellMap.mac = E('td', { 'class': 'tm-td tm-td--mono tm-td--sm tm-c-mute' }, macEl || '');
 
-		cellMap._speed = E('td', { 'style': td+';text-align:right;font-family:monospace', 'data-speed-ip': r.ip, 'title': sd ? (_('Avg')+': '+fmtSpeed(sd.avg)+' / '+_('Max')+': '+fmtSpeed(sd.max)) : _('Calculating…') });
+		cellMap._speed = E('td', { 'class': 'tm-td tm-td--right tm-td--mono', 'data-speed-ip': r.ip, 'title': sd ? (_('Avg')+': '+fmtSpeed(sd.avg)+' / '+_('Max')+': '+fmtSpeed(sd.max)) : _('Calculating…') });
 		if (sd && sd.current > 1024) { cellMap._speed.className = 'tm-speed-active'; cellMap._speed.textContent = fmtSpeed(sd.current); }
 		else { cellMap._speed.className = 'tm-speed-idle'; cellMap._speed.textContent = sd ? fmtSpeed(sd.current) : '—'; }
 
 		var sparkTip = r._throttle_kbit > 0 ? (_('Limit') + ': ' + fmtRate(r._throttle_kbit)) : '';
-		cellMap._spark = E('td', { 'style': td+';text-align:center;padding:2px 4px', 'data-spark-ip': r.ip, 'data-tip': sparkTip || undefined });
+		cellMap._spark = E('td', { 'class': 'tm-td tm-td--center', 'style': 'padding:2px 4px', 'data-spark-ip': r.ip, 'data-tip': sparkTip || undefined });
 		var sparkSvg = renderSparkline(speedHistory[r.ip], globalSpeedMax, 60, 20, r._throttle_kbit);
 		if (sparkSvg) cellMap._spark.appendChild(sparkSvg);
 
-		cellMap.conns = E('td', { 'style': td+';text-align:right;font-weight:600' }, String(r.conns||0));
-		cellMap.total = E('td', { 'style': td+';text-align:right;font-family:monospace;font-size:11px' }, fmtBytes(r.total||0));
-		cellMap.tcp = E('td', { 'style': td+';text-align:right;font-family:monospace;font-size:11px;color:'+C.proto }, fmtBytes(r.tcp||0));
-		cellMap.udp = E('td', { 'style': td+';text-align:right;font-family:monospace;font-size:11px;color:'+C.stateClose }, fmtBytes(r.udp||0));
+		cellMap.conns = E('td', { 'class': 'tm-td tm-td--right tm-td--bold' }, String(r.conns||0));
+		cellMap.total = E('td', { 'class': 'tm-td tm-td--right tm-td--mono tm-td--sm' }, fmtBytes(r.total||0));
+		cellMap.tcp = E('td', { 'class': 'tm-td tm-td--right tm-td--mono tm-td--sm tm-c-proto' }, fmtBytes(r.tcp||0));
+		cellMap.udp = E('td', { 'class': 'tm-td tm-td--right tm-td--mono tm-td--sm tm-c-close' }, fmtBytes(r.udp||0));
 
 		var inetBadge = r.blocked
-			? E('span', { 'style': 'color:'+C.rateFg+';font-weight:600' }, '⏸️ ' + _('paused'))
-			: E('span', { 'style': 'color:'+C.proto }, '▶️ ' + _('ok'));
-		cellMap.blocked = E('td', { 'style': td+';text-align:center' }, inetBadge);
+			? E('span', { 'class': 'tm-c-rate tm-fw-600' }, '⏸️ ' + _('paused'))
+			: E('span', { 'class': 'tm-c-proto' }, '▶️ ' + _('ok'));
+		cellMap.blocked = E('td', { 'class': 'tm-td tm-td--center' }, inetBadge);
 
 		var linkBadge;
 		var ct = r.conn_type || 'ethernet';
@@ -998,31 +962,31 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 					tip = _('Last seen') + ': ' + lastType + ', ' + agoStr + ' ' + _('ago');
 				}
 			}
-			linkBadge = E('span', { 'style': 'color:'+C.textFaint+';cursor:help', 'title': tip }, '❓');
+			linkBadge = E('span', { 'class': 'tm-c-faint', 'style': 'cursor:help', 'title': tip }, '❓');
 		} else if (isWifi) {
 			var wLabel = ct === 'wifi' ? 'WiFi' : ct;
 			linkBadge = r.wifi_blocked
-				? E('span', { 'style': 'color:'+C.rateFg+';font-weight:600;text-decoration:line-through' }, '📶 ' + wLabel)
-				: E('span', { 'style': 'color:'+C.proto }, '📶 ' + wLabel);
+				? E('span', { 'class': 'tm-c-rate tm-fw-600', 'style': 'text-decoration:line-through' }, '📶 ' + wLabel)
+				: E('span', { 'class': 'tm-c-proto' }, '📶 ' + wLabel);
 		} else {
 			var ethLabel = (ct === 'ethernet') ? 'eth' : ct;
-			linkBadge = E('span', { 'style': 'color:'+C.textMute }, [mkEthIcon(14), document.createTextNode(ethLabel)]);
+			linkBadge = E('span', { 'class': 'tm-c-mute' }, [mkEthIcon(14), document.createTextNode(ethLabel)]);
 		}
-		cellMap.conn_type = E('td', { 'style': td+';text-align:center' }, linkBadge);
+		cellMap.conn_type = E('td', { 'class': 'tm-td tm-td--center' }, linkBadge);
 
 		var throttleBadge;
-		if (r._throttle_mode === 'shaper') { throttleBadge = E('span', { 'style': 'color:'+C.shapeFg+';font-weight:600', 'title': _('Shaper (tc/HTB queue)') }, '🌊 ' + fmtRate(r._throttle_kbit)); }
-		else if (r._throttle_mode === 'limiter') { throttleBadge = E('span', { 'style': 'color:'+C.rateFg+';font-weight:600', 'title': _('Limiter (nft drop)') }, '⚡ ' + fmtRate(r._throttle_kbit)); }
-		else { throttleBadge = E('span', { 'style': 'color:'+C.textFaint }, '—'); }
-		cellMap._throttle_kbit = E('td', { 'style': td+';text-align:center' }, throttleBadge);
+		if (r._throttle_mode === 'shaper') { throttleBadge = E('span', { 'class': 'tm-c-shape tm-fw-600', 'title': _('Shaper (tc/HTB queue)') }, '🌊 ' + fmtRate(r._throttle_kbit)); }
+		else if (r._throttle_mode === 'limiter') { throttleBadge = E('span', { 'class': 'tm-c-rate tm-fw-600', 'title': _('Limiter (nft drop)') }, '⚡ ' + fmtRate(r._throttle_kbit)); }
+		else { throttleBadge = E('span', { 'class': 'tm-c-faint' }, '—'); }
+		cellMap._throttle_kbit = E('td', { 'class': 'tm-td tm-td--center' }, throttleBadge);
 
 		var dp = r._drop_packets || 0;
-		var dropBadge = dp > 0 ? E('span', { 'style': 'color:'+C.dropFg+';font-weight:600', 'title': fmtBytes(r._drop_bytes||0)+' '+_('dropped') }, '🚫 ' + dp) : E('span', { 'style': 'color:'+C.textFaint }, '—');
-		cellMap._drop_packets = E('td', { 'style': td+';text-align:center', 'data-drop-ip': r.ip }, dropBadge);
+		var dropBadge = dp > 0 ? E('span', { 'class': 'tm-c-drop tm-fw-600', 'title': fmtBytes(r._drop_bytes||0)+' '+_('dropped') }, '🚫 ' + dp) : E('span', { 'class': 'tm-c-faint' }, '—');
+		cellMap._drop_packets = E('td', { 'class': 'tm-td tm-td--center', 'data-drop-ip': r.ip }, dropBadge);
 
 		var bl = r._backlog || 0;
-		var backlogBadge = bl > 0 ? E('span', { 'style': 'color:'+C.shapeFg+';font-weight:600', 'title': _('Bytes queued in tc') }, fmtBytes(bl)) : E('span', { 'style': 'color:'+C.textFaint }, '—');
-		cellMap._backlog = E('td', { 'style': td+';text-align:center', 'data-backlog-ip': r.ip }, backlogBadge);
+		var backlogBadge = bl > 0 ? E('span', { 'class': 'tm-c-shape tm-fw-600', 'title': _('Bytes queued in tc') }, fmtBytes(bl)) : E('span', { 'class': 'tm-c-faint' }, '—');
+		cellMap._backlog = E('td', { 'class': 'tm-td tm-td--center', 'data-backlog-ip': r.ip }, backlogBadge);
 
 		var cells = visibleCols.map(function(c) { return cellMap[c.key]; });
 		var row = E('tr', { 'class': 'tm-row', 'title': _('Click to inspect') + ' ' + r.name }, cells);
@@ -1036,7 +1000,6 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 function setStatus(el, type, msg) {
 	el.className = 'tm-status tm-status--' + (type || 'ok');
 	el.innerHTML = type === 'loading' ? '<span class="tm-spinner"></span>'+escHtml(msg) : escHtml(msg);
-	el.style.display = '';
 }
 
 function updateUrlParams(opts) {
@@ -1193,7 +1156,7 @@ function buildExtendedStatsLegend(shapeMap, dropMap) {
 		rows.push(E('div', { 'style': 'padding:4px 0;color:var(--tm-text-mute)' }, _('No extended stats available.')));
 	}
 
-	return E('div', { 'class': 'tm-ext-panel--sticky' }, [
+	return E('div', { 'class': 'tm-ext-panel tm-ext-panel--sticky' }, [
 		E('div', { 'class': 'tm-ext-panel__title' }, _('Extended Statistics') + ' (' + _('all devices') + ')'),
 		E('div', { 'class': 'tm-ext-col-flex' }, rows)
 	]);
@@ -1230,7 +1193,7 @@ function buildCardGrid(devices, onSelect, speedMap, shapeMap, dropMap) {
 		while (wrapper.firstChild) wrapper.removeChild(wrapper.firstChild);
 
 		var allCard = E('div', {
-			'class': 'tm-card--all',
+			'class': 'tm-card tm-card--all',
 			'data-value': '__all__'
 		}, [E('span', {'style':'font-size:20px'}, '📊'), E('span', {}, _('All devices'))]);
 		allCard.addEventListener('click', function() { selectItem('__all__'); });
@@ -1346,9 +1309,9 @@ function buildChipCloud(devices, onSelect, speedMap, shapeMap, dropMap) {
 	var wrapper = E('div', {'class':'tm-chip-cloud'});
 
 	var chipNorm    = 'tm-cloud-chip';
-	var chipActive  = 'tm-cloud-chip--active';
-	var chipBlocked = 'tm-cloud-chip--blocked';
-	var chipLimited = 'tm-cloud-chip--limited';
+	var chipActive  = 'tm-cloud-chip tm-cloud-chip--active';
+	var chipBlocked = 'tm-cloud-chip tm-cloud-chip--blocked';
+	var chipLimited = 'tm-cloud-chip tm-cloud-chip--limited';
 
 	function render(devs) {
 		while (wrapper.firstChild) wrapper.removeChild(wrapper.firstChild);
@@ -1412,8 +1375,8 @@ function buildSearchSelect(devices, placeholder, onSelect) {
 		'autocomplete': 'off',
 		'class': 'tm-search-input'
 	});
-	var clearBtn = E('span', { 'class': 'tm-search-clear' }, '×');
-	var dropdown = E('div', { 'class': 'tm-search-dropdown' });
+	var clearBtn = E('span', { 'class': 'tm-search-clear tm-hidden' }, '×');
+	var dropdown = E('div', { 'class': 'tm-search-dropdown tm-hidden' });
 	wrapper.appendChild(input);
 	wrapper.appendChild(clearBtn);
 	wrapper.appendChild(dropdown);
@@ -1507,32 +1470,32 @@ function buildSearchSelect(devices, placeholder, onSelect) {
 		selectedValue = value;
 		if (value === '__all__') {
 			input.value = '';
-			clearBtn.style.display = 'none';
+			clearBtn.classList.add('tm-hidden');
 		} else {
 			addToRecent(value);
 			input.value = label.replace(/\s+\(.*\)$/, '');
-			clearBtn.style.display = 'inline';
+			clearBtn.classList.remove('tm-hidden');
 		}
-		dropdown.style.display = 'none';
+		dropdown.classList.add('tm-hidden');
 		if (!silent) onSelect(value);
 	}
 
 	input.addEventListener('focus', function() {
 		this.style.cursor = 'text';
 		renderItems(input.value);
-		dropdown.style.display = 'block';
+		dropdown.classList.remove('tm-hidden');
 	});
 	input.addEventListener('blur', function() {
 		this.style.cursor = 'pointer';
-		setTimeout(function() { dropdown.style.display = 'none'; }, 150);
+		setTimeout(function() { dropdown.classList.add('tm-hidden'); }, 150);
 	});
 	input.addEventListener('click', function() {
 		renderItems(input.value);
-		dropdown.style.display = 'block';
+		dropdown.classList.remove('tm-hidden');
 	});
 	input.addEventListener('input', function() {
 		renderItems(input.value);
-		dropdown.style.display = 'block';
+		dropdown.classList.remove('tm-hidden');
 	});
 	input.addEventListener('keydown', function(ev) {
 		var actionItems = [];
@@ -1555,7 +1518,7 @@ function buildSearchSelect(devices, placeholder, onSelect) {
 				selectItem(el.getAttribute('data-value'), el.textContent);
 			}
 		} else if (ev.key === 'Escape') {
-			dropdown.style.display = 'none';
+			dropdown.classList.add('tm-hidden');
 			input.blur();
 		}
 	});
@@ -1664,7 +1627,7 @@ return view.extend({
 				var label = (dev && dev.name) || storedName || ip;
 				var isActive = ip === currentIp;
 				var chip = E('span', {
-					'class': isActive ? 'tm-recent-chip--active' : 'tm-recent-chip',
+					'class': isActive ? 'tm-recent-chip tm-recent-chip--active' : 'tm-recent-chip',
 					'title': ip + (dev && dev.mac ? ' (' + dev.mac + ')' : '')
 				}, [
 					deviceIcon(guessDeviceType(dev || {name:label}), 12),
@@ -1697,7 +1660,7 @@ return view.extend({
 			var track = E('label', { 'class': 'tm-toggle', 'for': id });
 			return E('div', { 'class': 'tm-toggle-wrap' }, [
 				cb, track,
-				E('label', { 'for': id, 'style': 'cursor:pointer;color:'+C.hostname+';font-size:12px;user-select:none' }, label)
+				E('label', { 'for': id, 'style': 'cursor:pointer;font-size:12px;user-select:none;color:var(--tm-text)' }, label)
 			]);
 		}
 		function mkLabel(t) {
@@ -1707,7 +1670,7 @@ return view.extend({
 		function mkInlinePick(options, currentValue, onChange) {
 			var wrapper = E('span', {'class':'tm-inline-pick-wrapper'});
 			var display = E('span', {'class':'tm-inline-pick-display'});
-			var popup = E('div', {'class':'tm-inline-pick-popup'});
+			var popup = E('div', {'class':'tm-inline-pick-popup tm-hidden'});
 			var selectedValue = currentValue;
 
 			function updateDisplay() {
@@ -1730,7 +1693,7 @@ return view.extend({
 						ev.preventDefault();
 						selectedValue = opt.v;
 						updateDisplay();
-						popup.style.display = 'none';
+						popup.classList.add('tm-hidden');
 						onChange(opt.v);
 					});
 					item.addEventListener('mouseenter', function() { this.style.background = 'var(--tm-hover)'; });
@@ -1742,9 +1705,9 @@ return view.extend({
 			display.addEventListener('click', function(ev) {
 				ev.stopPropagation();
 				buildPopup();
-				popup.style.display = popup.style.display === 'none' ? '' : 'none';
+				popup.classList.toggle('tm-hidden');
 			});
-			document.addEventListener('click', function() { popup.style.display = 'none'; });
+			document.addEventListener('click', function() { popup.classList.add('tm-hidden'); });
 
 			wrapper.appendChild(display);
 			wrapper.appendChild(popup);
@@ -1757,38 +1720,38 @@ return view.extend({
 			var selected = currentValue;
 			var chips = [];
 			options.forEach(function(opt) {
-				var chip = E('span', {'class': opt.v === selected ? 'tm-chip-active' : 'tm-chip'}, opt.l);
+				var chip = E('span', {'class': opt.v === selected ? 'tm-chip tm-chip--active' : 'tm-chip'}, opt.l);
 				chip.addEventListener('click', function() {
 					selected = opt.v;
-					chips.forEach(function(c) { c.className = c._v === selected ? 'tm-chip-active' : 'tm-chip'; });
+					chips.forEach(function(c) { c.className = c._v === selected ? 'tm-chip tm-chip--active' : 'tm-chip'; });
 					onChange(opt.v);
 				});
 				chip._v = opt.v;
 				chips.push(chip);
 				wrapper.appendChild(chip);
 			});
-			return { el: wrapper, getValue: function() { return selected; }, setValue: function(v) { selected = v; chips.forEach(function(c) { c.className = c._v === v ? 'tm-chip-active' : 'tm-chip'; }); } };
+			return { el: wrapper, getValue: function() { return selected; }, setValue: function(v) { selected = v; chips.forEach(function(c) { c.className = c._v === v ? 'tm-chip tm-chip--active' : 'tm-chip'; }); } };
 		}
 
 		var showStats = mkToggle('tm-stats', _('Stats'), opts.showStats !== false, function() {
 			var o = loadOpts(); o.showStats = this.checked; saveOpts(o); updateUrlParams(o);
-			statsDiv.style.display = this.checked ? '' : 'none';
+			statsDiv.classList.toggle('tm-hidden', !this.checked);
 		});
 		var showConns = mkToggle('tm-conns', _('Connections'), opts.showConns !== false, function() {
 			var o = loadOpts(); o.showConns = this.checked; saveOpts(o); updateUrlParams(o);
-			connsDiv.style.display = this.checked ? '' : 'none';
+			connsDiv.classList.toggle('tm-hidden', !this.checked);
 		});
 		var rdnsCheck = mkToggle('tm-rdns', _('rDNS'), opts.rdns, function() {
 			var o = loadOpts(); o.rdns = this.checked; saveOpts(o); updateUrlParams(o);
 		});
 		var extStatsCheck = mkToggle('tm-extended', _('Extended'), opts.extendedStats, function() {
 			var o = loadOpts(); o.extendedStats = this.checked; saveOpts(o); updateUrlParams(o);
-			extStatsDiv.style.display = this.checked ? '' : 'none';
+			extStatsDiv.classList.toggle('tm-hidden', !this.checked);
 			if (this.checked) updateExtendedStats();
 		});
 		var activityCheck = mkToggle('tm-activity', _('Activity'), opts.showActivity, function() {
 			var o = loadOpts(); o.showActivity = this.checked; saveOpts(o);
-			activityDiv.style.display = this.checked ? '' : 'none';
+			activityDiv.classList.toggle('tm-hidden', !this.checked);
 			if (this.checked) {
 				if (!activityDiv._loaded) {
 					activityDiv._loaded = true;
@@ -1798,8 +1761,8 @@ return view.extend({
 			}
 		});
 
-		var extStatsDiv = E('div', { 'style': opts.extendedStats ? '' : 'display:none' });
-		var activityDiv = E('div', { 'style': opts.showActivity ? '' : 'display:none' });
+		var extStatsDiv = E('div', { 'class': opts.extendedStats ? '' : 'tm-hidden' });
+		var activityDiv = E('div', { 'class': opts.showActivity ? '' : 'tm-hidden' });
 
 		var refreshPick = mkChipPick([
 			{v:'0',l:_('Off')},{v:'5',l:'5s'},{v:'10',l:'10s'},{v:'30',l:'30s'},{v:'60',l:'60s'}
@@ -1837,9 +1800,9 @@ return view.extend({
 			var o = loadOpts(); o.groupBy = v; saveOpts(o); runQuery();
 		});
 
-		var statusDiv = E('div', { 'style': 'display:none' });
-		var statsDiv  = E('div', { 'style': 'margin:8px 0' + (opts.showStats===false?';display:none':'') });
-		var connsDiv  = E('div', { 'style': opts.showConns===false?'display:none':'' });
+		var statusDiv = E('div', { 'class': 'tm-hidden' });
+		var statsDiv  = E('div', { 'style': 'margin:8px 0', 'class': opts.showStats === false ? 'tm-hidden' : '' });
+		var connsDiv  = E('div', { 'class': opts.showConns === false ? 'tm-hidden' : '' });
 
 		var _rdnsQueue   = [];
 		var _rdnsFlying  = 0;
@@ -1859,8 +1822,8 @@ return view.extend({
 						Array.prototype.forEach.call(
 							connsDiv.querySelectorAll('td[data-dst="'+it.dst+'"]'),
 							function(cell) {
-								if (host) { cell.textContent = host; cell.style.color = C.hostname; }
-								else { cell.innerHTML = '<span style="color:'+C.textFaint+'">—</span>'; }
+								if (host) { cell.textContent = host; cell.style.color = ''; }
+								else { cell.innerHTML = '<span class="tm-c-faint">—</span>'; }
 							}
 						);
 					}).catch(function() {
@@ -1870,7 +1833,7 @@ return view.extend({
 						self._rdnsCache[it.dst] = null;
 						Array.prototype.forEach.call(
 							connsDiv.querySelectorAll('td[data-dst="'+it.dst+'"]'),
-							function(cell) { cell.innerHTML = '<span style="color:'+C.textFaint+'">—</span>'; }
+							function(cell) { cell.innerHTML = '<span class="tm-c-faint">—</span>'; }
 						);
 					});
 				})(item);
@@ -1878,7 +1841,7 @@ return view.extend({
 		};
 
 		// Speed graph popup on spark cell hover
-		var graphPopup = E('div', {'class':'tm-graph-popup'});
+		var graphPopup = E('div', {'class':'tm-graph-popup tm-hidden'});
 		document.body.appendChild(graphPopup);
 		var graphPopupIp = null;
 		var graphPopupTimer = null;
@@ -1891,7 +1854,7 @@ return view.extend({
 			var rect = cell.getBoundingClientRect();
 			graphPopup.style.left = Math.max(8, rect.left - 160) + 'px';
 			graphPopup.style.top = (rect.bottom + 6) + 'px';
-			graphPopup.style.display = 'block';
+			graphPopup.classList.remove('tm-hidden');
 			if (!graphPopupTimer) {
 				graphPopupTimer = setInterval(updateGraphPopup, 2000);
 			}
@@ -1919,7 +1882,7 @@ return view.extend({
 			}
 		}
 		function hideGraphPopup() {
-			graphPopup.style.display = 'none';
+			graphPopup.classList.add('tm-hidden');
 			graphPopupIp = null;
 			if (graphPopupTimer) { clearInterval(graphPopupTimer); graphPopupTimer = null; }
 		}
@@ -1939,32 +1902,32 @@ return view.extend({
 		}, true);
 
 		var inetBtn = E('button', { 'class': 'cbi-button' }, '');
-		var wifiBtn = E('button', { 'class': 'cbi-button', 'style': 'display:none' }, '');
+		var wifiBtn = E('button', { 'class': 'cbi-button tm-hidden' }, '');
 
 		function updateInetBtn(blocked) {
 			if (blocked) {
 				inetBtn.textContent = '▶️ ' + _('Unblock Internet');
-				inetBtn.className = 'tm-btn-unblock';
+				inetBtn.className = 'tm-btn tm-btn--unblock';
 				inetBtn._action = 'unblock';
 			} else {
 				inetBtn.textContent = '⏸️ ' + _('Block Internet');
-				inetBtn.className = 'tm-btn-block';
+				inetBtn.className = 'tm-btn tm-btn--block';
 				inetBtn._action = 'block';
 			}
 		}
 		updateInetBtn(false);
 
 		function updateWifiBtn(wifiBlocked, hasMac) {
-			if (!hasMac) { wifiBtn.style.display = 'none'; return; }
-			wifiBtn.style.display = '';
+			if (!hasMac) { wifiBtn.classList.add('tm-hidden'); return; }
+			wifiBtn.classList.remove('tm-hidden');
 			wifiBtn.disabled = false;
 			if (wifiBlocked) {
 				wifiBtn.textContent = '📡✓ ' + _('Unblock WiFi');
-				wifiBtn.className = 'tm-btn-unblock';
+				wifiBtn.className = 'tm-btn tm-btn--unblock';
 				wifiBtn._wifiAction = 'unblock';
 			} else {
 				wifiBtn.textContent = '📡❌ ' + _('Block WiFi');
-				wifiBtn.className = 'tm-btn-block';
+				wifiBtn.className = 'tm-btn tm-btn--block';
 				wifiBtn._wifiAction = 'block';
 			}
 		}
@@ -1976,12 +1939,12 @@ return view.extend({
 		var rateChipsRow = E('div', {'class':'tm-rate-chips-row'});
 		var rateChips = [];
 		RATE_PRESETS.filter(function(p) { return p.v !== 'custom'; }).forEach(function(preset) {
-			var chip = E('span', {'class': preset.v === '0' ? 'tm-chip-off' : 'tm-chip'}, preset.l);
+			var chip = E('span', {'class': preset.v === '0' ? 'tm-chip tm-chip--off' : 'tm-chip'}, preset.l);
 			chip._val = preset.v;
 			chip.addEventListener('click', function() {
 				_rateSelected = preset.v;
 				updateRateChips();
-				customRow.style.display = 'none';
+				customRow.classList.add('tm-hidden');
 				applyRate();
 			});
 			rateChips.push(chip);
@@ -1991,13 +1954,13 @@ return view.extend({
 		function updateRateChips() {
 			rateChips.forEach(function(c) {
 				if (c._val === '0') {
-					c.className = c._val === _rateSelected ? 'tm-chip-off-active' : 'tm-chip-off';
+					c.className = c._val === _rateSelected ? 'tm-chip tm-chip--off-active' : 'tm-chip tm-chip--off';
 				} else {
-					c.className = c._val === _rateSelected ? 'tm-chip-active' : 'tm-chip';
+					c.className = c._val === _rateSelected ? 'tm-chip tm-chip--active' : 'tm-chip';
 				}
 			});
 			if (_rateSelected === 'custom') {
-				rateChips.forEach(function(c) { c.className = c._val === '0' ? 'tm-chip-off' : 'tm-chip'; });
+				rateChips.forEach(function(c) { c.className = c._val === '0' ? 'tm-chip tm-chip--off' : 'tm-chip'; });
 			}
 		}
 
@@ -2030,11 +1993,11 @@ return view.extend({
 
 		var customToggleBtn = E('span', {'class': 'tm-chip', 'data-tip': _('Enter a custom speed value')}, '✎ ' + _('Custom'));
 		customToggleBtn.addEventListener('click', function() {
-			customRow.style.display = customRow.style.display === 'none' ? 'flex' : 'none';
+			customRow.classList.toggle('tm-hidden');
 		});
 		rateChipsRow.appendChild(customToggleBtn);
 
-		var customRow = E('div', {'class':'tm-custom-row'}, [
+		var customRow = E('div', {'class':'tm-custom-row tm-hidden'}, [
 			customInput, customUnitBtns, customApplyBtn
 		]);
 
@@ -2063,8 +2026,7 @@ return view.extend({
 		updateModeToggle();
 
 		var rateLimitRow = E('div', {
-			'class': 'tm-rate-panel',
-			'style': 'display:none'
+			'class': 'tm-rate-panel tm-hidden'
 		}, [
 			E('div', {'class':'tm-rate-panel__header'}, [
 				E('span', {'class':'tm-rate-panel__title'}, '⚡ ' + _('Speed Limit')),
@@ -2139,11 +2101,11 @@ return view.extend({
 
 		function updateModeUI() {
 			var all = isAllMode();
-			actionRow.style.display     = all ? 'none' : '';
-			rateLimitRow.style.display  = all ? 'none' : '';
-			rdnsCheck.style.display     = all ? 'none' : '';
-			extStatsCheck.style.display = all ? 'none' : '';
-			extStatsDiv.style.display   = (!all && loadOpts().extendedStats) ? '' : 'none';
+			actionRow.classList.toggle('tm-hidden', all);
+			rateLimitRow.classList.toggle('tm-hidden', all);
+			rdnsCheck.classList.toggle('tm-hidden', all);
+			extStatsCheck.classList.toggle('tm-hidden', all);
+			extStatsDiv.classList.toggle('tm-hidden', all || !loadOpts().extendedStats);
 			if (typeof updateTableSectionMode === 'function') updateTableSectionMode();
 		}
 
@@ -2194,11 +2156,11 @@ return view.extend({
 						while (cell.firstChild) cell.removeChild(cell.firstChild);
 						if (dp > 0) {
 							cell.appendChild(E('span', {
-								'style': 'color:'+C.dropFg+';font-weight:600',
+								'class': 'tm-c-drop tm-fw-600',
 								'title': fmtBytes(db) + ' ' + _('dropped')
 							}, '🚫 ' + dp));
 						} else {
-							cell.appendChild(E('span', { 'style': 'color:'+C.textFaint }, '—'));
+							cell.appendChild(E('span', { 'class': 'tm-c-faint' }, '—'));
 						}
 					});
 				}
@@ -2226,9 +2188,9 @@ return view.extend({
 						if (!cell) return;
 						while (cell.firstChild) cell.removeChild(cell.firstChild);
 						if (bl > 0) {
-							cell.appendChild(E('span', { 'style': 'color:'+C.shapeFg+';font-weight:600', 'title': _('Bytes queued in tc') }, fmtBytes(bl)));
+							cell.appendChild(E('span', { 'class': 'tm-c-shape tm-fw-600', 'title': _('Bytes queued in tc') }, fmtBytes(bl)));
 						} else {
-							cell.appendChild(E('span', { 'style': 'color:'+C.textFaint }, '—'));
+							cell.appendChild(E('span', { 'class': 'tm-c-faint' }, '—'));
 						}
 					});
 				}
@@ -2340,8 +2302,9 @@ return view.extend({
 				}
 
 				if (opts.showStats !== false) {
-					var parts = [_('Connections') + ': <b>'+data.total+'</b>'];
-					if (data.total > 0) {
+					var connCount = (data.protocols.tcp||0) + (data.protocols.udp||0) + (data.protocols.other||0);
+					var parts = [_('Connections') + ': <b>'+connCount+'</b>'];
+					if (connCount > 0) {
 						parts.push('TCP: <b>'+(data.protocols.tcp||0)+'</b>');
 						parts.push('UDP: <b>'+(data.protocols.udp||0)+'</b>');
 						if (data.tcp_states) {
@@ -2351,20 +2314,20 @@ return view.extend({
 						}
 					}
 					if ((data.shape_kbit || 0) > 0) {
-						parts.push(_('Shaped') + ': <b style="color:'+C.shapeFg+'">🌊 '+fmtRate(data.shape_kbit)+'</b>');
+						parts.push(_('Shaped') + ': <b style="color:var(--tm-shape-fg)">🌊 '+fmtRate(data.shape_kbit)+'</b>');
 						var sm = self._shapeMap[data.ip || searchSelect.getValue()] || {};
-						if ((sm.backlog||0) > 0) parts.push(_('Queued') + ': <b style="color:'+C.shapeFg+'">'+fmtBytes(sm.backlog)+'</b>');
+						if ((sm.backlog||0) > 0) parts.push(_('Queued') + ': <b style="color:var(--tm-shape-fg)">'+fmtBytes(sm.backlog)+'</b>');
 						if ((sm.bytes||0) > 0) parts.push(_('Passed') + ': <b>'+fmtBytes(sm.bytes)+'</b>');
 					} else if ((data.rate_limit_kbit || 0) > 0) {
-						parts.push(_('Speed limit') + ': <b style="color:'+C.rateFg+'">⚡ '+fmtRate(data.rate_limit_kbit)+'</b>');
+						parts.push(_('Speed limit') + ': <b style="color:var(--tm-rate-fg)">⚡ '+fmtRate(data.rate_limit_kbit)+'</b>');
 						var dm = self._dropMap[data.ip || searchSelect.getValue()] || {};
 						if ((dm.packets||0) > 0) {
-							parts.push(_('Dropped') + ': <b style="color:'+C.dropFg+'">🚫 '+dm.packets+' pkts / '+fmtBytes(dm.bytes||0)+'</b>');
+							parts.push(_('Dropped') + ': <b style="color:var(--tm-drop-fg)">🚫 '+dm.packets+' pkts / '+fmtBytes(dm.bytes||0)+'</b>');
 						}
 					}
 					var wifiPart = data.wifi_blocked
-						? ' &nbsp;|&nbsp; <b style="color:'+C.stateWait+'">📵 ' + _('WiFi blocked') + '</b> ('+escHtml(data.mac||'') + ')'
-						: (data.mac ? ' &nbsp;|&nbsp; <span style="color:'+C.textFaint+'">MAC: '+escHtml(data.mac)+'</span>' : '');
+						? ' &nbsp;|&nbsp; <b style="color:var(--tm-state-wait)">📵 ' + _('WiFi blocked') + '</b> ('+escHtml(data.mac||'') + ')'
+						: (data.mac ? ' &nbsp;|&nbsp; <span style="color:var(--tm-text-faint)">MAC: '+escHtml(data.mac)+'</span>' : '');
 					statsDiv.className = 'tm-stats-bar ' + (data.blocked ? 'tm-stats-bar--blocked' : 'tm-stats-bar--info');
 					statsDiv.innerHTML = (data.blocked
 						? '<b>⛔ ' + _('BLOCKED') + '</b> — '+data.block_packets+' pkts, '+fmtBytes(data.block_bytes)+' ' + _('dropped') + ' &nbsp;|&nbsp; '
@@ -2383,20 +2346,20 @@ return view.extend({
 				var matched = RATE_PRESETS.some(function(p) { return p.v === curRateStr; });
 				if (matched) {
 					ratePick.setValue(curRateStr);
-					customRow.style.display = 'none';
+					customRow.classList.add('tm-hidden');
 				} else if (curRate > 0) {
 					ratePick.setValue('custom');
 					customInput.value = curRate;
 					_customUnit = 'kbit'; updateUnitBtns();
-					customRow.style.display = 'flex';
+					customRow.classList.remove('tm-hidden');
 				} else {
 					ratePick.setValue('0');
-					customRow.style.display = 'none';
+					customRow.classList.add('tm-hidden');
 				}
 
 				while (connsDiv.firstChild) connsDiv.removeChild(connsDiv.firstChild);
 				if (!data.connections || data.connections.length === 0) {
-					connsDiv.appendChild(E('p', {'style':'color:'+C.textMute+';padding:12px 0'}, _('No active connections.')));
+					connsDiv.appendChild(E('p', {'style':'color:var(--tm-text-mute);padding:12px 0'}, _('No active connections.')));
 				} else {
 					var groupBy = o.groupBy || 'none';
 					var tbl;
@@ -2416,7 +2379,7 @@ return view.extend({
 							});
 						});
 						connsDiv.appendChild(E('div',{'style':'overflow-x:auto'},[tbl]));
-						connsDiv.appendChild(E('p',{'style':'color:'+C.textFaint+';font-size:11px;margin-top:6px'},
+						connsDiv.appendChild(E('p',{'style':'color:var(--tm-text-faint);font-size:11px;margin-top:6px'},
 							groups.length + ' ' + _('groups from') + ' ' + data.connections.length + ' ' + _('connections') + '. ' + _('Click header to sort.')));
 					} else {
 						tbl = buildTable(data.connections, self._sortCol, self._sortDir, o.rdns, self._connHiddenCols);
@@ -2433,7 +2396,7 @@ return view.extend({
 							});
 						});
 						connsDiv.appendChild(E('div',{'style':'overflow-x:auto'},[tbl]));
-						connsDiv.appendChild(E('p',{'style':'color:'+C.textFaint+';font-size:11px;margin-top:6px'},
+						connsDiv.appendChild(E('p',{'style':'color:var(--tm-text-faint);font-size:11px;margin-top:6px'},
 							data.connections.length + ' ' + _('connections') + '. ' + _('Click header to sort.')));
 
 						if (o.rdns) {
@@ -2449,8 +2412,8 @@ return view.extend({
 									Array.prototype.forEach.call(
 										connsDiv.querySelectorAll('td[data-dst="'+dst+'"]'),
 										function(cell) {
-											if (cached) { cell.textContent = cached; cell.style.color = C.hostname; }
-											else { cell.innerHTML = '<span style="color:'+C.textFaint+'">—</span>'; }
+											if (cached) { cell.textContent = cached; cell.style.color = ''; }
+											else { cell.innerHTML = '<span class="tm-c-faint">—</span>'; }
 										}
 									);
 									return;
@@ -2506,16 +2469,16 @@ return view.extend({
 
 			var parts = [];
 			parts.push(E('span', {}, [document.createTextNode(_('Active') + ': '), E('b', {}, String(rows.length))]));
-			parts.push(E('span', {}, [document.createTextNode(_('Blocked') + ': '), mkFilterVal('blocked', C.blockedFg, String(blocked))]));
-			parts.push(E('span', {}, [document.createTextNode(_('WiFi') + ': '), mkFilterVal('wifi_blocked', C.stateWait, String(wifiBlk))]));
-			if (limited > 0) parts.push(E('span', {}, [document.createTextNode(_('Limited') + ': '), mkFilterVal('limited', C.rateFg, '⚡' + limited)]));
-			if (shaped > 0) parts.push(E('span', {}, [document.createTextNode(_('Shaped') + ': '), mkFilterVal('shaped', C.shapeFg, '🌊' + shaped)]));
+			parts.push(E('span', {}, [document.createTextNode(_('Blocked') + ': '), mkFilterVal('blocked', 'var(--tm-blocked-fg)', String(blocked))]));
+			parts.push(E('span', {}, [document.createTextNode(_('WiFi') + ': '), mkFilterVal('wifi_blocked', 'var(--tm-state-wait)', String(wifiBlk))]));
+			if (limited > 0) parts.push(E('span', {}, [document.createTextNode(_('Limited') + ': '), mkFilterVal('limited', 'var(--tm-rate-fg)', '⚡' + limited)]));
+			if (shaped > 0) parts.push(E('span', {}, [document.createTextNode(_('Shaped') + ': '), mkFilterVal('shaped', 'var(--tm-shape-fg)', '🌊' + shaped)]));
 			if (totalDropPkts > 0) parts.push(E('span', {}, [
-				document.createTextNode(_('Dropped') + ': '), E('b', {'style':'color:'+C.dropFg}, '🚫' + totalDropPkts)
+				document.createTextNode(_('Dropped') + ': '), E('b', {'style':'color:var(--tm-drop-fg)'}, '🚫' + totalDropPkts)
 			]));
 
 			parts.forEach(function(el, i) {
-				if (i > 0) statsDiv.appendChild(E('span', {'style':'margin:0 6px;color:'+C.textFaint}, '|'));
+				if (i > 0) statsDiv.appendChild(E('span', {'style':'margin:0 6px;color:var(--tm-text-faint)'}, '|'));
 				statsDiv.appendChild(el);
 				var filterEl = el.querySelector('[data-filter]');
 				if (filterEl) {
@@ -2524,14 +2487,14 @@ return view.extend({
 			});
 
 			if (activeFilter) {
-				statsDiv.appendChild(E('span', {'style':'margin-left:10px;cursor:pointer;color:'+C.textMute+';font-size:11px'}, '✕ ' + _('clear filter')));
+				statsDiv.appendChild(E('span', {'style':'margin-left:10px;cursor:pointer;color:var(--tm-text-mute);font-size:11px'}, '✕ ' + _('clear filter')));
 				statsDiv.lastChild.addEventListener('click', function() { self._tableFilter = null; renderSummary(rows); });
 			}
 
 			var filtered = applyTableFilter(rows);
 			while (connsDiv.firstChild) connsDiv.removeChild(connsDiv.firstChild);
 			if (filtered.length === 0) {
-				connsDiv.appendChild(E('p',{'style':'color:'+C.textMute+';padding:12px 0'}, _('No devices match filter.')));
+				connsDiv.appendChild(E('p',{'style':'color:var(--tm-text-mute);padding:12px 0'}, _('No devices match filter.')));
 			} else {
 				var tbl = buildSummaryTable(
 					filtered,
@@ -2561,7 +2524,7 @@ return view.extend({
 					self._hiddenCols
 				);
 				connsDiv.appendChild(E('div',{'style':'overflow-x:auto'},[tbl]));
-				connsDiv.appendChild(E('p',{'style':'color:'+C.textFaint+';font-size:11px;margin-top:6px'},
+				connsDiv.appendChild(E('p',{'style':'color:var(--tm-text-faint);font-size:11px;margin-top:6px'},
 					_('Click a row to inspect that device. Download speed updates every 2 seconds.')));
 			}
 		}
@@ -2679,15 +2642,15 @@ return view.extend({
 			{key:'_throttle_kbit', label:_('Speed Limit')},
 			{key:'_drop_packets', label:_('Drops')}, {key:'_backlog', label:_('Queue')}
 		];
-		var colChipsContainer = E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:0'});
+		var colChipsContainer = E('div', {'class':'tm-chips-wrap'});
 		colChipDefs.forEach(function(ct) {
 			var chip = E('span', {
-				'class': savedHidden[ct.key] ? 'tm-col-chip-off' : 'tm-col-chip-on',
+				'class': savedHidden[ct.key] ? 'tm-col-chip tm-col-chip--off' : 'tm-col-chip tm-col-chip--on',
 				'data-tip': _('Click to toggle column visibility')
 			}, ct.label);
 			chip.addEventListener('click', function() {
-				if (self._hiddenCols[ct.key]) { delete self._hiddenCols[ct.key]; chip.className = 'tm-col-chip-on'; }
-				else { self._hiddenCols[ct.key] = true; chip.className = 'tm-col-chip-off'; }
+				if (self._hiddenCols[ct.key]) { delete self._hiddenCols[ct.key]; chip.className = 'tm-col-chip tm-col-chip--on'; }
+				else { self._hiddenCols[ct.key] = true; chip.className = 'tm-col-chip tm-col-chip--off'; }
 				var o = loadOpts(); o.hiddenCols = self._hiddenCols; saveOpts(o);
 				if (isAllMode()) runAll();
 			});
@@ -2703,15 +2666,15 @@ return view.extend({
 		];
 		var savedConnHidden = opts.connHiddenCols || {};
 		self._connHiddenCols = savedConnHidden;
-		var connColChipsContainer = E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:0'});
+		var connColChipsContainer = E('div', {'class':'tm-chips-wrap'});
 		connColDefs.forEach(function(ct) {
 			var chip = E('span', {
-				'class': savedConnHidden[ct.key] ? 'tm-col-chip-off' : 'tm-col-chip-on',
+				'class': savedConnHidden[ct.key] ? 'tm-col-chip tm-col-chip--off' : 'tm-col-chip tm-col-chip--on',
 				'data-tip': _('Click to toggle column visibility')
 			}, ct.label);
 			chip.addEventListener('click', function() {
-				if (self._connHiddenCols[ct.key]) { delete self._connHiddenCols[ct.key]; chip.className = 'tm-col-chip-on'; }
-				else { self._connHiddenCols[ct.key] = true; chip.className = 'tm-col-chip-off'; }
+				if (self._connHiddenCols[ct.key]) { delete self._connHiddenCols[ct.key]; chip.className = 'tm-col-chip tm-col-chip--on'; }
+				else { self._connHiddenCols[ct.key] = true; chip.className = 'tm-col-chip tm-col-chip--off'; }
 				var o = loadOpts(); o.connHiddenCols = self._connHiddenCols; saveOpts(o);
 				if (!isAllMode()) runQuery();
 			});
@@ -2727,21 +2690,21 @@ return view.extend({
 
 		settingsToggle.addEventListener('click', function() {
 			settingsCollapsed = !settingsCollapsed;
-			settingsBody.style.display = settingsCollapsed ? 'none' : 'block';
+			settingsBody.classList.toggle('tm-hidden', settingsCollapsed);
 			settingsToggle.firstChild.textContent = settingsCollapsed ? '▸' : '▾';
 		});
 
 		// ── Collapsible subsection helper ──────────────────────────────────
 		function mkCollapsible(title, content, startOpen) {
-			var body = E('div', {'style': startOpen ? '' : 'display:none', 'class': 'tm-collapsible-body'});
+			var body = E('div', {'class': 'tm-collapsible-body' + (startOpen ? '' : ' tm-hidden')});
 			if (content) body.appendChild(content);
-			var arrow = E('span', {'style':'font-size:11px;color:'+C.textMute}, startOpen ? ' ▾' : ' ▸');
+			var arrow = E('span', {'class':'tm-c-mute', 'style':'font-size:11px'}, startOpen ? ' ▾' : ' ▸');
 			var label = sectionLabel(title);
 			label.style.cursor = 'pointer';
 			label.appendChild(arrow);
 			label.addEventListener('click', function() {
-				var open = body.style.display !== 'none';
-				body.style.display = open ? 'none' : '';
+				var open = !body.classList.contains('tm-hidden');
+				body.classList.toggle('tm-hidden');
 				arrow.textContent = open ? ' ▸' : ' ▾';
 			});
 			return {label: label, body: body, el: E('div', {}, [label, body])};
@@ -2751,14 +2714,14 @@ return view.extend({
 		var tgSection = mkCollapsible(_('Telegram Bot'), null, false);
 		var tgLoaded = false;
 		tgSection.label.addEventListener('click', function() {
-			if (!tgLoaded && tgSection.body.style.display !== 'none') {
+			if (!tgLoaded && !tgSection.body.classList.contains('tm-hidden')) {
 				tgLoaded = true;
 				loadTelegramUI(tgSection.body);
 			}
 		});
 
 		function loadTelegramUI(container) {
-			var statusSpan = E('span', {'style':'font-size:12px;margin-left:8px;color:'+C.textMute}, _('Loading…'));
+			var statusSpan = E('span', {'style':'font-size:12px;margin-left:8px;color:var(--tm-text-mute)'}, _('Loading…'));
 			container.appendChild(statusSpan);
 
 			callTelegramGet().then(function(cfg) {
@@ -2851,7 +2814,7 @@ return view.extend({
 				testBtn.addEventListener('click', function() {
 					testBtn.disabled = true;
 					testResult.textContent = _('Sending…');
-					testResult.style.color = C.textMute;
+					testResult.style.color = 'var(--tm-text-mute)';
 					var tk = tokenInput.value || '***';
 					callTelegramTest(tk, chatInput.value, templateArea.value || '').then(function(res) {
 						testResult.textContent = (res && res.ok) ? '✓ ' + (res.msg || 'OK') : '✗ ' + (res && res.msg || 'error');
@@ -2876,7 +2839,7 @@ return view.extend({
 					controlMode = ctrl;
 					segControl.className = 'tg-segmented__item' + (ctrl ? ' tg-segmented__item--active' : '');
 					segNotify.className = 'tg-segmented__item' + (!ctrl ? ' tg-segmented__item--active' : '');
-					controlSection.style.display = ctrl ? '' : 'none';
+					controlSection.classList.toggle('tm-hidden', !ctrl);
 					doSave();
 				}
 
@@ -2965,7 +2928,7 @@ return view.extend({
 				var templateToggle = E('span', {
 					'style': 'font-size:12px;cursor:pointer;color:var(--tm-text-mute);user-select:none'
 				}, '▸ ' + _('Customize message'));
-				var templateBody = E('div', {'style':'display:none;margin-top:6px'});
+				var templateBody = E('div', {'class':'tm-hidden','style':'margin-top:6px'});
 				templateBody.appendChild(E('div', {'style':'display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap'}, [
 					E('div', {'style':'flex:1;min-width:200px'}, [templateArea]),
 					varRef
@@ -2975,8 +2938,8 @@ return view.extend({
 					previewBubble
 				]));
 				templateToggle.addEventListener('click', function() {
-					var show = templateBody.style.display === 'none';
-					templateBody.style.display = show ? '' : 'none';
+					var show = templateBody.classList.contains('tm-hidden');
+					templateBody.classList.toggle('tm-hidden');
 					templateToggle.textContent = (show ? '▾ ' : '▸ ') + _('Customize message');
 				});
 				notifySection.appendChild(E('div', {'style':'margin-top:8px'}, [templateToggle, templateBody]));
@@ -3052,7 +3015,7 @@ return view.extend({
 						_('Flow: /devices → select device → inline keyboard with enabled actions above'))
 				]));
 
-				if (!controlMode) controlSection.style.display = 'none';
+				if (!controlMode) controlSection.classList.add('tm-hidden');
 				section.appendChild(controlSection);
 				section.appendChild(notifySection);
 				setupDone = true;
@@ -3076,14 +3039,14 @@ return view.extend({
 		var loggingSection = mkCollapsible(_('Logging & Persistence'), null, false);
 		var loggingLoaded = false;
 		loggingSection.label.addEventListener('click', function() {
-			if (!loggingLoaded && loggingSection.body.style.display !== 'none') {
+			if (!loggingLoaded && !loggingSection.body.classList.contains('tm-hidden')) {
 				loggingLoaded = true;
 				loadLoggingUI(loggingSection.body);
 			}
 		});
 
 		function loadLoggingUI(container) {
-			var statusSpan = E('span', {'style':'font-size:12px;color:'+C.textMute}, _('Loading…'));
+			var statusSpan = E('span', {'style':'font-size:12px;color:var(--tm-text-mute)'}, _('Loading…'));
 			container.appendChild(statusSpan);
 
 			callLoggingGet().then(function(cfg) {
@@ -3128,7 +3091,7 @@ return view.extend({
 
 				container.appendChild(E('div', {'class':'tm-log-row'}, [logEnabled, logSyslog, persistRules, logStatus]));
 				container.appendChild(E('div', {'style':'margin-top:6px'}, [
-					E('div', {'style':'font-size:11px;color:'+C.textMute+';margin-bottom:4px'}, _('Log categories')),
+					E('div', {'style':'font-size:11px;color:var(--tm-text-mute);margin-bottom:4px'}, _('Log categories')),
 					E('div', {'class':'tm-log-row'}, [logBlocks, logRatelimits, logShapes, logTelegram, logConfig])
 				]));
 			}).catch(function(e) {
@@ -3160,9 +3123,9 @@ return view.extend({
 
 		function updateTableSectionMode() {
 			var all = isAllMode();
-			colChipsContainer.style.display = all ? 'flex' : 'none';
-			connColChipsContainer.style.display = all ? 'none' : 'flex';
-			connFiltersRow.style.display = all ? 'none' : 'flex';
+			colChipsContainer.classList.toggle('tm-hidden', !all);
+			connColChipsContainer.classList.toggle('tm-hidden', all);
+			connFiltersRow.classList.toggle('tm-hidden', all);
 		}
 		updateTableSectionMode();
 
@@ -3170,13 +3133,13 @@ return view.extend({
 
 		function loadActivityPanel(container) {
 			container.className = 'tm-activity-panel';
-			var statusSpan = E('span', {'style':'font-size:12px;color:'+C.textMute}, _('Loading…'));
+			var statusSpan = E('span', {'style':'font-size:12px;color:var(--tm-text-mute)'}, _('Loading…'));
 			container.appendChild(statusSpan);
 
 			callActivityLog(100).then(function(res) {
 				while (container.firstChild) container.removeChild(container.firstChild);
 				if (!res || !res.lines || !res.lines.length) {
-					container.appendChild(E('div', {'style':'font-size:12px;color:'+C.textMute}, _('No activity recorded yet.')));
+					container.appendChild(E('div', {'style':'font-size:12px;color:var(--tm-text-mute)'}, _('No activity recorded yet.')));
 					return;
 				}
 				var logArea = E('div', {'class':'tm-log-area'});
@@ -3304,12 +3267,12 @@ return view.extend({
 				])
 			]);
 			banner.firstChild.lastChild.addEventListener('click', function() {
-				banner.style.display = 'none';
+				banner.classList.add('tm-hidden');
 			});
 			return banner;
 		};
 
-		var offloadBanner = E('div', {'id': 'tm-offload-banner', 'style': 'display:none'});
+		var offloadBanner = E('div', {'id': 'tm-offload-banner', 'class': 'tm-hidden'});
 
 		// Debug: add ?offload_debug=1 to URL to preview all banner types at once
 		if (window.location.search.indexOf('offload_debug') !== -1) {
@@ -3317,13 +3280,13 @@ return view.extend({
 				var b = mkOffloadBanner(mode);
 				if (b) offloadBanner.appendChild(b);
 			});
-			offloadBanner.style.display = '';
+			offloadBanner.classList.remove('tm-hidden');
 		} else {
 			callConfigGet().then(function(cfg) {
 				var b = mkOffloadBanner(cfg && cfg.offload_mode);
 				if (!b) return;
 				offloadBanner.appendChild(b);
-				offloadBanner.style.display = '';
+				offloadBanner.classList.remove('tm-hidden');
 			});
 		}
 
