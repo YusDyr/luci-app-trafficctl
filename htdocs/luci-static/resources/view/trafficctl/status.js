@@ -2571,6 +2571,7 @@ return view.extend({
 
 			callTrafficctl().then(function(rows) {
 				if (!Array.isArray(rows)) rows = [];
+				searchSelect.updateDevices(rows);
 				renderSummary(rows);
 				setStatus(statusDiv, 'ok', '✓ ' + _('Done'));
 				self._startBytesPoll();
