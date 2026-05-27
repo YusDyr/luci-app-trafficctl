@@ -1520,7 +1520,7 @@ function buildSearchSelect(devices, placeholder, onSelect) {
 	input.addEventListener('focus', function() {
 		this.style.cursor = 'text';
 		renderItems(input.value);
-		dropdown.style.display = '';
+		dropdown.style.display = 'block';
 	});
 	input.addEventListener('blur', function() {
 		this.style.cursor = 'pointer';
@@ -1528,11 +1528,11 @@ function buildSearchSelect(devices, placeholder, onSelect) {
 	});
 	input.addEventListener('click', function() {
 		renderItems(input.value);
-		dropdown.style.display = '';
+		dropdown.style.display = 'block';
 	});
 	input.addEventListener('input', function() {
 		renderItems(input.value);
-		dropdown.style.display = '';
+		dropdown.style.display = 'block';
 	});
 	input.addEventListener('keydown', function(ev) {
 		var actionItems = [];
