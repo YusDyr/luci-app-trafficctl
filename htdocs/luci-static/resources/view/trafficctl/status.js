@@ -21,15 +21,19 @@ var RECENT_KEY = 'trafficctl_recent';
 var MAX_RECENT = 6;
 
 function getRecentDevices() {
-	try { return JSON.parse(window.localStorage.getItem(RECENT_KEY) || '[]'); }
-	catch(e) { return []; }
+	try {
+		var stored = JSON.parse(window.localStorage.getItem(RECENT_KEY) || '[]');
+		return stored.map(function(r) { return typeof r === 'string' ? {ip: r, name: r} : r; });
+	} catch(e) { return []; }
 }
 function saveRecentDevices(arr) {
 	try { window.localStorage.setItem(RECENT_KEY, JSON.stringify(arr)); } catch(e) {}
 }
-function addRecentDevice(ip) {
-	var recent = getRecentDevices().filter(function(r) { return r !== ip; });
-	recent.unshift(ip);
+function addRecentDevice(ip, name) {
+	var recent = getRecentDevices();
+	var existing = recent.filter(function(r) { return (r.ip || r) === ip; })[0];
+	recent = recent.filter(function(r) { return (r.ip || r) !== ip; });
+	recent.unshift({ip: ip, name: name || (existing && existing.name) || ip});
 	if (recent.length > MAX_RECENT) recent.length = MAX_RECENT;
 	saveRecentDevices(recent);
 }
@@ -1022,7 +1026,7 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 
 		var cells = visibleCols.map(function(c) { return cellMap[c.key]; });
 		var row = E('tr', { 'class': 'tm-row', 'title': _('Click to inspect') + ' ' + r.name }, cells);
-		row.addEventListener('click', function() { addRecentDevice(r.ip); onSelect(r.ip, r.name); });
+		row.addEventListener('click', function() { addRecentDevice(r.ip, r.name); onSelect(r.ip, r.name); });
 		return row;
 	}));
 
@@ -1522,6 +1526,10 @@ function buildSearchSelect(devices, placeholder, onSelect) {
 		this.style.cursor = 'pointer';
 		setTimeout(function() { dropdown.style.display = 'none'; }, 150);
 	});
+	input.addEventListener('click', function() {
+		renderItems(input.value);
+		dropdown.style.display = '';
+	});
 	input.addEventListener('input', function() {
 		renderItems(input.value);
 		dropdown.style.display = '';
@@ -1608,7 +1616,10 @@ return view.extend({
 
 		function onDeviceSelect(value) {
 			var o = loadOpts(); o.lastIp = value; saveOpts(o); updateUrlParams(o);
-			if (value !== '__all__') addRecentDevice(value);
+			if (value !== '__all__') {
+				var _nd = devices.filter(function(d) { return d.ip === value; })[0];
+				addRecentDevice(value, _nd ? _nd.name : null);
+			}
 			renderRecentChips();
 			updateModeUI();
 			runQuery();
@@ -1646,9 +1657,11 @@ return view.extend({
 			// when a device is selected we switch to outline-only variant
 			allBtn.className = currentIp === '__all__' ? 'tm-quick-bar__all' : 'tm-quick-bar__all tm-quick-bar__all--outline';
 
-			recent.forEach(function(ip) {
+			recent.forEach(function(entry) {
+				var ip = entry.ip || entry;
+				var storedName = entry.name;
 				var dev = devices.filter(function(d) { return d.ip === ip; })[0];
-				var label = dev ? dev.name : ip;
+				var label = (dev && dev.name) || storedName || ip;
 				var isActive = ip === currentIp;
 				var chip = E('span', {
 					'class': isActive ? 'tm-recent-chip--active' : 'tm-recent-chip',
@@ -1658,14 +1671,14 @@ return view.extend({
 					document.createTextNode(' ' + label)
 				]);
 				chip.addEventListener('click', function() {
-					searchSelect.setValue(ip, dev ? dev.name + '  —  ' + ip : ip);
+					var lbl = label !== ip ? label + '  —  ' + ip : ip;
+					searchSelect.setValue(ip, lbl);
 					onDeviceSelect(ip);
 				});
-				// Remove button (×) on hover
 				var removeBtn = E('span', {'class':'tm-recent-remove'}, '×');
 				removeBtn.addEventListener('click', function(ev) {
 					ev.stopPropagation();
-					var r = getRecentDevices().filter(function(x) { return x !== ip; });
+					var r = getRecentDevices().filter(function(x) { return (x.ip || x) !== ip; });
 					saveRecentDevices(r);
 					renderRecentChips();
 				});
