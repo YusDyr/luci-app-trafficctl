@@ -4,6 +4,7 @@
 		"read": {
 			"ubus": {
 				"luci.trafficctl": [
+					"version",
 					"summary", "device", "bytes",
 					"ratelimit_stats", "shape_stats", "rdns",
 					"config_get", "telegram_config_get",

@@ -2,6 +2,17 @@
 'require view';
 'require rpc';
 'require fs';
+
+(function() {
+	if (!document.querySelector('link[href*="trafficctl/status.css"]')) {
+		var lnk = document.createElement('link');
+		lnk.rel = 'stylesheet';
+		lnk.type = 'text/css';
+		lnk.href = '/luci-static/resources/view/trafficctl/status.css';
+		document.head.appendChild(lnk);
+	}
+})();
+
 var TRAFFICCTL_BUILD = '20260526i';
 console.log('[trafficctl] build:' + TRAFFICCTL_BUILD);
 
@@ -248,7 +259,7 @@ function mkEthIcon(size) {
 	svg.setAttribute('stroke-width', '2');
 	svg.setAttribute('stroke-linecap', 'round');
 	svg.setAttribute('stroke-linejoin', 'round');
-	svg.style.cssText = 'display:inline-block;vertical-align:middle;margin-right:3px';
+	svg.setAttribute('class', 'tm-eth-icon');
 	var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
 	path.setAttribute('d', 'M4 7h16a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1zM7 11v2M10 11v2M13 11v2M16 11v2');
 	svg.appendChild(path);
@@ -271,7 +282,7 @@ function renderSparkline(history, globalMax, width, height, limitKbit) {
 	svg.setAttribute('width', w);
 	svg.setAttribute('height', h);
 	svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
-	svg.style.cssText = 'display:block;margin:0 auto';
+	svg.style.cssText = 'display:block;margin:0 auto'; /* sparkline — kept inline (runtime/canvas) */
 	var area = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
 	area.setAttribute('points', '0,' + h + ' ' + points.join(' ') + ' ' + (w - 0) + ',' + h);
 	area.setAttribute('fill', 'var(--tm-speed)');
@@ -731,8 +742,6 @@ function injectStyles() {
 	document.head.appendChild(s);
 }
 
-var TH = 'cursor:pointer;padding:7px 12px;white-space:nowrap;background:' + C.thBg +
-         ';color:' + C.thFg + ';border:none;font-size:12px;font-weight:600;user-select:none;text-align:left';
 
 var PRIVATE_RE = /^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/;
 
@@ -776,7 +785,7 @@ function buildGroupedTable(groups, sortCol, sortDir) {
 
 	var thead = E('thead', {}, E('tr', {}, cols.map(function(c) {
 		var arrow = c.key === sortCol ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
-		return E('th', { 'style': TH, 'data-col': c.key, 'data-num': c.num ? '1' : '0' }, c.label + arrow);
+		return E('th', { 'class': 'tm-th', 'data-col': c.key, 'data-num': c.num ? '1' : '0' }, c.label + arrow);
 	})));
 
 	var tbody = E('tbody', {}, sorted.map(function(r, i) {
@@ -791,9 +800,7 @@ function buildGroupedTable(groups, sortCol, sortDir) {
 		]);
 	}));
 
-	return E('table', {
-		'style': 'width:100%;border-collapse:collapse;font-size:12px;border:1px solid '+C.border+';border-radius:4px;overflow:hidden'
-	}, [thead, tbody]);
+	return E('table', { 'class': 'tm-table' }, [thead, tbody]);
 }
 
 function buildTable(conns, sortCol, sortDir, rdnsMode, hiddenCols) {
@@ -818,7 +825,7 @@ function buildTable(conns, sortCol, sortDir, rdnsMode, hiddenCols) {
 
 	var thead = E('thead', {}, E('tr', {}, cols.map(function(c) {
 		var arrow = c.key === sortCol ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
-		return E('th', { 'style': TH, 'data-col': c.key, 'data-num': c.num ? '1' : '0' }, c.label + arrow);
+		return E('th', { 'class': 'tm-th', 'data-col': c.key, 'data-num': c.num ? '1' : '0' }, c.label + arrow);
 	})));
 
 	var tbody = E('tbody', {}, sorted.map(function(r, i) {
@@ -855,9 +862,7 @@ function buildTable(conns, sortCol, sortDir, rdnsMode, hiddenCols) {
 		return E('tr', { 'class': 'tm-row' }, cells);
 	}));
 
-	return E('table', {
-		'style': 'width:100%;border-collapse:collapse;font-size:12px;border:1px solid '+C.border+';border-radius:4px;overflow:hidden'
-	}, [thead, tbody]);
+	return E('table', { 'class': 'tm-table' }, [thead, tbody]);
 }
 
 function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, dropMap, shapeMap, speedHistory, hiddenCols) {
@@ -932,8 +937,8 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 	var thead = E('thead', {}, E('tr', {}, visibleCols.map(function(c) {
 		var arrow = c.key === sortCol ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
 		var compact = c.key === '_spark' || c.key === '_throttle_kbit' || c.key === '_drop_packets' || c.key === '_backlog';
-		var thStyle = TH + (c.key === '_spark' ? ';cursor:default;width:68px' : '') + (compact ? ';white-space:nowrap;width:1%' : '');
-		var attrs = { 'style': thStyle, 'data-col': c.key, 'data-num': c.num ? '1' : '0' };
+		var thExtra = (c.key === '_spark' ? ';cursor:default;width:68px' : '') + (compact ? ';white-space:nowrap;width:1%' : '');
+		var attrs = { 'class': 'tm-th', 'style': thExtra || undefined, 'data-col': c.key, 'data-num': c.num ? '1' : '0' };
 		if (c.tip) attrs['data-tip'] = c.tip;
 		var label = c.label + arrow;
 		if (c.key === '_speed' && !hasSpeedData) label = c.label + ' ';
@@ -1021,19 +1026,11 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		return row;
 	}));
 
-	return E('table', {
-		'style': 'width:100%;border-collapse:collapse;font-size:12px;border:1px solid '+C.border+';border-radius:4px;overflow:hidden'
-	}, [thead, tbody]);
+	return E('table', { 'class': 'tm-table' }, [thead, tbody]);
 }
 
 function setStatus(el, type, msg) {
-	var styles = {
-		loading: 'background:var(--tm-info-bg);border:1px solid var(--tm-info-border);color:var(--tm-info-fg)',
-		ok:      'background:var(--tm-info-bg);border:1px solid var(--tm-state-ok);color:var(--tm-state-ok)',
-		error:   'background:var(--tm-blocked-bg);border:1px solid var(--tm-blocked-border);color:var(--tm-blocked-fg)',
-		action:  'background:var(--tm-info-bg);border:1px solid var(--tm-rate-fg);color:var(--tm-rate-fg)'
-	};
-	el.style.cssText = 'padding:8px 14px;border-radius:4px;font-size:13px;margin-bottom:10px;' + (styles[type]||styles.ok);
+	el.className = 'tm-status tm-status--' + (type || 'ok');
 	el.innerHTML = type === 'loading' ? '<span class="tm-spinner"></span>'+escHtml(msg) : escHtml(msg);
 	el.style.display = '';
 }
@@ -1076,7 +1073,6 @@ function buildExtendedStatsPanel(ip, shapeMap, dropMap, speedMap) {
 	var dm = dropMap[ip];
 	var spd = speedMap[ip];
 
-	var panelStyle = 'background:var(--tm-bg-subtle);border:1px solid var(--tm-border);border-radius:4px;padding:12px 16px;font-size:13px;margin:8px 0';
 	var td = 'padding:5px 12px;border-bottom:1px solid var(--tm-border);font-size:13px';
 	var tooltips = {
 		'Drops': _('packets dropped by queue overflow'),
@@ -1130,22 +1126,20 @@ function buildExtendedStatsPanel(ip, shapeMap, dropMap, speedMap) {
 	}
 
 	if (rows.length === 0) {
-		return E('div', { 'style': panelStyle + ';color:var(--tm-text-mute)' }, _('No extended stats available for this device.'));
+		return E('div', { 'class': 'tm-ext-panel', 'style': 'color:var(--tm-text-mute)' }, _('No extended stats available for this device.'));
 	}
 
-	var tbl = E('table', { 'style': 'width:100%;border-collapse:collapse;border:1px solid var(--tm-border);border-radius:4px;overflow:hidden' }, [
+	var tbl = E('table', { 'class': 'tm-table' }, [
 		E('tbody', {}, rows)
 	]);
 
-	return E('div', { 'style': panelStyle }, [
-		E('div', { 'style': 'margin-bottom:8px;font-weight:600;font-size:14px;color:var(--tm-text)' }, _('Extended Statistics')),
+	return E('div', { 'class': 'tm-ext-panel' }, [
+		E('div', { 'class': 'tm-ext-panel__title' }, _('Extended Statistics')),
 		tbl
 	]);
 }
 
 function buildExtendedStatsLegend(shapeMap, dropMap) {
-	var panelStyle = 'position:sticky;top:0;background:var(--tm-bg-subtle);border:1px solid var(--tm-border);border-radius:4px;padding:12px 16px;font-size:13px;margin:8px 0';
-	var rowStyle = 'display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;border-bottom:1px dotted var(--tm-border)';
 	var labelStyle = 'color:var(--tm-text-mute);font-size:12px';
 	var valueStyle = 'font-family:monospace;font-weight:600;color:var(--tm-text);font-size:13px';
 	var totalDrops = 0, totalOverlimits = 0, totalEcn = 0, totalMemory = 0;
@@ -1174,7 +1168,7 @@ function buildExtendedStatsLegend(shapeMap, dropMap) {
 	var rows = [];
 	function addRow(label, value, color) {
 		var vs = color ? valueStyle + ';color:' + color : valueStyle;
-		rows.push(E('div', { 'style': rowStyle }, [
+		rows.push(E('div', { 'class': 'tm-ext-row' }, [
 			E('span', { 'style': labelStyle }, label),
 			E('span', { 'style': vs }, value)
 		]));
@@ -1195,9 +1189,9 @@ function buildExtendedStatsLegend(shapeMap, dropMap) {
 		rows.push(E('div', { 'style': 'padding:4px 0;color:var(--tm-text-mute)' }, _('No extended stats available.')));
 	}
 
-	return E('div', { 'style': panelStyle }, [
-		E('div', { 'style': 'margin-bottom:8px;font-weight:600;font-size:14px;color:var(--tm-text)' }, _('Extended Statistics') + ' (' + _('all devices') + ')'),
-		E('div', { 'style': 'display:flex;flex-direction:column' }, rows)
+	return E('div', { 'class': 'tm-ext-panel--sticky' }, [
+		E('div', { 'class': 'tm-ext-panel__title' }, _('Extended Statistics') + ' (' + _('all devices') + ')'),
+		E('div', { 'class': 'tm-ext-col-flex' }, rows)
 	]);
 }
 
@@ -1226,16 +1220,14 @@ function deviceIcon(type, size) {
 
 function buildCardGrid(devices, onSelect, speedMap, shapeMap, dropMap) {
 	var selectedValue = '__all__';
-	var wrapper = E('div', {'style':'display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-bottom:8px'});
+	var wrapper = E('div', {'class':'tm-card-grid'});
 
 	function render(devs) {
 		while (wrapper.firstChild) wrapper.removeChild(wrapper.firstChild);
 
 		var allCard = E('div', {
-			'style':'padding:10px;border-radius:8px;border:2px solid var(--tm-proto);background:var(--tm-info-bg);' +
-				'cursor:pointer;text-align:center;font-size:12px;font-weight:600;color:var(--tm-proto);' +
-				'transition:all .15s;display:flex;flex-direction:column;align-items:center;gap:4px',
-			'data-value':'__all__'
+			'class': 'tm-card--all',
+			'data-value': '__all__'
 		}, [E('span', {'style':'font-size:20px'}, '📊'), E('span', {}, _('All devices'))]);
 		allCard.addEventListener('click', function() { selectItem('__all__'); });
 		wrapper.appendChild(allCard);
@@ -1250,22 +1242,20 @@ function buildCardGrid(devices, onSelect, speedMap, shapeMap, dropMap) {
 
 			var statusDot = isBlocked ? '🔴' : (hasLimit ? '🟠' : (spd && spd.current > 1024 ? '🟢' : '⚪'));
 			var speedLabel = spd && spd.current > 0 ? fmtSpeed(spd.current) : '';
-			var borderColor = selectedValue === d.ip ? 'var(--tm-proto)' : 'var(--tm-border)';
-			var bg = selectedValue === d.ip ? 'var(--tm-info-bg)' : 'var(--tm-bg)';
-
+			var isSelected = selectedValue === d.ip;
 			var card = E('div', {
-				'style':'padding:10px 8px;border-radius:8px;border:2px solid '+borderColor+';background:'+bg+';' +
-					'cursor:pointer;text-align:center;font-size:11px;transition:all .15s;display:flex;flex-direction:column;align-items:center;gap:3px;overflow:hidden',
+				'class': 'tm-card',
+				'style': isSelected ? 'border-color:var(--tm-proto);background:var(--tm-info-bg)' : '',
 				'data-value': d.ip,
 				'title': d.name + ' (' + d.ip + ')'
 			}, [
-				E('div', {'style':'position:relative'}, [
+				E('div', {'class':'tm-device-icon-wrap'}, [
 					deviceIcon(type, 22),
-					E('span', {'style':'position:absolute;top:-2px;right:-8px;font-size:8px'}, statusDot)
+					E('span', {'class':'tm-device-icon-badge'}, statusDot)
 				]),
-				E('div', {'style':'font-weight:600;color:var(--tm-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%'}, d.name || d.ip),
-				E('div', {'style':'color:var(--tm-text-mute);font-family:monospace;font-size:10px'}, d.ip),
-				speedLabel ? E('div', {'style':'color:var(--tm-speed);font-weight:600;font-size:10px'}, speedLabel) : E('span')
+				E('div', {'class':'tm-card__name'}, d.name || d.ip),
+				E('div', {'class':'tm-card__ip'}, d.ip),
+				speedLabel ? E('div', {'class':'tm-card__speed'}, speedLabel) : E('span')
 			]);
 			card.addEventListener('click', function() { selectItem(d.ip); });
 			card.addEventListener('mouseenter', function() { if (selectedValue !== d.ip) this.style.borderColor = 'var(--tm-text-mute)'; });
@@ -1292,13 +1282,13 @@ function buildCardGrid(devices, onSelect, speedMap, shapeMap, dropMap) {
 
 function buildAvatarStrip(devices, onSelect, speedMap) {
 	var selectedValue = '__all__';
-	var wrapper = E('div', {'style':'display:flex;gap:6px;overflow-x:auto;padding:6px 2px;margin-bottom:8px;scrollbar-width:thin'});
+	var wrapper = E('div', {'class':'tm-avatar-strip'});
 
 	function render(devs) {
 		while (wrapper.firstChild) wrapper.removeChild(wrapper.firstChild);
 
 		var allPill = E('div', {
-			'style':'display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;min-width:56px;transition:all .15s',
+			'class':'tm-avatar-pill',
 			'data-value':'__all__'
 		}, [
 			E('div', {'style':'width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;' +
@@ -1318,7 +1308,7 @@ function buildAvatarStrip(devices, onSelect, speedMap) {
 			var bg = isActive ? 'var(--tm-info-bg)' : 'var(--tm-bg)';
 
 			var pill = E('div', {
-				'style':'display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;min-width:56px;transition:all .15s',
+				'class':'tm-avatar-pill',
 				'data-value': d.ip,
 				'title': d.name + ' — ' + d.ip
 			}, [
@@ -1349,21 +1339,17 @@ function buildAvatarStrip(devices, onSelect, speedMap) {
 
 function buildChipCloud(devices, onSelect, speedMap, shapeMap, dropMap) {
 	var selectedValue = '__all__';
-	var wrapper = E('div', {'style':'display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;align-items:center'});
+	var wrapper = E('div', {'class':'tm-chip-cloud'});
 
-	var chipNorm = 'display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:16px;font-size:12px;' +
-		'cursor:pointer;transition:all .15s;border:1.5px solid var(--tm-border);background:var(--tm-bg);color:var(--tm-text);user-select:none';
-	var chipActive = 'display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:16px;font-size:12px;' +
-		'cursor:pointer;transition:all .15s;border:1.5px solid var(--tm-proto);background:var(--tm-proto);color:#fff;font-weight:600;user-select:none';
-	var chipBlocked = 'display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:16px;font-size:12px;' +
-		'cursor:pointer;transition:all .15s;border:1.5px solid var(--tm-blocked-border);background:var(--tm-blocked-bg);color:var(--tm-blocked-fg);user-select:none';
-	var chipLimited = 'display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:16px;font-size:12px;' +
-		'cursor:pointer;transition:all .15s;border:1.5px solid var(--tm-rate-fg);background:var(--tm-bg);color:var(--tm-rate-fg);user-select:none';
+	var chipNorm    = 'tm-cloud-chip';
+	var chipActive  = 'tm-cloud-chip--active';
+	var chipBlocked = 'tm-cloud-chip--blocked';
+	var chipLimited = 'tm-cloud-chip--limited';
 
 	function render(devs) {
 		while (wrapper.firstChild) wrapper.removeChild(wrapper.firstChild);
 
-		var allChip = E('span', {'style': selectedValue === '__all__' ? chipActive : chipNorm}, [
+		var allChip = E('span', {'class': selectedValue === '__all__' ? chipActive : chipNorm}, [
 			E('span', {'style':'font-size:13px'}, '📊'),
 			E('span', {}, _('All'))
 		]);
@@ -1379,16 +1365,16 @@ function buildChipCloud(devices, onSelect, speedMap, shapeMap, dropMap) {
 			var spd = speedMap && speedMap[d.ip];
 			var speedTxt = spd && spd.current > 1024 ? ' ' + fmtSpeed(spd.current) : '';
 
-			var style;
-			if (selectedValue === d.ip) style = chipActive;
-			else if (isBlocked) style = chipBlocked;
-			else if (hasLimit) style = chipLimited;
-			else style = chipNorm;
+			var chipClass;
+			if (selectedValue === d.ip) chipClass = chipActive;
+			else if (isBlocked) chipClass = chipBlocked;
+			else if (hasLimit) chipClass = chipLimited;
+			else chipClass = chipNorm;
 
-			var chip = E('span', {'style': style, 'title': d.ip + (d.mac ? ' ('+d.mac+')' : '')}, [
+			var chip = E('span', {'class': chipClass, 'title': d.ip + (d.mac ? ' ('+d.mac+')' : '')}, [
 				deviceIcon(type, 13),
 				E('span', {}, d.name || d.ip),
-				speedTxt ? E('span', {'style':'font-size:10px;opacity:.7'}, speedTxt) : E('span')
+				speedTxt ? E('span', {'class':'tm-cloud-chip__speed'}, speedTxt) : E('span')
 			]);
 			chip.addEventListener('click', function() { selectItem(d.ip); });
 			wrapper.appendChild(chip);
@@ -1415,27 +1401,20 @@ function buildSearchSelect(devices, placeholder, onSelect) {
 	var selectedValue = '__all__';
 	var recentIps = [];
 	var MAX_RECENT = 5;
-	var wrapper = E('div', { 'style': 'position:relative;display:inline-block;width:100%;max-width:480px' });
+	var wrapper = E('div', { 'class': 'tm-search-wrapper' });
 	var input = E('input', {
 		'type': 'text',
 		'placeholder': placeholder,
 		'autocomplete': 'off',
-		'style': 'width:100%;padding:8px 32px 8px 12px;font-size:14px;border:2px solid var(--tm-border);border-radius:6px;cursor:pointer;background:var(--tm-bg);color:var(--tm-text)'
+		'class': 'tm-search-input'
 	});
-	var clearBtn = E('span', {
-		'style': 'position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;color:var(--tm-text-mute);font-size:16px;display:none;line-height:1'
-	}, '×');
-	var dropdown = E('div', {
-		'style': 'position:absolute;top:100%;left:0;right:0;max-height:280px;overflow-y:auto;' +
-				 'background:var(--tm-bg);border:1px solid var(--tm-border);border-top:none;border-radius:0 0 4px 4px;' +
-				 'box-shadow:0 4px 8px rgba(0,0,0,.15);z-index:100;display:none'
-	});
+	var clearBtn = E('span', { 'class': 'tm-search-clear' }, '×');
+	var dropdown = E('div', { 'class': 'tm-search-dropdown' });
 	wrapper.appendChild(input);
 	wrapper.appendChild(clearBtn);
 	wrapper.appendChild(dropdown);
 
 	var highlightIdx = -1;
-	var ITEM_STYLE = 'padding:6px 10px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--tm-border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
 
 	function addToRecent(ip) {
 		recentIps = recentIps.filter(function(r) { return r !== ip; });
@@ -1456,18 +1435,18 @@ function buildSearchSelect(devices, placeholder, onSelect) {
 	}
 
 	function mkItem(it, idx, q) {
-		var item = E('div', { 'style': ITEM_STYLE, 'data-value': it.value });
+		var item = E('div', { 'class': 'tm-dropdown-item', 'data-value': it.value });
 		if (q && it.value !== '__all__') {
 			item.innerHTML = highlightMatch(it.label, q);
 		} else {
 			item.textContent = it.label;
 		}
 		if (it.section) {
-			item.style.cssText = 'padding:3px 10px;font-size:11px;color:var(--tm-text-mute);font-weight:600;text-transform:uppercase;letter-spacing:.3px;cursor:default;border-bottom:1px solid var(--tm-border)';
+			item.className = 'tm-dropdown-item--section';
 			return item;
 		}
 		if (it.value === '__all__') {
-			item.style.cssText = ITEM_STYLE + ';font-weight:600;color:var(--tm-proto)';
+			item.className = 'tm-dropdown-item tm-dropdown-item--all';
 		}
 		item.addEventListener('mousedown', function(ev) {
 			ev.preventDefault();
@@ -1644,28 +1623,18 @@ return view.extend({
 		// Recent devices — functions defined at top level
 
 		// Quick-access bar: [All devices] + recent device chips
-		var quickBar = E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:6px'});
+		var quickBar = E('div', {'class':'tm-quick-bar'});
 
-		var allBtn = E('span', {
-			'style':'display:inline-flex;align-items:center;gap:3px;padding:4px 10px;border-radius:14px;font-size:12px;' +
-				'font-weight:600;cursor:pointer;transition:all .15s;user-select:none;' +
-				'border:1.5px solid var(--tm-proto);background:var(--tm-proto);color:#fff'
-		}, ['📊 ', _('All devices')]);
+		var allBtn = E('span', {'class':'tm-quick-bar__all'}, ['📊 ', _('All devices')]);
 		allBtn.addEventListener('click', function() {
 			searchSelect.setValue('__all__', '');
 			onDeviceSelect('__all__');
 		});
 		quickBar.appendChild(allBtn);
 
-		var recentContainer = E('span', {'style':'display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center'});
+		var recentContainer = E('span', {'class':'tm-recent-container'});
 		quickBar.appendChild(recentContainer);
 
-		var chipNormStyle = 'display:inline-flex;align-items:center;gap:3px;padding:4px 10px;border-radius:14px;font-size:11px;' +
-			'font-weight:500;cursor:pointer;transition:all .15s;user-select:none;' +
-			'border:1.5px solid var(--tm-border);background:var(--tm-bg);color:var(--tm-text)';
-		var chipActiveStyle = 'display:inline-flex;align-items:center;gap:3px;padding:4px 10px;border-radius:14px;font-size:11px;' +
-			'font-weight:600;cursor:pointer;transition:all .15s;user-select:none;' +
-			'border:1.5px solid var(--tm-proto);background:var(--tm-info-bg);color:var(--tm-proto)';
 
 		function renderRecentChips() {
 			while (recentContainer.firstChild) recentContainer.removeChild(recentContainer.firstChild);
@@ -1673,22 +1642,16 @@ return view.extend({
 			var currentIp = searchSelect.getValue();
 
 			// Update All button style
-			if (currentIp === '__all__') {
-				allBtn.style.background = 'var(--tm-proto)';
-				allBtn.style.color = '#fff';
-				allBtn.style.borderColor = 'var(--tm-proto)';
-			} else {
-				allBtn.style.background = 'var(--tm-bg)';
-				allBtn.style.color = 'var(--tm-proto)';
-				allBtn.style.borderColor = 'var(--tm-proto)';
-			}
+			// tm-quick-bar__all has the active (filled) look by default;
+			// when a device is selected we switch to outline-only variant
+			allBtn.className = currentIp === '__all__' ? 'tm-quick-bar__all' : 'tm-quick-bar__all tm-quick-bar__all--outline';
 
 			recent.forEach(function(ip) {
 				var dev = devices.filter(function(d) { return d.ip === ip; })[0];
 				var label = dev ? dev.name : ip;
 				var isActive = ip === currentIp;
 				var chip = E('span', {
-					'style': isActive ? chipActiveStyle : chipNormStyle,
+					'class': isActive ? 'tm-recent-chip--active' : 'tm-recent-chip',
 					'title': ip + (dev && dev.mac ? ' (' + dev.mac + ')' : '')
 				}, [
 					deviceIcon(guessDeviceType(dev || {name:label}), 12),
@@ -1699,9 +1662,7 @@ return view.extend({
 					onDeviceSelect(ip);
 				});
 				// Remove button (×) on hover
-				var removeBtn = E('span', {
-					'style':'margin-left:2px;font-size:10px;opacity:0;transition:opacity .15s;color:var(--tm-text-mute);cursor:pointer'
-				}, '×');
+				var removeBtn = E('span', {'class':'tm-recent-remove'}, '×');
 				removeBtn.addEventListener('click', function(ev) {
 					ev.stopPropagation();
 					var r = getRecentDevices().filter(function(x) { return x !== ip; });
@@ -1721,26 +1682,19 @@ return view.extend({
 			cb.checked = !!checked;
 			cb.addEventListener('change', onChange);
 			var track = E('label', { 'class': 'tm-toggle', 'for': id });
-			return E('div', { 'style': 'display:inline-flex;align-items:center;gap:6px;margin-right:12px;white-space:nowrap' }, [
+			return E('div', { 'class': 'tm-toggle-wrap' }, [
 				cb, track,
 				E('label', { 'for': id, 'style': 'cursor:pointer;color:'+C.hostname+';font-size:12px;user-select:none' }, label)
 			]);
 		}
 		function mkLabel(t) {
-			return E('span', { 'style': 'color:'+C.textMute+';font-size:12px;margin-right:4px;white-space:nowrap' }, t);
+			return E('span', { 'class': 'tm-inline-label' }, t);
 		}
 
 		function mkInlinePick(options, currentValue, onChange) {
-			var wrapper = E('span', {'style':'position:relative;display:inline-block'});
-			var display = E('span', {
-				'style': 'color:var(--tm-text);font-size:12px;font-weight:500;cursor:pointer;' +
-					'border-bottom:1px dashed var(--tm-text-mute);padding-bottom:1px;white-space:nowrap'
-			});
-			var popup = E('div', {
-				'style': 'display:none;position:absolute;top:calc(100% + 4px);left:50%;transform:translateX(-50%);' +
-					'background:var(--tm-bg);border:1px solid var(--tm-border);border-radius:6px;' +
-					'box-shadow:0 4px 12px rgba(0,0,0,.15);z-index:200;padding:4px 0;white-space:nowrap'
-			});
+			var wrapper = E('span', {'class':'tm-inline-pick-wrapper'});
+			var display = E('span', {'class':'tm-inline-pick-display'});
+			var popup = E('div', {'class':'tm-inline-pick-popup'});
 			var selectedValue = currentValue;
 
 			function updateDisplay() {
@@ -1789,22 +1743,18 @@ return view.extend({
 			var wrapper = E('span', {'style':'display:inline-flex;flex-wrap:wrap;gap:2px;align-items:center'});
 			var selected = currentValue;
 			var chips = [];
-			var csNorm = 'padding:3px 8px;border-radius:10px;font-size:11px;cursor:pointer;transition:all .15s;' +
-				'border:1px solid var(--tm-border);background:var(--tm-bg);color:var(--tm-text)';
-			var csActive = 'padding:3px 8px;border-radius:10px;font-size:11px;cursor:pointer;transition:all .15s;' +
-				'border:1px solid var(--tm-proto);background:var(--tm-proto);color:#fff;font-weight:600';
 			options.forEach(function(opt) {
-				var chip = E('span', {'style': opt.v === selected ? csActive : csNorm}, opt.l);
+				var chip = E('span', {'class': opt.v === selected ? 'tm-chip-active' : 'tm-chip'}, opt.l);
 				chip.addEventListener('click', function() {
 					selected = opt.v;
-					chips.forEach(function(c) { c.style.cssText = c._v === selected ? csActive : csNorm; });
+					chips.forEach(function(c) { c.className = c._v === selected ? 'tm-chip-active' : 'tm-chip'; });
 					onChange(opt.v);
 				});
 				chip._v = opt.v;
 				chips.push(chip);
 				wrapper.appendChild(chip);
 			});
-			return { el: wrapper, getValue: function() { return selected; }, setValue: function(v) { selected = v; chips.forEach(function(c) { c.style.cssText = c._v === v ? csActive : csNorm; }); } };
+			return { el: wrapper, getValue: function() { return selected; }, setValue: function(v) { selected = v; chips.forEach(function(c) { c.className = c._v === v ? 'tm-chip-active' : 'tm-chip'; }); } };
 		}
 
 		var showStats = mkToggle('tm-stats', _('Stats'), opts.showStats !== false, function() {
@@ -1879,8 +1829,7 @@ return view.extend({
 		var connsDiv  = E('div', { 'style': opts.showConns===false?'display:none':'' });
 
 		// Speed graph popup on spark cell hover
-		var graphPopup = E('div', {'style':'display:none;position:fixed;z-index:500;padding:10px;border-radius:10px;' +
-			'background:var(--tm-bg);border:1px solid var(--tm-border);box-shadow:0 8px 24px rgba(0,0,0,.25)'});
+		var graphPopup = E('div', {'class':'tm-graph-popup'});
 		document.body.appendChild(graphPopup);
 		var graphPopupIp = null;
 		var graphPopupTimer = null;
@@ -1893,7 +1842,7 @@ return view.extend({
 			var rect = cell.getBoundingClientRect();
 			graphPopup.style.left = Math.max(8, rect.left - 160) + 'px';
 			graphPopup.style.top = (rect.bottom + 6) + 'px';
-			graphPopup.style.display = '';
+			graphPopup.style.display = 'block';
 			if (!graphPopupTimer) {
 				graphPopupTimer = setInterval(updateGraphPopup, 2000);
 			}
@@ -1913,11 +1862,11 @@ return view.extend({
 			if (svg) {
 				graphPopup.appendChild(svg);
 				if (lk > 0) {
-					graphPopup.appendChild(E('div', {'style':'font-size:10px;color:var(--tm-text-mute);margin-top:4px;text-align:center'},
+					graphPopup.appendChild(E('div', {'class':'tm-graph-popup__note'},
 						_('Note: speed is measured before shaper — bursts above limit are normal')));
 				}
 			} else {
-				graphPopup.appendChild(E('span', {'style':'color:var(--tm-text-mute);font-size:11px'}, _('Not enough data yet')));
+				graphPopup.appendChild(E('span', {'class':'tm-graph-popup__empty'}, _('Not enough data yet')));
 			}
 		}
 		function hideGraphPopup() {
@@ -1940,21 +1889,17 @@ return view.extend({
 			hideGraphPopup();
 		}, true);
 
-		var BTN_BASE = 'padding:5px 14px;border-radius:3px;cursor:pointer;font-size:13px;min-width:140px;text-align:center;font-weight:500';
-		var BTN_ORANGE = BTN_BASE + ';background:#c05621;color:#fff;border:1px solid #9c4221';
-		var BTN_GREEN  = BTN_BASE + ';background:#276749;color:#fff;border:1px solid #22543d';
-
 		var inetBtn = E('button', { 'class': 'cbi-button' }, '');
 		var wifiBtn = E('button', { 'class': 'cbi-button', 'style': 'display:none' }, '');
 
 		function updateInetBtn(blocked) {
 			if (blocked) {
 				inetBtn.textContent = '▶️ ' + _('Unblock Internet');
-				inetBtn.style.cssText = BTN_GREEN;
+				inetBtn.className = 'tm-btn-unblock';
 				inetBtn._action = 'unblock';
 			} else {
 				inetBtn.textContent = '⏸️ ' + _('Block Internet');
-				inetBtn.style.cssText = BTN_ORANGE;
+				inetBtn.className = 'tm-btn-block';
 				inetBtn._action = 'block';
 			}
 		}
@@ -1966,11 +1911,11 @@ return view.extend({
 			wifiBtn.disabled = false;
 			if (wifiBlocked) {
 				wifiBtn.textContent = '📡✓ ' + _('Unblock WiFi');
-				wifiBtn.style.cssText = BTN_GREEN;
+				wifiBtn.className = 'tm-btn-unblock';
 				wifiBtn._wifiAction = 'unblock';
 			} else {
 				wifiBtn.textContent = '📡❌ ' + _('Block WiFi');
-				wifiBtn.style.cssText = BTN_ORANGE;
+				wifiBtn.className = 'tm-btn-block';
 				wifiBtn._wifiAction = 'block';
 			}
 		}
@@ -1979,23 +1924,10 @@ return view.extend({
 		var _rateSelected = '0';
 		var _modeSelected = 'shaper';
 
-		var chipStyle = 'display:inline-block;padding:4px 10px;margin:2px;border-radius:14px;font-size:12px;' +
-			'font-weight:500;cursor:pointer;transition:all .15s;border:1.5px solid var(--tm-border);' +
-			'background:var(--tm-bg);color:var(--tm-text);user-select:none';
-		var rateChipActiveStyle = 'display:inline-block;padding:4px 10px;margin:2px;border-radius:14px;font-size:12px;' +
-			'font-weight:600;cursor:pointer;transition:all .15s;border:1.5px solid var(--tm-proto);' +
-			'background:var(--tm-proto);color:#fff;user-select:none';
-		var chipOffStyle = 'display:inline-block;padding:4px 10px;margin:2px;border-radius:14px;font-size:12px;' +
-			'font-weight:500;cursor:pointer;transition:all .15s;border:1.5px solid var(--tm-border);' +
-			'background:var(--tm-bg);color:var(--tm-text-mute);user-select:none';
-		var chipOffActiveStyle = 'display:inline-block;padding:4px 10px;margin:2px;border-radius:14px;font-size:12px;' +
-			'font-weight:600;cursor:pointer;transition:all .15s;border:1.5px solid var(--tm-text-mute);' +
-			'background:var(--tm-text-mute);color:#fff;user-select:none';
-
-		var rateChipsRow = E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:0'});
+		var rateChipsRow = E('div', {'class':'tm-rate-chips-row'});
 		var rateChips = [];
 		RATE_PRESETS.filter(function(p) { return p.v !== 'custom'; }).forEach(function(preset) {
-			var chip = E('span', {'style': preset.v === '0' ? chipOffStyle : chipStyle}, preset.l);
+			var chip = E('span', {'class': preset.v === '0' ? 'tm-chip-off' : 'tm-chip'}, preset.l);
 			chip._val = preset.v;
 			chip.addEventListener('click', function() {
 				_rateSelected = preset.v;
@@ -2010,20 +1942,20 @@ return view.extend({
 		function updateRateChips() {
 			rateChips.forEach(function(c) {
 				if (c._val === '0') {
-					c.style.cssText = c._val === _rateSelected ? chipOffActiveStyle : chipOffStyle;
+					c.className = c._val === _rateSelected ? 'tm-chip-off-active' : 'tm-chip-off';
 				} else {
-					c.style.cssText = c._val === _rateSelected ? rateChipActiveStyle : chipStyle;
+					c.className = c._val === _rateSelected ? 'tm-chip-active' : 'tm-chip';
 				}
 			});
 			if (_rateSelected === 'custom') {
-				rateChips.forEach(function(c) { c.style.cssText = c._val === '0' ? chipOffStyle : chipStyle; });
+				rateChips.forEach(function(c) { c.className = c._val === '0' ? 'tm-chip-off' : 'tm-chip'; });
 			}
 		}
 
 		// Custom input row
 		var customInput = E('input', { 'type':'number', 'min':'1', 'step':'1', 'placeholder': _('value'),
-			'style':'width:70px;font-size:12px;padding:4px 8px;border:1.5px solid var(--tm-border);border-radius:8px;background:var(--tm-bg);color:var(--tm-text)' });
-		var customUnitBtns = E('span', {'style':'display:inline-flex;border-radius:8px;overflow:hidden;border:1.5px solid var(--tm-border)'});
+			'class': 'tm-custom-input' });
+		var customUnitBtns = E('span', {'class':'tm-custom-unit-btns'});
 		var _customUnit = 'mbit';
 		var mbitBtn = E('span', {'style':'padding:4px 8px;font-size:11px;cursor:pointer;background:var(--tm-proto);color:#fff'}, 'Mbit/s');
 		var kbitBtn = E('span', {'style':'padding:4px 8px;font-size:11px;cursor:pointer;background:var(--tm-bg);color:var(--tm-text)'}, 'kbit/s');
@@ -2039,7 +1971,7 @@ return view.extend({
 		customUnitBtns.appendChild(kbitBtn);
 
 		var customApplyBtn = E('button', {
-			'style':'padding:4px 12px;font-size:12px;border-radius:8px;border:none;background:var(--tm-proto);color:#fff;cursor:pointer;font-weight:600'
+			'class':'tm-custom-apply'
 		}, _('Apply'));
 		customApplyBtn.addEventListener('click', function() {
 			_rateSelected = 'custom';
@@ -2047,18 +1979,18 @@ return view.extend({
 			applyRate();
 		});
 
-		var customToggleBtn = E('span', {'style': chipStyle, 'data-tip': _('Enter a custom speed value')}, '✎ ' + _('Custom'));
+		var customToggleBtn = E('span', {'class': 'tm-chip', 'data-tip': _('Enter a custom speed value')}, '✎ ' + _('Custom'));
 		customToggleBtn.addEventListener('click', function() {
 			customRow.style.display = customRow.style.display === 'none' ? 'flex' : 'none';
 		});
 		rateChipsRow.appendChild(customToggleBtn);
 
-		var customRow = E('div', {'style':'display:none;margin-top:6px;align-items:center;gap:6px'}, [
+		var customRow = E('div', {'class':'tm-custom-row'}, [
 			customInput, customUnitBtns, customApplyBtn
 		]);
 
 		// Mode: segmented toggle (Shaper default)
-		var modeToggle = E('div', {'style':'display:inline-flex;border-radius:8px;overflow:hidden;border:1.5px solid var(--tm-border);margin-top:6px'});
+		var modeToggle = E('div', {'class':'tm-mode-toggle'});
 		var shaperBtn = E('span', {
 			'style':'padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s',
 			'data-tip': _('Queues excess traffic (smoother streaming, lower jitter)')
@@ -2082,11 +2014,11 @@ return view.extend({
 		updateModeToggle();
 
 		var rateLimitRow = E('div', {
-			'style': 'display:none;padding:12px 14px;border-radius:8px;margin-bottom:8px;' +
-				'border:1px solid var(--tm-border);background:var(--tm-section-action)'
+			'class': 'tm-rate-panel',
+			'style': 'display:none'
 		}, [
-			E('div', {'style':'display:flex;align-items:center;justify-content:space-between;margin-bottom:8px'}, [
-				E('span', {'style':'font-size:12px;font-weight:600;color:var(--tm-text)'}, '⚡ ' + _('Speed Limit')),
+			E('div', {'class':'tm-rate-panel__header'}, [
+				E('span', {'class':'tm-rate-panel__title'}, '⚡ ' + _('Speed Limit')),
 				modeToggle
 			]),
 			rateChipsRow,
@@ -2151,7 +2083,7 @@ return view.extend({
 			}
 		}
 
-		var actionRow = E('div', { 'style': 'display:flex;flex-wrap:nowrap;align-items:center;gap:8px' },
+		var actionRow = E('div', { 'class': 'tm-action-row' },
 			[inetBtn, wifiBtn]);
 
 		function isAllMode() { return searchSelect.getValue() === '__all__'; }
@@ -2383,9 +2315,7 @@ return view.extend({
 					var wifiPart = data.wifi_blocked
 						? ' &nbsp;|&nbsp; <b style="color:'+C.stateWait+'">📵 ' + _('WiFi blocked') + '</b> ('+escHtml(data.mac||'') + ')'
 						: (data.mac ? ' &nbsp;|&nbsp; <span style="color:'+C.textFaint+'">MAC: '+escHtml(data.mac)+'</span>' : '');
-					statsDiv.style.cssText = 'padding:8px 14px;border-radius:4px;font-size:13px;margin-bottom:8px;' +
-						(data.blocked ? 'background:'+C.blockedBg+';border:1px solid '+C.blockedBorder+';color:'+C.blockedFg
-						             : 'background:'+C.infoBg   +';border:1px solid '+C.infoBorder+';color:'+C.infoFg);
+					statsDiv.className = 'tm-stats-bar ' + (data.blocked ? 'tm-stats-bar--blocked' : 'tm-stats-bar--info');
 					statsDiv.innerHTML = (data.blocked
 						? '<b>⛔ ' + _('BLOCKED') + '</b> — '+data.block_packets+' pkts, '+fmtBytes(data.block_bytes)+' ' + _('dropped') + ' &nbsp;|&nbsp; '
 						: '') + parts.join(' &nbsp;|&nbsp; ') + wifiPart;
@@ -2536,7 +2466,7 @@ return view.extend({
 			var lnk = 'cursor:pointer;text-decoration:underline;text-decoration-style:dashed';
 			var activeFilter = self._tableFilter;
 
-			statsDiv.style.cssText = 'padding:8px 14px;border-radius:4px;font-size:13px;margin-bottom:8px;background:'+C.infoBg+';border:1px solid '+C.infoBorder+';color:'+C.infoFg;
+			statsDiv.className = 'tm-stats-bar tm-stats-bar--info';
 			while (statsDiv.firstChild) statsDiv.removeChild(statsDiv.firstChild);
 
 			function mkFilterVal(filter, color, text) {
@@ -2719,19 +2649,15 @@ return view.extend({
 			{key:'_throttle_kbit', label:_('Speed Limit')},
 			{key:'_drop_packets', label:_('Drops')}, {key:'_backlog', label:_('Queue')}
 		];
-		var chipBase = 'display:inline-block;padding:3px 10px;border-radius:12px;font-size:11px;cursor:pointer;user-select:none;margin:2px;transition:all .15s;font-weight:500';
-		var chipOn = chipBase + ';background:var(--tm-proto);color:#fff;border:1px solid var(--tm-proto)';
-		var chipOff = chipBase + ';background:var(--tm-bg);color:var(--tm-text-mute);border:1px solid var(--tm-border)';
-
 		var colChipsContainer = E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:0'});
 		colChipDefs.forEach(function(ct) {
 			var chip = E('span', {
-				'style': savedHidden[ct.key] ? chipOff : chipOn,
+				'class': savedHidden[ct.key] ? 'tm-col-chip-off' : 'tm-col-chip-on',
 				'data-tip': _('Click to toggle column visibility')
 			}, ct.label);
 			chip.addEventListener('click', function() {
-				if (self._hiddenCols[ct.key]) { delete self._hiddenCols[ct.key]; chip.style.cssText = chipOn; }
-				else { self._hiddenCols[ct.key] = true; chip.style.cssText = chipOff; }
+				if (self._hiddenCols[ct.key]) { delete self._hiddenCols[ct.key]; chip.className = 'tm-col-chip-on'; }
+				else { self._hiddenCols[ct.key] = true; chip.className = 'tm-col-chip-off'; }
 				var o = loadOpts(); o.hiddenCols = self._hiddenCols; saveOpts(o);
 				if (isAllMode()) runAll();
 			});
@@ -2750,31 +2676,28 @@ return view.extend({
 		var connColChipsContainer = E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:0'});
 		connColDefs.forEach(function(ct) {
 			var chip = E('span', {
-				'style': savedConnHidden[ct.key] ? chipOff : chipOn,
+				'class': savedConnHidden[ct.key] ? 'tm-col-chip-off' : 'tm-col-chip-on',
 				'data-tip': _('Click to toggle column visibility')
 			}, ct.label);
 			chip.addEventListener('click', function() {
-				if (self._connHiddenCols[ct.key]) { delete self._connHiddenCols[ct.key]; chip.style.cssText = chipOn; }
-				else { self._connHiddenCols[ct.key] = true; chip.style.cssText = chipOff; }
+				if (self._connHiddenCols[ct.key]) { delete self._connHiddenCols[ct.key]; chip.className = 'tm-col-chip-on'; }
+				else { self._connHiddenCols[ct.key] = true; chip.className = 'tm-col-chip-off'; }
 				var o = loadOpts(); o.connHiddenCols = self._connHiddenCols; saveOpts(o);
 				if (!isAllMode()) runQuery();
 			});
 			connColChipsContainer.appendChild(chip);
 		});
 
-		var ob = 'border:1px solid '+C.optsBorder+';background:'+C.optsBg;
-		var sep = function() { return E('span',{'style':'border-left:1px solid '+C.border+';height:18px;margin:0 4px'}); };
-		var sectionLabel = function(t) { return E('div', {'style':'font-size:12px;font-weight:600;color:var(--tm-text-mute);margin-bottom:4px;margin-top:8px'}, t); };
+		var sep = function() { return E('span', {'class':'tm-sep'}); };
+		var sectionLabel = function(t) { return E('div', {'class':'tm-section-label'}, t); };
 
-		var settingsBody = E('div', {'style':'padding:0 14px 10px;display:none'});
+		var settingsBody = E('div', {'class':'tm-settings-body'});
 		var settingsCollapsed = true;
-		var settingsToggle = E('div', {
-			'style': 'padding:8px 14px;cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--tm-text-mute)'
-		}, [E('span', {'class':'tm-settings-arrow'}, '▸'), E('span', {}, _('Settings'))]);
+		var settingsToggle = E('div', {'class':'tm-settings-toggle'}, [E('span', {'class':'tm-settings-arrow'}, '▸'), E('span', {}, _('Settings'))]);
 
 		settingsToggle.addEventListener('click', function() {
 			settingsCollapsed = !settingsCollapsed;
-			settingsBody.style.display = settingsCollapsed ? 'none' : '';
+			settingsBody.style.display = settingsCollapsed ? 'none' : 'block';
 			settingsToggle.firstChild.textContent = settingsCollapsed ? '▸' : '▾';
 		});
 
@@ -3110,7 +3033,7 @@ return view.extend({
 		// ── Assemble settings sections ─────────────────────────────────────
 		settingsBody.appendChild(tgSection.el);
 
-		var displaySection = mkCollapsible(_('Display'), E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding-top:4px'}, [
+		var displaySection = mkCollapsible(_('Display'), E('div', {'class':'tm-settings-section-row'}, [
 			showStats, showConns, extStatsCheck, rdnsCheck, activityCheck,
 			sep(),
 			E('span', {'data-tip':_('Auto-refresh interval for summary table')}, [mkLabel(_('Refresh')+':'), refreshPick.el])
@@ -3133,7 +3056,6 @@ return view.extend({
 
 			callLoggingGet().then(function(cfg) {
 				while (container.firstChild) container.removeChild(container.firstChild);
-				var gap = 'display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding-top:4px';
 
 				var logStatus = E('span', {'class':'tg-save-status'});
 				var logTimer = null;
@@ -3172,10 +3094,10 @@ return view.extend({
 				var logTelegram = mkToggle('tm-log-telegram', _('Telegram'), cfg.log_telegram, doLogSave);
 				var logConfig = mkToggle('tm-log-config', _('Config'), cfg.log_config, doLogSave);
 
-				container.appendChild(E('div', {'style':gap}, [logEnabled, logSyslog, persistRules, logStatus]));
+				container.appendChild(E('div', {'class':'tm-log-row'}, [logEnabled, logSyslog, persistRules, logStatus]));
 				container.appendChild(E('div', {'style':'margin-top:6px'}, [
 					E('div', {'style':'font-size:11px;color:'+C.textMute+';margin-bottom:4px'}, _('Log categories')),
-					E('div', {'style':gap}, [logBlocks, logRatelimits, logShapes, logTelegram, logConfig])
+					E('div', {'class':'tm-log-row'}, [logBlocks, logRatelimits, logShapes, logTelegram, logConfig])
 				]));
 			}).catch(function(e) {
 				statusSpan.textContent = '✗ ' + e.message;
@@ -3184,13 +3106,13 @@ return view.extend({
 		}
 		settingsBody.appendChild(loggingSection.el);
 
-		var connFiltersRow = E('div', {'style':'display:none;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:6px'}, [
+		var connFiltersRow = E('div', {'class':'tm-conn-filters-row'}, [
 			E('span', {'data-tip':_('Filter connections by protocol')}, [mkLabel(_('Proto')+':'), protoPick.el]),
 			sep(),
 			E('span', {'data-tip':_('Group connections table rows')}, [mkLabel(_('Group')+':'), groupPick.el])
 		]);
-		var tableSection = mkCollapsible(_('Table & Speed'), E('div', {'style':'padding-top:4px'}, [
-			E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:8px'}, [
+		var tableSection = mkCollapsible(_('Table & Speed'), E('div', {'class':'tm-table-speed-inner'}, [
+			E('div', {'class':'tm-table-speed-row'}, [
 				E('span', {'data-tip':_('Polling interval for per-device speed graph')}, [mkLabel(_('Poll')+':'), pollIntervalPick.el]),
 				sep(),
 				E('span', {'data-tip':_('Time window for speed averaging')}, [mkLabel(_('Window')+':'), avgWindowPick.el]),
@@ -3212,12 +3134,10 @@ return view.extend({
 		}
 		updateTableSectionMode();
 
-		var settingsPanel = E('div', {'style':'border-radius:8px;margin-bottom:10px;background:var(--tm-section-action);border:1px solid var(--tm-border)'}, [
-			settingsToggle, settingsBody
-		]);
+		var settingsPanel = E('div', {'class':'tm-settings-panel'}, [settingsToggle, settingsBody]);
 
 		function loadActivityPanel(container) {
-			container.style.cssText = 'margin:8px 0;padding:8px 14px;border-radius:4px;border:1px solid var(--tm-border);background:var(--tm-bg-subtle)';
+			container.className = 'tm-activity-panel';
 			var statusSpan = E('span', {'style':'font-size:12px;color:'+C.textMute}, _('Loading…'));
 			container.appendChild(statusSpan);
 
@@ -3227,14 +3147,10 @@ return view.extend({
 					container.appendChild(E('div', {'style':'font-size:12px;color:'+C.textMute}, _('No activity recorded yet.')));
 					return;
 				}
-				var logArea = E('div', {
-					'style': 'max-height:250px;overflow-y:auto;font-family:monospace;font-size:11px;' +
-						'background:var(--tm-bg);border:1px solid var(--tm-border);border-radius:4px;padding:6px;' +
-						'white-space:pre-wrap;word-break:break-all;color:var(--tm-text)'
-				});
+				var logArea = E('div', {'class':'tm-log-area'});
 				var lines = res.lines.slice().reverse();
 				lines.forEach(function(line) {
-					logArea.appendChild(E('div', {'style':'padding:1px 0;border-bottom:1px solid var(--tm-border)'}, line));
+					logArea.appendChild(E('div', {'class':'tm-log-line'}, line));
 				});
 				var refreshBtn = E('button', {
 					'class': 'cbi-button',
@@ -3311,7 +3227,7 @@ return view.extend({
 					para(_('The router offloads established connections from the CPU to the hardware (NIC/SoC), ' +
 						  'achieving 2–3× higher throughput and lower CPU usage.')),
 					para(_('In this mode the kernel\'s conntrack, firewall, and tc are bypassed for offloaded flows:')),
-					E('ul', {'style': 'margin:4px 0 4px 18px;padding:0'}, [
+					E('ul', {'class': 'tm-offload-ul'}, [
 						E('li', {}, _('Speed monitoring — conntrack byte counters are not updated')),
 						E('li', {}, _('Traffic shaping (tc/HTB) — bypassed for offloaded flows')),
 						E('li', {}, _('Rate limiting — applies only to new connections')),
@@ -3343,14 +3259,14 @@ return view.extend({
 			}
 
 			var banner = E('div', {
-				'style': 'padding:10px 14px;margin-bottom:8px;border-radius:6px;' +
-					'border:1px solid ' + border + ';background:' + bg + ';font-size:13px;line-height:1.5'
+				'class': 'tm-offload-banner',
+				'style': 'border:1px solid ' + border + ';background:' + bg
 			}, [
-				E('div', {'style': 'display:flex;justify-content:space-between;align-items:flex-start'}, [
-					E('span', {'style': 'font-size:15px;margin-right:8px'}, icon),
-					E('div', {'style': 'flex:1'}, body),
+				E('div', {'class': 'tm-offload-banner__row'}, [
+					E('span', {'class': 'tm-offload-banner__icon'}, icon),
+					E('div', {'class': 'tm-offload-banner__body'}, body),
 					E('span', {
-						'style': 'cursor:pointer;opacity:0.5;padding:0 0 0 10px;font-size:18px;line-height:1;flex-shrink:0',
+						'class': 'tm-offload-banner__close',
 						'title': _('Dismiss')
 					}, '×')
 				])
@@ -3379,8 +3295,8 @@ return view.extend({
 			});
 		}
 
-		return E('div', {'class':'cbi-map', 'style':'color:'+C.hostname}, [
-			E('h2', {'style':'color:'+C.hostname}, _('Traffic Control')),
+		return E('div', {'class':'cbi-map', 'style':'color:var(--tm-text)'}, [
+			E('h2', {'style':'color:var(--tm-text)'}, _('Traffic Control')),
 			E('div', {'class':'cbi-section'}, [
 				offloadBanner,
 				E('div', {'style':'margin-bottom:10px'}, [
@@ -3395,7 +3311,7 @@ return view.extend({
 				connsDiv,
 				activityDiv
 			]),
-			E('div', {'id':'tm-version-footer','style':'text-align:right;font-size:10px;color:var(--tm-text-faint);padding:8px 4px 0;user-select:all'},
+			E('div', {'id':'tm-version-footer','class':'tm-version-footer'},
 				'trafficctl (' + TRAFFICCTL_BUILD + ')')
 		]);
 	},
