@@ -118,6 +118,13 @@ ssh root@192.168.0.1 sh -c '"cat > /www/luci-static/resources/view/trafficctl/st
 - Y-axis scaling: 98th percentile, nice ticks (multiples of 100/500 Kbit/s, min 5 gridlines)
 - Speed units: ×1000 (SI network convention), not ×1024
 
+## CSS / JS Display Gotcha
+
+Elements hidden via a **CSS class** (`display:none` in `.tm-search-dropdown`, `.tm-search-clear`, `.tm-graph-popup`, `.tm-settings-body`, etc.) must be shown with an **explicit value** like `style.display = 'block'` (or `'inline'`, `'flex'`).  
+Setting `style.display = ''` removes the inline override and lets the CSS class re-hide the element — it does **not** show it.
+
+Elements hidden with an **inline style** (`style="display:none"` in the `E()` call) work the opposite way: `style.display = ''` correctly removes the inline style and the element becomes visible.
+
 ## UI Design Principles
 
 - Colorblind-safe: blue-orange contrast (no red-green reliance)
