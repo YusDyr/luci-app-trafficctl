@@ -2842,13 +2842,11 @@ return view.extend({
 				var controlMode = cfg.control_enabled !== false;
 				var controlSection = E('div', {});
 				var notifySection = E('div', {});
-				if (controlMode) notifySection.style.display = 'none';
 				function setMode(ctrl) {
 					controlMode = ctrl;
 					segControl.className = 'tg-segmented__item' + (ctrl ? ' tg-segmented__item--active' : '');
 					segNotify.className = 'tg-segmented__item' + (!ctrl ? ' tg-segmented__item--active' : '');
 					controlSection.style.display = ctrl ? '' : 'none';
-					notifySection.style.display = ctrl ? 'none' : '';
 					doSave();
 				}
 
@@ -2952,7 +2950,6 @@ return view.extend({
 					templateToggle.textContent = (show ? '▾ ' : '▸ ') + _('Customize message');
 				});
 				notifySection.appendChild(E('div', {'style':'margin-top:8px'}, [templateToggle, templateBody]));
-				section.appendChild(notifySection);
 
 				// ── Control section (conditionally visible) ──
 				controlSection.appendChild(E('div', {'class':'tg-divider'}, _('Control')));
@@ -3027,6 +3024,7 @@ return view.extend({
 
 				if (!controlMode) controlSection.style.display = 'none';
 				section.appendChild(controlSection);
+				section.appendChild(notifySection);
 				setupDone = true;
 			}).catch(function(e) {
 				statusSpan.textContent = '✗ ' + e.message;
@@ -3127,7 +3125,7 @@ return view.extend({
 			colChipsContainer,
 			connColChipsContainer,
 			connFiltersRow
-		]), true);
+		]), false);
 		settingsBody.appendChild(tableSection.el);
 
 		function updateTableSectionMode() {
