@@ -22,10 +22,9 @@ case "$PKG" in
             # Older rootfs images (and the x86-64 variants up to 24.10) don't
             # register the "all" architecture by default, so they reject our
             # _all.ipk with "incompatible with the architectures configured".
-            # Inject it explicitly (priority 1 is fine — we have no conflicts).
-            grep -q '^arch all ' /etc/opkg.conf 2>/dev/null \
-                || echo 'arch all 1' >> /etc/opkg.conf
-            opkg install --force-depends "$PKG"
+            # --add-arch registers it for this invocation with high priority,
+            # overriding whatever (if anything) is in /etc/opkg.conf.
+            opkg --add-arch all:200 install --force-depends "$PKG"
         else
             echo "ERROR: opkg not available in this container"
             exit 1

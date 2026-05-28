@@ -16,16 +16,16 @@ PKG="$1"
 
 # Minimal rootfs containers don't ship with /var/lock or /var/log — opkg needs them.
 mkdir -p /var/lock /var/log
-# Register the "all" architecture so opkg accepts our _all.ipk on rootfs images
-# that don't include it by default.
-grep -q '^arch all ' /etc/opkg.conf 2>/dev/null || echo 'arch all 1' >> /etc/opkg.conf
+# Register the "all" architecture inline so opkg accepts our _all.ipk on rootfs
+# images that don't include it by default.
+OPKG="opkg --add-arch all:200"
 
 # ── Phase 1: install without --force-depends, expect failure ─────────────────
 echo "=== Phase 1: install without dep resolution (expecting failure) ==="
 case "$PKG" in
     *.ipk)
         # Without --force-depends, opkg should refuse if deps missing
-        if opkg install "$PKG" 2>&1 | tee /tmp/opkg.out; then
+        if $OPKG install "$PKG" 2>&1 | tee /tmp/opkg.out; then
             # Did it actually install? Check
             if opkg list-installed | grep -q "^luci-app-trafficctl "; then
                 echo "WARNING: install succeeded — deps may already be present in this image."
@@ -67,7 +67,7 @@ case "$PKG" in
             exit 0
         fi
         # Now install — opkg should pull in conntrack/luci-base/rpcd automatically
-        opkg install "$PKG"
+        $OPKG install "$PKG"
         ;;
     *.apk)
         if ! apk update 2>&1 | tee /tmp/apk-update.out; then
