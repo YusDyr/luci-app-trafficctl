@@ -1,0 +1,66 @@
+#!/bin/sh
+# Reproduces the user-facing feed install workflow inside an OpenWrt SDK container.
+# Usage:  sh /tests/test_feed_install.sh /src
+# Where:  /src is the repo root (mounted from host)
+#
+# This is what users do:
+#   echo "src-git trafficctl https://github.com/YusDyr/luci-app-trafficctl.git" >> feeds.conf
+#   ./scripts/feeds update trafficctl
+#   ./scripts/feeds install -p trafficctl luci-app-trafficctl
+#   make package/luci-app-trafficctl/compile V=s
+#
+# We use `src-link` instead of `src-git` to point at the locally-mounted repo,
+# but the feed scanner code path is identical — if feeds update fails on the
+# real repo, it fails here too.
+set -eu
+
+SRC="${1:-/src}"
+[ -d "$SRC" ] || { echo "ERROR: source dir $SRC missing"; exit 1; }
+
+# SDK images put the buildroot at /home/build/openwrt
+cd /home/build/openwrt
+
+# Ensure the LuCI feed is enabled (our Makefile includes feeds/luci/luci.mk)
+echo "Configuring feeds..."
+if ! grep -q "^src-.*luci" feeds.conf.default 2>/dev/null; then
+    echo "src-git luci https://github.com/openwrt/luci.git" > feeds.conf
+else
+    cp feeds.conf.default feeds.conf
+fi
+echo "src-link trafficctl $SRC" >> feeds.conf
+
+echo "--- feeds.conf ---"
+cat feeds.conf
+echo "------------------"
+
+echo "Running scripts/feeds update luci trafficctl..."
+./scripts/feeds update luci trafficctl
+
+echo "Running scripts/feeds install -p trafficctl luci-app-trafficctl..."
+./scripts/feeds install -p trafficctl luci-app-trafficctl
+
+echo "Listing trafficctl feed contents..."
+ls -la package/feeds/trafficctl/ || {
+    echo "ERROR: feed install did not create symlinks"; exit 1; }
+
+# Verify the package was registered with the buildroot
+echo "Verifying package is known to buildroot..."
+make defconfig V=s 2>&1 | tail -20
+if ! grep -q "luci-app-trafficctl" .config 2>/dev/null; then
+    echo "Enabling package in .config..."
+    echo 'CONFIG_PACKAGE_luci-app-trafficctl=m' >> .config
+    make defconfig
+fi
+
+echo "Building package..."
+make package/luci-app-trafficctl/compile V=s -j"$(nproc)" 2>&1 | tail -50
+
+# Verify build artifact exists
+FOUND=$(find bin/ -name "luci-app-trafficctl*" \( -name "*.ipk" -o -name "*.apk" \) 2>/dev/null | head -1)
+if [ -z "$FOUND" ]; then
+    echo "ERROR: no package artifact found in bin/"
+    find bin/ -type f 2>/dev/null | head -20
+    exit 1
+fi
+
+echo "Feed install + build succeeded: $FOUND"

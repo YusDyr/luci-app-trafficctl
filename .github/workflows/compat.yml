@@ -8,6 +8,8 @@ on:
 
 permissions:
   contents: read
+  # gh release download in the upgrade job needs read access to releases
+  # (covered by the default GITHUB_TOKEN's contents: read above)
 
 jobs:
   build-packages:
@@ -153,3 +155,135 @@ jobs:
             -v "$PWD/tests:/tests" \
             "$IMAGE" \
             /tests/test_install.sh "$PKG"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Feed install — reproduce the user-facing `./scripts/feeds update` workflow
+  # inside an OpenWrt SDK container. This is the path most users actually
+  # follow (and the one currently broken — see issue #7).
+  # ──────────────────────────────────────────────────────────────────────────
+  feed-install:
+    name: Feed install (SDK ${{ matrix.version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { version: "23.05.6",  sdk_image: "openwrt/sdk:x86_64-23.05.6" }
+          - { version: "24.10.6",  sdk_image: "openwrt/sdk:x86_64-24.10.6" }
+          - { version: "25.12.4",  sdk_image: "openwrt/sdk:x86_64-25.12.4" }
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run feed install test in ${{ matrix.sdk_image }}
+        run: |
+          docker pull "${{ matrix.sdk_image }}" || {
+            echo "::warning::SDK image ${{ matrix.sdk_image }} not pullable, skipping"
+            exit 0
+          }
+          docker run --rm \
+            -v "$PWD:/src:ro" \
+            --entrypoint /bin/sh \
+            "${{ matrix.sdk_image }}" \
+            /src/tests/test_feed_install.sh /src
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Upgrade — install previous GitHub release, then install current build.
+  # Verifies pre-upgrade/post-upgrade hooks, config file preservation.
+  # ──────────────────────────────────────────────────────────────────────────
+  upgrade:
+    name: Upgrade ${{ matrix.version }}
+    runs-on: ubuntu-latest
+    needs: build-packages
+    strategy:
+      fail-fast: false
+      matrix:
+        # Only test IPK upgrade for now — APK releases prior to the fix in
+        # this branch are broken (issue #7), so APK upgrade is gated on a
+        # known-good baseline being released first.
+        include:
+          - { version: "23.05.6", image: "x86-64-v23.05.6", format: "ipk" }
+          - { version: "24.10.6", image: "x86-64-v24.10.6", format: "ipk" }
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: dist/
+
+      - name: Download previous release
+        run: |
+          mkdir -p dist-old
+          # Find the latest published release prior to current
+          PREV_TAG=$(gh release list --limit 5 --json tagName,isLatest \
+                     --jq '.[] | select(.isLatest == true) | .tagName')
+          if [ -z "$PREV_TAG" ]; then
+            PREV_TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
+          fi
+          echo "Previous release: $PREV_TAG"
+          if ! gh release download "$PREV_TAG" \
+               -p "*.${{ matrix.format }}" -D dist-old 2>/tmp/dl-err; then
+            cat /tmp/dl-err >&2
+            echo "::warning::Could not download previous release $PREV_TAG, skipping"
+            exit 0
+          fi
+          ls -la dist-old/
+
+      - name: Run upgrade test
+        run: |
+          OLD_PKG=$(ls dist-old/luci-app-trafficctl*.${{ matrix.format }} 2>/dev/null | head -1)
+          NEW_PKG="dist/luci-app-trafficctl_0.0.0-test-1_all.ipk"
+          if [ -z "$OLD_PKG" ]; then
+            echo "::warning::No previous package downloaded, skipping upgrade test"
+            exit 0
+          fi
+          # Make paths container-relative
+          OLD_BASE=$(basename "$OLD_PKG")
+          mv "$OLD_PKG" "dist/${OLD_BASE}"
+
+          IMAGE="ghcr.io/openwrt/rootfs:${{ matrix.image }}"
+          docker pull "$IMAGE"
+          docker run --rm \
+            --entrypoint /bin/sh \
+            -v "$PWD/dist:/dist" \
+            -v "$PWD/tests:/tests" \
+            "$IMAGE" \
+            /tests/test_upgrade.sh "/dist/${OLD_BASE}" "/dist/luci-app-trafficctl_0.0.0-test-1_all.ipk"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Dependencies — verify install fails cleanly when deps are missing, and
+  # that opkg update + install correctly resolves them.
+  # ──────────────────────────────────────────────────────────────────────────
+  dependencies:
+    name: Dependencies ${{ matrix.version }}
+    runs-on: ubuntu-latest
+    needs: build-packages
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { version: "23.05.6", image: "x86-64-v23.05.6", format: "ipk" }
+          - { version: "24.10.6", image: "x86-64-v24.10.6", format: "ipk" }
+          - { version: "25.12.4", image: "x86-64-v25.12.4", format: "apk" }
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: dist/
+
+      - name: Run dependency test
+        run: |
+          if [ "${{ matrix.format }}" = "apk" ]; then
+            PKG="/dist/$(basename "$(ls dist/luci-app-trafficctl*noarch.apk | head -1)")"
+          else
+            PKG="/dist/luci-app-trafficctl_0.0.0-test-1_all.ipk"
+          fi
+          IMAGE="ghcr.io/openwrt/rootfs:${{ matrix.image }}"
+          docker pull "$IMAGE"
+          docker run --rm \
+            --entrypoint /bin/sh \
+            -v "$PWD/dist:/dist" \
+            -v "$PWD/tests:/tests" \
+            "$IMAGE" \
+            /tests/test_dependencies.sh "$PKG"
