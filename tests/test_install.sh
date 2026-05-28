@@ -15,8 +15,12 @@ trap 'rm -rf "$TMPDIR"' EXIT
 case "$PKG" in
     *.ipk)
         echo "Installing IPK package..."
-        tar xzf "$PKG" -C "$TMPDIR"
-        tar xzf "$TMPDIR/data.tar.gz" -C /
+        if command -v opkg >/dev/null 2>&1; then
+            opkg install --force-depends "$PKG"
+        else
+            echo "ERROR: opkg not available in this container"
+            exit 1
+        fi
         ;;
     *.apk)
         echo "Installing APK package..."
@@ -52,6 +56,7 @@ for f in \
   /usr/local/bin/trafficctl-macfilter-remove.sh \
   /usr/libexec/rpcd/luci.trafficctl \
   /www/luci-static/resources/view/trafficctl/status.js \
+  /www/luci-static/resources/view/trafficctl/status.css \
   /usr/share/luci/menu.d/luci-app-trafficctl.json \
   /usr/share/rpcd/acl.d/luci-app-trafficctl.json \
   /etc/config/trafficctl \
@@ -79,4 +84,32 @@ for s in \
   [ -x "$s" ] || { echo "NOT EXECUTABLE: $s"; exit 1; }
 done
 
+echo "Install checks passed."
+
+# ── Removal test ─────────────────────────────────────────────────────────────
+echo "Testing package removal..."
+case "$PKG" in
+    *.ipk)
+        opkg remove luci-app-trafficctl || {
+            echo "REMOVAL FAILED: opkg remove returned non-zero"; exit 1; }
+        ;;
+    *.apk)
+        apk del luci-app-trafficctl || {
+            echo "REMOVAL FAILED: apk del returned non-zero"; exit 1; }
+        ;;
+esac
+
+# Verify primary files are gone (config files in /etc/config may be kept by design)
+for f in \
+  /usr/local/bin/trafficctl-summary.sh \
+  /usr/local/bin/trafficctl-fw.sh \
+  /usr/local/bin/trafficctl-block.sh \
+  /usr/libexec/rpcd/luci.trafficctl \
+  /www/luci-static/resources/view/trafficctl/status.js \
+  /www/luci-static/resources/view/trafficctl/status.css \
+  /etc/init.d/trafficctl-telegram; do
+  [ -f "$f" ] && { echo "REMOVAL FAILED: $f still exists"; exit 1; }
+done
+
+echo "Removal verified."
 echo "All checks passed ($(echo "$PKG" | sed 's/.*\.//' | tr '[:lower:]' '[:upper:]') format)."

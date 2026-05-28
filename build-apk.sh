@@ -20,6 +20,7 @@ mkdir -p "$DATA"
 cp -a root/* "$DATA/"
 mkdir -p "$DATA/www/luci-static/resources/view/trafficctl"
 cp htdocs/luci-static/resources/view/trafficctl/status.js "$DATA/www/luci-static/resources/view/trafficctl/"
+cp htdocs/luci-static/resources/view/trafficctl/status.css "$DATA/www/luci-static/resources/view/trafficctl/"
 
 chmod +x "$DATA/usr/local/bin/trafficctl-"*.sh
 chmod +x "$DATA/usr/libexec/rpcd/luci.trafficctl"
@@ -39,7 +40,7 @@ mkdir -p "$SCRIPTS"
 
 cat > "$SCRIPTS/post-install" <<'SCRIPT'
 #!/bin/sh
-[ -n "${IPKG_INSTROOT}" ] || /etc/init.d/rpcd restart
+[ -n "${IPKG_INSTROOT}" ] || /etc/init.d/rpcd restart 2>/dev/null || true
 exit 0
 SCRIPT
 
@@ -55,8 +56,7 @@ SCRIPT
 cat > "$SCRIPTS/post-upgrade" <<'SCRIPT'
 #!/bin/sh
 if [ -z "${IPKG_INSTROOT}" ]; then
-    /etc/init.d/rpcd restart
-    # Restart telegram bot if it was enabled
+    /etc/init.d/rpcd restart 2>/dev/null || true
     if [ -x /etc/init.d/trafficctl-telegram ]; then
         /etc/init.d/trafficctl-telegram start 2>/dev/null || true
     fi

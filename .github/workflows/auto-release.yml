@@ -109,9 +109,35 @@ jobs:
         if: steps.bump.outputs.bump != 'none'
         run: ./build-ipk.sh "${{ steps.bump.outputs.new_version }}" 1
 
-      - name: Build .apk (standalone)
+      - name: Update Makefile version for SDK build
         if: steps.bump.outputs.bump != 'none'
-        run: ./build-apk.sh "${{ steps.bump.outputs.new_version }}" 1
+        run: |
+          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${{ steps.bump.outputs.new_version }}/" Makefile
+          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=1/" Makefile
+
+      - name: Build .apk (via OpenWrt SDK, signed)
+        if: steps.bump.outputs.bump != 'none'
+        uses: openwrt/gh-action-sdk@main
+        env:
+          ARCH: x86_64-25.12.4
+          FEEDNAME: trafficctl
+          PACKAGES: luci-app-trafficctl
+          NO_DEFAULT_FEEDS: 1
+          EXTRA_FEEDS: "src-git|luci|https://github.com/openwrt/luci.git;openwrt-25.12"
+          PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
+          KEY_BUILD: ${{ secrets.USIGN_PRIVATE_KEY }}
+
+      - name: Collect APK
+        if: steps.bump.outputs.bump != 'none'
+        run: |
+          APK=$(find bin/ -name "luci-app-trafficctl*.apk" 2>/dev/null | head -1)
+          if [ -n "$APK" ]; then
+            cp "$APK" "dist/luci-app-trafficctl_${{ steps.bump.outputs.new_version }}-r1_noarch.apk"
+          else
+            echo "::error::APK not found in SDK output"
+            find bin/ -type f -name "*.apk" || true
+            exit 1
+          fi
 
       - name: Create GitHub Release
         if: steps.bump.outputs.bump != 'none'
