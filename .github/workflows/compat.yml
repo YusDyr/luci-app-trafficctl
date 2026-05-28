@@ -30,6 +30,7 @@ jobs:
           NO_DEFAULT_FEEDS: 1
           EXTRA_FEEDS: "src-git|luci|https://github.com/openwrt/luci.git;openwrt-25.12"
           PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
+          V: sc
           KEY_BUILD: ${{ secrets.USIGN_PRIVATE_KEY }}
 
       - name: Collect APK
