@@ -16,6 +16,9 @@ PKG="$1"
 
 # Minimal rootfs containers don't ship with /var/lock or /var/log — opkg needs them.
 mkdir -p /var/lock /var/log
+# Register the "all" architecture so opkg accepts our _all.ipk on rootfs images
+# that don't include it by default.
+grep -q '^arch all ' /etc/opkg.conf 2>/dev/null || echo 'arch all 1' >> /etc/opkg.conf
 
 # ── Phase 1: install without --force-depends, expect failure ─────────────────
 echo "=== Phase 1: install without dep resolution (expecting failure) ==="

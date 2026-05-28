@@ -14,6 +14,9 @@ NEW_PKG="$2"
 
 # Minimal rootfs containers don't ship with /var/lock or /var/log — opkg needs them.
 mkdir -p /var/lock /var/log
+# Register the "all" architecture so opkg accepts our _all.ipk on rootfs images
+# that don't include it by default (most 21.02–24.10 x86-64 variants).
+grep -q '^arch all ' /etc/opkg.conf 2>/dev/null || echo 'arch all 1' >> /etc/opkg.conf
 
 # ── Step 1: install OLD ───────────────────────────────────────────────────────
 echo "=== Installing OLD package: $OLD_PKG ==="

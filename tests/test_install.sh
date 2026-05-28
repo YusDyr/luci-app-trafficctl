@@ -19,6 +19,12 @@ case "$PKG" in
             # Minimal rootfs containers (esp. 21.02–23.05) don't ship with
             # /var/lock or /var/log — opkg refuses to install without these.
             mkdir -p /var/lock /var/log
+            # Older rootfs images (and the x86-64 variants up to 24.10) don't
+            # register the "all" architecture by default, so they reject our
+            # _all.ipk with "incompatible with the architectures configured".
+            # Inject it explicitly (priority 1 is fine — we have no conflicts).
+            grep -q '^arch all ' /etc/opkg.conf 2>/dev/null \
+                || echo 'arch all 1' >> /etc/opkg.conf
             opkg install --force-depends "$PKG"
         else
             echo "ERROR: opkg not available in this container"
