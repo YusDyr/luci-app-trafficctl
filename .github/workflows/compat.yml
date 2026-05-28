@@ -27,7 +27,7 @@ jobs:
           ARCH: x86_64-25.12.4
           FEEDNAME: trafficctl
           PACKAGES: luci-app-trafficctl
-          NO_DEFAULT_FEEDS: 1
+
           EXTRA_FEEDS: "src-git|luci|https://github.com/openwrt/luci.git;openwrt-25.12"
           PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
           V: sc
