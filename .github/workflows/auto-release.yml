@@ -114,13 +114,17 @@ jobs:
             echo 'CHANGELOG_EOF'
           } >> "$GITHUB_OUTPUT"
 
-      - name: Create tag
+      - name: Update Makefile version and tag
         if: steps.bump.outputs.bump != 'none'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${{ steps.bump.outputs.new_version }}/" luci-app-trafficctl/Makefile
+          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=1/" luci-app-trafficctl/Makefile
+          git add luci-app-trafficctl/Makefile
+          git commit -m "chore: bump version to ${{ steps.bump.outputs.new_version }}"
           git tag "${{ steps.bump.outputs.new_tag }}"
-          git push origin "${{ steps.bump.outputs.new_tag }}"
+          git push origin main "${{ steps.bump.outputs.new_tag }}"
 
       - name: Build .ipk (standalone)
         if: steps.bump.outputs.bump != 'none'
@@ -128,12 +132,6 @@ jobs:
           ./build-ipk.sh "${{ steps.bump.outputs.new_version }}" 1
           ln -f dist/luci-app-trafficctl_*_all.ipk dist/luci-app-trafficctl_all.ipk
           ln -f dist/luci-app-trafficctl_*_all.ipk dist/luci-app-trafficctl.ipk
-
-      - name: Update Makefile version for SDK build
-        if: steps.bump.outputs.bump != 'none'
-        run: |
-          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${{ steps.bump.outputs.new_version }}/" luci-app-trafficctl/Makefile
-          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=1/" luci-app-trafficctl/Makefile
 
       - name: Build .apk (via OpenWrt SDK, signed)
         if: steps.bump.outputs.bump != 'none'
