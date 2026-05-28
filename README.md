@@ -498,3 +498,4 @@ Contributions are welcome. Please:
 Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for the full text.
 
 Copyright 2024-2026 Denis Iusupov.
+
