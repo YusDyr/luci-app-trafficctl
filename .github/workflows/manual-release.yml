@@ -1,13 +1,16 @@
 name: Manual Release Rebuild
 
 # Rebuilds and uploads artifacts to an existing GitHub Release.
-# Use this when a release shipped with broken artifacts (e.g. v1.5.0 had a
-# missing status.css and an invalid APK) and we want to replace the assets
-# in place rather than cutting a new version number.
 #
-# The build always runs against the CURRENT main branch (which contains
-# the fixes), not against the broken tag — building from a broken tag
-# would just reproduce the broken artifact.
+# Default behaviour: checks out the tag matching the version and rebuilds
+# from it — this reproduces the original release verbatim (useful for
+# re-signing or reproducibility checks).
+#
+# Exceptional case: if the tag itself shipped with broken build scripts
+# (as v1.5.0 did — missing status.css, invalid APK), pass a ref override
+# (e.g. `main`) so the build uses fixed infrastructure. The artifacts
+# will then contain whatever that ref points at, labelled as the chosen
+# version — effectively rewriting the published release content.
 #
 # Trigger: Actions → Manual Release Rebuild → Run workflow → enter version.
 
@@ -24,8 +27,8 @@ on:
         required: false
         type: string
       ref:
-        description: 'Git ref to build from (default: main — DO NOT use the broken tag)'
-        default: 'main'
+        description: 'Git ref to build from (default: v<version> tag; override to a branch like main if the tag has broken build scripts)'
+        default: ''
         required: false
         type: string
 
@@ -39,25 +42,44 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
+      - name: Resolve build ref
+        id: resolve
+        run: |
+          REF="${{ inputs.ref }}"
+          [ -z "$REF" ] && REF="v${{ inputs.version }}"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "Building from: $REF"
+
       - uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ steps.resolve.outputs.ref }}
           fetch-depth: 0
 
       - name: Verify target release exists
         run: |
           TAG="v${{ inputs.version }}"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            echo "::error::Release $TAG does not exist. Create it first or use the auto-release flow for new versions."
+            echo "::error::Release $TAG does not exist. Create it via auto-release.yml first."
             exit 1
           fi
           echo "Target release $TAG exists, proceeding."
 
-      - name: Patch Makefile version
+      - name: Locate and patch Makefile
         run: |
-          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${{ inputs.version }}/" luci-app-trafficctl/Makefile
-          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=${{ inputs.release_num }}/" luci-app-trafficctl/Makefile
-          grep -E '^PKG_(VERSION|RELEASE)' luci-app-trafficctl/Makefile
+          # Handle both layouts: legacy (Makefile at root) and current
+          # (luci-app-trafficctl/Makefile) so we can rebuild any historical tag.
+          if [ -f luci-app-trafficctl/Makefile ]; then
+            MAKEFILE=luci-app-trafficctl/Makefile
+          elif [ -f Makefile ]; then
+            MAKEFILE=Makefile
+          else
+            echo "::error::No Makefile found at known locations"
+            exit 1
+          fi
+          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${{ inputs.version }}/" "$MAKEFILE"
+          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=${{ inputs.release_num }}/" "$MAKEFILE"
+          echo "Patched $MAKEFILE:"
+          grep -E '^PKG_(VERSION|RELEASE)' "$MAKEFILE"
 
       - name: Build .ipk (standalone)
         run: ./build-ipk.sh "${{ inputs.version }}" "${{ inputs.release_num }}"
@@ -100,24 +122,6 @@ jobs:
       - name: Upload artifacts to release v${{ inputs.version }}
         run: |
           TAG="v${{ inputs.version }}"
-          # --clobber replaces existing assets with the same name
           gh release upload "$TAG" dist/*.ipk dist/*.apk --clobber
           echo "Uploaded artifacts to $TAG"
           gh release view "$TAG" --json assets --jq '.assets[].name'
-
-      - name: Append rebuild note to release body
-        run: |
-          TAG="v${{ inputs.version }}"
-          BODY=$(gh release view "$TAG" --json body --jq .body)
-          MARKER="<!-- rebuilt-marker -->"
-          if printf '%s' "$BODY" | grep -qF "$MARKER"; then
-            echo "Release body already has rebuild marker, skipping append."
-            exit 0
-          fi
-          NOTE=$(printf '%s\n\n%s\n> **Artifacts rebuilt on %s from `%s` (run `%s`).** The original assets had install issues; the IPK/APK above are the corrected build.' \
-            "$BODY" \
-            "$MARKER" \
-            "$(date -u +%Y-%m-%d)" \
-            "${{ inputs.ref }}" \
-            "${{ github.run_id }}")
-          gh release edit "$TAG" --notes "$NOTE"
