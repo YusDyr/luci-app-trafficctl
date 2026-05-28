@@ -17,8 +17,22 @@ set -eu
 SRC="${1:-/src}"
 [ -d "$SRC" ] || { echo "ERROR: source dir $SRC missing"; exit 1; }
 
-# SDK images put the buildroot at /home/build/openwrt
-cd /home/build/openwrt
+# Detect the SDK buildroot — its location varies across openwrt/sdk image versions
+BUILDROOT=""
+for candidate in /builder /home/build/openwrt /home/build; do
+    if [ -d "$candidate" ] && [ -d "$candidate/scripts" ] && \
+       [ -f "$candidate/feeds.conf.default" ]; then
+        BUILDROOT="$candidate"
+        break
+    fi
+done
+if [ -z "$BUILDROOT" ]; then
+    echo "ERROR: SDK buildroot not found (tried /builder, /home/build/openwrt, /home/build)"
+    ls -la /builder /home/build /home/build/openwrt 2>/dev/null
+    exit 1
+fi
+echo "Using SDK buildroot: $BUILDROOT"
+cd "$BUILDROOT"
 
 # Ensure the LuCI feed is enabled (our Makefile includes feeds/luci/luci.mk)
 echo "Configuring feeds..."

@@ -82,7 +82,13 @@ jobs:
           grep -E '^PKG_(VERSION|RELEASE)' "$MAKEFILE"
 
       - name: Build .ipk (standalone)
-        run: ./build-ipk.sh "${{ inputs.version }}" "${{ inputs.release_num }}"
+        run: |
+          ./build-ipk.sh "${{ inputs.version }}" "${{ inputs.release_num }}"
+          # Mirror auto-release: also produce generic-named copies for
+          # stable /releases/latest/download/ URLs (these get clobbered;
+          # the versioned -r<N> file stays as a distinct artifact).
+          ln -f dist/luci-app-trafficctl_*_all.ipk dist/luci-app-trafficctl_all.ipk
+          ln -f dist/luci-app-trafficctl_*_all.ipk dist/luci-app-trafficctl.ipk
 
       - name: Smoke-test the IPK
         run: sh tests/test_build_ipk.sh
@@ -106,7 +112,10 @@ jobs:
             find bin/ -type f -name "*.apk" || true
             exit 1
           fi
-          cp "$APK" "dist/luci-app-trafficctl_${{ inputs.version }}-r${{ inputs.release_num }}_noarch.apk"
+          DEST="dist/luci-app-trafficctl_${{ inputs.version }}-r${{ inputs.release_num }}_noarch.apk"
+          cp "$APK" "$DEST"
+          ln -f "$DEST" dist/luci-app-trafficctl_noarch.apk
+          ln -f "$DEST" dist/luci-app-trafficctl.apk
           ls -la dist/
 
       - name: Verify artifacts include status.css
