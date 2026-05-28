@@ -14,6 +14,9 @@ set -e
 PKG="$1"
 [ -f "$PKG" ] || { echo "Package not found: $PKG"; exit 1; }
 
+# Minimal rootfs containers don't ship with /var/lock or /var/log — opkg needs them.
+mkdir -p /var/lock /var/log
+
 # ── Phase 1: install without --force-depends, expect failure ─────────────────
 echo "=== Phase 1: install without dep resolution (expecting failure) ==="
 case "$PKG" in

@@ -12,6 +12,9 @@ NEW_PKG="$2"
 [ -f "$OLD_PKG" ] || { echo "Old package not found: $OLD_PKG"; exit 1; }
 [ -f "$NEW_PKG" ] || { echo "New package not found: $NEW_PKG"; exit 1; }
 
+# Minimal rootfs containers don't ship with /var/lock or /var/log — opkg needs them.
+mkdir -p /var/lock /var/log
+
 # ── Step 1: install OLD ───────────────────────────────────────────────────────
 echo "=== Installing OLD package: $OLD_PKG ==="
 case "$OLD_PKG" in

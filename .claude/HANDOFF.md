@@ -99,8 +99,21 @@ OpenWrt's APK signing pipeline calls `openssl ec` which only accepts EC keys, bu
 
 Once B2 is resolved with the secret update, B3 (empty v1.5.0 release) gets unblocked by the next manual-release run.
 
-### B3. v1.5.0 release on GitHub is empty
-The user deleted the two broken artifacts (`luci-app-trafficctl_1.5.0-1_all.ipk`, `luci-app-trafficctl_1.5.0-r1_noarch.apk`) at user's request. The release v1.5.0 currently has **zero assets**. The plan was to rebuild via manual-release.yml once B2 is fixed.
+### B3. v1.5.0 release on GitHub is empty — RESOLVED
+~~Empty~~ — Rebuilt successfully via manual-release run `26581321702` (auto-fired after user pushed CI fixes for missing feeds). v1.5.0 now contains 6 healthy assets (3 IPK + 3 APK variants, including stable-URL `luci-app-trafficctl.ipk` / `.apk`). Verified:
+- IPK includes `status.css` (the original bug)
+- IPK Version metadata is `1.5.0-1` with correct deps
+- APK starts with `ADBd` magic bytes — **APKv3 format**, accepted by OpenWrt 25.x apk-tools (the original v1.5.0 was APKv2 fallback from broken build path, rejected by apk-tools)
+
+### Additional CI fixes pushed by another session
+Between handoff B2 resolution and now, another agent session also pushed:
+- `6d075ce` `fix(ci): remove NO_DEFAULT_FEEDS to resolve SDK build failures` — root cause for missing lua.h/ucode/module.h headers in lucihttp
+- `ab39351` `fix(ci): make release check non-fatal in manual-release`
+- `50df448` `fix(ci): remove EXTRA_FEEDS and preserve IPK across SDK step` — SDK action in Docker was wiping local dist/
+- Plus mirror commits on main: `4212fdb`, `0b2653b`, `4853bac`, `fdfbc55`, `ee93b8b`
+- New doc: `docs/APK-FORMAT-FIX.md` (160 lines)
+
+These collectively unblocked auto-release/manual-release for v1.5.0 rebuild.
 
 ## Background tasks that may still be running
 

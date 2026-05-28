@@ -16,6 +16,9 @@ case "$PKG" in
     *.ipk)
         echo "Installing IPK package..."
         if command -v opkg >/dev/null 2>&1; then
+            # Minimal rootfs containers (esp. 21.02–23.05) don't ship with
+            # /var/lock or /var/log — opkg refuses to install without these.
+            mkdir -p /var/lock /var/log
             opkg install --force-depends "$PKG"
         else
             echo "ERROR: opkg not available in this container"
