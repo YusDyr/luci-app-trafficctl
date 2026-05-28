@@ -80,17 +80,24 @@ What I have NOT tried:
 - Adding `workflow_dispatch:` trigger to ci.yml / compat.yml as a temporary unstick mechanism
 - Waiting longer (rate-limit hypothesis — never confirmed)
 
-### B2. SDK APK build genuinely fails on our package
-Independent from B1. Observed in:
-- The cancelled compat.yml run for `937064c` — `Build packages` job hung on `csstidy host-compile` then was cancelled.
-- The manual-release run we triggered for v1.5.0 (run id `26571035657`) — failed at `make package/luci-app-trafficctl/compile` after ~7 seconds, no useful log because `gh-action-sdk@main` doesn't enable `V=s`.
+### B2. SDK APK build was failing because of wrong-format signing key — RESOLVED in code, NEEDS SECRET UPDATE
 
-Hypotheses worth investigating next:
-- The Makefile relies on `include $(TOPDIR)/feeds/luci/luci.mk` — maybe `luci.mk` isn't being resolved during the SDK build context after the restructure.
-- The default `Build/Install` template from `luci.mk` may not find files under `./htdocs/` etc. when invoked from the `luci-app-trafficctl/` subdir of the workspace.
-- Could enable `OPENWRT_VERBOSE: c` in the SDK action env to actually see the make error.
+After adding `V: sc` to the SDK action env (commit `9208acd` on v2 / `d96aa51` on main) and re-running manual-release (run `26574552052`), the actual error became visible:
 
-To debug, the next agent should add `OPENWRT_VERBOSE: c` to the SDK action invocations in compat.yml and manual-release.yml, push, and read the resulting log.
+```
+/builder/staging_dir/host/bin/openssl ec -in /builder/private-key.pem -pubout > /builder/public-key.pem
+unable to load Key
+error:06FFF08E ... expecting a ec key
+make[1]: *** [package/Makefile:66: /builder/public-key.pem] Error 1
+```
+
+OpenWrt's APK signing pipeline calls `openssl ec` which only accepts EC keys, but the committed `keys/apk-signing.pub` was 2048-bit RSA — so `APK_PRIVATE_KEY` GitHub secret was almost certainly also RSA. The restructure was a complete red herring; this had been broken for every APK release.
+
+**Code fix done** (`1ec90cb` on v2): replaced `keys/apk-signing.pub` with a freshly generated NIST P-256 EC public key.
+
+**Manual step pending** — user must update the GitHub secret `APK_PRIVATE_KEY` at https://github.com/YusDyr/luci-app-trafficctl/settings/secrets/actions with the matching EC private key. Once that's done, re-trigger manual-release for v1.5.0 to validate.
+
+Once B2 is resolved with the secret update, B3 (empty v1.5.0 release) gets unblocked by the next manual-release run.
 
 ### B3. v1.5.0 release on GitHub is empty
 The user deleted the two broken artifacts (`luci-app-trafficctl_1.5.0-1_all.ipk`, `luci-app-trafficctl_1.5.0-r1_noarch.apk`) at user's request. The release v1.5.0 currently has **zero assets**. The plan was to rebuild via manual-release.yml once B2 is fixed.
