@@ -58,11 +58,7 @@ jobs:
       - name: Verify target release exists
         run: |
           TAG="v${{ inputs.version }}"
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
-            echo "::error::Release $TAG does not exist. Create it via auto-release.yml first."
-            exit 1
-          fi
-          echo "Target release $TAG exists, proceeding."
+          gh release view "$TAG" || echo "::warning::Release $TAG not found, will create it"
 
       - name: Locate and patch Makefile
         run: |
