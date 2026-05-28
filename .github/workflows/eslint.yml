@@ -20,4 +20,4 @@ jobs:
         with:
           node-version: '20'
       - run: npm ci
-      - run: npx eslint htdocs/
+      - run: npx eslint luci-app-trafficctl/htdocs/
