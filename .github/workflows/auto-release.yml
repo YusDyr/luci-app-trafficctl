@@ -94,6 +94,23 @@ jobs:
             fi
 
             echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${TAG}...${{ steps.bump.outputs.new_tag }}"
+            echo ""
+            echo "---"
+            echo ""
+            echo "### Download"
+            echo ""
+            echo "| File | OpenWrt version | Install command |"
+            echo "|------|----------------|-----------------|"
+            echo "| \`luci-app-trafficctl.ipk\` | 21.02 — 24.10 | \`opkg install <file>\` |"
+            echo "| \`luci-app-trafficctl.apk\` | 25.12+ | \`apk add --allow-untrusted <file>\` |"
+            echo ""
+            echo "Stable URL (always points to the latest release):"
+            echo "\`\`\`"
+            echo "wget https://github.com/${{ github.repository }}/releases/latest/download/luci-app-trafficctl.ipk"
+            echo "wget https://github.com/${{ github.repository }}/releases/latest/download/luci-app-trafficctl.apk"
+            echo "\`\`\`"
+            echo ""
+            echo "Other filenames (\`_all.ipk\`, \`_noarch.apk\`, versioned) are the same file."
             echo 'CHANGELOG_EOF'
           } >> "$GITHUB_OUTPUT"
 
@@ -107,7 +124,10 @@ jobs:
 
       - name: Build .ipk (standalone)
         if: steps.bump.outputs.bump != 'none'
-        run: ./build-ipk.sh "${{ steps.bump.outputs.new_version }}" 1
+        run: |
+          ./build-ipk.sh "${{ steps.bump.outputs.new_version }}" 1
+          ln -f dist/luci-app-trafficctl_*_all.ipk dist/luci-app-trafficctl_all.ipk
+          ln -f dist/luci-app-trafficctl_*_all.ipk dist/luci-app-trafficctl.ipk
 
       - name: Update Makefile version for SDK build
         if: steps.bump.outputs.bump != 'none'
@@ -133,6 +153,8 @@ jobs:
           APK=$(find bin/ -name "luci-app-trafficctl*.apk" 2>/dev/null | head -1)
           if [ -n "$APK" ]; then
             cp "$APK" "dist/luci-app-trafficctl_${{ steps.bump.outputs.new_version }}-r1_noarch.apk"
+            ln -f "dist/luci-app-trafficctl_${{ steps.bump.outputs.new_version }}-r1_noarch.apk" dist/luci-app-trafficctl_noarch.apk
+            ln -f "dist/luci-app-trafficctl_${{ steps.bump.outputs.new_version }}-r1_noarch.apk" dist/luci-app-trafficctl.apk
           else
             echo "::error::APK not found in SDK output"
             find bin/ -type f -name "*.apk" || true

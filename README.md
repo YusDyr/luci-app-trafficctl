@@ -230,6 +230,19 @@ Each test builds the `.ipk`, runs `opkg install --force-depends` inside the real
 > - OpenWrt **21.02 — 24.10** → download `.ipk` (opkg)
 > - OpenWrt **25.12+** and snapshot → download `.apk` (apk)
 
+Each release includes multiple filenames for the same package:
+
+| Asset name | Purpose |
+|-----------|---------|
+| `luci-app-trafficctl.ipk` | Stable download URL (opkg) |
+| `luci-app-trafficctl_all.ipk` | Same file, OpenWrt naming convention |
+| `luci-app-trafficctl_X.Y.Z-1_all.ipk` | Same file, version-pinned |
+| `luci-app-trafficctl.apk` | Stable download URL (apk) |
+| `luci-app-trafficctl_noarch.apk` | Same file, OpenWrt naming convention |
+| `luci-app-trafficctl_X.Y.Z-r1_noarch.apk` | Same file, version-pinned |
+
+The "stable URL" links below always download from the latest release — the filename stays constant across versions.
+
 ### OpenWrt 25.12+ (.apk)
 
 **Option A — LuCI web UI:**
