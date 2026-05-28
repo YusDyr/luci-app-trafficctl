@@ -1,11 +1,24 @@
-# Branch handoff — fix/install-and-feed-testing
+# Branch handoff — fix/install-and-feed-testing-v2
 
 > Purpose: snapshot of the in-flight work on this branch so a fresh agent
 > session can pick up where the previous one left off.
 > Update this file at meaningful checkpoints (decisions, blockers, mid-task
 > pauses). Delete or squash before merging the PR.
 
-Last updated: 2026-05-28 14:30 UTC by Claude Sonnet 4.6
+Last updated: 2026-05-28 12:30 UTC by Claude Sonnet 4.6
+
+**Active PR: #9** (supersedes #8). The original branch
+`fix/install-and-feed-testing` and its PR #8 got stuck — GitHub Actions
+silently stopped triggering `pull_request` workflows after the 4th push.
+Resubmitted as v2 branch on a fresh PR. Still waiting to see if regular
+workflows fire on PR #9 (so far only CodeQL has — same symptom).
+
+Workaround: `workflow_dispatch` (manual-release.yml on main) still works
+and is being used as our build channel for diagnosing the SDK build.
+
+Latest manual-release run: 26574552052 — `version=1.5.0
+ref=fix/install-and-feed-testing-v2`. This run has `V: sc` env set
+on the SDK action so we should finally get a readable make error.
 
 ---
 
