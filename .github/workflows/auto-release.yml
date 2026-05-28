@@ -112,8 +112,8 @@ jobs:
       - name: Update Makefile version for SDK build
         if: steps.bump.outputs.bump != 'none'
         run: |
-          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${{ steps.bump.outputs.new_version }}/" Makefile
-          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=1/" Makefile
+          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${{ steps.bump.outputs.new_version }}/" luci-app-trafficctl/Makefile
+          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=1/" luci-app-trafficctl/Makefile
 
       - name: Build .apk (via OpenWrt SDK, signed)
         if: steps.bump.outputs.bump != 'none'
