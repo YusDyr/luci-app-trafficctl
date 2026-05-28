@@ -132,6 +132,7 @@ jobs:
           ./build-ipk.sh "${{ steps.bump.outputs.new_version }}" 1
           ln -f dist/luci-app-trafficctl_*_all.ipk dist/luci-app-trafficctl_all.ipk
           ln -f dist/luci-app-trafficctl_*_all.ipk dist/luci-app-trafficctl.ipk
+          cp dist/*.ipk /tmp/
 
       - name: Build .apk (via OpenWrt SDK, signed)
         if: steps.bump.outputs.bump != 'none'
@@ -140,7 +141,6 @@ jobs:
           ARCH: x86_64-25.12.4
           FEEDNAME: trafficctl
           PACKAGES: luci-app-trafficctl
-          EXTRA_FEEDS: "src-git|luci|https://github.com/openwrt/luci.git;openwrt-25.12"
           PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
           V: sc
           KEY_BUILD: ${{ secrets.USIGN_PRIVATE_KEY }}
@@ -148,6 +148,8 @@ jobs:
       - name: Collect APK
         if: steps.bump.outputs.bump != 'none'
         run: |
+          mkdir -p dist
+          cp /tmp/luci-app-trafficctl*.ipk dist/ 2>/dev/null || true
           APK=$(find bin/ -name "luci-app-trafficctl*.apk" 2>/dev/null | head -1)
           if [ -n "$APK" ]; then
             cp "$APK" "dist/luci-app-trafficctl_${{ steps.bump.outputs.new_version }}-r1_noarch.apk"

@@ -80,11 +80,10 @@ jobs:
       - name: Build .ipk (standalone)
         run: |
           ./build-ipk.sh "${{ inputs.version }}" "${{ inputs.release_num }}"
-          # Mirror auto-release: also produce generic-named copies for
-          # stable /releases/latest/download/ URLs (these get clobbered;
-          # the versioned -r<N> file stays as a distinct artifact).
           ln -f dist/luci-app-trafficctl_*_all.ipk dist/luci-app-trafficctl_all.ipk
           ln -f dist/luci-app-trafficctl_*_all.ipk dist/luci-app-trafficctl.ipk
+          ls -la dist/
+          cp dist/*.ipk /tmp/
 
       - name: Smoke-test the IPK
         run: sh tests/test_build_ipk.sh
@@ -95,8 +94,6 @@ jobs:
           ARCH: x86_64-25.12.4
           FEEDNAME: trafficctl
           PACKAGES: luci-app-trafficctl
-
-          EXTRA_FEEDS: "src-git|luci|https://github.com/openwrt/luci.git;openwrt-25.12"
           PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
           V: sc
           KEY_BUILD: ${{ secrets.USIGN_PRIVATE_KEY }}
@@ -109,6 +106,8 @@ jobs:
             find bin/ -type f -name "*.apk" || true
             exit 1
           fi
+          mkdir -p dist
+          cp /tmp/luci-app-trafficctl*.ipk dist/ 2>/dev/null || true
           DEST="dist/luci-app-trafficctl_${{ inputs.version }}-r${{ inputs.release_num }}_noarch.apk"
           cp "$APK" "$DEST"
           ln -f "$DEST" dist/luci-app-trafficctl_noarch.apk
