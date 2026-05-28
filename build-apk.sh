@@ -9,6 +9,9 @@ PKG_NAME="luci-app-trafficctl"
 PKG_VERSION="${1:-1.0.0}"
 PKG_RELEASE="${2:-1}"
 
+# Package source tree (feed-compatible subdirectory layout)
+SRC="$(dirname "$0")/${PKG_NAME}"
+
 OUTDIR="dist"
 WORKDIR=$(mktemp -d)
 trap 'rm -rf "$WORKDIR"' EXIT
@@ -17,10 +20,10 @@ trap 'rm -rf "$WORKDIR"' EXIT
 DATA="$WORKDIR/data"
 mkdir -p "$DATA"
 
-cp -a root/* "$DATA/"
+cp -a "$SRC/root/"* "$DATA/"
 mkdir -p "$DATA/www/luci-static/resources/view/trafficctl"
-cp htdocs/luci-static/resources/view/trafficctl/status.js "$DATA/www/luci-static/resources/view/trafficctl/"
-cp htdocs/luci-static/resources/view/trafficctl/status.css "$DATA/www/luci-static/resources/view/trafficctl/"
+cp "$SRC/htdocs/luci-static/resources/view/trafficctl/status.js" "$DATA/www/luci-static/resources/view/trafficctl/"
+cp "$SRC/htdocs/luci-static/resources/view/trafficctl/status.css" "$DATA/www/luci-static/resources/view/trafficctl/"
 
 chmod +x "$DATA/usr/local/bin/trafficctl-"*.sh
 chmod +x "$DATA/usr/libexec/rpcd/luci.trafficctl"

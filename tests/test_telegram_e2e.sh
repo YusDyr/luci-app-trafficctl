@@ -8,7 +8,7 @@ set -e
 PASS=0
 FAIL=0
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BOT_SCRIPT="$REPO_ROOT/root/usr/local/bin/trafficctl-telegram.sh"
+BOT_SCRIPT="$REPO_ROOT/luci-app-trafficctl/root/usr/local/bin/trafficctl-telegram.sh"
 
 assert_contains() {
     local desc="$1" needle="$2" haystack="$3"

@@ -36,14 +36,14 @@ if ! command -v dash >/dev/null 2>&1; then
     SHELL_CMD="sh"
 fi
 
-for script in "$REPO_ROOT"/root/usr/local/bin/trafficctl-*.sh; do
+for script in "$REPO_ROOT"/luci-app-trafficctl/root/usr/local/bin/trafficctl-*.sh; do
     name=$(basename "$script")
     assert_ok "syntax: $name" $SHELL_CMD -n "$script"
 done
 
-assert_ok "syntax: rpcd/trafficctl" $SHELL_CMD -n "$REPO_ROOT/root/usr/libexec/rpcd/luci.trafficctl"
-assert_ok "syntax: hotplug" $SHELL_CMD -n "$REPO_ROOT/root/etc/hotplug.d/iface/99-trafficctl-shapes"
-assert_ok "syntax: init.d/trafficctl-telegram" $SHELL_CMD -n "$REPO_ROOT/root/etc/init.d/trafficctl-telegram"
+assert_ok "syntax: rpcd/trafficctl" $SHELL_CMD -n "$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
+assert_ok "syntax: hotplug" $SHELL_CMD -n "$REPO_ROOT/luci-app-trafficctl/root/etc/hotplug.d/iface/99-trafficctl-shapes"
+assert_ok "syntax: init.d/trafficctl-telegram" $SHELL_CMD -n "$REPO_ROOT/luci-app-trafficctl/root/etc/init.d/trafficctl-telegram"
 
 # ── No bashisms (check common ones) ───────────────────────────────────────
 
@@ -71,10 +71,10 @@ check_bashism() {
     PASS=$((PASS + 1))
 }
 
-for script in "$REPO_ROOT"/root/usr/local/bin/trafficctl-*.sh; do
+for script in "$REPO_ROOT"/luci-app-trafficctl/root/usr/local/bin/trafficctl-*.sh; do
     check_bashism "$script"
 done
-check_bashism "$REPO_ROOT/root/usr/libexec/rpcd/luci.trafficctl"
+check_bashism "$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
 
 # ── IPK build and structure ────────────────────────────────────────────────
 
@@ -122,17 +122,17 @@ fi
 
 # ── Script permissions ─────────────────────────────────────────────────────
 
-for script in "$REPO_ROOT"/root/usr/local/bin/trafficctl-*.sh; do
+for script in "$REPO_ROOT"/luci-app-trafficctl/root/usr/local/bin/trafficctl-*.sh; do
     assert_ok "executable: $(basename "$script")" test -x "$script"
 done
-assert_ok "executable: rpcd" test -x "$REPO_ROOT/root/usr/libexec/rpcd/luci.trafficctl"
-assert_ok "executable: init.d" test -x "$REPO_ROOT/root/etc/init.d/trafficctl-telegram"
+assert_ok "executable: rpcd" test -x "$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
+assert_ok "executable: init.d" test -x "$REPO_ROOT/luci-app-trafficctl/root/etc/init.d/trafficctl-telegram"
 
 # ── JSON validity ──────────────────────────────────────────────────────────
 
 for json_file in \
-    "$REPO_ROOT/root/usr/share/luci/menu.d/luci-app-trafficctl.json" \
-    "$REPO_ROOT/root/usr/share/rpcd/acl.d/luci-app-trafficctl.json"; do
+    "$REPO_ROOT/luci-app-trafficctl/root/usr/share/luci/menu.d/luci-app-trafficctl.json" \
+    "$REPO_ROOT/luci-app-trafficctl/root/usr/share/rpcd/acl.d/luci-app-trafficctl.json"; do
     name=$(basename "$json_file")
     if python3 -c "import json; json.load(open('$json_file'))" 2>/dev/null; then
         PASS=$((PASS + 1))

@@ -31,7 +31,7 @@ nft() { return 1; }
 command() { return 1; }
 export -f uci nft command
 
-. "$(dirname "$0")/../root/usr/local/bin/trafficctl-fw.sh"
+. "$(dirname "$0")/../luci-app-trafficctl/root/usr/local/bin/trafficctl-fw.sh"
 
 # Command injection attempts via IP
 assert_eq "injection: semicolon" 1 "$(tctl_validate_ip '192.168.1.1; rm -rf /' && echo 0 || echo 1)"
@@ -95,7 +95,7 @@ assert_eq "json escape: normal preserved" "hello world" "$(json_escape 'hello wo
 
 # ── No secrets in output ───────────────────────────────────────────────────
 
-SCRIPTS_DIR="$(dirname "$0")/../root/usr/local/bin"
+SCRIPTS_DIR="$(dirname "$0")/../luci-app-trafficctl/root/usr/local/bin"
 assert_not_contains "no hardcoded tokens in scripts" "$(cat "$SCRIPTS_DIR"/trafficctl-telegram.sh)" "BOT_TOKEN_VALUE"
 assert_not_contains "no test credentials" "$(cat "$SCRIPTS_DIR"/trafficctl-telegram.sh)" "123456:ABC"
 

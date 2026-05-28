@@ -274,24 +274,27 @@ ssh root@router 'opkg install https://github.com/YusDyr/luci-app-trafficctl/rele
 ### From source (OpenWrt build system)
 
 ```sh
-# Add to your feeds.conf:
+# Add to your feeds.conf (the package depends on luci, so make sure
+# luci is also configured — it is by default in feeds.conf.default):
 echo "src-git trafficctl https://github.com/YusDyr/luci-app-trafficctl.git" >> feeds.conf
 
-# Update and install:
-./scripts/feeds update trafficctl
-./scripts/feeds install luci-app-trafficctl
+# Update both feeds (luci must be updated before trafficctl is scanned):
+./scripts/feeds update luci trafficctl
+./scripts/feeds install -p trafficctl luci-app-trafficctl
 
-# Build:
+# Enable and build:
+echo 'CONFIG_PACKAGE_luci-app-trafficctl=m' >> .config
+make defconfig
 make package/luci-app-trafficctl/compile V=s
 ```
 
 ### Manual installation
 
-Copy the `root/` tree to the router's filesystem, then restart rpcd:
+Copy the `luci-app-trafficctl/root/` tree to the router's filesystem, then restart rpcd:
 
 ```sh
-scp -r root/* root@router:/
-scp -r htdocs/luci-static root@router:/www/
+scp -r luci-app-trafficctl/root/* root@router:/
+scp -r luci-app-trafficctl/htdocs/luci-static root@router:/www/
 ssh root@router 'chmod +x /usr/local/bin/trafficctl-*.sh /usr/libexec/rpcd/luci.trafficctl && /etc/init.d/rpcd restart'
 ```
 
@@ -434,15 +437,15 @@ The frontend talks to a thin rpcd dispatcher over ubus. The Telegram bot provide
 
 | Path | Role |
 |------|------|
-| `htdocs/.../view/trafficctl/status.js` | Frontend — single ES5 file, no deps |
-| `root/usr/libexec/rpcd/luci.trafficctl` | rpcd backend — JSON-RPC dispatch |
-| `root/usr/local/bin/trafficctl-*.sh` | Backend scripts (monitoring + control) |
-| `root/usr/local/bin/trafficctl-fw.sh` | Firewall abstraction layer (sourced) |
-| `root/usr/local/bin/trafficctl-telegram.sh` | Telegram bot daemon (long polling) |
-| `root/etc/init.d/trafficctl-telegram` | procd init script for the bot |
-| `root/etc/hotplug.d/iface/99-trafficctl-shapes` | Boot persistence for tc + block + ratelimit rules |
-| `root/etc/hotplug.d/dhcp/99-trafficctl-newdevice` | Instant new-device detection via DHCP events |
-| `root/usr/share/rpcd/acl.d/` | ACL permissions |
+| `luci-app-trafficctl/htdocs/.../view/trafficctl/status.js` | Frontend — single ES5 file, no deps |
+| `luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl` | rpcd backend — JSON-RPC dispatch |
+| `luci-app-trafficctl/root/usr/local/bin/trafficctl-*.sh` | Backend scripts (monitoring + control) |
+| `luci-app-trafficctl/root/usr/local/bin/trafficctl-fw.sh` | Firewall abstraction layer (sourced) |
+| `luci-app-trafficctl/root/usr/local/bin/trafficctl-telegram.sh` | Telegram bot daemon (long polling) |
+| `luci-app-trafficctl/root/etc/init.d/trafficctl-telegram` | procd init script for the bot |
+| `luci-app-trafficctl/root/etc/hotplug.d/iface/99-trafficctl-shapes` | Boot persistence for tc + block + ratelimit rules |
+| `luci-app-trafficctl/root/etc/hotplug.d/dhcp/99-trafficctl-newdevice` | Instant new-device detection via DHCP events |
+| `luci-app-trafficctl/root/usr/share/rpcd/acl.d/` | ACL permissions |
 | `Makefile` | OpenWrt package build |
 | `docs/` | Extended docs (architecture, API, compat) |
 

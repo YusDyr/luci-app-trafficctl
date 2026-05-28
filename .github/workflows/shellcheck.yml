@@ -19,7 +19,7 @@ jobs:
       - name: Run ShellCheck
         uses: ludeeus/action-shellcheck@2.0.0
         with:
-          scandir: root/usr/local/bin
-          additional_files: root/etc/hotplug.d/iface/99-trafficctl-shapes root/usr/libexec/rpcd/luci.trafficctl root/etc/init.d/trafficctl-telegram
+          scandir: luci-app-trafficctl/root/usr/local/bin
+          additional_files: luci-app-trafficctl/root/etc/hotplug.d/iface/99-trafficctl-shapes luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl luci-app-trafficctl/root/etc/init.d/trafficctl-telegram
         env:
           SHELLCHECK_OPTS: -x -e SC1091

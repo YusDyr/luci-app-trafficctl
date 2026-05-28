@@ -17,15 +17,15 @@
 
 ```sh
 # Deploy all backend scripts
-scp root/usr/local/bin/trafficctl-*.sh root@192.168.0.1:/usr/local/bin/
+scp luci-app-trafficctl/root/usr/local/bin/trafficctl-*.sh root@192.168.0.1:/usr/local/bin/
 ssh root@192.168.0.1 'chmod +x /usr/local/bin/trafficctl-*.sh'
 
 # Deploy rpcd backend
-scp root/usr/libexec/rpcd/trafficctl root@192.168.0.1:/usr/libexec/rpcd/
+scp luci-app-trafficctl/root/usr/libexec/rpcd/trafficctl root@192.168.0.1:/usr/libexec/rpcd/
 ssh root@192.168.0.1 'chmod +x /usr/libexec/rpcd/trafficctl && /etc/init.d/rpcd restart'
 
 # Deploy frontend
-scp htdocs/luci-static/resources/view/trafficctl/status.js \
+scp luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js \
     root@192.168.0.1:/www/luci-static/resources/view/trafficctl/
 ```
 
@@ -73,9 +73,9 @@ make package/luci-app-trafficctl/compile V=s
 
 ```
 luci-app-trafficctl/
-├── htdocs/luci-static/resources/view/trafficctl/
+├── luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/
 │   └── status.js                        # Frontend (single ES5 file, ~1800 lines)
-├── root/
+├── luci-app-trafficctl/root/
 │   ├── etc/
 │   │   ├── config/trafficctl            # UCI config placeholder
 │   │   └── hotplug.d/iface/
@@ -185,11 +185,11 @@ ssh root@192.168.0.1 'nft list chain inet fw4 forward'
 
 ```sh
 # Shell (requires shellcheck)
-shellcheck root/usr/local/bin/trafficctl-*.sh
+shellcheck luci-app-trafficctl/root/usr/local/bin/trafficctl-*.sh
 
 # JavaScript (requires node + eslint)
 npm install   # installs eslint from package.json devDependencies
-npx eslint htdocs/luci-static/resources/view/trafficctl/status.js
+npx eslint luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js
 ```
 
 ### Automated Tests

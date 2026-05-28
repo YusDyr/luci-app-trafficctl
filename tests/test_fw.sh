@@ -21,7 +21,7 @@ command() { return 1; }
 export -f uci nft command
 
 # Source the firewall library (will fall back to iptables mode)
-. "$(dirname "$0")/../root/usr/local/bin/trafficctl-fw.sh"
+. "$(dirname "$0")/../luci-app-trafficctl/root/usr/local/bin/trafficctl-fw.sh"
 
 # --- tctl_validate_ip ---
 
@@ -71,7 +71,7 @@ _offload_mode() {
             printf '%s\n' "$_nft_out"
         }
         export -f uci nft
-        . "$(dirname "$0")/../root/usr/local/bin/trafficctl-fw.sh"
+        . "$(dirname "$0")/../luci-app-trafficctl/root/usr/local/bin/trafficctl-fw.sh"
         tctl_get_offload_mode
     )
 }

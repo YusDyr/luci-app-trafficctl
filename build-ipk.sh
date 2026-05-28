@@ -6,6 +6,9 @@ PKG_VERSION="${1:-1.0.0}"
 PKG_RELEASE="${2:-1}"
 PKG_ARCH="all"
 
+# Package source tree (feed-compatible subdirectory layout)
+SRC="$(dirname "$0")/${PKG_NAME}"
+
 OUTDIR="dist"
 WORKDIR=$(mktemp -d)
 
@@ -15,10 +18,10 @@ trap 'rm -rf "$WORKDIR"' EXIT
 DATA="$WORKDIR/data"
 mkdir -p "$DATA"
 
-cp -a root/* "$DATA/"
+cp -a "$SRC/root/"* "$DATA/"
 mkdir -p "$DATA/www/luci-static/resources/view/trafficctl"
-cp htdocs/luci-static/resources/view/trafficctl/status.js "$DATA/www/luci-static/resources/view/trafficctl/"
-cp htdocs/luci-static/resources/view/trafficctl/status.css "$DATA/www/luci-static/resources/view/trafficctl/"
+cp "$SRC/htdocs/luci-static/resources/view/trafficctl/status.js" "$DATA/www/luci-static/resources/view/trafficctl/"
+cp "$SRC/htdocs/luci-static/resources/view/trafficctl/status.css" "$DATA/www/luci-static/resources/view/trafficctl/"
 
 # Ensure scripts are executable
 chmod +x "$DATA/usr/local/bin/trafficctl-"*.sh
