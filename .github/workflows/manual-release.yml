@@ -1,0 +1,123 @@
+name: Manual Release Rebuild
+
+# Rebuilds and uploads artifacts to an existing GitHub Release.
+# Use this when a release shipped with broken artifacts (e.g. v1.5.0 had a
+# missing status.css and an invalid APK) and we want to replace the assets
+# in place rather than cutting a new version number.
+#
+# The build always runs against the CURRENT main branch (which contains
+# the fixes), not against the broken tag — building from a broken tag
+# would just reproduce the broken artifact.
+#
+# Trigger: Actions → Manual Release Rebuild → Run workflow → enter version.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version to rebuild (without v prefix, e.g. 1.5.0)'
+        required: true
+        type: string
+      release_num:
+        description: 'Package release number (default: 1)'
+        default: '1'
+        required: false
+        type: string
+      ref:
+        description: 'Git ref to build from (default: main — DO NOT use the broken tag)'
+        default: 'main'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  rebuild:
+    name: Rebuild v${{ inputs.version }}
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      - name: Verify target release exists
+        run: |
+          TAG="v${{ inputs.version }}"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::Release $TAG does not exist. Create it first or use the auto-release flow for new versions."
+            exit 1
+          fi
+          echo "Target release $TAG exists, proceeding."
+
+      - name: Patch Makefile version
+        run: |
+          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${{ inputs.version }}/" luci-app-trafficctl/Makefile
+          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=${{ inputs.release_num }}/" luci-app-trafficctl/Makefile
+          grep -E '^PKG_(VERSION|RELEASE)' luci-app-trafficctl/Makefile
+
+      - name: Build .ipk (standalone)
+        run: ./build-ipk.sh "${{ inputs.version }}" "${{ inputs.release_num }}"
+
+      - name: Smoke-test the IPK
+        run: sh tests/test_build_ipk.sh
+
+      - name: Build .apk via OpenWrt SDK
+        uses: openwrt/gh-action-sdk@main
+        env:
+          ARCH: x86_64-25.12.4
+          FEEDNAME: trafficctl
+          PACKAGES: luci-app-trafficctl
+          NO_DEFAULT_FEEDS: 1
+          EXTRA_FEEDS: "src-git|luci|https://github.com/openwrt/luci.git;openwrt-25.12"
+          PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
+          KEY_BUILD: ${{ secrets.USIGN_PRIVATE_KEY }}
+
+      - name: Collect APK
+        run: |
+          APK=$(find bin/ -name "luci-app-trafficctl*.apk" 2>/dev/null | head -1)
+          if [ -z "$APK" ]; then
+            echo "::error::APK not found in SDK output"
+            find bin/ -type f -name "*.apk" || true
+            exit 1
+          fi
+          cp "$APK" "dist/luci-app-trafficctl_${{ inputs.version }}-r${{ inputs.release_num }}_noarch.apk"
+          ls -la dist/
+
+      - name: Verify artifacts include status.css
+        run: |
+          set -e
+          for ART in dist/*.ipk; do
+            mkdir -p /tmp/verify-ipk && rm -rf /tmp/verify-ipk/*
+            (cd /tmp/verify-ipk && tar xzf "$GITHUB_WORKSPACE/$ART" && tar tzf data.tar.gz) | \
+              grep -q 'status\.css' || { echo "::error::status.css missing from $ART"; exit 1; }
+            echo "OK: status.css present in $ART"
+          done
+
+      - name: Upload artifacts to release v${{ inputs.version }}
+        run: |
+          TAG="v${{ inputs.version }}"
+          # --clobber replaces existing assets with the same name
+          gh release upload "$TAG" dist/*.ipk dist/*.apk --clobber
+          echo "Uploaded artifacts to $TAG"
+          gh release view "$TAG" --json assets --jq '.assets[].name'
+
+      - name: Append rebuild note to release body
+        run: |
+          TAG="v${{ inputs.version }}"
+          BODY=$(gh release view "$TAG" --json body --jq .body)
+          MARKER="<!-- rebuilt-marker -->"
+          if printf '%s' "$BODY" | grep -qF "$MARKER"; then
+            echo "Release body already has rebuild marker, skipping append."
+            exit 0
+          fi
+          NOTE=$(printf '%s\n\n%s\n> **Artifacts rebuilt on %s from `%s` (run `%s`).** The original assets had install issues; the IPK/APK above are the corrected build.' \
+            "$BODY" \
+            "$MARKER" \
+            "$(date -u +%Y-%m-%d)" \
+            "${{ inputs.ref }}" \
+            "${{ github.run_id }}")
+          gh release edit "$TAG" --notes "$NOTE"
