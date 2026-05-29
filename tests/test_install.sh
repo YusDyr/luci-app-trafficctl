@@ -19,28 +19,23 @@ case "$PKG" in
             # Minimal rootfs containers don't ship with /var/lock or /var/log — opkg needs them.
             mkdir -p /var/lock /var/log
 
-            # Detect the native architecture from any installed package and register it
-            # along with "all" — minimal rootfs images don't pre-populate /etc/opkg.conf
-            # with arch directives, so opkg rejects every install with "no valid arch".
+            # Detect native arch and register it + 'all' so opkg accepts our _all.ipk.
+            # Also disable signature check since CI-built IPK is unsigned.
             NATIVE_ARCH=$(awk '/^Architecture: / && $2 != "all" {print $2; exit}' /usr/lib/opkg/status 2>/dev/null)
-            # Some opkg versions read arch from customfeeds.conf, not opkg.conf — register in both
-            mkdir -p /etc/opkg
-            for conf in /etc/opkg.conf /etc/opkg/customfeeds.conf; do
-                if [ -n "$NATIVE_ARCH" ]; then
-                    grep -q "^arch $NATIVE_ARCH " "$conf" 2>/dev/null || echo "arch $NATIVE_ARCH 100" >> "$conf"
-                fi
-                grep -q '^arch all ' "$conf" 2>/dev/null || echo 'arch all 200' >> "$conf"
-            done
+            if [ -n "$NATIVE_ARCH" ]; then
+                grep -q "^arch $NATIVE_ARCH " /etc/opkg.conf || echo "arch $NATIVE_ARCH 100" >> /etc/opkg.conf
+            fi
+            grep -q '^arch all ' /etc/opkg.conf || echo 'arch all 200' >> /etc/opkg.conf
+            # Disable signature check — our CI IPK is unsigned
+            sed -i '/^option check_signature/d' /etc/opkg.conf
 
-            echo "=== ARCH DEBUG ==="
-            echo "NATIVE_ARCH detected: '$NATIVE_ARCH'"
+            echo "=== ARCH DEBUG (post-cleanup) ==="
+            echo "NATIVE_ARCH: '$NATIVE_ARCH'"
             echo "--- /etc/opkg.conf ---"
             cat /etc/opkg.conf
-            echo "--- /etc/opkg/customfeeds.conf ---"
-            cat /etc/opkg/customfeeds.conf 2>/dev/null || echo "(none)"
             echo "--- opkg print-architecture ---"
             opkg print-architecture 2>&1 | head -5 || true
-            echo "=== END ARCH DEBUG ==="
+            echo "=== END ==="
 
             opkg install --force-depends "$PKG"
         else
