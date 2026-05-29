@@ -47,12 +47,12 @@ setup_env() {
     MOCKDIR=$(mktemp -d)
     MOCKBIN="$MOCKDIR/bin"
     MOCKDATA="$MOCKDIR/data"
-    mkdir -p "$MOCKBIN" "$MOCKDATA" "$MOCKDIR/tmp" "$MOCKDIR/etc/trafficmon" \
+    mkdir -p "$MOCKBIN" "$MOCKDATA" "$MOCKDIR/tmp" "$MOCKDIR/etc/trafficctl" \
              "$MOCKDIR/etc/config" "$MOCKDIR/proc" "$MOCKDIR/lib/functions" \
              "$MOCKDIR/etc/init.d" "$MOCKDIR/sys/class/net"
 
     # State files — realistic values as from a Keenetic/OpenWrt home router
-    echo '[]' > "$MOCKDIR/etc/trafficmon/telegram_known.json"
+    echo '[]' > "$MOCKDIR/etc/trafficctl/telegram_known.json"
     echo "" > "$MOCKDIR/tmp/dhcp.leases"
     # Uptime: 2 days, 5 hours, 17 minutes (= 192220 sec)
     echo "192220.45 384440.90" > "$MOCKDIR/proc/uptime"
@@ -324,7 +324,7 @@ run_bot_once() {
         -e 's|sleep "$TG_POLL"|:|g' \
         -e 's|sleep 0.1|:|g' \
         -e 's|SCRIPTS="/usr/local/bin"|SCRIPTS="'"$MOCKBIN"'"|' \
-        -e 's|KNOWN_FILE="/etc/trafficmon/telegram_known.json"|KNOWN_FILE="'"$MOCKDIR"'/etc/trafficmon/telegram_known.json"|' \
+        -e 's|KNOWN_FILE="/etc/trafficctl/telegram_known.json"|KNOWN_FILE="'"$MOCKDIR"'/etc/trafficctl/telegram_known.json"|' \
         -e 's|OFFSET_FILE="/tmp/trafficctl_tg_offset"|OFFSET_FILE="'"$MOCKDIR"'/tmp/offset"|' \
         -e 's|CACHE_FILE="/tmp/trafficctl_tg_devices.json"|CACHE_FILE="'"$MOCKDIR"'/tmp/cache.json"|' \
         -e 's|ONLINE_STATE_FILE="/tmp/trafficctl_tg_online"|ONLINE_STATE_FILE="'"$MOCKDIR"'/tmp/online"|' \
@@ -645,7 +645,7 @@ MOCK
 
     # Known file has a dummy entry (not empty) so seed_known() is skipped,
     # but does NOT contain our target MAC — so it will be detected as new
-    cat > "$MOCKDIR/etc/trafficmon/telegram_known.json" <<'JSON'
+    cat > "$MOCKDIR/etc/trafficctl/telegram_known.json" <<'JSON'
 [{"mac":"a2:b4:c6:d8:e0:12","name":"iPhone-Denis","ip":"192.168.1.45","first_seen":1716200000}]
 JSON
 
@@ -696,7 +696,7 @@ MOCK
     chmod +x "$MOCKBIN/uci"
 
     # Device is in known list (not new)
-    cat > "$MOCKDIR/etc/trafficmon/telegram_known.json" <<'JSON'
+    cat > "$MOCKDIR/etc/trafficctl/telegram_known.json" <<'JSON'
 [{"mac":"e6:f8:0a:1b:2c:3d","name":"Pixel-8","ip":"192.168.1.88","first_seen":"2026-05-01"}]
 JSON
 
@@ -759,7 +759,7 @@ esac
 MOCK
     chmod +x "$MOCKBIN/uci"
 
-    cat > "$MOCKDIR/etc/trafficmon/telegram_known.json" <<'JSON'
+    cat > "$MOCKDIR/etc/trafficctl/telegram_known.json" <<'JSON'
 [{"mac":"e6:f8:0a:1b:2c:3d","name":"Pixel-8","ip":"192.168.1.88","first_seen":"2026-05-01"}]
 JSON
 
@@ -900,7 +900,7 @@ MOCK
     chmod +x "$MOCKBIN/ip"
 
     # Known file has existing devices so seed_known() is skipped
-    cat > "$MOCKDIR/etc/trafficmon/telegram_known.json" <<'JSON'
+    cat > "$MOCKDIR/etc/trafficctl/telegram_known.json" <<'JSON'
 [{"mac":"a2:b4:c6:d8:e0:12","name":"iPhone-Denis","ip":"192.168.1.45","first_seen":1716200000}]
 JSON
 
@@ -980,7 +980,7 @@ esac
 MOCK
     chmod +x "$MOCKBIN/ip"
     # Known file has existing device so seed_known() won't absorb our target MAC
-    cat > "$MOCKDIR/etc/trafficmon/telegram_known.json" <<'JSON'
+    cat > "$MOCKDIR/etc/trafficctl/telegram_known.json" <<'JSON'
 [{"mac":"a2:b4:c6:d8:e0:12","name":"iPhone-Denis","ip":"192.168.1.45","first_seen":1716200000}]
 JSON
 

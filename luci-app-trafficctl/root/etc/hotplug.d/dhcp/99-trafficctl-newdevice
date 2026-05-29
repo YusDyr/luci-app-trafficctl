@@ -6,7 +6,7 @@
 [ "$ACTION" = "add" ] || exit 0
 [ -n "$MACADDR" ] || exit 0
 
-KNOWN_FILE="/etc/trafficmon/telegram_known.json"
+KNOWN_FILE="/etc/trafficctl/telegram_known.json"
 NOTIFY_FLAG="/tmp/trafficctl_tg_newdev"
 
 # Only trigger if telegram bot is enabled

@@ -12,8 +12,8 @@ fi
 
 [ "$ACTION" = "ifup" ] && [ "$INTERFACE" = "lan" ] || exit 0
 
-SHAPES_FILE="/etc/trafficmon/shapes.json"
-RULES_FILE="/etc/trafficmon/rules.json"
+SHAPES_FILE="/etc/trafficctl/shapes.json"
+RULES_FILE="/etc/trafficctl/rules.json"
 
 # Wait for network stack to be ready (up to 10 seconds)
 tries=0

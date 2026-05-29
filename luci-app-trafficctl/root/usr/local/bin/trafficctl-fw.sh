@@ -145,7 +145,7 @@ tctl_hostapd_allow_mac() {
 
 # ── Persistence ───────────────────────────────────────────────────────────
 
-TCTL_RULES_FILE="/etc/trafficmon/rules.json"
+TCTL_RULES_FILE="/etc/trafficctl/rules.json"
 
 tctl_persist_enabled() {
     [ "$(uci -q get trafficctl.main.persist_rules 2>/dev/null)" = "1" ]

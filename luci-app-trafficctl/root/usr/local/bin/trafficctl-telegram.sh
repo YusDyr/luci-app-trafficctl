@@ -5,7 +5,7 @@
 # Only responds to the authorized chat_id configured in UCI.
 
 SCRIPTS="/usr/local/bin"
-KNOWN_FILE="/etc/trafficmon/telegram_known.json"
+KNOWN_FILE="/etc/trafficctl/telegram_known.json"
 OFFSET_FILE="/tmp/trafficctl_tg_offset"
 CACHE_FILE="/tmp/trafficctl_tg_devices.json"
 CACHE_TTL=5

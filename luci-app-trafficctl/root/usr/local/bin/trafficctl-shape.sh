@@ -5,7 +5,7 @@
 
 . /usr/local/bin/trafficctl-fw.sh
 
-SHAPES_FILE="/etc/trafficmon/shapes.json"
+SHAPES_FILE="/etc/trafficctl/shapes.json"
 LAN_DEV=$(tctl_get_lan_device)
 
 ACTION="$1"

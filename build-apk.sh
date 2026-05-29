@@ -43,6 +43,15 @@ mkdir -p "$SCRIPTS"
 
 cat > "$SCRIPTS/post-install" <<'SCRIPT'
 #!/bin/sh
+# Migrate state dir from old /etc/trafficmon to new /etc/trafficctl
+if [ -d /etc/trafficmon ] && [ ! -e /etc/trafficctl ]; then
+    mv /etc/trafficmon /etc/trafficctl
+elif [ -d /etc/trafficmon ] && [ -d /etc/trafficctl ]; then
+    # Both exist — merge by copying any files from old dir
+    cp -an /etc/trafficmon/. /etc/trafficctl/ 2>/dev/null || true
+    rm -rf /etc/trafficmon 2>/dev/null || true
+fi
+
 [ -n "${IPKG_INSTROOT}" ] || /etc/init.d/rpcd restart 2>/dev/null || true
 exit 0
 SCRIPT
@@ -59,6 +68,15 @@ SCRIPT
 cat > "$SCRIPTS/post-upgrade" <<'SCRIPT'
 #!/bin/sh
 if [ -z "${IPKG_INSTROOT}" ]; then
+    # Migrate state dir from old /etc/trafficmon to new /etc/trafficctl
+    if [ -d /etc/trafficmon ] && [ ! -e /etc/trafficctl ]; then
+        mv /etc/trafficmon /etc/trafficctl
+    elif [ -d /etc/trafficmon ] && [ -d /etc/trafficctl ]; then
+        # Both exist — merge by copying any files from old dir
+        cp -an /etc/trafficmon/. /etc/trafficctl/ 2>/dev/null || true
+        rm -rf /etc/trafficmon 2>/dev/null || true
+    fi
+
     /etc/init.d/rpcd restart 2>/dev/null || true
     if [ -x /etc/init.d/trafficctl-telegram ]; then
         /etc/init.d/trafficctl-telegram start 2>/dev/null || true
