@@ -14,16 +14,20 @@ NEW_PKG="$2"
 
 # Minimal rootfs containers don't ship with /var/lock or /var/log — opkg needs them.
 mkdir -p /var/lock /var/log
-# Helper to install IPKs while registering the "all" architecture (rootfs
-# images for older OpenWrt + x86-64 variants don't include it by default).
-opkg_install() {
-    opkg --add-arch all:200 install --force-depends "$1"
-}
+
+# Detect the native architecture from any installed package and register it
+# along with "all" — minimal rootfs images don't pre-populate /etc/opkg.conf
+# with arch directives, so opkg rejects every install with "no valid arch".
+NATIVE_ARCH=$(awk '/^Architecture: / && $2 != "all" {print $2; exit}' /usr/lib/opkg/status 2>/dev/null)
+if [ -n "$NATIVE_ARCH" ]; then
+    grep -q "^arch $NATIVE_ARCH " /etc/opkg.conf || echo "arch $NATIVE_ARCH 100" >> /etc/opkg.conf
+fi
+grep -q '^arch all ' /etc/opkg.conf || echo 'arch all 200' >> /etc/opkg.conf
 
 # ── Step 1: install OLD ───────────────────────────────────────────────────────
 echo "=== Installing OLD package: $OLD_PKG ==="
 case "$OLD_PKG" in
-    *.ipk) opkg_install "$OLD_PKG" ;;
+    *.ipk) opkg install --force-depends "$OLD_PKG" ;;
     *.apk) apk add --allow-untrusted "$OLD_PKG" ;;
     *) echo "Unknown format: $OLD_PKG"; exit 1 ;;
 esac
@@ -49,7 +53,7 @@ echo "Marker line added to /etc/config/trafficctl: $MARKER"
 # ── Step 3: install NEW on top ────────────────────────────────────────────────
 echo "=== Installing NEW package on top: $NEW_PKG ==="
 case "$NEW_PKG" in
-    *.ipk) opkg_install "$NEW_PKG" ;;
+    *.ipk) opkg install --force-depends "$NEW_PKG" ;;
     *.apk) apk add --allow-untrusted "$NEW_PKG" ;;
 esac
 
