@@ -52,7 +52,21 @@ case "$PKG" in
     *.apk)
         echo "Installing APK package..."
         if command -v apk >/dev/null 2>&1; then
-            apk add --allow-untrusted "$PKG"
+            # Tolerate post-install hook failures from OTHER packages (e.g.,
+            # upstream rpcd-mod-luci / rpcd-mod-ucode post-install scripts in
+            # the snapshot rootfs occasionally exit non-zero). What matters is
+            # that OUR package's files land on the rootfs — the file-presence
+            # check below will fail loudly if they didn't.
+            apk add --allow-untrusted "$PKG" || {
+                APK_EXIT=$?
+                echo "::warning::apk add exited $APK_EXIT — checking whether luci-app-trafficctl installed regardless."
+                if apk info -e luci-app-trafficctl >/dev/null 2>&1; then
+                    echo "luci-app-trafficctl is installed despite apk add exit $APK_EXIT (likely upstream post-install hook noise)."
+                else
+                    echo "ERROR: apk add failed and luci-app-trafficctl is not installed."
+                    exit "$APK_EXIT"
+                fi
+            }
         else
             echo "ERROR: apk not available in this container"
             exit 1

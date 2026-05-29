@@ -9,6 +9,10 @@
 #
 # Note: the minimal OpenWrt rootfs containers have no conntrack/luci-base installed
 # out of the box, so this exercises the "missing deps" failure path naturally.
+
+# Diagnostic: confirm script entered + show args. Dependencies 25.12.4 has been
+# exiting 1 in ~2s with no stdout — this surfaces whether the script even runs.
+echo "=== test_dependencies.sh starting === PKG_ARG='$1' sh='$0' uname='$(uname -a 2>/dev/null || echo n/a)'"
 set -e
 
 PKG="$1"
