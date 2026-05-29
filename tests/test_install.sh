@@ -18,10 +18,7 @@ case "$PKG" in
         if command -v opkg >/dev/null 2>&1; then
             mkdir -p /var/lock /var/log
 
-            # Try opkg install with arch autodetect + signature disabled.
-            # If that fails (older opkg versions can't always install our
-            # standalone IPK despite correct config), fall back to manual
-            # tar extraction.
+            # Register native arch + 'all', drop signature check
             NATIVE_ARCH=$(awk '/^Architecture: / && $2 != "all" {print $2; exit}' /usr/lib/opkg/status 2>/dev/null)
             if [ -n "$NATIVE_ARCH" ]; then
                 grep -q "^arch $NATIVE_ARCH " /etc/opkg.conf || echo "arch $NATIVE_ARCH 100" >> /etc/opkg.conf
@@ -29,13 +26,18 @@ case "$PKG" in
             grep -q '^arch all ' /etc/opkg.conf || echo 'arch all 200' >> /etc/opkg.conf
             sed -i '/^option check_signature/d' /etc/opkg.conf
 
-            if opkg install --force-depends "$PKG" 2>&1 | tee /tmp/opkg.out; then
+            # Try opkg install first
+            opkg install --force-depends "$PKG" 2>&1 | tee /tmp/opkg.out || true
+
+            # Verify it actually placed files — older opkg can return 0 without
+            # extracting. If the marker file is missing, fall back to manual tar.
+            if [ -f /usr/local/bin/trafficctl-fw.sh ]; then
                 echo "Installed via opkg."
             else
-                echo "::warning::opkg install failed (older opkg can't handle standalone IPK on some rootfs images), falling back to manual tar extract."
+                echo "::warning::opkg returned success but didn't extract files (known older-opkg quirk on some rootfs images). Falling back to manual tar extract."
                 cd /tmp && rm -rf ipk-extract && mkdir ipk-extract && cd ipk-extract
-                tar xzf "$PKG" && tar xzf data.tar.gz -C /
-                # Make scripts executable (postinst would normally do this)
+                tar xzf "$PKG"
+                tar xzf data.tar.gz -C /
                 chmod +x /usr/local/bin/trafficctl-*.sh 2>/dev/null || true
                 chmod +x /usr/libexec/rpcd/luci.trafficctl 2>/dev/null || true
                 chmod +x /etc/init.d/trafficctl-telegram 2>/dev/null || true
