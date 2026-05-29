@@ -21,10 +21,14 @@ mkdir -p /var/lock /var/log
 # along with "all" — minimal rootfs images don't pre-populate /etc/opkg.conf
 # with arch directives, so opkg rejects every install with "no valid arch".
 NATIVE_ARCH=$(awk '/^Architecture: / && $2 != "all" {print $2; exit}' /usr/lib/opkg/status 2>/dev/null)
-if [ -n "$NATIVE_ARCH" ]; then
-    grep -q "^arch $NATIVE_ARCH " /etc/opkg.conf || echo "arch $NATIVE_ARCH 100" >> /etc/opkg.conf
-fi
-grep -q '^arch all ' /etc/opkg.conf || echo 'arch all 200' >> /etc/opkg.conf
+# Some opkg versions read arch from customfeeds.conf, not opkg.conf — register in both
+mkdir -p /etc/opkg
+for conf in /etc/opkg.conf /etc/opkg/customfeeds.conf; do
+    if [ -n "$NATIVE_ARCH" ]; then
+        grep -q "^arch $NATIVE_ARCH " "$conf" 2>/dev/null || echo "arch $NATIVE_ARCH 100" >> "$conf"
+    fi
+    grep -q '^arch all ' "$conf" 2>/dev/null || echo 'arch all 200' >> "$conf"
+done
 
 # ── Phase 1: install without --force-depends, expect failure ─────────────────
 echo "=== Phase 1: install without dep resolution (expecting failure) ==="
