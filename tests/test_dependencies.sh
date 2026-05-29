@@ -12,26 +12,28 @@
 
 # Diagnostic: confirm script entered + show args. Dependencies 25.12.4 has been
 # exiting 1 in ~2s with no stdout — this surfaces whether the script even runs.
-echo "=== test_dependencies.sh starting === PKG_ARG='$1' sh='$0' uname='$(uname -a 2>/dev/null || echo n/a)'"
-# Trace every line until we figure out why 25.12.4 dies in ~80ms with no output.
-set -x
 set -e
 
 PKG="$1"
 [ -f "$PKG" ] || { echo "Package not found: $PKG"; exit 1; }
 
-# Minimal rootfs containers don't ship with /var/lock or /var/log — opkg needs them.
-mkdir -p /var/lock /var/log
+# opkg-specific setup. Skip entirely on apk-only rootfs images (25.12+) where
+# /usr/lib/opkg/status and /etc/opkg.conf don't exist — running awk on the
+# missing status file makes `set -e` + busybox ash kill the script silently
+# inside `VAR=$(awk ...)`.
+if command -v opkg >/dev/null 2>&1; then
+    # Minimal rootfs containers don't ship with /var/lock or /var/log — opkg needs them.
+    mkdir -p /var/lock /var/log
 
-# Detect native arch and register it + 'all' so opkg accepts our _all.ipk.
-# Also disable signature check since CI-built IPK is unsigned.
-NATIVE_ARCH=$(awk '/^Architecture: / && $2 != "all" {print $2; exit}' /usr/lib/opkg/status 2>/dev/null)
-if [ -n "$NATIVE_ARCH" ]; then
-    grep -q "^arch $NATIVE_ARCH " /etc/opkg.conf || echo "arch $NATIVE_ARCH 100" >> /etc/opkg.conf
+    # Detect native arch and register it + 'all' so opkg accepts our _all.ipk.
+    # Also disable signature check since CI-built IPK is unsigned.
+    NATIVE_ARCH=$(awk '/^Architecture: / && $2 != "all" {print $2; exit}' /usr/lib/opkg/status 2>/dev/null || true)
+    if [ -n "$NATIVE_ARCH" ]; then
+        grep -q "^arch $NATIVE_ARCH " /etc/opkg.conf || echo "arch $NATIVE_ARCH 100" >> /etc/opkg.conf
+    fi
+    grep -q '^arch all ' /etc/opkg.conf || echo 'arch all 200' >> /etc/opkg.conf
+    sed -i '/^option check_signature/d' /etc/opkg.conf
 fi
-grep -q '^arch all ' /etc/opkg.conf || echo 'arch all 200' >> /etc/opkg.conf
-# Disable signature check — our CI IPK is unsigned
-sed -i '/^option check_signature/d' /etc/opkg.conf
 
 # ── Phase 1: install without --force-depends, expect failure ─────────────────
 echo "=== Phase 1: install without dep resolution (expecting failure) ==="
