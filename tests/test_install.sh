@@ -16,15 +16,27 @@ case "$PKG" in
     *.ipk)
         echo "Installing IPK package..."
         if command -v opkg >/dev/null 2>&1; then
-            # Minimal rootfs containers (esp. 21.02–23.05) don't ship with
-            # /var/lock or /var/log — opkg refuses to install without these.
             mkdir -p /var/lock /var/log
-            # Older rootfs images (and the x86-64 variants up to 24.10) don't
-            # register the "all" architecture by default, so they reject our
-            # _all.ipk with "incompatible with the architectures configured".
-            # --add-arch registers it for this invocation with high priority,
-            # overriding whatever (if anything) is in /etc/opkg.conf.
-            opkg --add-arch all:200 install --force-depends "$PKG"
+            # Diagnostic dump so we can read CI logs to understand each image
+            echo "=== DIAG: /etc/opkg.conf ==="
+            cat /etc/opkg.conf 2>/dev/null || echo "(no opkg.conf)"
+            echo "=== DIAG: ls /etc/opkg/ ==="
+            ls -la /etc/opkg/ 2>/dev/null || echo "(no /etc/opkg/)"
+            echo "=== DIAG: opkg arch-related flags ==="
+            opkg --help 2>&1 | grep -iE 'arch|force' || echo "(no arch flags found in help)"
+            echo "=== DIAG: installed package sample ==="
+            grep -m1 -A1 '^Package: busybox$' /usr/lib/opkg/status 2>/dev/null || echo "(no status)"
+            echo "=== END DIAG ==="
+            # Older rootfs images don't register the "all" architecture by
+            # default, so they reject our _all.ipk. Try --add-arch first, fall
+            # back to writing opkg.conf if the flag isn't supported.
+            opkg --add-arch all:200 install --force-depends "$PKG" 2>&1 | tee /tmp/opkg-out
+            if grep -qE 'Unknown package|incompatible' /tmp/opkg-out; then
+                echo "=== Retry: prepend 'arch all 100' to /etc/opkg.conf ==="
+                printf 'arch all 100\n%s' "$(cat /etc/opkg.conf)" > /etc/opkg.conf.new
+                mv /etc/opkg.conf.new /etc/opkg.conf
+                opkg install --force-depends "$PKG"
+            fi
         else
             echo "ERROR: opkg not available in this container"
             exit 1
