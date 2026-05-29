@@ -85,9 +85,18 @@ case "$NEW_PKG" in
             echo "NEW installed via opkg (file updated)."
         else
             echo "::warning::opkg install of NEW silently failed; falling back to manual tar extract."
+            # Preserve user-modified config across raw tar extract — opkg's
+            # conffiles machinery is what normally protects this file, and we
+            # bypass it in the fallback path.
+            CONFIG_BACKUP=$(mktemp)
+            cp /etc/config/trafficctl "$CONFIG_BACKUP" 2>/dev/null || true
             EXTRACT_DIR=$(mktemp -d)
             ( cd "$EXTRACT_DIR" && tar xzf "$NEW_PKG" && tar xzf data.tar.gz -C / )
             rm -rf "$EXTRACT_DIR"
+            if [ -s "$CONFIG_BACKUP" ]; then
+                cp "$CONFIG_BACKUP" /etc/config/trafficctl
+            fi
+            rm -f "$CONFIG_BACKUP"
             chmod +x /usr/local/bin/trafficctl-*.sh 2>/dev/null || true
             chmod +x /usr/libexec/rpcd/luci.trafficctl 2>/dev/null || true
             chmod +x /etc/init.d/trafficctl-telegram 2>/dev/null || true
