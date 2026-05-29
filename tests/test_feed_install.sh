@@ -47,8 +47,8 @@ echo "--- feeds.conf ---"
 cat feeds.conf
 echo "------------------"
 
-echo "Running scripts/feeds update luci trafficctl..."
-./scripts/feeds update luci trafficctl
+echo "Running scripts/feeds update -a (need all feeds so liblua headers stage for lucihttp-lua)..."
+./scripts/feeds update -a
 
 echo "Running scripts/feeds install -p trafficctl luci-app-trafficctl..."
 ./scripts/feeds install -p trafficctl luci-app-trafficctl
@@ -57,14 +57,24 @@ echo "Listing trafficctl feed contents..."
 ls -la package/feeds/trafficctl/ || {
     echo "ERROR: feed install did not create symlinks"; exit 1; }
 
+# Install all feed packages so transitive deps (lua headers for lucihttp-lua,
+# ucode headers for lucihttp-ucode) are staged. Without this, the lucihttp
+# compile step explodes with "lua.h: No such file or directory".
+echo "Running scripts/feeds install -a..."
+./scripts/feeds install -a
+
 # Verify the package was registered with the buildroot
 echo "Verifying package is known to buildroot..."
 make defconfig V=s 2>&1 | tail -20
 if ! grep -q "luci-app-trafficctl" .config 2>/dev/null; then
     echo "Enabling package in .config..."
     echo 'CONFIG_PACKAGE_luci-app-trafficctl=m' >> .config
-    make defconfig
 fi
+# luci-app-trafficctl doesn't need lucihttp's lua/ucode bindings — disable them
+# so we don't have to compile bindings we don't use.
+echo 'CONFIG_PACKAGE_liblucihttp-lua=n' >> .config
+echo 'CONFIG_PACKAGE_liblucihttp-ucode=n' >> .config
+make defconfig
 
 echo "Building package..."
 make package/luci-app-trafficctl/compile V=s -j"$(nproc)" 2>&1 | tail -50
