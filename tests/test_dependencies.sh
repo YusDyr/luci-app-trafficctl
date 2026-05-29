@@ -13,6 +13,8 @@
 # Diagnostic: confirm script entered + show args. Dependencies 25.12.4 has been
 # exiting 1 in ~2s with no stdout — this surfaces whether the script even runs.
 echo "=== test_dependencies.sh starting === PKG_ARG='$1' sh='$0' uname='$(uname -a 2>/dev/null || echo n/a)'"
+# Trace every line until we figure out why 25.12.4 dies in ~80ms with no output.
+set -x
 set -e
 
 PKG="$1"
