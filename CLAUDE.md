@@ -116,8 +116,9 @@ ssh root@192.168.0.1 sh -c '"cat > /www/luci-static/resources/view/trafficctl/st
 - tc/HTB shaping: classid derived from IP octets (`1:<hex(o3*256+o4)>`)
 - Reserved HTB classids: `1:1` (root), `1:fffe` (default) — skip these
 - Burst calculation for tc: `rate_kbit * 125 / 100` (10ms of data, min 1600 bytes)
-- Persistent shapes stored in `/etc/trafficmon/shapes.json`
-- Persistent blocks/ratelimits stored in `/etc/trafficmon/rules.json` (when `persist_rules` enabled)
+- Persistent shapes stored in `/etc/trafficctl/shapes.json`
+- Persistent blocks/ratelimits stored in `/etc/trafficctl/rules.json` (when `persist_rules` enabled)
+- Note: Only `/etc/config/trafficctl` is tracked as a conffile for package upgrades; runtime JSON files are non-essential and can be regenerated
 - Speed measurement: conntrack bytes (BEFORE tc shaper), so reported speed may exceed shaped limit
 - Spike filter: cap speed at 125 MB/s (1 Gbit/s), discard anomalous samples
 - Y-axis scaling: 98th percentile, nice ticks (multiples of 100/500 Kbit/s, min 5 gridlines)

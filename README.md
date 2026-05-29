@@ -227,6 +227,7 @@ Each test builds the `.ipk`, runs `opkg install --force-depends` inside the real
 ## Installation
 
 > **Which file do I need?**
+> - **Recommended**: v1.6.5+ (earlier releases are broken — missing status.css, invalid APK format)
 > - OpenWrt **21.02 — 24.10** → download `.ipk` (opkg)
 > - OpenWrt **25.12+** and snapshot → download `.apk` (apk)
 
@@ -257,6 +258,7 @@ The "stable URL" links below always download from the latest release — the fil
 wget -O /etc/apk/keys/luci-app-trafficctl.pub https://raw.githubusercontent.com/YusDyr/luci-app-trafficctl/main/keys/apk-signing.pub
 # Install:
 cd /tmp && wget https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.apk && apk add luci-app-trafficctl.apk
+# If you get "modified conffile" on upgrade, add `--force-maintainer` to override
 ```
 
 **Option C — SSH (without key, quick install):**
@@ -388,8 +390,10 @@ opkg install curl
 
 ### Persistence
 
-- Shaping rules are always saved to `/etc/trafficmon/shapes.json` and restored on boot.
-- Block and rate-limit rules are optionally persistent when `persist_rules` is enabled in Settings > Logging & Persistence (saved to `/etc/trafficmon/rules.json`).
+**Note**: As of v1.6.5+, the runtime data directory is `/etc/trafficctl/` (previously `/etc/trafficmon/`).
+
+- Shaping rules are always saved to `/etc/trafficctl/shapes.json` and restored on boot.
+- Block and rate-limit rules are optionally persistent when `persist_rules` is enabled in Settings > Logging & Persistence (saved to `/etc/trafficctl/rules.json`).
 - On reboot, the hotplug script at `/etc/hotplug.d/iface/99-trafficctl-shapes` restores all saved rules (shapes, blocks, ratelimits) when the LAN interface comes up.
 
 ### Activity Logging

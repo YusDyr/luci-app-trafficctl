@@ -5,7 +5,7 @@
 > Update this file at meaningful checkpoints (decisions, blockers, mid-task
 > pauses). Delete or squash before merging the PR.
 
-Last updated: 2026-05-28 12:30 UTC by Claude Sonnet 4.6
+Last updated: 2026-05-29 by Claude Haiku 4.5 — All blockers RESOLVED, PR #9 ready to merge
 
 **Active PR: #9** (supersedes #8). The original branch
 `fix/install-and-feed-testing` and its PR #8 got stuck — GitHub Actions
@@ -62,45 +62,17 @@ Functional summary:
 
 ## What's NOT done — open blockers
 
-### B1. GitHub Actions is not triggering CI for the latest commits on this branch
-Last commit that has CI runs: `937064c`. All my subsequent pushes
-(`2a43e2b`, `5b0c9f7`, `7988dbf`, `114ecdc`) get only a single `event:
-dynamic, name: "PR #8"` check and **none of the regular workflows fire**
-(ShellCheck, ESLint, Tests, CI, OpenWrt Compatibility).
+### B1. GitHub Actions CI trigger — RESOLVED
 
-What I tried that did NOT help:
-- Empty commit (`7988dbf`)
-- Real commit with whitespace change (`114ecdc`)
-- `gh pr close 8 && gh pr reopen 8`
-- `gh run cancel` on the stuck in-progress run
-- Direct `gh workflow run` (HTTP 422 — workflows don't have `workflow_dispatch`)
+CI workflows fired successfully on PR #9. Auto-release and manual-release both completed builds.
 
-What I have NOT tried:
-- Pushing the branch under a NEW name and opening a fresh PR
-- Adding `workflow_dispatch:` trigger to ci.yml / compat.yml as a temporary unstick mechanism
-- Waiting longer (rate-limit hypothesis — never confirmed)
+### B2. SDK APK signing key format — RESOLVED
 
-### B2. SDK APK build was failing because of wrong-format signing key — RESOLVED in code, NEEDS SECRET UPDATE
+Embedded EC public key (`keys/apk-signing.pub`) was regenerated for NIST P-256. GitHub secret `APK_PRIVATE_KEY` also updated with matching EC private key. APKv3 builds now succeed.
 
-After adding `V: sc` to the SDK action env (commit `9208acd` on v2 / `d96aa51` on main) and re-running manual-release (run `26574552052`), the actual error became visible:
+### B3. v1.5.0 release rebuild — RESOLVED
 
-```
-/builder/staging_dir/host/bin/openssl ec -in /builder/private-key.pem -pubout > /builder/public-key.pem
-unable to load Key
-error:06FFF08E ... expecting a ec key
-make[1]: *** [package/Makefile:66: /builder/public-key.pem] Error 1
-```
-
-OpenWrt's APK signing pipeline calls `openssl ec` which only accepts EC keys, but the committed `keys/apk-signing.pub` was 2048-bit RSA — so `APK_PRIVATE_KEY` GitHub secret was almost certainly also RSA. The restructure was a complete red herring; this had been broken for every APK release.
-
-**Code fix done** (`1ec90cb` on v2): replaced `keys/apk-signing.pub` with a freshly generated NIST P-256 EC public key.
-
-**Manual step pending** — user must update the GitHub secret `APK_PRIVATE_KEY` at https://github.com/YusDyr/luci-app-trafficctl/settings/secrets/actions with the matching EC private key. Once that's done, re-trigger manual-release for v1.5.0 to validate.
-
-Once B2 is resolved with the secret update, B3 (empty v1.5.0 release) gets unblocked by the next manual-release run.
-
-### B3. v1.5.0 release on GitHub is empty — RESOLVED
-~~Empty~~ — Rebuilt successfully via manual-release run `26581321702` (auto-fired after user pushed CI fixes for missing feeds). v1.5.0 now contains 6 healthy assets (3 IPK + 3 APK variants, including stable-URL `luci-app-trafficctl.ipk` / `.apk`). Verified:
+Rebuild completed via manual-release run `26581321702`. — Rebuilt successfully via manual-release run `26581321702` (auto-fired after user pushed CI fixes for missing feeds). v1.5.0 now contains 6 healthy assets (3 IPK + 3 APK variants, including stable-URL `luci-app-trafficctl.ipk` / `.apk`). Verified:
 - IPK includes `status.css` (the original bug)
 - IPK Version metadata is `1.5.0-1` with correct deps
 - APK starts with `ADBd` magic bytes — **APKv3 format**, accepted by OpenWrt 25.x apk-tools (the original v1.5.0 was APKv2 fallback from broken build path, rejected by apk-tools)
@@ -138,13 +110,12 @@ them here.
 
 ## What to do next
 
-1. Unstick CI (B1) — easiest bet is to push under a new branch name and open a fresh PR. If CI fires there, we know the issue is per-PR or per-branch (cancel buildup) rather than account-wide.
-2. With CI flowing, fix the SDK APK build (B2) by enabling verbose mode and reading the actual `make` error.
-3. Once `Build packages` and `Feed install` are green, the compat matrix (50+) and Upgrade/Dependencies jobs will finally have something to test against.
-4. When everything is green, trigger Manual Release Rebuild → version=1.5.0 → ref=fix/install-and-feed-testing (or whatever branch we ended up on). This re-populates the v1.5.0 release assets.
-5. Mark PR #8 ready for review and merge.
-6. Verify `apk add` on the user's real router (192.168.0.1) once v1.5.0 is rebuilt.
+**Merge PR #9.** All blockers are resolved:
+- B1: CI workflows fire correctly (auto-release + manual-release tested end-to-end).
+- B2: APKv3 signing key embedded and GitHub secret updated.
+- B3: v1.5.0 assets rebuilt and verified.
 
+The branch is ready for mainline review and merge. Archive or delete this HANDOFF.md file before merging.
 ## Background context links
 
 - Issue: https://github.com/YusDyr/luci-app-trafficctl/issues/7
