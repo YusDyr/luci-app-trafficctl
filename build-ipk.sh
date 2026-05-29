@@ -47,10 +47,12 @@ Description: Per-device traffic monitoring, rate limiting (nft/iptables),
  traffic shaping (tc/HTB), internet blocking, and WiFi MAC filtering.
 EOF
 
+# Conffiles must list ONLY files that ship in data.tar.gz and may be user-edited.
+# shapes.json / telegram_known.json are runtime state created by scripts at
+# runtime — they're NOT in the package, so listing them as conffiles makes
+# opkg complain "Failed to open file" on every install.
 cat > "$CTRL/conffiles" <<EOF
 /etc/config/trafficctl
-/etc/trafficmon/shapes.json
-/etc/trafficmon/telegram_known.json
 EOF
 
 cat > "$CTRL/preinst" <<'EOF'

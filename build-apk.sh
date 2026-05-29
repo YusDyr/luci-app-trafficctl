@@ -30,11 +30,11 @@ chmod +x "$DATA/usr/libexec/rpcd/luci.trafficctl"
 [ -d "$DATA/etc/init.d" ] && chmod +x "$DATA/etc/init.d/"*
 
 # --- Conffiles (embedded in lib/apk/packages for APK protected-paths) ---
+# Only list files that ship in the package; shapes.json / telegram_known.json
+# are runtime state created by scripts and should NOT be conffiles.
 mkdir -p "$DATA/lib/apk/packages"
 cat > "$DATA/lib/apk/packages/${PKG_NAME}.conffiles" <<'EOF'
 /etc/config/trafficctl
-/etc/trafficmon/shapes.json
-/etc/trafficmon/telegram_known.json
 EOF
 
 # --- Lifecycle scripts ---
