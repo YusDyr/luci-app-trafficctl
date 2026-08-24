@@ -99,7 +99,7 @@ jobs:
             type_regex="$1"
             git log "$RANGE" --reverse --pretty=format:'%H%x09%s%x09%b%x1e' |
               tr -d '\r' |
-              awk -v type_re="^${type_regex}(\\([^)]*\\))?:" \
+              awk -v type_re="^${type_regex}([(][^)]*[)])?:" \
                   -v repo="$REPO" '
                 BEGIN { RS = "\x1e"; FS = "\t" }
                 {
