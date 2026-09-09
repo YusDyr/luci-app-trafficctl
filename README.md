@@ -190,6 +190,7 @@ I hope it turns out as useful for you as it has been for me.
 | `luci-base` | Web interface | Always required |
 | `rpcd` | Backend RPC | Always required |
 | `tc-full` + `kmod-sched-core` + `kmod-sched-htb` | Traffic shaping | For HTB/fq_codel queues |
+| `kmod-ifb` | Upload shaping | Without it the shaper applies to download only, and reports that |
 | `iw-full` | Interface detection | WiFi band identification |
 | `bridge-utils` | Interface detection | LAN port identification (brctl) |
 | `curl` + `jsonfilter` | Telegram bot | jsonfilter is part of base OpenWrt |

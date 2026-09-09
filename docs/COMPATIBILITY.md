@@ -59,6 +59,7 @@ The package contains no compiled code (all shell scripts and JavaScript), so it 
 | `tc-full` | Traffic control utility | ~180 KB |
 | `kmod-sched-core` | Kernel scheduler framework | ~20 KB |
 | `kmod-sched-htb` | HTB qdisc kernel module | ~15 KB |
+| `kmod-ifb` | Intermediate device used to shape upload | ~5 KB |
 
 If `tc` is not installed, the shaping feature gracefully degrades: the UI still works but shaper actions return an error message explaining what to install.
 
@@ -121,7 +122,7 @@ In practice, both achieve the same result (excess packets are dropped), but the 
 
 3. **DHCP lease dependency** -- Device names and MACs are resolved from `/tmp/dhcp.leases`. Devices with static IPs that bypass DHCP will show as IP addresses only.
 
-4. **No upload shaping** -- tc/HTB is applied on br-lan egress (which is device download). Upload shaping would require an additional qdisc on the WAN interface, which is not implemented.
+4. **Upload shaping needs `kmod-ifb`** -- both directions are shaped. Download is handled by tc/HTB on the LAN bridge's egress; upload is shaped on an IFB device fed from LAN-side ingress, because a `match ip src` filter on the WAN side sees post-NAT addresses and would match nothing. That requires the `kmod-ifb` kernel module: without it the shaper falls back to download-only and says so, rather than reporting success while leaving upload unlimited.
 
 5. **Rate limiter precision** -- nftables rate limiting uses kbytes/second granularity. For rates below 8 kbit/s, the minimum effective limit is 1 kbyte/s (8 kbit/s).
 
