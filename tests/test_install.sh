@@ -50,6 +50,17 @@ case "$PKG" in
     *.apk)
         echo "Installing APK package..."
         if command -v apk >/dev/null 2>&1; then
+            # Installing a local .apk still resolves its dependencies from the
+            # distribution feeds, so unreachable feeds make this test impossible
+            # to run — a different thing from the package being broken. Probe
+            # first and report that distinctly (78), so the caller can tell
+            # "upstream is down" from "our package failed to install".
+            if ! apk update >/tmp/apk-update.out 2>&1; then
+                echo "::warning::package feeds are unreachable in this image:"
+                tail -5 /tmp/apk-update.out
+                echo "SKIP: cannot resolve dependencies, upstream feeds unavailable"
+                exit 78
+            fi
             # Tolerate post-install hook failures from OTHER packages (e.g.,
             # upstream rpcd-mod-luci / rpcd-mod-ucode post-install scripts in
             # the snapshot rootfs occasionally exit non-zero). What matters is

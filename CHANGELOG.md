@@ -4,6 +4,26 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.13.4] - 2026-09-09
+
+### Bug Fixes
+- stop release notes hanging on a commit that cites an issue ([613f5c3](https://github.com/YusDyr/luci-app-trafficctl/commit/613f5c34d63ff1221a7b4fc6a8b5a7952f69672c))
+  The auto-linking loop in the release-notes generator rewrites `subj` in
+  place and re-matches from the start:
+
+### Other
+- tell "snapshot feeds are down" apart from "our package is broken" ([895a09f](https://github.com/YusDyr/luci-app-trafficctl/commit/895a09f236d72d3f4869ad49b00fb37bb778a917))
+  The snapshot/x86-64 job has failed on every open PR for two days, blocking
+  #48, #49 and #50 — none of which could affect it (two touched only README,
+  one only an awk expression in a workflow). Inside the container apk fails
+  with "wget: exited with error 8" then "unable to select packages": OpenWrt's
+  rolling snapshot feeds are not serving. The same job passed on main on
+  2026-09-04, the image tag resolves fine, and reruns a day apart did not help.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.13.3...v1.13.4
+
+---
+
 ## [1.13.3] - 2026-08-25
 
 ### Bug Fixes

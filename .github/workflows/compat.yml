@@ -115,12 +115,30 @@ jobs:
           else
             PKG="/dist/luci-app-trafficctl_0.0.0-test-1_all.ipk"
           fi
+          set +e
           docker run --rm \
             --entrypoint /bin/sh \
             -v "$PWD/dist:/dist" \
             -v "$PWD/tests:/tests" \
             "$IMAGE" \
             /tests/test_install.sh "$PKG"
+          rc=$?
+          set -e
+          # 78 means the image's package feeds were unreachable, so the test
+          # could not resolve dependencies and never got to judge our package.
+          # Tolerated ONLY for the rolling snapshot target, whose feeds are
+          # rebuilt continuously and are legitimately unavailable at times.
+          # A pinned release with dead feeds is itself worth a red build, and
+          # any other failure stays red everywhere.
+          if [ "$rc" = "78" ]; then
+            if [ "${{ matrix.version }}" = "snapshot" ]; then
+              echo "::warning::snapshot feeds unavailable — package not verified on snapshot this run"
+              exit 0
+            fi
+            echo "::error::package feeds unavailable for ${{ matrix.version }} (pinned release — not tolerated)"
+            exit 1
+          fi
+          exit $rc
 
   # ──────────────────────────────────────────────────────────────────────────
   # Feed install — reproduce the user-facing `./scripts/feeds update` workflow
