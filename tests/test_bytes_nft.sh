@@ -152,6 +152,94 @@ OUT=$(run_bytes_nft)
 assert_eq "output starts with ["  "[" "$(echo "$OUT" | cut -c1)"
 assert_eq "output ends with ]"    "]" "$(echo "$OUT" | rev | cut -c1)"
 
+# ── rule orientation: which map each direction is keyed by ──────────────────
+#
+# The maps used to be keyed the wrong way round: bytes_in by `ip saddr`, which
+# is traffic the device SENT, i.e. its upload — while trafficctl-bytes.sh (the
+# conntrack backend this script substitutes for), docs/API.md and the DL/UL
+# columns in status.js all define bytes_in as download. The same RPC call
+# returned DL and UL swapped depending on the router's offload mode.
+#
+# These tests pin the orientation at the point where the rules are created,
+# not where the output is parsed, so a future swap in the awk cannot make them
+# pass while the counters are wrong.
+
+NFT_LOG="$TMPDIR/nft.log"
+CHAIN_FILE="$TMPDIR/chain.txt"
+
+cat > "$MOCKBIN/nft" <<MOCK
+#!/bin/sh
+echo "\$*" >> "$NFT_LOG"
+case "\$*" in
+    "list tables") echo "table inet fw4" ;;
+    "list chain inet trafficctl_mon mon_forward") cat "$CHAIN_FILE" 2>/dev/null ;;
+    "list map inet trafficctl_mon bytes_in") cat "$BYTES_IN_FILE" 2>/dev/null ;;
+    "list map inet trafficctl_mon bytes_out") cat "$BYTES_OUT_FILE" 2>/dev/null ;;
+    *) exit 0 ;;
+esac
+exit 0
+MOCK
+chmod +x "$MOCKBIN/nft"
+
+cat > "$BYTES_IN_FILE" <<'EOF'
+elements = { 192.168.0.100 : counter packets 584 bytes 892341 }
+EOF
+cat > "$BYTES_OUT_FILE" <<'EOF'
+elements = { 192.168.0.100 : counter packets 312 bytes 45678 }
+EOF
+
+# fresh install — no chain yet
+: > "$CHAIN_FILE"
+: > "$NFT_LOG"
+run_bytes_nft >/dev/null
+
+assert_eq "fresh: bytes_in is keyed by daddr (download)" "1" \
+    "$(grep -c 'add rule inet trafficctl_mon mon_forward update @bytes_in { ip daddr counter }' "$NFT_LOG")"
+assert_eq "fresh: bytes_out is keyed by saddr (upload)" "1" \
+    "$(grep -c 'add rule inet trafficctl_mon mon_forward update @bytes_out { ip saddr counter }' "$NFT_LOG")"
+assert_eq "fresh: no inverted bytes_in rule" "0" \
+    "$(grep -c '@bytes_in { ip saddr counter }' "$NFT_LOG")"
+
+# upgrade from a router that already carries the old, inverted rules.
+# The creation gate must NOT accept them: a looser check ("does any rule
+# mention saddr?") matches the broken chain too, so the corrected rules would
+# only ever reach fresh installs.
+cat > "$CHAIN_FILE" <<'EOF'
+table inet trafficctl_mon {
+	chain mon_forward {
+		type filter hook forward priority -200; policy accept;
+		update @bytes_in { ip saddr counter }
+		update @bytes_out { ip daddr counter }
+	}
+}
+EOF
+: > "$NFT_LOG"
+run_bytes_nft >/dev/null
+
+assert_eq "upgrade: stale table is dropped" "1" \
+    "$(grep -c '^delete table inet trafficctl_mon$' "$NFT_LOG")"
+assert_eq "upgrade: corrected bytes_in rule is installed" "1" \
+    "$(grep -c 'update @bytes_in { ip daddr counter }' "$NFT_LOG")"
+
+# already correct — must be a no-op, or every poll would delete and rebuild
+# the table and the counters would never accumulate.
+cat > "$CHAIN_FILE" <<'EOF'
+table inet trafficctl_mon {
+	chain mon_forward {
+		type filter hook forward priority -200; policy accept;
+		update @bytes_in { ip daddr counter }
+		update @bytes_out { ip saddr counter }
+	}
+}
+EOF
+: > "$NFT_LOG"
+run_bytes_nft >/dev/null
+
+assert_eq "correct chain: table is not dropped" "0" \
+    "$(grep -c '^delete table' "$NFT_LOG")"
+assert_eq "correct chain: no rules re-added" "0" \
+    "$(grep -c '^add rule' "$NFT_LOG")"
+
 # ── unsupported dynamic counter maps: falls back to conntrack script ────────
 # When `nft list map ... bytes_in` fails (kernel lacks dynamic counter maps),
 # the script must re-exec trafficctl-bytes.sh instead of returning [] forever.
