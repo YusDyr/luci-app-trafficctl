@@ -8,8 +8,24 @@
 
 command -v nft >/dev/null 2>&1 || { echo '[]'; exit 0; }
 
-# Create table/maps/chain/rules if not already present (idempotent)
-if ! nft list chain inet trafficctl_mon mon_forward 2>/dev/null | grep -q "saddr"; then
+# Create table/maps/chain/rules if not already present (idempotent).
+#
+# The gate matches the CURRENT rule orientation, not merely "some rule exists".
+# Until 1.13.x the maps were keyed the other way round (bytes_in by saddr), so
+# a router upgrading from that version already has the chain: a looser check
+# would leave the old, inverted rules in place forever and the fix would only
+# ever reach fresh installs.
+#
+# Direction convention, matching trafficctl-bytes.sh and docs/API.md:
+#   bytes_in  = traffic toward the device  (download) -> keyed by ip daddr
+#   bytes_out = traffic from the device    (upload)   -> keyed by ip saddr
+if ! nft list chain inet trafficctl_mon mon_forward 2>/dev/null | grep -q "bytes_in.*daddr"; then
+    # Drop the old table wholesale rather than appending to it — leaving the
+    # previous pair of rules in place would double-count every packet. This
+    # resets the counters once, on upgrade; they are only used for speed
+    # deltas, so a single discarded sample is the whole cost.
+    nft delete table inet trafficctl_mon 2>/dev/null
+
     nft add table inet trafficctl_mon 2>/dev/null
     nft add map inet trafficctl_mon bytes_in \
         '{ type ipv4_addr : counter; flags dynamic; }' 2>/dev/null
@@ -18,9 +34,9 @@ if ! nft list chain inet trafficctl_mon mon_forward 2>/dev/null | grep -q "saddr
     nft add chain inet trafficctl_mon mon_forward \
         '{ type filter hook forward priority -200; policy accept; }' 2>/dev/null
     nft add rule inet trafficctl_mon mon_forward \
-        'update @bytes_in { ip saddr counter }' 2>/dev/null
+        'update @bytes_in { ip daddr counter }' 2>/dev/null
     nft add rule inet trafficctl_mon mon_forward \
-        'update @bytes_out { ip daddr counter }' 2>/dev/null
+        'update @bytes_out { ip saddr counter }' 2>/dev/null
 fi
 
 # Dynamic counter maps are unsupported on some kernels ("Not supported").
