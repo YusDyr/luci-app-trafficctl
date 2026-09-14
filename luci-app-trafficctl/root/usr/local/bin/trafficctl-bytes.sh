@@ -84,7 +84,7 @@ END {
     n = 0
     for (ip in in_total) {
         if (n > 0) printf ","
-        printf "{\"ip\":\"%s\",\"bytes_in\":%d,\"bytes_out\":%d}", ip, in_total[ip], out_total[ip]
+        printf "{\"ip\":\"%s\",\"bytes_in\":%.0f,\"bytes_out\":%.0f}", ip, in_total[ip], out_total[ip]
         n++
     }
     printf "]\n"

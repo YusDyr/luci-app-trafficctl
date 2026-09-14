@@ -52,13 +52,13 @@ END {
     n = 0
     for (ip in in_b) {
         if (n > 0) printf ","
-        printf "{\"ip\":\"%s\",\"bytes_in\":%d,\"bytes_out\":%d}", ip, in_b[ip], out_b[ip]+0
+        printf "{\"ip\":\"%s\",\"bytes_in\":%.0f,\"bytes_out\":%.0f}", ip, in_b[ip], out_b[ip]+0
         n++
     }
     for (ip in out_b) {
         if (!(ip in in_b)) {
             if (n > 0) printf ","
-            printf "{\"ip\":\"%s\",\"bytes_in\":0,\"bytes_out\":%d}", ip, out_b[ip]
+            printf "{\"ip\":\"%s\",\"bytes_in\":0,\"bytes_out\":%.0f}", ip, out_b[ip]
             n++
         }
     }

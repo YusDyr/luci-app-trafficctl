@@ -170,7 +170,7 @@ BEGIN {
 }
 END {
     for (ip in conns)
-        printf "%s %d %d %d %d %s\n", ip, total[ip]+0, tcp[ip]+0, udp[ip]+0, conns[ip], kind[ip]
+        printf "%s %.0f %.0f %.0f %d %s\n", ip, total[ip]+0, tcp[ip]+0, udp[ip]+0, conns[ip], kind[ip]
 }' /proc/net/nf_conntrack 2>/dev/null)
 
 ACTIVE_IPS=$(echo "$CT_SUMMARY" | awk 'NF{print $1}' | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n)
@@ -441,7 +441,7 @@ for ip in $ACTIVE_IPS; do
     else
         printf ","
     fi
-    printf '{"ip":"%s","name":"%s","mac":"%s","conn_type":"%s","conn_last":"%s","app":"%s","conns":%d,"total":%d,"tcp":%d,"udp":%d,"blocked":%s,"block_bytes":%d,"wifi_blocked":%s,"rate_limit_kbit":%d,"shape_kbit":%d}' \
+    printf '{"ip":"%s","name":"%s","mac":"%s","conn_type":"%s","conn_last":"%s","app":"%s","conns":%d,"total":%.0f,"tcp":%.0f,"udp":%.0f,"blocked":%s,"block_bytes":%.0f,"wifi_blocked":%s,"rate_limit_kbit":%.0f,"shape_kbit":%.0f}' \
         "$ip" "$NAME" "$MAC" "$CONN_TYPE" "$CONN_LAST" "$APP" "$CONNS" "$TOTAL" "$TCP" "$UDP" \
         "$([ "$BLOCKED" = "1" ] && echo true || echo false)" \
         "$BLOCK_BYTES" \

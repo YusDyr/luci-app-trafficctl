@@ -228,7 +228,7 @@ BEGIN { total=0; n_tcp=0; n_udp=0; n_other=0; est=0; tw=0; ss=0; cw=0 }
     else if (state == "SYN_SENT") ss++
     else if (state == "CLOSE_WAIT") cw++
 }
-END { printf "%d %d %d %d %d %d %d %d", total, n_tcp, n_udp, n_other, est, tw, ss, cw }
+END { printf "%.0f %d %d %d %d %d %d %d", total, n_tcp, n_udp, n_other, est, tw, ss, cw }
 ')
 
 TOTAL=$(echo "$META_LINE" | awk '{print $1}')
@@ -324,7 +324,7 @@ BEGIN {
     oif = ""
     if (dst in oifdev) oif = oifdev[dst]
     if (n > 0) printf ","
-    printf "{\"proto\":\"%s\",\"dst\":\"%s\",\"host\":\"\",\"port\":%s,\"service\":\"%s\",\"bytes\":%d,\"state\":\"%s\",\"oif\":\"%s\"}", proto, dst, dport, svc, bytes, state, oif
+    printf "{\"proto\":\"%s\",\"dst\":\"%s\",\"host\":\"\",\"port\":%s,\"service\":\"%s\",\"bytes\":%.0f,\"state\":\"%s\",\"oif\":\"%s\"}", proto, dst, dport, svc, bytes, state, oif
     n++
 }
 ')
@@ -375,7 +375,7 @@ if [ "$DO_RDNS" = "1" ]; then
 fi
 
 # Output final JSON
-printf '{"ip":"%s","name":"%s","mac":"%s","conn_type":"%s","conn_last":"%s","timestamp":%d,"blocked":%s,"block_packets":%d,"block_bytes":%d,"wifi_blocked":%s,"total":%d,"protocols":{"tcp":%d,"udp":%d,"other":%d},"tcp_states":{"established":%d,"time_wait":%d,"syn_sent":%d,"close_wait":%d},"connections":[%s],"rate_limit_kbit":%d,"shape_kbit":%d}\n' \
+printf '{"ip":"%s","name":"%s","mac":"%s","conn_type":"%s","conn_last":"%s","timestamp":%d,"blocked":%s,"block_packets":%d,"block_bytes":%.0f,"wifi_blocked":%s,"total":%.0f,"protocols":{"tcp":%d,"udp":%d,"other":%d},"tcp_states":{"established":%d,"time_wait":%d,"syn_sent":%d,"close_wait":%d},"connections":[%s],"rate_limit_kbit":%d,"shape_kbit":%d}\n' \
     "$IP" "$NAME" "$MAC" "$CONN_TYPE" "$CONN_LAST" "$TIMESTAMP" "$BLOCKED" "$BLOCK_PACKETS" "$BLOCK_BYTES" \
     "$WIFI_BLOCKED" "$TOTAL" "$N_TCP" "$N_UDP" "$N_OTHER" \
     "$EST" "$TW" "$SS" "$CW" "$CONNS_OUT" "$RATE_LIM" "$SHAPE_KBIT"
