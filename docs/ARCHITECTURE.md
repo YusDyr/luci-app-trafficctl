@@ -32,6 +32,7 @@ graph TD
         subgraph "Query Scripts — /usr/local/bin/"
             SUM["trafficctl-summary.sh<br/>(all active devices)"]
             DEV["trafficctl-device.sh<br/>(per-device connections)"]
+            TOT["trafficctl-totals.sh<br/>(monotonic lifetime totals)"]
             BYT["trafficctl-bytes.sh<br/>(conntrack byte counters)"]
             BYTNFT["trafficctl-bytes-nft.sh<br/>(nft counter init helper)"]
             IFA["trafficctl-ifaces.sh<br/>(per-interface counters + role map)"]
@@ -70,14 +71,16 @@ graph TD
 
     JS -->|"HTTP POST<br/>JSON-RPC"| RPC
     RPC -->|"ACL check"| ACL
-    RPC --> SUM & DEV & BYT & RLS & SHS & RDNS
+    RPC --> SUM & DEV & TOT & RLS & SHS & RDNS
     RPC --> BLK & UBK & RL & SH & MFA & MFR
 
     SUM --> CTMOD
     SUM --> IW
     DEV --> CTMOD
     DEV --> IW
+    TOT --> BYT
     BYT --> CTMOD
+    BYT -->|"offload active"| BYTNFT
 
     BLK & UBK --> FWSH
     RL --> FWSH
@@ -104,7 +107,7 @@ sequenceDiagram
     participant B as Browser
     participant R as rpcd
     participant S as trafficctl-summary.sh
-    participant BY as trafficctl-bytes.sh
+    participant BY as trafficctl-totals.sh
 
     B->>R: summary()
     R->>S: exec
@@ -118,9 +121,11 @@ sequenceDiagram
     loop Every N seconds (poll)
         B->>R: bytes()
         R->>BY: exec
-        BY->>BY: parse /proc/net/nf_conntrack
-        BY-->>B: [{ip, bytes_in, bytes_out}]
+        BY->>BY: trafficctl-bytes.sh (conntrack, or nft maps under offload)
+        BY->>BY: accumulate positive deltas into /tmp/trafficctl_totals.state
+        BY-->>B: [{ip, bytes_in, bytes_out, bytes_*_total, …}]
         B->>B: calculate speed = delta_bytes / delta_time
+        B->>B: paint the cumulative Bytes/TCP/UDP cells
     end
 ```
 
@@ -312,7 +317,7 @@ The frontend uses independent polling loops:
 
 | Poll | Interval | Script | Purpose |
 |------|----------|--------|---------|
-| Bytes | Configurable (default 2s, 1s–5s, or off) | `trafficctl-bytes.sh` | Bandwidth speed = delta bytes / delta time |
+| Bytes | Configurable (default 2s, 1s–5s, or off) | `trafficctl-totals.sh` | Bandwidth speed = delta bytes / delta time, **and** the cumulative Bytes/TCP/UDP columns. This poll is also what advances the lifetime totals — with the page closed and no Prometheus scraper, they stand still |
 | Interfaces | Same tick as Bytes, only while the Overview panel is open | `trafficctl-ifaces.sh` | Per-interface throughput for the global overview. Deliberately has no timer of its own, so it inherits the Poll interval |
 | Drops | 5s | `trafficctl-ratelimit-stats.sh` | nft policer drop counters |
 | Shape stats | 5s | `trafficctl-shape-stats.sh` | tc class stats (backlog, drops, overlimits) |

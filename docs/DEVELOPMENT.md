@@ -91,6 +91,7 @@ luci-app-trafficctl/
 │   │   │   ├── trafficctl-device.sh    # Per-device detail
 │   │   │   ├── trafficctl-bytes.sh     # Byte counters for speed (conntrack)
 │   │   │   ├── trafficctl-bytes-nft.sh # nft counter init helper
+│   │   │   ├── trafficctl-totals.sh    # Monotonic lifetime totals (shared by UI + exporter)
 │   │   │   ├── trafficctl-ifaces.sh    # Per-interface counters (global overview)
 │   │   │   ├── trafficctl-block.sh     # Internet block
 │   │   │   ├── trafficctl-unblock.sh   # Internet unblock

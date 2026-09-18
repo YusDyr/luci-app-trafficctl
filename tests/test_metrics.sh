@@ -39,13 +39,32 @@ assert_not_contains() {
 
 # metrics.sh shells out to the other trafficctl scripts by absolute path;
 # point those at mocks and the state file at the temp dir.
+#
+# trafficctl-totals.sh is deliberately NOT mocked: the accumulator moved there
+# and is the whole point of these monotonicity assertions, so the real script
+# runs, with only its own byte source and state path redirected.
 sed -e "s|/usr/local/bin/trafficctl-fw.sh|$FWLIB|" \
-    -e "s|STATE=\"/tmp/trafficctl_metrics.state\"|STATE=\"$STATE\"|" \
-    -e "s|/usr/local/bin/trafficctl-bytes.sh|$MOCKBIN/bytes|" \
+    -e "s|/usr/local/bin/trafficctl-totals.sh|$TMPDIR/totals.sh|" \
     -e "s|/usr/local/bin/trafficctl-summary.sh|$MOCKBIN/summary|" \
     -e "s|/usr/local/bin/trafficctl-portfw.sh|$MOCKBIN/portfw|" \
     -e "s|/usr/local/bin/trafficctl-netify.sh|$MOCKBIN/netify|" \
     "$BIN/trafficctl-metrics.sh" > "$TMPDIR/metrics.sh"
+
+sed -e "s|/usr/local/bin/trafficctl-fw.sh|$FWLIB|" \
+    -e "s|STATE=\"/tmp/trafficctl_totals.state\"|STATE=\"$STATE\"|" \
+    -e "s|LOCKD=\"/tmp/trafficctl_totals.lock.d\"|LOCKD=\"$TMPDIR/lock.d\"|" \
+    -e "s|/usr/local/bin/trafficctl-bytes.sh|$MOCKBIN/bytes|" \
+    "$BIN/trafficctl-totals.sh" > "$TMPDIR/totals.sh"
+chmod +x "$TMPDIR/totals.sh"
+
+# sed exits 0 when nothing matched, so a renamed path would leave these
+# pointing at the production scripts and /tmp state while the tests still pass.
+for must in "$TMPDIR/totals.sh" "$MOCKBIN/summary"; do
+    grep -qF "$must" "$TMPDIR/metrics.sh" || \
+        { echo "FAIL: metrics.sh was not redirected to $must"; exit 1; }
+done
+grep -qF "$STATE" "$TMPDIR/totals.sh" || \
+    { echo "FAIL: totals.sh still points at the production state file"; exit 1; }
 
 # uci mock: exporter enabled, apps enabled so cardinality guard is exercised
 cat > "$MOCKBIN/uci" <<'MOCK'

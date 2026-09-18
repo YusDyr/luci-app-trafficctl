@@ -107,7 +107,8 @@ chmod +x "$MOCKBIN/ubus"
 # covered by that script's own dedicated test file).
 DISPATCH_LOG="$TMPDIR/dispatch.log"
 for sub in trafficctl-summary.sh trafficctl-device.sh trafficctl-bytes.sh \
-           trafficctl-ifaces.sh trafficctl-block.sh trafficctl-unblock.sh \
+           trafficctl-totals.sh trafficctl-ifaces.sh \
+           trafficctl-block.sh trafficctl-unblock.sh \
            trafficctl-macfilter-add.sh trafficctl-macfilter-remove.sh \
            trafficctl-ratelimit.sh trafficctl-ratelimit-stats.sh \
            trafficctl-shape.sh trafficctl-shape-stats.sh \
@@ -158,6 +159,13 @@ assert_contains "summary: dispatches to trafficctl-summary.sh" '"ok":true,"msg":
 OUT=$(run_call ifaces)
 assert_contains "ifaces: wraps sub-script output under result" '{"result":' "$OUT"
 assert_contains "ifaces: dispatches to trafficctl-ifaces.sh" '"ok":true,"msg":"stub-trafficctl-ifaces.sh"' "$OUT"
+
+# `bytes` must go through the accumulator, not the raw sampler: the lifetime
+# totals the Bytes/TCP/UDP columns show are added there, and it is the LuCI
+# poll that keeps them advancing while somebody has the page open.
+OUT=$(run_call bytes)
+assert_contains "bytes: dispatches to the accumulator, not the raw sampler" \
+    '"ok":true,"msg":"stub-trafficctl-totals.sh"' "$OUT"
 
 OUT=$(run_call device '{"ip":"192.168.1.5"}')
 assert_contains "device: forwards ip to trafficctl-device.sh" "trafficctl-device.sh 192.168.1.5" "$(cat "$DISPATCH_LOG")"

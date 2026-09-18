@@ -35,6 +35,8 @@ jobs:
         run: bash tests/test_netify.sh
       - name: Bidirectional limit/shape tests
         run: bash tests/test_direction.sh
+      - name: Cumulative byte counter tests
+        run: bash tests/test_totals.sh
       - name: Prometheus exporter tests
         run: bash tests/test_metrics.sh
       - name: Telegram unit tests

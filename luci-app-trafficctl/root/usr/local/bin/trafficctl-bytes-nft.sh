@@ -2,7 +2,17 @@
 # shellcheck shell=dash
 # Per-device byte counters using nftables maps.
 # Works with software flow offload (hook priority -200, before flowtable at -150).
-# Output: JSON array [{"ip":"...","bytes_in":N,"bytes_out":N}]
+# Output: JSON array
+#   [{"ip":"…","bytes_in":N,"bytes_out":N,"bytes_tcp":-1,"bytes_udp":-1,"src":"nft"}]
+#
+# The counters here are cumulative since the table was created, unlike the
+# conntrack sums trafficctl-bytes.sh returns, which cover live flows only.
+# "src" lets trafficctl-totals.sh notice the swap and rebaseline instead of
+# accumulating the whole map as a single enormous delta.
+#
+# The protocol split is -1, i.e. "unknown", not 0: a `type ipv4_addr : counter`
+# map is keyed by address alone, so there is nothing here to split TCP from UDP
+# with. Reporting 0 would render as a device that sent no TCP at all.
 
 . /usr/local/bin/trafficctl-fw.sh
 
@@ -68,13 +78,15 @@ END {
     n = 0
     for (ip in in_b) {
         if (n > 0) printf ","
-        printf "{\"ip\":\"%s\",\"bytes_in\":%.0f,\"bytes_out\":%.0f}", ip, in_b[ip], out_b[ip]+0
+        printf "{\"ip\":\"%s\",\"bytes_in\":%.0f,\"bytes_out\":%.0f,\"bytes_tcp\":-1,\"bytes_udp\":-1,\"src\":\"nft\"}", \
+            ip, in_b[ip], out_b[ip]+0
         n++
     }
     for (ip in out_b) {
         if (!(ip in in_b)) {
             if (n > 0) printf ","
-            printf "{\"ip\":\"%s\",\"bytes_in\":0,\"bytes_out\":%.0f}", ip, out_b[ip]
+            printf "{\"ip\":\"%s\",\"bytes_in\":0,\"bytes_out\":%.0f,\"bytes_tcp\":-1,\"bytes_udp\":-1,\"src\":\"nft\"}", \
+                ip, out_b[ip]
             n++
         }
     }

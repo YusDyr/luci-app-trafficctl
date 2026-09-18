@@ -190,27 +190,49 @@ for a in $AWKS; do
 done
 
 # ════════════════════════════════════════════════════════════════════════════
-# 3. The metrics accumulator is not permanently pinned.
+# 3. The shared accumulator is not permanently pinned.
 #
 #    This is the worst instance of the bug and the only one that does not heal
-#    itself once the format is fixed: the exporter writes the running total to
-#    a state file and seeds from it on the next scrape. Written through a
-#    32-bit %d the stored value saturates, is read back saturated, saturates
-#    again — so trafficctl_device_bytes_total, declared a monotonic counter,
-#    stops at 2147483647 and never moves again.
+#    itself once the format is fixed: trafficctl-totals.sh writes the running
+#    total to a state file and seeds from it on the next sample. Written
+#    through a 32-bit %d the stored value saturates, is read back saturated,
+#    saturates again — so trafficctl_device_bytes_total, declared a monotonic
+#    counter, stops at 2147483647 and never moves again. Since 1.14 the same
+#    store also feeds the LuCI Bytes column, so a pinned value is visible in
+#    two places at once.
+#
+#    The exporter is driven end to end here (metrics.sh -> totals.sh -> a
+#    mocked byte source) because the round trip through the state file is
+#    exactly what has to survive.
 # ════════════════════════════════════════════════════════════════════════════
 
-STATE="$TMP/metrics.state"
+STATE="$TMP/totals.state"
 METRICS_MOCK="$TMP/mbin"
 mkdir -p "$METRICS_MOCK"
 
 sed -e "s|/usr/local/bin/trafficctl-fw.sh|$FWLIB|" \
-    -e "s|STATE=\"/tmp/trafficctl_metrics.state\"|STATE=\"$STATE\"|" \
-    -e "s|/usr/local/bin/trafficctl-bytes.sh|$METRICS_MOCK/bytes|" \
+    -e "s|/usr/local/bin/trafficctl-totals.sh|$TMP/totals.sh|" \
     -e "s|/usr/local/bin/trafficctl-summary.sh|$METRICS_MOCK/summary|" \
     -e "s|/usr/local/bin/trafficctl-portfw.sh|$METRICS_MOCK/portfw|" \
     -e "s|/usr/local/bin/trafficctl-netify.sh|$METRICS_MOCK/netify|" \
     "$BIN/trafficctl-metrics.sh" > "$TMP/metrics.sh"
+
+sed -e "s|/usr/local/bin/trafficctl-fw.sh|$FWLIB|" \
+    -e "s|STATE=\"/tmp/trafficctl_totals.state\"|STATE=\"$STATE\"|" \
+    -e "s|LOCKD=\"/tmp/trafficctl_totals.lock.d\"|LOCKD=\"$TMP/lock.d\"|" \
+    -e "s|/usr/local/bin/trafficctl-bytes.sh|$METRICS_MOCK/bytes|" \
+    "$BIN/trafficctl-totals.sh" > "$TMP/totals.sh"
+chmod +x "$TMP/totals.sh"
+
+# sed exits 0 on no match. If these paths are ever renamed, the rewrites would
+# silently no-op and this section would test the production scripts against the
+# real /tmp state file — or nothing at all.
+assert_contains "metrics.sh is redirected at the accumulator under test" \
+    "$TMP/totals.sh" "$(cat "$TMP/metrics.sh")"
+assert_contains "the accumulator is redirected at the temp state file" \
+    "$STATE" "$(cat "$TMP/totals.sh")"
+assert_contains "the accumulator is redirected at the mocked byte source" \
+    "$METRICS_MOCK/bytes" "$(cat "$TMP/totals.sh")"
 
 cat > "$METRICS_MOCK/uci" <<'MOCK'
 #!/bin/sh
@@ -234,15 +256,18 @@ for a in $AWKS; do
     shim="$TMP/shim-$a"
 
     # Prior state: a device sitting just under the clamp. Fields are
-    # ip rx_acc tx_acc rx_last tx_last seen.
-    printf '192.168.0.50 2100000000 10 2100000000 10 1700000000\n' > "$STATE"
+    # ip rx_acc tx_acc rx_last tx_last seen tcp_acc udp_acc tcp_last udp_last
+    # src since.
+    printf '192.168.0.50 2100000000 10 2100000000 10 1700000000 0 0 -1 -1 ct 1700000000\n' > "$STATE"
     # Live conntrack has moved on by 200 MB, which must push the accumulator
     # past 2^31-1 rather than parking it there.
-    printf '[{"ip":"192.168.0.50","bytes_in":2300000000,"bytes_out":10}]\n' > "$BYTES_FILE"
+    printf '[{"ip":"192.168.0.50","bytes_in":2300000000,"bytes_out":10,"bytes_tcp":-1,"bytes_udp":-1,"src":"ct"}]\n' > "$BYTES_FILE"
 
     out=$(PATH="$shim:$METRICS_MOCK:$PATH" sh "$TMP/metrics.sh" 2>/dev/null)
     assert_contains "metrics ($a): rx counter crosses 2^31-1" \
         'trafficctl_device_bytes_total{ip="192.168.0.50",direction="rx"} 2300000000' "$out"
+    assert_not_contains "metrics ($a): counter is not pinned at the clamp" \
+        "direction=\"rx\"} $CLAMP" "$out"
 
     # And the value that goes back to disk must not be clamped either, or the
     # next scrape starts from the ceiling again.
@@ -280,7 +305,7 @@ assert_eq "no byte-named field is printed with %d" "" "$offenders"
 #   summary.sh  : total/tcp/udp accumulate conntrack BYTES (conns is a count)
 #   device.sh   : total accumulates bytes; n_tcp/est/... are counts
 #   netify.sh   : per-app byte totals (flows is a count)
-#   metrics.sh  : the persisted accumulator line
+#   totals.sh   : the persisted accumulator line
 assert_contains "summary.sh: conntrack byte sums use %.0f" \
     'printf "%s %.0f %.0f %.0f %d %s\n", ip, total[ip]+0, tcp[ip]+0, udp[ip]+0, conns[ip], kind[ip]' \
     "$(cat "$BIN/trafficctl-summary.sh")"
@@ -290,9 +315,14 @@ assert_contains "device.sh: conntrack byte total uses %.0f" \
 assert_contains "netify.sh: per-app byte total uses %.0f" \
     'printf "%s %s %.0f %d\n", p[1], p[2], total[k], flows[k]' \
     "$(cat "$BIN/trafficctl-netify.sh")"
-assert_contains "metrics.sh: persisted accumulator uses %.0f" \
-    'printf "%s %.0f %.0f %.0f %.0f %d\n", ip, rxa[ip], txa[ip], rxl[ip], txl[ip], now > tmp' \
-    "$(cat "$BIN/trafficctl-metrics.sh")"
+assert_contains "totals.sh: persisted accumulator uses %.0f" \
+    'printf "%s %.0f %.0f %.0f %.0f %d %.0f %.0f %.0f %.0f %s %d\n", \' \
+    "$(cat "$BIN/trafficctl-totals.sh")"
+# The accumulated totals are re-emitted into JSON as well; a %d there would
+# clamp the number the Bytes column shows even while the store stayed intact.
+assert_contains "totals.sh: emitted totals use %.0f" \
+    '\"bytes_in_total\":%.0f,\"bytes_out_total\":%.0f,\"bytes_tcp_total\":%.0f,\"bytes_udp_total\":%.0f' \
+    "$(cat "$BIN/trafficctl-totals.sh")"
 # shape-stats reports tc's cumulative counters: bytes and packets, but also
 # drops/overlimits/requeues/lended/borrowed/ecn_mark, which climb for the life
 # of the qdisc and overflow the same way. Only "bytes" is byte-named, so the

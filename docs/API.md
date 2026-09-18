@@ -30,7 +30,7 @@ method because it returns the contents of the configured log file.
 |--------|--------|--------|-----|
 | `summary` | `trafficctl-summary.sh` | (none) | read |
 | `device` | `trafficctl-device.sh` | `ip`, `proto` | read |
-| `bytes` | `trafficctl-bytes.sh` | (none) | read |
+| `bytes` | `trafficctl-totals.sh` | (none) | read |
 | `ifaces` | `trafficctl-ifaces.sh` | (none) | read |
 | `rdns` | `trafficctl-rdns.sh` | `ip` | read |
 | `ratelimit_stats` | `trafficctl-ratelimit-stats.sh` | (none) | read |
@@ -182,7 +182,8 @@ single-WAN, or policy-routing that doesn't restore the connmark such as podkop)
 
 ### trafficctl-bytes.sh
 
-Returns raw byte counters from conntrack for bandwidth speed calculation.
+Returns raw byte counters for bandwidth speed calculation. These are a *sample*,
+not a lifetime total — see `trafficctl-totals.sh` below.
 
 **Arguments:** None
 
@@ -190,15 +191,84 @@ Returns raw byte counters from conntrack for bandwidth speed calculation.
 
 ```json
 [
-  {"ip": "192.168.0.111", "bytes_in": 456789012, "bytes_out": 12345678}
+  {"ip": "192.168.0.111", "bytes_in": 456789012, "bytes_out": 12345678,
+   "bytes_tcp": 460000000, "bytes_udp": 9134690, "src": "ct"}
 ]
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `ip` | string | Device IP |
-| `bytes_in` | number | Total bytes received (download = conntrack reply direction) |
-| `bytes_out` | number | Total bytes sent (upload = conntrack original direction) |
+| `bytes_in` | number | Bytes received (download = conntrack reply direction) |
+| `bytes_out` | number | Bytes sent (upload = conntrack original direction) |
+| `bytes_tcp` | number | TCP bytes, both directions. `-1` when the source cannot split by protocol |
+| `bytes_udp` | number | UDP bytes, both directions. `-1` when the source cannot split by protocol |
+| `src` | string | `ct` = conntrack, `nft` = nftables counter maps |
+
+Which source is used is decided per call: with flow offload active and no
+working `counter` flag, conntrack stops accounting for offloaded flows, so the
+script hands over to `trafficctl-bytes-nft.sh`, whose maps sit on the forward
+hook at priority `-200`, ahead of the flowtable at `-150`. Those maps are keyed
+by address alone, which is why `bytes_tcp` / `bytes_udp` are `-1` there.
+
+`-1` means "not measurable", never "zero". A consumer that renders it as 0 is
+claiming the device sent no TCP at all.
+
+---
+
+### trafficctl-totals.sh
+
+Wraps `trafficctl-bytes.sh` with a **monotonic per-device accumulator** — the
+lifetime totals behind both the LuCI Bytes / TCP / UDP columns and the
+`trafficctl_device_bytes_total` metric. Neither raw source is a lifetime total:
+conntrack reports only flows that still exist (so a device's number collapses
+when they expire — [#26](https://github.com/YusDyr/luci-app-trafficctl/issues/26)),
+and the nft maps count only since the table was built.
+
+**Arguments:** `--all` (optional) — also emit devices that have left the sample
+but still carry a total. Used by the exporter so a Prometheus series does not
+vanish and reappear every time an idle device's last flow expires.
+
+**Output:** the `trafficctl-bytes.sh` array, extended per element:
+
+```json
+[
+  {"ip": "192.168.0.111", "bytes_in": 456789012, "bytes_out": 12345678,
+   "bytes_tcp": 460000000, "bytes_udp": 9134690, "src": "ct",
+   "bytes_in_total": 8123456789, "bytes_out_total": 91234567,
+   "bytes_tcp_total": 8100000000, "bytes_udp_total": 114691346,
+   "total_since": 1789000000, "live": true}
+]
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `bytes_in_total` | number | Lifetime bytes received |
+| `bytes_out_total` | number | Lifetime bytes sent |
+| `bytes_tcp_total` | number | Lifetime TCP bytes, or `-1` if not measurable |
+| `bytes_udp_total` | number | Lifetime UDP bytes, or `-1` if not measurable |
+| `total_since` | number | Unix time accumulation began for this device |
+| `live` | bool | Whether the device was in this sample (always `true` without `--all`) |
+
+**Semantics worth knowing before you build on it:**
+
+- **Only positive movement counts.** A drop in the raw counter means flows
+  expired; their bytes were accumulated while they lived, so the drop rebaselines
+  and adds nothing.
+- **A source switch rebaselines.** conntrack and nft counters have unrelated
+  magnitudes, so toggling flow offload (or the nft path falling back on a kernel
+  without dynamic counter maps) must not be differenced. The source is stored
+  per device and a change starts a fresh baseline.
+- **Totals reset on reboot.** The store is `/tmp/trafficctl_totals.state`, i.e.
+  tmpfs. Deliberate: it is rewritten on every LuCI poll (2–10 s) and every
+  scrape, and that write volume into flash would wear the router out. Surviving
+  a reboot would mean a much coarser periodic flush into `/etc/trafficctl`
+  (kept across sysupgrade by `lib/upgrade/keep.d`).
+- **Totals advance only while something samples.** The LuCI page polling, or a
+  Prometheus scrape, is what drives accumulation. With the page closed and no
+  scraper configured, the counters stand still. There is no background tick.
+- **Concurrent samplers are serialised** with an atomic `mkdir` lock, so a LuCI
+  poll and a scrape landing together cannot discard one another's delta.
 
 ---
 

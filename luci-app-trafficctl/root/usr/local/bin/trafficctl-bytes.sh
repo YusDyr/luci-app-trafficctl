@@ -1,7 +1,18 @@
 #!/bin/sh
 # shellcheck shell=dash
 # Per-device byte counters from conntrack (for speed calculation).
-# Output: JSON array [{"ip":"...","bytes_in":N,"bytes_out":N}]
+# Output: JSON array
+#   [{"ip":"…","bytes_in":N,"bytes_out":N,"bytes_tcp":N,"bytes_udp":N,"src":"ct"}]
+#
+# "src" names the counter source. trafficctl-totals.sh accumulates these into
+# lifetime totals and the two sources have unrelated magnitudes (conntrack
+# reports only live flows, the nft maps count since the table was built), so it
+# has to be able to tell a source switch from a burst of traffic.
+#
+# bytes_tcp / bytes_udp carry both directions summed, and exist only on the
+# conntrack path — nft counter maps are keyed by address alone and cannot split
+# by protocol, so trafficctl-bytes-nft.sh reports -1 there. -1 rather than 0:
+# "unknown" and "no TCP traffic" must not render as the same number.
 
 . /usr/local/bin/trafficctl-fw.sh
 
@@ -52,8 +63,12 @@ BEGIN {
     for (k = 1; k <= nl; k++) if (lp[k] != "") islocal[lp[k]] = 1
 }
 {
-    src=""; osrc=""; rdst=""; nsrc=0; bytes_orig=0; bytes_reply=0; bc=0
+    src=""; osrc=""; rdst=""; nsrc=0; bytes_orig=0; bytes_reply=0; bc=0; proto=""
     for (i=1; i<=NF; i++) {
+        # The L4 protocol is a bare word in the header fields ("ipv4 2 tcp 6 …"),
+        # before any key=value pair, so it is matched by value like summary.sh.
+        if ($i == "tcp") proto="tcp"
+        else if ($i == "udp") proto="udp"
         if ($i ~ /^src=/) {
             v = substr($i, 5)
             nsrc++
@@ -78,13 +93,19 @@ BEGIN {
         key = src
         in_total[key] += bytes_reply
         out_total[key] += bytes_orig
+        # Both directions, unlike the per-direction sums above: the protocol
+        # split answers how much of the traffic for this device was TCP, which
+        # is not a question about direction.
+        if (proto == "tcp") tcp_total[key] += bytes_orig + bytes_reply
+        else if (proto == "udp") udp_total[key] += bytes_orig + bytes_reply
     }
 }
 END {
     n = 0
     for (ip in in_total) {
         if (n > 0) printf ","
-        printf "{\"ip\":\"%s\",\"bytes_in\":%.0f,\"bytes_out\":%.0f}", ip, in_total[ip], out_total[ip]
+        printf "{\"ip\":\"%s\",\"bytes_in\":%.0f,\"bytes_out\":%.0f,\"bytes_tcp\":%.0f,\"bytes_udp\":%.0f,\"src\":\"ct\"}", \
+            ip, in_total[ip], out_total[ip], tcp_total[ip]+0, udp_total[ip]+0
         n++
     }
     printf "]\n"

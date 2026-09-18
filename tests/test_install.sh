@@ -101,6 +101,7 @@ for f in \
   /usr/local/bin/trafficctl-shape.sh \
   /usr/local/bin/trafficctl-shape-stats.sh \
   /usr/local/bin/trafficctl-bytes.sh \
+  /usr/local/bin/trafficctl-totals.sh \
   /usr/local/bin/trafficctl-rdns.sh \
   /usr/local/bin/trafficctl-macfilter-add.sh \
   /usr/local/bin/trafficctl-macfilter-remove.sh \

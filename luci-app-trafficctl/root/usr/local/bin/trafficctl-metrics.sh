@@ -7,23 +7,19 @@
 #   textfile        : cron > /var/lib/node_exporter/textfile_collector/trafficctl.prom
 #
 # Memory discipline (this runs on 128–512 MB routers):
-#   * no large shell variables — the byte source is streamed straight into awk
+#   * no large shell variables — every source is streamed straight into awk
 #   * one awk process holds the only in-memory table, bounded by device count
-#   * the state file is a few dozen bytes per device, kept in /tmp (tmpfs), so
-#     scraping never writes to flash
 #
-# Counter semantics: the raw conntrack sums are NOT monotonic — a device's
-# total drops when its flows expire. Exporting them directly would look like a
-# counter reset on every expiry and produce nonsense rate(). So positive deltas
-# are accumulated into a monotonic per-device counter here. A decrease means
-# flows aged out (their bytes were already accumulated while they lived), so it
-# resyncs the baseline and adds nothing.
+# Counter semantics: the raw byte sources are NOT monotonic — a device's
+# conntrack total drops when its flows expire. Exporting that directly would
+# look like a counter reset on every expiry and produce nonsense rate(). The
+# accumulation that fixes it used to live here; it now lives in
+# trafficctl-totals.sh, which the LuCI Bytes column reads too, so the column
+# and this counter cannot drift apart.
 #
 # Usage: trafficctl-metrics.sh
 
 . /usr/local/bin/trafficctl-fw.sh
-
-STATE="/tmp/trafficctl_metrics.state"
 
 metrics_enabled() {
     [ "$(uci -q get trafficctl.metrics.enabled 2>/dev/null)" = "1" ]
@@ -39,15 +35,17 @@ opt_on() {
     [ "$(uci -q get "trafficctl.metrics.$1" 2>/dev/null)" != "0" ]
 }
 
-NOW=$(date +%s)
-
 # ── device byte counters ────────────────────────────────────────────────────
-# trafficctl-bytes.sh already resolves the right source (conntrack, or nft
-# counters under uncountered offload) and handles routed/NATed clients, so it
-# is reused rather than duplicating that logic here.
-/usr/local/bin/trafficctl-bytes.sh 2>/dev/null \
+# trafficctl-totals.sh owns both the accumulator and its state file. It also
+# resolves the byte source (conntrack, or nft counters under uncountered flow
+# offload) via trafficctl-bytes.sh, so none of that is duplicated here.
+#
+# --all, because a Prometheus series that vanished and came back every time a
+# quiet device's last flow expired would be unusable: the exporter wants every
+# device that still carries a total, not just the ones currently transmitting.
+/usr/local/bin/trafficctl-totals.sh --all 2>/dev/null \
     | sed 's/},{/}\n{/g' \
-    | awk -v state="$STATE" -v now="$NOW" '
+    | awk '
 function num(line, key,   re, seg) {
     re = "\"" key "\"[ \t]*:[ \t]*"
     if (!match(line, re)) return -1
@@ -63,49 +61,16 @@ function str(line, key,   re, seg) {
     return substr(seg, 1, RSTART - 1)
 }
 BEGIN {
-    # prior state: ip rx_acc tx_acc rx_last tx_last seen
-    while ((getline l < state) > 0) {
-        n = split(l, f, " ")
-        if (n < 5) continue
-        rxa[f[1]] = f[2] + 0; txa[f[1]] = f[3] + 0
-        rxl[f[1]] = f[4] + 0; txl[f[1]] = f[5] + 0
-    }
-    close(state)
+    print "# HELP trafficctl_device_bytes_total Bytes transferred per device since the counter started. The store is tmpfs, so this resets on reboot; it advances whenever anything samples (a scrape, or the LuCI page)."
+    print "# TYPE trafficctl_device_bytes_total counter"
 }
 {
     ip = str($0, "ip")
     if (ip == "") next
-    rx = num($0, "bytes_in"); tx = num($0, "bytes_out")
-    if (rx < 0) rx = 0
-    if (tx < 0) tx = 0
-
-    # Only positive movement is real new traffic; a drop means flows expired.
-    if (ip in rxl) {
-        if (rx > rxl[ip]) rxa[ip] += rx - rxl[ip]
-        if (tx > txl[ip]) txa[ip] += tx - txl[ip]
-    } else {
-        rxa[ip] += rx; txa[ip] += tx
-    }
-    rxl[ip] = rx; txl[ip] = tx
-    live[ip] = 1
-}
-END {
-    tmp = state ".tmp"
-    for (ip in rxl) {
-        # Drop devices that have gone quiet AND carry no total, so the state
-        # file cannot grow without bound on a busy network.
-        if (!(ip in live) && rxa[ip] + txa[ip] == 0) continue
-        printf "%s %.0f %.0f %.0f %.0f %d\n", ip, rxa[ip], txa[ip], rxl[ip], txl[ip], now > tmp
-    }
-    close(tmp)
-    system("mv " tmp " " state " 2>/dev/null")
-
-    print "# HELP trafficctl_device_bytes_total Bytes transferred per device since the exporter started."
-    print "# TYPE trafficctl_device_bytes_total counter"
-    for (ip in rxa) {
-        printf "trafficctl_device_bytes_total{ip=\"%s\",direction=\"rx\"} %.0f\n", ip, rxa[ip]
-        printf "trafficctl_device_bytes_total{ip=\"%s\",direction=\"tx\"} %.0f\n", ip, txa[ip]
-    }
+    rx = num($0, "bytes_in_total");  if (rx < 0) rx = 0
+    tx = num($0, "bytes_out_total"); if (tx < 0) tx = 0
+    printf "trafficctl_device_bytes_total{ip=\"%s\",direction=\"rx\"} %.0f\n", ip, rx
+    printf "trafficctl_device_bytes_total{ip=\"%s\",direction=\"tx\"} %.0f\n", ip, tx
 }'
 
 # ── per-device state gauges ─────────────────────────────────────────────────

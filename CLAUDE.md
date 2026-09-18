@@ -41,8 +41,9 @@ luci-app-trafficctl/
     trafficctl-ratelimit-stats.sh           — Limiter counters
     trafficctl-shape.sh                     — tc/HTB shaping (queue-based)
     trafficctl-shape-stats.sh               — Shaper counters
-    trafficctl-bytes.sh                     — Per-device byte counters
+    trafficctl-bytes.sh                     — Per-device byte counters (one sample, not a total)
     trafficctl-bytes-nft.sh                 — nftables counters for software flow offload
+    trafficctl-totals.sh                    — Monotonic lifetime totals; the ONLY accumulator (UI + Prometheus share its store)
     trafficctl-rdns.sh                      — Reverse DNS lookup
     trafficctl-telegram.sh                  — Telegram bot daemon (long polling)
     trafficctl-telegram-test.sh             — Send test message to Telegram

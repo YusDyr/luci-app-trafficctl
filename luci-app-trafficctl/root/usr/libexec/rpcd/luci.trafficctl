@@ -92,8 +92,18 @@ call)
 		fi
 		;;
 	bytes)
+		# trafficctl-totals.sh wraps trafficctl-bytes.sh: same array, same
+		# bytes_in/bytes_out the speed graph differentiates, plus the lifetime
+		# *_total fields the Bytes/TCP/UDP columns show. Folded into this one
+		# call rather than given a method of its own so the accumulator sees
+		# exactly one sample per poll — a second method would mean a second
+		# /proc/net/nf_conntrack read every two seconds.
+		#
+		# Note this makes a read-ACL method write the tmpfs accumulator as a
+		# side effect. That is what keeps the counter advancing while somebody
+		# is watching the page; a metrics scrape has always done the same.
 		printf '{"result":'
-		"$SCRIPTS/trafficctl-bytes.sh"
+		"$SCRIPTS/trafficctl-totals.sh"
 		printf '}'
 		;;
 	ifaces)
