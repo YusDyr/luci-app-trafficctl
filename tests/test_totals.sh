@@ -277,6 +277,126 @@ assert_contains "metrics.sh consumes the shared accumulator" \
 assert_eq "metrics.sh keeps no state file of its own" "" \
     "$(grep -n 'trafficctl_metrics.state' "$BIN/trafficctl-metrics.sh")"
 
+# ── end to end, against real /proc/net/nf_conntrack text ────────────────────
+# Everything above feeds the accumulator hand-written JSON, which cannot catch
+# a mistake in the thing that PRODUCES that JSON. The protocol split is new
+# parsing in trafficctl-bytes.sh, and a tidy mock would never have exercised
+# it, so the real script runs here over real conntrack lines: a TCP flow, a UDP
+# flow, and — the case an all-TCP fixture would silently miss — an ICMP flow,
+# whose bytes belong in the total but in neither protocol bucket.
+CT="$TMPDIR/nf_conntrack"
+cat > "$CT" <<'EOF'
+ipv4     2 tcp      6 431999 ESTABLISHED src=192.168.1.100 dst=142.250.185.78 sport=52134 dport=443 packets=142 bytes=15234 src=142.250.185.78 dst=192.168.1.100 sport=443 dport=52134 packets=198 bytes=245678 [ASSURED] mark=0 zone=0 use=2
+ipv4     2 udp      17 29 src=192.168.1.100 dst=192.168.1.1 sport=51234 dport=53 packets=1 bytes=68 src=192.168.1.1 dst=192.168.1.100 sport=53 dport=51234 packets=1 bytes=124 mark=0 zone=0 use=2
+ipv4     2 icmp     1 29 src=192.168.1.101 dst=8.8.8.8 type=8 code=0 id=1234 packets=5 bytes=420 src=8.8.8.8 dst=192.168.1.101 type=0 code=0 id=1234 packets=5 bytes=420 mark=0 zone=0 use=2
+ipv4     2 tcp      6 120 TIME_WAIT src=192.168.1.101 dst=93.184.216.34 sport=44556 dport=80 packets=10 bytes=1024 src=93.184.216.34 dst=192.168.1.101 sport=80 dport=44556 packets=12 bytes=8192 [ASSURED] mark=0 zone=0 use=2
+EOF
+
+# A stub fw lib rather than mocks for uci/ubus/jsonfilter: subnet discovery has
+# its own coverage in test_fw.sh, and reproducing it here would test that
+# instead of the conntrack parser this section is about.
+# 192.168.1.0/24 => netbase 3232235776, block 256, router 192.168.1.1.
+cat > "$TMPDIR/fw-stub.sh" <<'STUB'
+TCTL_FW="nft"
+tctl_get_offload_mode() { echo "none"; }
+tctl_monitored_subnets() { echo "br-lan 3232235776 256 3232235777"; }
+STUB
+
+cat > "$MOCKBIN/ip" <<'MOCK'
+#!/bin/sh
+echo "    inet 192.168.1.1/24 brd 192.168.1.255 scope global br-lan"
+MOCK
+chmod +x "$MOCKBIN/ip"
+
+sed -e "s|\. /usr/local/bin/trafficctl-fw.sh|. $TMPDIR/fw-stub.sh|" \
+    -e "s|/proc/net/nf_conntrack|$CT|" \
+    "$BIN/trafficctl-bytes.sh" > "$TMPDIR/bytes-real.sh"
+assert_contains "the real sampler is pointed at the conntrack fixture" \
+    "$CT" "$(cat "$TMPDIR/bytes-real.sh")"
+
+REAL=$(PATH="$MOCKBIN:$PATH" sh "$TMPDIR/bytes-real.sh" 2>/dev/null)
+
+# .100: TCP 15234 up / 245678 down, UDP 68 up / 124 down.
+assert_contains "real conntrack: download is the reply direction" \
+    '"bytes_in":245802' "$REAL"
+assert_contains "real conntrack: upload is the original direction" \
+    '"bytes_out":15302' "$REAL"
+assert_contains "real conntrack: TCP split counts both directions" \
+    '"bytes_tcp":260912' "$REAL"
+assert_contains "real conntrack: UDP split counts both directions" \
+    '"bytes_udp":192' "$REAL"
+assert_contains "real conntrack: the source is tagged" '"src":"ct"' "$REAL"
+
+# .101: ICMP 420/420 plus TCP 1024 up / 8192 down. The ICMP bytes must land in
+# the totals and in NEITHER protocol bucket — if the split silently absorbed
+# non-TCP/UDP traffic, tcp+udp would equal the total and nobody would notice.
+assert_contains "real conntrack: ICMP bytes are in the device total" \
+    '"bytes_in":8612' "$REAL"
+assert_contains "real conntrack: ICMP is not counted as TCP" \
+    '"bytes_tcp":9216' "$REAL"
+assert_contains "real conntrack: a device with no UDP reports zero, not -1" \
+    '"bytes_udp":0' "$REAL"
+
+# And the accumulator on top of that real output.
+rm -f "$STATE"
+cat > "$MOCKBIN/bytes" <<MOCK
+#!/bin/sh
+PATH="$MOCKBIN:\$PATH" sh "$TMPDIR/bytes-real.sh"
+MOCK
+chmod +x "$MOCKBIN/bytes"
+OUT=$(run)
+assert_contains "end to end: totals seed from the real sampler" \
+    '"bytes_in_total":245802' "$OUT"
+assert_contains "end to end: the protocol split survives the accumulator" \
+    '"bytes_tcp_total":260912' "$OUT"
+OUT=$(run)
+assert_contains "end to end: a second identical read adds nothing" \
+    '"bytes_in_total":245802' "$OUT"
+
+# Restore the JSON mock for the sections below.
+cat > "$MOCKBIN/bytes" <<MOCK
+#!/bin/sh
+cat "$SAMPLE"
+MOCK
+chmod +x "$MOCKBIN/bytes"
+
+# ── a state file written by an older version still loads ────────────────────
+# The script documents that the first six fields match the layout the exporter
+# used before the accumulator moved out of it. Nothing tested that claim, and
+# the failure would be silent: the protocol totals of every pre-existing device
+# would come back as 0 — "sent no TCP" — instead of -1, "never measured".
+rm -f "$STATE"
+printf '192.168.1.100 5000 900 5000 900 1700000000\n' > "$STATE"
+sample '[{"ip":"192.168.1.100","bytes_in":6000,"bytes_out":900,"bytes_tcp":-1,"bytes_udp":-1,"src":"ct"}]'
+OUT=$(run)
+assert_contains "legacy six-field state line still seeds the byte total" \
+    '"bytes_in_total":6000' "$OUT"
+
+# Read back WITHOUT a fresh sample, which is the only path where the protocol
+# baseline loaded from the file is what gets reported. With a live sample the
+# incoming value overwrites it, so seeding it as 0 instead of -1 is invisible —
+# that is exactly how this would have shipped unnoticed.
+rm -f "$STATE"
+printf '192.168.1.100 5000 900 5000 900 1700000000\n' > "$STATE"
+sample '[]'
+OUT=$(runall)
+assert_contains "legacy state line is retained for the exporter" \
+    '"bytes_in_total":5000' "$OUT"
+assert_contains "legacy state line yields an unknown TCP total, not zero" \
+    '"bytes_tcp_total":-1' "$OUT"
+assert_not_contains "legacy state line does not claim zero TCP" \
+    '"bytes_tcp_total":0' "$OUT"
+assert_not_contains "legacy state line does not claim zero UDP" \
+    '"bytes_udp_total":0' "$OUT"
+
+# A truncated line is skipped rather than read as a device with junk totals.
+rm -f "$STATE"
+printf '192.168.1.100 5000\n' > "$STATE"
+sample '[{"ip":"192.168.1.100","bytes_in":100,"bytes_out":10,"bytes_tcp":110,"bytes_udp":0,"src":"ct"}]'
+OUT=$(run)
+assert_contains "a truncated state line is ignored, not half-trusted" \
+    '"bytes_in_total":100' "$OUT"
+
 # ── concurrent samplers must not corrupt the store ──────────────────────────
 # A LuCI poll and a metrics scrape land together routinely. The lock serialises
 # the read-modify-write, but it can be STOLEN after a timeout, so two writers
@@ -291,7 +411,9 @@ assert_eq "metrics.sh keeps no state file of its own" "" \
 rm -f "$STATE"
 sample '[{"ip":"10.0.20.99","bytes_in":1000,"bytes_out":0,"bytes_tcp":-1,"bytes_udp":-1,"src":"ct"}]'
 run >/dev/null
-for i in $(seq 1 12); do
+RACERS=0
+while [ "$RACERS" -lt 12 ]; do
+    RACERS=$((RACERS + 1))
     PATH="$MOCKBIN:$PATH" sh "$TMPDIR/totals.sh" >/dev/null 2>&1 &
 done
 wait

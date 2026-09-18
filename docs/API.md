@@ -250,6 +250,11 @@ vanish and reappear every time an idle device's last flow expires.
 | `total_since` | number | Unix time accumulation began for this device |
 | `live` | bool | Whether the device was in this sample (always `true` without `--all`) |
 
+When `live` is `false` (only reachable under `--all`) the device was not in this
+sample, so there is no current reading: `bytes_in`, `bytes_out`, `bytes_tcp` and
+`bytes_udp` are all `-1`. The `*_total` fields are unaffected — those are
+accumulated history and stay exact.
+
 **Semantics worth knowing before you build on it:**
 
 - **Only positive movement counts.** A drop in the raw counter means flows

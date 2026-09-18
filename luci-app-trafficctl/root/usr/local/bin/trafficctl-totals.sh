@@ -227,6 +227,13 @@ END {
         # printed 0 would be claiming the device sent no TCP. Keyed off the
         # stored baseline rather than this sample, so a quiet device under
         # --all still reports the protocol history it does have.
+        #
+        # These MUST stay value tests. `(ip in tcl)` would be true for every
+        # device by the time control reaches here: the state-writing loop above
+        # reads tcl[ip] and tca[ip] by subscript, and merely referencing an awk
+        # array element creates it. A membership test would then report 0 bytes
+        # of TCP — a confident wrong answer — for devices that never had a
+        # protocol reading at all.
         tt = -1; if (tcl[ip] >= 0) tt = tca[ip] + 0
         ut = -1; if (udl[ip] >= 0) ut = uda[ip] + 0
         # Hoisted out of the printf argument list rather than inlined as
