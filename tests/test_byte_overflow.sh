@@ -293,6 +293,14 @@ assert_contains "netify.sh: per-app byte total uses %.0f" \
 assert_contains "metrics.sh: persisted accumulator uses %.0f" \
     'printf "%s %.0f %.0f %.0f %.0f %d\n", ip, rxa[ip], txa[ip], rxl[ip], txl[ip], now > tmp' \
     "$(cat "$BIN/trafficctl-metrics.sh")"
+# shape-stats reports tc's cumulative counters: bytes and packets, but also
+# drops/overlimits/requeues/lended/borrowed/ecn_mark, which climb for the life
+# of the qdisc and overflow the same way. Only "bytes" is byte-named, so the
+# generic scan above cannot see the other six — without this line they would
+# quietly drift back to %d on the next edit.
+assert_contains "shape-stats.sh: cumulative tc counters use %.0f" \
+    '"bytes\":%.0f,\"packets\":%.0f,\"backlog\":%d,\"drops\":%.0f,\"overlimits\":%.0f,\"requeues\":%.0f,\"lended\":%.0f,\"borrowed\":%.0f,\"ecn_mark\":%.0f' \
+    "$(cat "$BIN/trafficctl-shape-stats.sh")"
 
 # ════════════════════════════════════════════════════════════════════════════
 
