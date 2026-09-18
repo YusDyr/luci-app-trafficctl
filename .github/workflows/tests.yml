@@ -57,6 +57,8 @@ jobs:
         run: bash tests/test_byte_overflow.sh
       - name: New device default-limit tests
         run: bash tests/test_newdevice.sh
+      - name: Per-interface counter tests (global overview)
+        run: bash tests/test_ifaces.sh
       - name: Regression tests
         run: bash tests/test_regressions.sh
       - name: Release version-bump tests

@@ -38,6 +38,7 @@ list)
 	printf '"summary":{},'
 	printf '"device":{"ip":"str","proto":"str"},'
 	printf '"bytes":{},'
+	printf '"ifaces":{},'
 	printf '"block":{"ip":"str","label":"str"},'
 	printf '"unblock":{"ip":"str","label":"str"},'
 	printf '"macfilter_add":{"ip":"str"},'
@@ -93,6 +94,11 @@ call)
 	bytes)
 		printf '{"result":'
 		"$SCRIPTS/trafficctl-bytes.sh"
+		printf '}'
+		;;
+	ifaces)
+		printf '{"result":'
+		"$SCRIPTS/trafficctl-ifaces.sh"
 		printf '}'
 		;;
 	block)

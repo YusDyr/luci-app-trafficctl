@@ -5,7 +5,7 @@
 			"ubus": {
 				"luci.trafficctl": [
 					"version",
-					"summary", "device", "bytes",
+					"summary", "device", "bytes", "ifaces",
 					"ratelimit_stats", "shape_stats", "rdns",
 					"portfw_list", "names_list", "netify_status", "netify_list",
 					"shape_status",

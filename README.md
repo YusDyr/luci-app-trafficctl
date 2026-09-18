@@ -154,6 +154,7 @@ I hope it turns out as useful for you as it has been for me.
 ## Features
 
 - **Real-time Per-device Monitoring** -- View active connections per device with TCP/UDP counts, TCP state breakdown, destination IPs, and live bandwidth speed (sparkline graphs with rate limit overlay).
+- **Global Overview** -- Optional whole-router panel (the **Overview** toggle in Settings > Display): uplink throughput graph, per-interface breakdown with WAN/LAN/VPN roles and sparklines, and a live top-talkers list. Reads per-interface kernel counters and the speed map the device table already computes, and polls on the existing Poll interval rather than a timer of its own.
 - **Interactive Speed Graphs** -- Hover any sparkline for a full-size popup graph with: download + upload dual lines, gradient area fill, min/max band, crosshair with precise values, rate limit line, nice-value Y axis (multiples of 100/500 Kbit/s). Full history from page load.
 - **Traffic Shaping (Queue)** -- tc/HTB classes on the LAN bridge with fq_codel leaf qdiscs. Queues excess traffic instead of dropping, providing smoother throughput.
 - **Rate Limiting (Policer)** -- nftables or iptables-based packet dropping when a device exceeds the configured rate. Instant enforcement, no queuing.

@@ -34,6 +34,7 @@ graph TD
             DEV["trafficctl-device.sh<br/>(per-device connections)"]
             BYT["trafficctl-bytes.sh<br/>(conntrack byte counters)"]
             BYTNFT["trafficctl-bytes-nft.sh<br/>(nft counter init helper)"]
+            IFA["trafficctl-ifaces.sh<br/>(per-interface counters + role map)"]
             RLS["trafficctl-ratelimit-stats.sh<br/>(nft drop counters)"]
             SHS["trafficctl-shape-stats.sh<br/>(tc class stats)"]
             RDNS["trafficctl-rdns.sh<br/>(reverse DNS — Telegram/CLI)"]
@@ -312,6 +313,7 @@ The frontend uses independent polling loops:
 | Poll | Interval | Script | Purpose |
 |------|----------|--------|---------|
 | Bytes | Configurable (default 2s, 1s–5s, or off) | `trafficctl-bytes.sh` | Bandwidth speed = delta bytes / delta time |
+| Interfaces | Same tick as Bytes, only while the Overview panel is open | `trafficctl-ifaces.sh` | Per-interface throughput for the global overview. Deliberately has no timer of its own, so it inherits the Poll interval |
 | Drops | 5s | `trafficctl-ratelimit-stats.sh` | nft policer drop counters |
 | Shape stats | 5s | `trafficctl-shape-stats.sh` | tc class stats (backlog, drops, overlimits) |
 | Summary | On-demand / auto-refresh (5s–60s) | `trafficctl-summary.sh` | Full device list refresh |

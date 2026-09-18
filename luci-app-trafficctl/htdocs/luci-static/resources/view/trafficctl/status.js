@@ -14,7 +14,7 @@
 	}
 })();
 
-var TRAFFICCTL_BUILD = '20260820c';
+var TRAFFICCTL_BUILD = '20260918a';
 console.log('[trafficctl] build:' + TRAFFICCTL_BUILD);
 
 // Per-device DPI app breakdown from netifyd, keyed by IP. Stays empty when the
@@ -25,6 +25,15 @@ var STORAGE_KEY = 'trafficctl_opts';
 var RECENT_KEY = 'trafficctl_recent';
 var MAX_RECENT = 6;
 var FULL_HISTORY_MAX = 1800;
+// Per-interface history for the overview graph. Deliberately far smaller than
+// FULL_HISTORY_MAX: this is kept for EVERY interface at once (a router with a
+// few tunnels easily has a dozen), where _fullHistory only ever holds the one
+// device the user opened. 600 samples is 20 min at the default 2 s poll.
+var IFACE_HISTORY_MAX = 600;
+// How many devices the "Top talkers" list shows. The point of the list is to
+// answer "who is using the line right now" at a glance; a longer list is what
+// the per-device table below already is.
+var TOP_TALKERS = 5;
 var _fgGraphIdSeq = 0;
 
 function getRecentDevices() {
@@ -69,6 +78,12 @@ var callDevice = rpc.declare({
 var callBytes = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'bytes',
+	expect: { result: [] }
+});
+
+var callIfaces = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'ifaces',
 	expect: { result: [] }
 });
 
@@ -700,6 +715,237 @@ function renderFullGraph(history, limitKbit, width, height) {
 /* styles come from status.css — no runtime injection needed */
 
 
+// ── Global overview (issue #26 item 7) ──────────────────────────────────────
+// A bmon-style read of the whole router rather than one row per client: what
+// the uplink is doing right now, how that splits across the physical WAN, the
+// LAN bridges and the VPN tunnels, and who is responsible for it.
+//
+// Every number here comes from a source that already existed — per-interface
+// kernel counters (trafficctl-ifaces.sh) and the per-device speed map the
+// summary table is already computing — so nothing new is collected or stored
+// on the router.
+
+var ROLE_ORDER = { wan: 0, vpn: 1, lan: 2, other: 3 };
+var ROLE_LABEL = { wan: 'WAN', vpn: 'VPN', lan: 'LAN', other: '—' };
+
+function ifaceRate(hist) {
+	if (!hist || !hist.length) return { down: 0, up: 0 };
+	var last = hist[hist.length - 1];
+	return { down: last.speed || 0, up: last.up || 0 };
+}
+
+// One interface line: badge, name, sparkline, RX/TX rate, lifetime counters.
+//
+// RX/TX are INTERFACE-relative, exactly as bmon reports them, and are not
+// flipped to be client-relative. On the WAN that makes RX the download; on
+// br-lan RX is what the LAN sent upstream. Flipping the LAN rows to match the
+// user's mental model would make the two halves of the same panel mean
+// different things, so the header says which way round it is instead.
+function mkIfaceRow(itf, hist, globalMax) {
+	var rate = ifaceRate(hist);
+	var cls = 'tc-ov-row' + (itf.up ? '' : ' tc-ov-row--down');
+	var badge = E('span', {
+		'class': 'tc-ov-badge tc-ov-badge--' + (ROLE_ORDER[itf.role] !== undefined ? itf.role : 'other')
+	}, ROLE_LABEL[itf.role] || ROLE_LABEL.other);
+
+	var nameCell = E('span', { 'class': 'tc-ov-ifname' }, [
+		E('span', { 'class': 'tc-fw-bold' }, itf.label || itf.dev)
+	]);
+	// The kernel device name only earns its space when it differs from the
+	// friendly uci name — on "lan"/"br-lan" it does, on an unnamed device it
+	// would just repeat itself.
+	if (itf.label && itf.label !== itf.dev) {
+		nameCell.appendChild(E('span', { 'class': 'tc-c-faint tc-ov-ifdev' }, itf.dev));
+	}
+	if (itf.defroute) {
+		nameCell.appendChild(E('span', {
+			'class': 'tc-ov-defroute',
+			'data-tip': _('Carries the default route')
+		}, '↗'));
+	}
+	if (!itf.up) {
+		nameCell.appendChild(E('span', { 'class': 'tc-c-err tc-ov-ifdev' }, _('down')));
+	}
+
+	var sparkCell = E('span', { 'class': 'tc-ov-spark' });
+	var spark = renderSparkline(hist, globalMax, 74, 18, 0);
+	if (spark) {
+		sparkCell.appendChild(spark);
+	}
+
+	return E('div', { 'class': cls }, [
+		badge,
+		nameCell,
+		sparkCell,
+		E('span', { 'class': 'tc-ov-rate tc-mono tc-c-speed', 'data-tip': _('Received by this interface') },
+			'↓ ' + fmtSpeed(rate.down)),
+		E('span', { 'class': 'tc-ov-rate tc-mono tc-c-ok', 'data-tip': _('Sent by this interface') },
+			'↑ ' + fmtSpeed(rate.up)),
+		E('span', { 'class': 'tc-ov-total tc-mono tc-c-muted', 'data-tip': _('Total since boot (RX / TX)') },
+			fmtBytes(itf.rx_bytes) + ' / ' + fmtBytes(itf.tx_bytes))
+	]);
+}
+
+// "Who is using the line right now", aggregated instead of one row per device.
+// Reads self._speedMap, which pollBytes() already maintains for the summary
+// table — the overview adds no second source of truth for device speed.
+function mkTopTalkers(speedMap, nameByIp) {
+	var list = [];
+	Object.keys(speedMap || {}).forEach(function(ip) {
+		var sd = speedMap[ip] || {};
+		var total = (sd.current || 0) + (sd.current_up || 0);
+		if (total > 0) {
+			list.push({ ip: ip, down: sd.current || 0, up: sd.current_up || 0, total: total });
+		}
+	});
+	list.sort(function(a, b) { return b.total - a.total; });
+	list = list.slice(0, TOP_TALKERS);
+
+	var body = E('div', { 'class': 'tc-ov-talkers' });
+	if (!list.length) {
+		body.appendChild(E('div', { 'class': 'tc-c-faint tc-ov-empty' }, _('No active devices')));
+		return body;
+	}
+	var peak = list[0].total || 1;
+	list.forEach(function(t) {
+		var label = nameByIp[t.ip] && nameByIp[t.ip] !== '*' ? nameByIp[t.ip] : t.ip;
+		var pct = Math.max(2, Math.round((t.total / peak) * 100));
+		body.appendChild(E('div', { 'class': 'tc-ov-talker' }, [
+			E('div', { 'class': 'tc-ov-talker-head' }, [
+				E('span', { 'class': 'tc-ov-talker-name', 'title': t.ip }, label),
+				E('span', { 'class': 'tc-mono tc-ov-talker-rate' }, [
+					E('span', { 'class': 'tc-c-speed' }, '↓ ' + fmtSpeed(t.down)),
+					E('span', { 'class': 'tc-c-ok tc-ov-talker-up' }, '↑ ' + fmtSpeed(t.up))
+				])
+			]),
+			E('div', { 'class': 'tc-ov-bar' }, [
+				E('div', { 'class': 'tc-ov-bar-fill', 'style': 'width:' + pct + '%' })
+			])
+		]));
+	});
+	return body;
+}
+
+function mkOvTile(caption, value, sub, colourClass) {
+	return E('div', { 'class': 'tc-ov-tile' }, [
+		E('div', { 'class': 'tc-ov-tile-cap' }, caption),
+		E('div', { 'class': 'tc-ov-tile-val tc-mono ' + (colourClass || '') }, value),
+		E('div', { 'class': 'tc-ov-tile-sub tc-c-faint' }, sub || '')
+	]);
+}
+
+// Builds the whole panel. Pure function of the state handed to it — it owns no
+// timer and no listener outside the nodes it returns, so dropping the element
+// is a complete teardown.
+function buildOverviewPanel(ifaces, ifHistory, speedMap, nameByIp, showOther, onToggleOther, pollOff) {
+	var wrap = E('div', { 'class': 'tc-overview' });
+	if (!ifaces || !ifaces.length) {
+		wrap.appendChild(E('div', { 'class': 'tc-c-faint tc-ov-empty' },
+			_('Collecting interface counters…')));
+		return wrap;
+	}
+
+	var primary = null;
+	ifaces.forEach(function(i) { if (i.primary) { primary = i; } });
+	if (!primary) { primary = ifaces[0]; }
+	var primaryHist = ifHistory[primary.dev] || [];
+	var primaryRate = ifaceRate(primaryHist);
+
+	var activeDevices = 0;
+	Object.keys(speedMap || {}).forEach(function(ip) {
+		var sd = speedMap[ip] || {};
+		if ((sd.current || 0) + (sd.current_up || 0) > 0) { activeDevices++; }
+	});
+
+	// ── headline tiles ──────────────────────────────────────────────────
+	var head = E('div', { 'class': 'tc-ov-tiles' }, [
+		mkOvTile(_('Download') + ' · ' + (primary.label || primary.dev),
+			fmtSpeed(primaryRate.down), fmtBytes(primary.rx_bytes) + ' ' + _('total'), 'tc-c-speed'),
+		mkOvTile(_('Upload') + ' · ' + (primary.label || primary.dev),
+			fmtSpeed(primaryRate.up), fmtBytes(primary.tx_bytes) + ' ' + _('total'), 'tc-c-ok'),
+		mkOvTile(_('Active devices'), String(activeDevices),
+			_('sending or receiving now'), '')
+	]);
+	wrap.appendChild(head);
+
+	// ── uplink graph ────────────────────────────────────────────────────
+	// One WAN, not a sum of all of them: on a failover pair the same bytes
+	// would be counted twice, and on two independent uplinks the sum is a
+	// number that describes neither link. Multi-WAN aggregation is issue #28.
+	var graphBox = E('div', { 'class': 'tc-ov-graph' });
+	var w = 560;
+	var svg = renderFullGraph(primaryHist, 0, w, 150);
+	if (svg) {
+		graphBox.appendChild(svg);
+	} else if (pollOff) {
+		// With Poll set to Off there is no second sample coming, ever — the
+		// rates are a diff of two polls. Promising one that will never arrive
+		// would send the user looking for a fault instead of at the Poll chip.
+		graphBox.appendChild(E('div', { 'class': 'tc-c-faint tc-ov-empty' },
+			_('Polling is off — set the Poll interval to see throughput.')));
+	} else {
+		graphBox.appendChild(E('div', { 'class': 'tc-c-faint tc-ov-empty' },
+			_('Waiting for a second sample…')));
+	}
+	wrap.appendChild(graphBox);
+
+	// ── per-interface breakdown + top talkers ───────────────────────────
+	var sorted = ifaces.slice().sort(function(a, b) {
+		var ra = ROLE_ORDER[a.role] !== undefined ? ROLE_ORDER[a.role] : 3;
+		var rb = ROLE_ORDER[b.role] !== undefined ? ROLE_ORDER[b.role] : 3;
+		if (ra !== rb) return ra - rb;
+		var sa = ifaceRate(ifHistory[a.dev]), sb = ifaceRate(ifHistory[b.dev]);
+		return (sb.down + sb.up) - (sa.down + sa.up);
+	});
+
+	// One scale for every sparkline, so the rows are comparable with each
+	// other at a glance — a per-row scale would make an idle tunnel look as
+	// busy as the WAN.
+	var globalMax = 1;
+	sorted.forEach(function(i) {
+		(ifHistory[i.dev] || []).forEach(function(p) {
+			if (p.speed > globalMax) { globalMax = p.speed; }
+		});
+	});
+
+	var ifList = E('div', { 'class': 'tc-ov-iflist' });
+	var others = [];
+	sorted.forEach(function(i) {
+		if (i.role === 'other') { others.push(i); return; }
+		ifList.appendChild(mkIfaceRow(i, ifHistory[i.dev], globalMax));
+	});
+	// "other" is where bridge ports, ifb mirrors (including the shaper's own
+	// tctl-ifb0) and dummy devices land. They are real counters but they
+	// duplicate traffic already shown above, so they are collapsed by default
+	// rather than dropped.
+	if (others.length) {
+		if (showOther) {
+			others.forEach(function(i) {
+				ifList.appendChild(mkIfaceRow(i, ifHistory[i.dev], globalMax));
+			});
+		}
+		var toggle = E('div', { 'class': 'tc-ov-more' },
+			(showOther ? '▾ ' : '▸ ') + _('Other interfaces') + ' (' + others.length + ')');
+		toggle.addEventListener('click', function() { onToggleOther(!showOther); });
+		ifList.appendChild(toggle);
+	}
+
+	wrap.appendChild(E('div', { 'class': 'tc-ov-cols' }, [
+		E('div', { 'class': 'tc-ov-col' }, [
+			E('div', { 'class': 'tc-ov-subtitle' }, _('Interfaces')),
+			ifList,
+			E('div', { 'class': 'tc-c-faint tc-ov-note' },
+				_('↓ / ↑ are relative to the interface: on the WAN ↓ is your download, on a LAN bridge ↓ is what the LAN sent upstream.'))
+		]),
+		E('div', { 'class': 'tc-ov-col' }, [
+			E('div', { 'class': 'tc-ov-subtitle' }, _('Top talkers')),
+			mkTopTalkers(speedMap, nameByIp)
+		])
+	]));
+
+	return wrap;
+}
+
 var PRIVATE_RE = /^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/;
 
 function groupConnections(conns, groupBy) {
@@ -1036,6 +1282,7 @@ function updateUrlParams(opts) {
 	if (opts.avgWindow && opts.avgWindow !== 15) params.set('avg', String(opts.avgWindow));
 	if (opts.avgMethod && opts.avgMethod !== 'simple') params.set('method', opts.avgMethod);
 	if (opts.extendedStats) params.set('extended', '1');
+	if (opts.showOverview) params.set('overview', '1');
 	if (opts.rdns) params.set('rdns', '1');
 	var newUrl = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
 	// Selecting a different device is a real navigation step, so push it and let
@@ -1057,6 +1304,7 @@ function applyUrlParams(opts) {
 	var paramAvg = urlParams.get('avg');
 	var paramMethod = urlParams.get('method');
 	var paramExtended = urlParams.get('extended');
+	var paramOverview = urlParams.get('overview');
 	var paramRdns = urlParams.get('rdns');
 
 	if (paramIp) opts.lastIp = paramIp;
@@ -1065,6 +1313,7 @@ function applyUrlParams(opts) {
 	if (paramAvg) opts.avgWindow = parseInt(paramAvg) || 15;
 	if (paramMethod && (paramMethod === 'ewma' || paramMethod === 'simple')) opts.avgMethod = paramMethod;
 	if (paramExtended === '1') opts.extendedStats = true;
+	if (paramOverview === '1') opts.showOverview = true;
 	if (paramRdns === '1') opts.rdns = true;
 	return opts;
 }
@@ -1399,6 +1648,12 @@ return view.extend({
 	_shapeMap:     {},
 	_speedEwma:    {},
 	_speedEwmaUp:  {},
+	// Global overview state. _ifBytes holds the previous raw counter sample per
+	// interface (the overview diffs two samples exactly as pollBytes does for
+	// devices), _ifHistory the derived rates, _ifMeta the last role/label map.
+	_ifBytes:      {},
+	_ifHistory:    {},
+	_ifMeta:       [],
 	_deviceTimer:  null,
 	_pollMode:     null,
 	_onPopState:   null,
@@ -1560,6 +1815,24 @@ return view.extend({
 			var o = loadOpts(); o.showConns = this.checked; saveOpts(o); updateUrlParams(o);
 			connsDiv.classList.toggle('tc-hidden', !this.checked);
 		});
+		// Off by default: it costs one extra rpcd call per poll tick, so a user
+		// who never opens it never pays for it. The gate is read fresh in
+		// pollBytes() rather than cached, so unticking it stops the call on the
+		// very next tick.
+		var overviewCheck = mkToggle('tm-overview', _('Overview'), opts.showOverview, function() {
+			var o = loadOpts(); o.showOverview = this.checked; saveOpts(o); updateUrlParams(o);
+			overviewDiv.classList.toggle('tc-hidden', !this.checked || !isAllMode());
+			if (this.checked) {
+				pollIfaces();
+			} else {
+				// Drop the samples too — keeping them would show a stale graph
+				// with a gap in it when the panel is re-opened much later.
+				self._ifHistory = {};
+				self._ifBytes = {};
+				self._ifMeta = [];
+				while (overviewDiv.firstChild) { overviewDiv.removeChild(overviewDiv.firstChild); }
+			}
+		});
 		var rdnsCheck = mkToggle('tm-rdns', _('rDNS'), opts.rdns, function() {
 			var o = loadOpts(); o.rdns = this.checked; saveOpts(o); updateUrlParams(o);
 		});
@@ -1580,6 +1853,7 @@ return view.extend({
 			}
 		});
 
+		var overviewDiv = E('div', { 'class': opts.showOverview ? '' : 'tc-hidden' });
 		var extStatsDiv = E('div', { 'class': opts.extendedStats ? '' : 'tc-hidden' });
 		var deviceGraphDiv = E('div', { 'class': 'tc-device-graph tc-hidden' });
 		var activityDiv = E('div', { 'class': opts.showActivity ? '' : 'tc-hidden' });
@@ -1992,6 +2266,11 @@ return view.extend({
 			modeToggle.classList.toggle('tc-hidden', all);
 			rdnsCheck.classList.toggle('tc-hidden', all);
 			extStatsCheck.classList.toggle('tc-hidden', all);
+			// The overview is a whole-router view, so it belongs to the
+			// all-devices mode only; its toggle goes with it rather than
+			// sitting there doing nothing while a device is selected.
+			overviewCheck.classList.toggle('tc-hidden', !all);
+			overviewDiv.classList.toggle('tc-hidden', !all || !loadOpts().showOverview);
 			extStatsDiv.classList.toggle('tc-hidden', all || !loadOpts().extendedStats);
 			if (typeof updateTableSectionMode === 'function') updateTableSectionMode();
 		}
@@ -2090,6 +2369,70 @@ return view.extend({
 				}
 				updateExtendedStats();
 			}).catch(function(){});
+		}
+
+		// Global overview. Deliberately has NO timer of its own: it is driven
+		// from pollBytes(), so it inherits the Poll chip, the document.hidden
+		// check and the start/stop lifecycle for free. A private setInterval
+		// here would ignore the Poll setting and would be one more thing to
+		// remember to clear on teardown — the bug class this repo has shipped
+		// before with the speed-graph popup.
+		function pollIfaces() {
+			if (!loadOpts().showOverview || !isAllMode()) return;
+			callIfaces().then(function(list) {
+				if (!Array.isArray(list)) return;
+				var now = Date.now();
+				self._ifMeta = list;
+
+				var seen = {};
+				list.forEach(function(itf) {
+					seen[itf.dev] = true;
+					var prev = self._ifBytes[itf.dev];
+					if (prev) {
+						var dt = (now - prev.time) / 1000;
+						if (dt >= 0.5) {
+							var dRx = itf.rx_bytes - prev.rx;
+							var dTx = itf.tx_bytes - prev.tx;
+							// An interface that went down and came back up
+							// restarts its counters at zero; a negative delta is
+							// that, not traffic.
+							if (dRx < 0) dRx = 0;
+							if (dTx < 0) dTx = 0;
+							if (!self._ifHistory[itf.dev]) self._ifHistory[itf.dev] = [];
+							var h = self._ifHistory[itf.dev];
+							h.push({ speed: dRx / dt, up: dTx / dt, time: now });
+							if (h.length > IFACE_HISTORY_MAX) h.splice(0, h.length - IFACE_HISTORY_MAX);
+						}
+					}
+					self._ifBytes[itf.dev] = { rx: itf.rx_bytes, tx: itf.tx_bytes, time: now };
+				});
+				// Forget interfaces that disappeared (a tunnel torn down, a
+				// modem unplugged) so their history cannot grow unbounded
+				// across a long session.
+				Object.keys(self._ifHistory).forEach(function(dev) {
+					if (!seen[dev]) { delete self._ifHistory[dev]; delete self._ifBytes[dev]; }
+				});
+
+				renderOverview();
+			}).catch(function(){});
+		}
+
+		function renderOverview() {
+			var o = loadOpts();
+			if (!o.showOverview || !isAllMode()) return;
+			var nameByIp = {};
+			(self._lastRows || []).forEach(function(r) { nameByIp[r.ip] = r.name; });
+			var panel = buildOverviewPanel(
+				self._ifMeta, self._ifHistory, self._speedMap, nameByIp,
+				!!o.ovShowOther,
+				function(next) {
+					var oo = loadOpts(); oo.ovShowOther = next; saveOpts(oo);
+					renderOverview();
+				},
+				(o.pollInterval !== undefined ? o.pollInterval : 2) <= 0
+			);
+			while (overviewDiv.firstChild) overviewDiv.removeChild(overviewDiv.firstChild);
+			overviewDiv.appendChild(panel);
 		}
 
 		function pollBytes() {
@@ -2201,6 +2544,10 @@ return view.extend({
 					}
 				}
 				updateDeviceGraph();
+				// Same tick as the device counters, so the overview's "Top
+				// talkers" and the summary table can never disagree about who
+				// is busy.
+				pollIfaces();
 			}).catch(function(){});
 		}
 
@@ -3009,7 +3356,7 @@ return view.extend({
 		settingsBody.appendChild(tgSection.el);
 
 		var displaySection = mkCollapsible(_('Display'), E('div', {'class':'tc-settings-section-row'}, [
-			showStats, showConns, extStatsCheck, rdnsCheck, activityCheck,
+			showStats, showConns, overviewCheck, extStatsCheck, rdnsCheck, activityCheck,
 			sep(),
 			E('span', {'data-tip':_('Auto-refresh interval for summary table')}, [mkLabel(_('Refresh')+':'), refreshPick.el])
 		]), false);
@@ -3473,6 +3820,7 @@ return view.extend({
 				statusDiv,
 				rateLimitRow,
 				settingsPanel,
+				overviewDiv,
 				statsDiv,
 				extStatsDiv,
 				deviceGraphDiv,
@@ -3494,5 +3842,12 @@ return view.extend({
 		if (this._onPopState) { window.removeEventListener('popstate', this._onPopState); this._onPopState = null; }
 		if (this._graphPopupTimer) { clearInterval(this._graphPopupTimer); this._graphPopupTimer = null; }
 		if (this._graphPopup && this._graphPopup.parentNode) { this._graphPopup.parentNode.removeChild(this._graphPopup); this._graphPopup = null; }
+		// The overview panel lives inside the view's own tree, so the DOM goes
+		// with it — but its sample history is on the view object and would be
+		// carried into the next visit, where it would draw a graph with a hole
+		// the size of the time spent on another page.
+		this._ifHistory = {};
+		this._ifBytes = {};
+		this._ifMeta = [];
 	}
 });

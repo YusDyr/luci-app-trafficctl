@@ -1,7 +1,7 @@
 #!/bin/bash
 # Tests for the rpcd/ubus backend (luci.trafficctl) — previously had NO test
 # coverage beyond `sh -n` syntax checking, despite being the entire
-# authenticated write surface (30 methods) reachable from LuCI/ubus.
+# authenticated write surface (31 methods) reachable from LuCI/ubus.
 #
 # Drives the real script the way rpcd actually does: `luci.trafficctl call
 # <method>` with the JSON argument object on stdin, and `list` with none.
@@ -107,7 +107,7 @@ chmod +x "$MOCKBIN/ubus"
 # covered by that script's own dedicated test file).
 DISPATCH_LOG="$TMPDIR/dispatch.log"
 for sub in trafficctl-summary.sh trafficctl-device.sh trafficctl-bytes.sh \
-           trafficctl-block.sh trafficctl-unblock.sh \
+           trafficctl-ifaces.sh trafficctl-block.sh trafficctl-unblock.sh \
            trafficctl-macfilter-add.sh trafficctl-macfilter-remove.sh \
            trafficctl-ratelimit.sh trafficctl-ratelimit-stats.sh \
            trafficctl-shape.sh trafficctl-shape-stats.sh \
@@ -131,7 +131,7 @@ run_call() {
 }
 
 # ════════════════════════════════════════════════════════════════════════════
-# `list` enumerates all 30 methods with their expected argument schema
+# `list` enumerates all 31 methods with their expected argument schema
 # ════════════════════════════════════════════════════════════════════════════
 
 LIST_OUT=$(run_list)
@@ -139,6 +139,7 @@ for m in summary device bytes block unblock macfilter_add macfilter_remove \
          ratelimit ratelimit_stats shape_add shape_remove shape_status shape_stats \
          rdns netify_status netify_list netify_collect names_list name_set name_clear \
          portfw_list portfw_ctl config_get config_set telegram_config_get \
+         ifaces \
          telegram_config_set telegram_test logging_config_get logging_config_set \
          activity_log version; do
     assert_contains "list: declares method $m" "\"$m\"" "$LIST_OUT"
@@ -153,6 +154,10 @@ assert_eq "list: is valid JSON (parses with python-free brace balance check)" \
 OUT=$(run_call summary)
 assert_contains "summary: wraps sub-script output under result" '{"result":' "$OUT"
 assert_contains "summary: dispatches to trafficctl-summary.sh" '"ok":true,"msg":"stub-trafficctl-summary.sh"' "$OUT"
+
+OUT=$(run_call ifaces)
+assert_contains "ifaces: wraps sub-script output under result" '{"result":' "$OUT"
+assert_contains "ifaces: dispatches to trafficctl-ifaces.sh" '"ok":true,"msg":"stub-trafficctl-ifaces.sh"' "$OUT"
 
 OUT=$(run_call device '{"ip":"192.168.1.5"}')
 assert_contains "device: forwards ip to trafficctl-device.sh" "trafficctl-device.sh 192.168.1.5" "$(cat "$DISPATCH_LOG")"
