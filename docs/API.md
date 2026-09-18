@@ -216,18 +216,19 @@ is stateless and one sample is cheap.
 ```json
 [
   {"dev":"eth1","label":"wan","role":"wan","tunnel":false,"primary":true,
-   "defroute":false,"up":true,"rx_bytes":5368709120,"tx_bytes":1234567890}
+   "defroute":false,"enslaved":false,"up":true,"rx_bytes":5368709120,"tx_bytes":1234567890}
 ]
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `dev` | string | Kernel device name |
-| `label` | string | uci/ubus interface name for that L3 device, or `dev` if it has none |
+| `label` | string | uci/ubus interface name for that L3 device, or `dev` if it has none. Several interfaces routinely share one `l3_device` (`wan`, `wan6` and `wan6_alias0` on a dual-stack uplink); the plain name wins over a v6 or alias name, ties breaking on length then lexically, so the choice never depends on ubus dump order |
 | `role` | string | `wan`, `lan`, `vpn` or `other` |
 | `tunnel` | bool | Device name matches a tunnel pattern (WireGuard, AmneziaWG, GRE, …). `ppp*` is deliberately excluded — `pppoe-wan` is an uplink, not a VPN |
 | `primary` | bool | The one interface the overview graphs. Exactly one per response |
 | `defroute` | bool | Currently carries a v4 or v6 default route |
+| `enslaved` | bool | Device is a bridge port (`/sys/class/net/<dev>/master` exists). Its bytes are also counted by its bridge, so it is forced to role `other` and the UI collapses it |
 | `up` | bool | `operstate` is `up` or `unknown` |
 | `rx_bytes` | number | Bytes received **by the interface** since boot |
 | `tx_bytes` | number | Bytes sent **by the interface** since boot |
@@ -240,6 +241,10 @@ which busybox awk evaluates through a 32-bit int (see `tests/test_byte_overflow.
 **Role rules**, in priority order — the ordering is what keeps a full-tunnel
 router correct:
 
+0. A bridge port is `other`, whatever else it looks like. `lan2`, `lan3` and
+   `phy0-ap0` are ports of `br-lan` and report the very same bytes the bridge
+   reports; naming cannot tell them apart from top-level devices, so
+   enslavement is read from `/sys/class/net/<dev>/master`.
 1. A device trafficctl already monitors as a LAN (`tctl_get_lan_devices`) is `lan`.
 2. A tunnel-named device is `vpn`, **even when it holds the default route**.
    On a WireGuard/AmneziaWG full-tunnel setup the default route is via `awg0`

@@ -116,6 +116,14 @@ write_operstate() {   # write_operstate <dev> <state>
     printf '%s\n' "$2" > "$SYSFS/$1/operstate"
 }
 
+# Enslavement, as the kernel exposes it: /sys/class/net/<port>/master is a
+# symlink to the bridge's directory, so master/ifindex is readable exactly when
+# the device is a bridge port.
+write_master() {   # write_master <port> <bridge-ifindex>
+    mkdir -p "$SYSFS/$1/master"
+    printf '%s\n' "$2" > "$SYSFS/$1/master/ifindex"
+}
+
 # /proc/net/dev: two header lines, then "<name>: <16 counters>".
 # Column 1 after the colon is rx_bytes, column 9 is tx_bytes.
 netdev_header() {
@@ -139,6 +147,129 @@ reset_state() {
     rm -f "$CACHE" "$FORKLOG"
     : > "$FORKLOG"
 }
+
+# ════════════════════════════════════════════════════════════════════════════
+# 0. A REAL router, not a tidy fixture.
+#
+#    OpenWrt 24.10 with four AmneziaWG tunnels, a DSA switch (lan2/lan3/lan4 +
+#    wan), two APs bridged into br-lan, and a dual-stack uplink where three uci
+#    interfaces — wan, wan6 and wan6_alias0 — share the l3_device "wan".
+#
+#    Every earlier fixture in this file was tidy enough that three separate
+#    defects survived it: defroute true on every "other" device, the uplink
+#    titled "wan6_alias0", and bridge ports listed alongside the bridge that
+#    already counts their bytes. This section exists so that cannot recur.
+# ════════════════════════════════════════════════════════════════════════════
+
+{
+    netdev_header
+    netdev_row lo 1234 1234
+    netdev_row eth0 380322298613 40000000000   # DSA conduit, carries everything
+    netdev_row wan  373121091511 30000000000   # DSA user port, the uplink
+    netdev_row lan2 9000 8000                  # bridge port
+    netdev_row lan3 7000 6000                  # bridge port
+    netdev_row lan4 0 0                        # bridge port, down
+    netdev_row phy0-ap0 5000 4000              # AP, bridge port
+    netdev_row phy1-ap0 3000 2000              # AP, bridge port
+    netdev_row br-lan 26008166902 20000000000
+    netdev_row awg0 100 200
+    netdev_row awg1 300 400
+    netdev_row awg2 500 600
+    netdev_row awg3 700 800
+    # This package's own shaper ifb. Not enslaved, not a LAN, not a tunnel, so
+    # it reaches the WAN branch of the role chain — which is what makes it a
+    # second, independent witness for the auto-vivification bug below, instead
+    # of relying on eth0 alone.
+    netdev_row tctl-ifb0 1000 2000
+} > "$PROC"
+
+write_fwlib "br-lan"
+write_ip "default via 188.242.0.1 dev wan proto static" ""
+# Three uci interfaces on one l3_device, emitted worst-name-last on purpose:
+# whichever the dump happens to end with must NOT be the one that wins.
+write_ubus "wan=wan" "wan6=wan" "wan6_alias0=wan" "lan=br-lan" \
+           "awg0=awg0" "awg1=awg1" "awg2=awg2" "awg3=awg3"
+for d in eth0 wan lan2 lan3 phy0-ap0 phy1-ap0 br-lan awg0 awg1 awg2 awg3 tctl-ifb0; do
+    write_operstate "$d" up
+done
+write_operstate lan4 down
+for p in lan2 lan3 lan4 phy0-ap0 phy1-ap0; do
+    write_master "$p" 7
+done
+reset_state
+
+OUT=$(run_ifaces)
+ROWS=$(printf '%s' "$OUT" | sed 's/},{/}\n{/g')
+
+# ── defect 1: awk auto-vivification made defroute true almost everywhere ────
+# Referencing isdef[d] in a condition CREATES the element, so a later `d in
+# isdef` test was true for every device that merely reached that condition.
+assert_eq "exactly one device carries the default route" "1" \
+    "$(printf '%s' "$OUT" | grep -o '"defroute":true' | wc -l | tr -d ' ')"
+assert_eq "…and it is the uplink" "1" \
+    "$(printf '%s' "$ROWS" | grep -c '"dev":"wan".*"defroute":true')"
+# eth0 and tctl-ifb0 both reach the WAN branch of the role chain, so both are
+# witnesses independent of the enslavement fix short-circuiting the others.
+for d in eth0 tctl-ifb0 lan2 lan3 lan4 phy0-ap0 phy1-ap0 br-lan awg0; do
+    assert_eq "defroute is false on $d" "1" \
+        "$(printf '%s' "$ROWS" | grep -c "\"dev\":\"$d\".*\"defroute\":false")"
+done
+
+# ── defect 2: the last uci name on a shared l3_device won ───────────────────
+assert_eq "a dual-stack uplink is titled 'wan', not the v6 alias" "1" \
+    "$(printf '%s' "$ROWS" | grep -c '"dev":"wan","label":"wan"')"
+assert_not_contains "the alias name never becomes the label" '"label":"wan6_alias0"' "$OUT"
+assert_not_contains "nor does the v6 name" '"label":"wan6"' "$OUT"
+
+# ── defect 3: bridge ports counted the same bytes as their bridge ───────────
+for p in lan2 lan3 lan4 phy0-ap0 phy1-ap0; do
+    assert_eq "$p is marked enslaved" "1" \
+        "$(printf '%s' "$ROWS" | grep -c "\"dev\":\"$p\".*\"enslaved\":true")"
+    # role "other" is what puts it behind the UI's collapsed expander instead
+    # of in the top-level list next to the bridge.
+    assert_eq "$p is demoted out of the top-level list" "1" \
+        "$(printf '%s' "$ROWS" | grep -c "\"dev\":\"$p\",\"label\":\"$p\",\"role\":\"other\"")"
+done
+assert_eq "the bridge itself is NOT enslaved" "1" \
+    "$(printf '%s' "$ROWS" | grep -c '"dev":"br-lan".*"enslaved":false')"
+assert_eq "the uplink is NOT enslaved" "1" \
+    "$(printf '%s' "$ROWS" | grep -c '"dev":"wan".*"enslaved":false')"
+# The DSA conduit beneath the uplink carries the same bytes again. It is not a
+# bridge port, so it lands in "other" on role rather than enslavement — either
+# way it must not appear as a second WAN.
+assert_eq "the DSA conduit is not a second WAN" "1" \
+    "$(printf '%s' "$ROWS" | grep -c '"dev":"eth0","label":"eth0","role":"other"')"
+assert_eq "exactly one device has role wan" "1" \
+    "$(printf '%s' "$OUT" | grep -o '"role":"wan"' | wc -l | tr -d ' ')"
+assert_eq "exactly one device is primary" "1" \
+    "$(printf '%s' "$OUT" | grep -o '"primary":true' | wc -l | tr -d ' ')"
+
+# ── the rest of the topology still classifies correctly ─────────────────────
+assert_eq "the bridge is the LAN" "1" \
+    "$(printf '%s' "$ROWS" | grep -c '"dev":"br-lan","label":"lan","role":"lan"')"
+assert_eq "all four tunnels are VPNs" "4" \
+    "$(printf '%s' "$OUT" | grep -o '"role":"vpn"' | wc -l | tr -d ' ')"
+assert_contains "a tunnel keeps its uci name" '"dev":"awg2","label":"awg2","role":"vpn"' "$OUT"
+assert_eq "the down bridge port reports down" "1" \
+    "$(printf '%s' "$ROWS" | grep -c '"dev":"lan4".*"up":false')"
+assert_contains "the uplink's 373 GB counter is intact" '"rx_bytes":373121091511' "$OUT"
+assert_eq "output is brace-balanced JSON" "0" \
+    "$(printf '%s' "$OUT" | tr -cd '{}' | awk '{o=gsub(/\{/,"");c=gsub(/\}/,"")} END{print (o==c)?0:1}')"
+
+# Label preference must not depend on the order ubus happened to emit. Same
+# three interfaces, reversed.
+write_ubus "wan6_alias0=wan" "wan6=wan" "wan=wan" "lan=br-lan"
+reset_state
+OUT=$(run_ifaces)
+assert_eq "label choice is independent of dump order" "1" \
+    "$(printf '%s' "$OUT" | sed 's/},{/}\n{/g' | grep -c '"dev":"wan","label":"wan"')"
+
+# And with ONLY the v6 alias present, the device still gets a usable name and is
+# still recognised as the uplink rather than falling through to "other".
+write_ubus "wan6_alias0=wan" "lan=br-lan"
+reset_state
+OUT=$(run_ifaces)
+assert_contains "an alias-only uplink is still a WAN" '"dev":"wan","label":"wan6_alias0","role":"wan"' "$OUT"
 
 # ════════════════════════════════════════════════════════════════════════════
 # 1. Roles on a full-tunnel router — the configuration this has to get right.
@@ -285,8 +416,8 @@ reset_state
 # Deliberately wrong roles, stamped with the current time.
 {
     printf '# %s\n' "$(date +%s)"
-    printf 'eth1 other 0 0 0 bogus-label\n'
-    printf 'br-lan other 0 0 0 bogus-lan\n'
+    printf 'eth1 other 0 0 0 0 bogus-label\n'
+    printf 'br-lan other 0 0 0 0 bogus-lan\n'
 } > "$CACHE"
 
 OUT=$(run_ifaces)
@@ -297,8 +428,8 @@ assert_eq "…and forks neither ip nor ubus" "0" "$(wc -l < "$FORKLOG" | tr -d '
 # Same cache, now older than the TTL.
 {
     printf '# %s\n' "$(( $(date +%s) - 3600 ))"
-    printf 'eth1 other 0 0 0 bogus-label\n'
-    printf 'br-lan other 0 0 0 bogus-lan\n'
+    printf 'eth1 other 0 0 0 0 bogus-label\n'
+    printf 'br-lan other 0 0 0 0 bogus-lan\n'
 } > "$CACHE"
 : > "$FORKLOG"
 
@@ -327,8 +458,8 @@ write_ubus "wan=eth1" "lan=br-lan" "vpn_by=awg3"
 # new tunnel in "other" until the TTL expired.
 {
     printf '# %s\n' "$(date +%s)"
-    printf 'eth1 wan 0 1 1 wan\n'
-    printf 'br-lan lan 0 0 0 lan\n'
+    printf 'eth1 wan 0 1 1 0 wan\n'
+    printf 'br-lan lan 0 0 0 0 lan\n'
 } > "$CACHE"
 
 OUT=$(run_ifaces)

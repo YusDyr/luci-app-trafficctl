@@ -763,6 +763,14 @@ function mkIfaceRow(itf, hist, globalMax) {
 			'data-tip': _('Carries the default route')
 		}, '↗'));
 	}
+	// Say it on the row as well as on the expander: once expanded, a port sitting
+	// next to its bridge should be identifiable without counting bytes.
+	if (itf.enslaved) {
+		nameCell.appendChild(E('span', {
+			'class': 'tc-c-faint tc-ov-ifdev',
+			'data-tip': _('Bridge port — these bytes are also counted in its bridge')
+		}, _('port')));
+	}
 	if (!itf.up) {
 		nameCell.appendChild(E('span', { 'class': 'tc-c-err tc-ov-ifdev' }, _('down')));
 	}
@@ -914,18 +922,22 @@ function buildOverviewPanel(ifaces, ifHistory, speedMap, nameByIp, showOther, on
 		if (i.role === 'other') { others.push(i); return; }
 		ifList.appendChild(mkIfaceRow(i, ifHistory[i.dev], globalMax));
 	});
-	// "other" is where bridge ports, ifb mirrors (including the shaper's own
-	// tctl-ifb0) and dummy devices land. They are real counters but they
-	// duplicate traffic already shown above, so they are collapsed by default
-	// rather than dropped.
+	// "other" is where bridge ports (lan2, phy0-ap0 …), the DSA conduit beneath
+	// the uplink, ifb mirrors including the shaper's own tctl-ifb0, and dummy
+	// devices land. Their counters are real but they re-count bytes the bridge
+	// or the uplink above already reports, so they are collapsed by default and
+	// the expander says why — dropping them silently would hide real devices,
+	// listing them flat would make the panel look like it is double-counting.
 	if (others.length) {
 		if (showOther) {
 			others.forEach(function(i) {
 				ifList.appendChild(mkIfaceRow(i, ifHistory[i.dev], globalMax));
 			});
 		}
-		var toggle = E('div', { 'class': 'tc-ov-more' },
-			(showOther ? '▾ ' : '▸ ') + _('Other interfaces') + ' (' + others.length + ')');
+		var toggle = E('div', {
+			'class': 'tc-ov-more',
+			'data-tip': _('Bridge ports, switch conduits and ifb mirrors. Their bytes are already counted in the bridge or uplink above.')
+		}, (showOther ? '▾ ' : '▸ ') + _('Other interfaces') + ' (' + others.length + ')');
 		toggle.addEventListener('click', function() { onToggleOther(!showOther); });
 		ifList.appendChild(toggle);
 	}
