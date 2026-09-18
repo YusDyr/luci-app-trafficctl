@@ -706,7 +706,9 @@ tctl_log() {
 
     local category
     case "$action" in
-        block|unblock) category="blocks" ;;
+        # The global cut is a block, just a wider one — it belongs in the same
+        # category so switching "Blocks" off does not leave it unlogged.
+        block|unblock|cut|uncut) category="blocks" ;;
         ratelimit*) category="ratelimits" ;;
         shape*) category="shapes" ;;
         telegram*) category="telegram" ;;

@@ -181,6 +181,20 @@ var callNewDeviceSet = rpc.declare({
 	params: ['enabled', 'limit_kbit', 'limit_mode']
 });
 
+// Global internet cut. cut_status is a write method even though it reads:
+// it reconciles the auto-revert deadline and revives a dead keeper, so that
+// the answer it gives about live nft state is one the UI can trust.
+var callCutStatus = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'cut_status'
+});
+
+var callCutSet = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'cut_set',
+	params: ['active', 'duration', 'persist']
+});
+
 var callActivityLog = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'activity_log',
@@ -3462,10 +3476,209 @@ return view.extend({
 			});
 		}
 
+		// ── Global internet cut (#55) ──────────────────────────────────────
+		//
+		// Deliberately NOT inside the collapsed Settings panel. This is the one
+		// control in the app that can lock out its own operator, so its live
+		// state has to be legible without expanding anything: a cut that is on
+		// must look on from the moment the page renders.
+		var cutPanel = E('div', {'class': 'tc-cut'});
+
+		var CUT_DURATIONS = [
+			{ v: '900',   l: _('15 min') },
+			{ v: '3600',  l: _('1 hour') },
+			{ v: '14400', l: _('4 hours') },
+			{ v: '0',     l: _('Until I switch it back') }
+		];
+
+		var cutDuration = null;
+		var cutPersist = null;
+		var cutArmed = false;
+		var cutArmTimer = null;
+
+		function fmtCutRemaining(secs) {
+			var h, m;
+			if (secs <= 0) { return _('under a minute'); }
+			h = Math.floor(secs / 3600);
+			m = Math.floor((secs % 3600) / 60);
+			if (h > 0) { return h + ' ' + _('h') + ' ' + m + ' ' + _('min'); }
+			if (m > 0) { return m + ' ' + _('min'); }
+			return secs + ' ' + _('s');
+		}
+
+		function cutDisarm() {
+			cutArmed = false;
+			if (cutArmTimer) { clearTimeout(cutArmTimer); cutArmTimer = null; }
+		}
+
+		function cutSubmit(active, status) {
+			cutDisarm();
+			status.textContent = active ? _('Cutting…') : _('Restoring…');
+			status.style.color = 'var(--tc-muted)';
+			callCutSet(active, parseInt(cutDuration, 10) || 0, !!cutPersist).then(function(res) {
+				if (res && res.ok) {
+					renderCut(res);
+				} else {
+					status.textContent = '✗ ' + ((res && res.msg) || _('failed'));
+					status.style.color = 'var(--tc-err)';
+				}
+			}).catch(function(e) {
+				status.textContent = '✗ ' + (e.message || e);
+				status.style.color = 'var(--tc-err)';
+			});
+		}
+
+		function renderCut(st) {
+			var status, btn, hint, persistToggle, pick, note, devs;
+
+			while (cutPanel.firstChild) { cutPanel.removeChild(cutPanel.firstChild); }
+			if (!st) { return; }
+
+			if (cutDuration === null) { cutDuration = String(st.default_duration); }
+			if (cutPersist === null) { cutPersist = !!st.default_persist; }
+
+			// nft is the only backend this is implemented on; saying so beats
+			// offering a button that would quietly do nothing.
+			if (st.supported === false) {
+				cutPanel.className = 'tc-cut';
+				cutPanel.appendChild(E('div', {'class': 'tc-cut__row'}, [
+					E('span', {'class': 'tc-cut__icon'}, '⊘'),
+					E('span', {'class': 'tc-c-muted'},
+						_('Global internet cut needs nftables (fw4). This router is running iptables.'))
+				]));
+				return;
+			}
+
+			status = E('span', {'class': 'tg-save-status'});
+			devs = st.lan_devices || '';
+
+			// The dangerous state: the toggle says on, the rule is gone. Never
+			// render this as ON — a lapsed cut with an ON-looking UI is exactly
+			// the failure this feature is supposed to not have.
+			if (st.active && !st.rule_present) {
+				cutPanel.className = 'tc-cut tc-cut--broken';
+				btn = E('button', {'class': 'btn cbi-button-negative'}, _('Switch it off'));
+				btn.addEventListener('click', function() { cutSubmit(false, status); });
+				cutPanel.appendChild(E('div', {'class': 'tc-cut__row'}, [
+					E('span', {'class': 'tc-cut__icon'}, '⚠'),
+					E('div', {'class': 'tc-cut__body'}, [
+						E('b', {}, _('The internet cut is switched on, but its firewall rule is missing.')),
+						E('div', {'class': 'tc-cut__hint'},
+							_('Traffic is flowing right now. It is normally re-asserted within seconds — if this persists, switch it off and on again.'))
+					]),
+					btn, status
+				]));
+				return;
+			}
+
+			if (st.active) {
+				cutPanel.className = 'tc-cut tc-cut--on';
+				btn = E('button', {'class': 'btn cbi-button-positive'}, _('Restore internet'));
+				btn.addEventListener('click', function() { cutSubmit(false, status); });
+
+				note = st.expires_at && st.expires_at !== 0
+					? _('Restores by itself in') + ' ' + fmtCutRemaining(st.remaining)
+					: _('Stays off until you switch it back.');
+
+				hint = E('div', {'class': 'tc-cut__hint'}, [
+					E('span', {}, note),
+					E('span', {}, ' · '),
+					E('span', {}, _('LAN keeps working') + (devs ? ' (' + devs + ')' : ''))
+				]);
+				if (st.persist) {
+					hint.appendChild(E('div', {'class': 'tc-cut__warn'},
+						_('Kept after reboot — undoing it needs LAN or physical access.')));
+				}
+				if (!st.keeper_running) {
+					hint.appendChild(E('div', {'class': 'tc-cut__warn'},
+						_('The auto-revert helper is not running; this page re-checks the deadline while it is open.')));
+				}
+
+				cutPanel.appendChild(E('div', {'class': 'tc-cut__row'}, [
+					E('span', {'class': 'tc-cut__icon'}, '⛔'),
+					E('div', {'class': 'tc-cut__body'}, [
+						E('b', {}, _('Internet is cut for all devices')),
+						hint
+					]),
+					btn, status
+				]));
+				return;
+			}
+
+			// ── Off: offer the cut ──
+			cutPanel.className = 'tc-cut';
+			pick = mkChipPick(CUT_DURATIONS, cutDuration, function(v) {
+				cutDuration = v;
+				cutDisarm();
+				btn.textContent = _('Cut internet');
+				btn.className = 'btn cbi-button-negative';
+			});
+
+			// Its own opt-in, never the global persist_rules flag: somebody who
+			// turned that on so their rate limits survive a reboot must not
+			// inherit a persistent internet kill from it.
+			persistToggle = mkToggle('tm-cut-persist', _('Keep after reboot'), cutPersist, function() {
+				cutPersist = this.checked;
+				cutDisarm();
+				btn.textContent = _('Cut internet');
+				btn.className = 'btn cbi-button-negative';
+				persistNote.classList.toggle('tc-hidden', !cutPersist);
+			});
+			var persistNote = E('div', {'class': 'tc-cut__warn' + (cutPersist ? '' : ' tc-hidden')},
+				_('You will need LAN or physical access to undo this — a reboot will not clear it.'));
+
+			// Two clicks, on purpose. Everything else in this app affects one
+			// device; this one can take away the path the operator is managing
+			// the router through.
+			btn = E('button', {'class': 'btn cbi-button-negative'}, _('Cut internet'));
+			btn.addEventListener('click', function() {
+				if (!cutArmed) {
+					cutArmed = true;
+					btn.textContent = _('Click again to confirm');
+					btn.className = 'btn cbi-button-negative tc-cut__btn--armed';
+					cutArmTimer = setTimeout(function() {
+						cutDisarm();
+						btn.textContent = _('Cut internet');
+						btn.className = 'btn cbi-button-negative';
+					}, 6000);
+					return;
+				}
+				cutSubmit(true, status);
+			});
+
+			cutPanel.appendChild(E('div', {'class': 'tc-cut__row'}, [
+				E('span', {'class': 'tc-cut__icon'}, '🌐'),
+				E('div', {'class': 'tc-cut__body'}, [
+					E('div', {'class': 'tc-cut__controls'}, [
+						E('b', {}, _('Cut all internet access')),
+						pick.el,
+						persistToggle,
+						btn, status
+					]),
+					E('div', {'class': 'tc-cut__hint'},
+						_('Devices keep talking to each other and to the router — only the way out is closed. ' +
+						  'Remote access that reaches the router through a LAN host (Tailscale, a tunnel, a jump host) stops working while this is on.')),
+					persistNote
+				])
+			]));
+		}
+
+		function refreshCut() {
+			callCutStatus().then(renderCut).catch(function() {});
+		}
+		refreshCut();
+		// Slow poll: the remaining-time readout and, more importantly, the
+		// live rule check that decides whether this renders as ON at all.
+		self._cutTimer = setInterval(function() {
+			if (document.hidden) { return; }
+			refreshCut();
+		}, 10000);
+
 		return E('div', {'class':'cbi-map', 'style':'color:currentColor'}, [
 			E('h2', {'style':'color:currentColor'}, _('Traffic Control')),
 			E('div', {'class':'cbi-section'}, [
 				offloadBanner,
+				cutPanel,
 				E('div', {'style':'margin-bottom:10px'}, [
 						E('div', {'style':'display:flex;align-items:center;gap:10px;flex-wrap:wrap'}, [searchSelect.el, actionRow]),
 						quickBar
@@ -3490,6 +3703,7 @@ return view.extend({
 
 	handleTeardown: function() {
 		if (this._timer) { clearInterval(this._timer); this._timer = null; }
+		if (this._cutTimer) { clearInterval(this._cutTimer); this._cutTimer = null; }
 		this._stopBytesPoll && this._stopBytesPoll();
 		if (this._onPopState) { window.removeEventListener('popstate', this._onPopState); this._onPopState = null; }
 		if (this._graphPopupTimer) { clearInterval(this._graphPopupTimer); this._graphPopupTimer = null; }

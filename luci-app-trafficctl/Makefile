@@ -30,5 +30,16 @@ chmod 0600 "$${IPKG_INSTROOT}/etc/config/trafficctl" 2>/dev/null || true
 exit 0
 endef
 
+# Fail open on removal. A global internet cut left engaged by a package that is
+# going away is a lockout with no UI left to undo it — the drop rule would sit
+# in nftables with nothing on the router admitting to owning it.
+define Package/$(PKG_NAME)/prerm
+#!/bin/sh
+if [ -z "$${IPKG_INSTROOT}" ] && [ -x /usr/local/bin/trafficctl-cut.sh ]; then
+	/usr/local/bin/trafficctl-cut.sh release >/dev/null 2>&1 || true
+fi
+exit 0
+endef
+
 # call BuildPackage - OpenWrt buildroot will pick up the standard LuCI layout
 $(eval $(call BuildPackage,$(PKG_NAME)))
