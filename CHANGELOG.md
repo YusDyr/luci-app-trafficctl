@@ -4,14 +4,6 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
-## [Unreleased]
-
-### Other
-
-- Added usage of the `%.0f` format for the counted bytes instead of the `%d` format.
-
----
-
 ## [1.13.4] - 2026-09-09
 
 ### Bug Fixes
