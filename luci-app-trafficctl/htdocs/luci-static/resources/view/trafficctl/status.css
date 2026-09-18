@@ -140,6 +140,60 @@
     padding: 0;
 }
 
+/* ── Global internet cut ──────────────────────────────────────────── */
+/* Sits above everything, outside the collapsible settings: the one control
+   here that can lock out its own operator has to be readable at a glance. */
+.tc-cut {
+    padding: 10px 14px;
+    margin-bottom: 8px;
+    border: 1px solid var(--tc-border);
+    border-radius: 6px;
+    background: var(--tc-bg-alt);
+    font-size: 13px;
+    line-height: 1.5;
+}
+.tc-cut--on {
+    border-color: var(--tc-err);
+    background: var(--tc-bg);
+}
+.tc-cut--broken {
+    border-color: var(--tc-warn);
+    background: var(--tc-bg);
+}
+.tc-cut__row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.tc-cut__icon {
+    font-size: 16px;
+    line-height: 1.4;
+}
+.tc-cut__body { flex: 1; min-width: 240px; }
+.tc-cut__controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+.tc-cut__hint {
+    font-size: 11px;
+    color: var(--tc-muted);
+    margin-top: 4px;
+}
+.tc-cut__warn {
+    font-size: 11px;
+    color: var(--tc-warn);
+    margin-top: 4px;
+}
+/* The armed half of the two-click confirm: visibly different, so nobody
+   double-clicks their way into a cut without noticing the second click. */
+.tc-cut__btn--armed {
+    outline: 2px solid var(--tc-err);
+    outline-offset: 1px;
+}
+
 /* ── Action row (block / wifi buttons) ───────────────────────────── */
 .tc-action-row {
     display: flex;

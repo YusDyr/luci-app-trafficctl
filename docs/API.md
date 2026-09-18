@@ -44,6 +44,8 @@ method because it returns the contents of the configured log file.
 | `logging_config_get` | (inline) | (none) | read |
 | `newdevice_config_get` | (inline) | (none) — returns `enabled`, `limit_kbit`, `limit_mode`, plus `seeded` and `seen_count` describing the seen-MAC ledger | read |
 | `version` | (inline) | (none) | read |
+| `cut_status` | `trafficctl-cut.sh status` | (none) | **write** — see below |
+| `cut_set` | `trafficctl-cut.sh engage`/`release` | `active` (bool), `duration` (seconds, `0` = indefinite), `persist` (bool) | write |
 | `block` | `trafficctl-block.sh` | `ip`, `label` | write |
 | `unblock` | `trafficctl-unblock.sh` | `ip`, `label` | write |
 | `ratelimit` | `trafficctl-ratelimit.sh` | `ip`, `rate_kbit`, `label`, `mode` (`each`\|`shared`) | write |
@@ -271,6 +273,79 @@ Block/unblock a device's internet access.
 **Side effects (block):**
 - Inserts drop rule in `inet fw4 forward` (nft) or `FORWARD` chain (iptables).
 - Kills existing conntrack entries for the device.
+
+---
+
+### trafficctl-cut.sh
+
+Cut internet access for **every** device at once while the LAN keeps working.
+
+**Arguments:** `engage <seconds|0> [persist]` · `release` · `status` · `restore` · `tick` · `keeper`
+
+`seconds` is `0` (indefinite) or 60–604800. `persist` is `0`/`1`.
+
+**Output (`status`, and the reply to `engage`/`release`):**
+```json
+{"ok":true,"active":true,"rule_present":true,"supported":true,
+ "expires_at":1700000900,"remaining":845,"started_at":1700000000,
+ "persist":false,"keeper_running":true,"lan_devices":"br-lan br-guest",
+ "default_duration":900,"default_persist":false,"msg":""}
+```
+
+`active` is what the state file says; **`rule_present` is what the kernel
+says**, and the UI renders the control as ON only when both hold. The two can
+disagree, and when they do the honest answer is "switched on but not in force",
+never a plain ON.
+
+**Mechanism.** One rule in its **own** table:
+
+```
+table inet tctl_cut {
+    chain cut_forward {
+        type filter hook forward priority -190; policy accept;
+        oifname != { "br-lan", … } counter drop comment "tctl_cut"
+    }
+}
+```
+
+- **Own table, not `inet fw4`.** fw4 tears down and rebuilds its own table on
+  every reload, and the `ifup lan` restore hook does not fire for that — a bare
+  `fw4 reload` would drop a rule placed there with nothing to put it back. Our
+  table survives a firewall rebuild structurally. (Same reasoning as
+  `inet tctl_pfw` and `netdev tm_ratelimit`.)
+- **Priority −190** is after DNAT and before fw4's flowtable rule at filter
+  priority 0, so an offloaded flow cannot bypass the drop.
+- **Interface matching, not addresses.** IPv4 *and* IPv6 are cut by the same
+  rule — the per-device block matches `ip saddr` and is v4-only, which for a
+  global cut would let a device walk out over a SLAAC address. LAN↔LAN, VLAN
+  ↔VLAN and downstream routed subnets all leave via a LAN device and are
+  spared; same-subnet traffic is bridged and never reaches the forward hook.
+- **`forward`, not `input`.** Traffic addressed to the router itself is
+  untouched: LuCI from the LAN and a VPN terminating *on* the router keep
+  working. What does stop is remote access that lands on a LAN host first
+  (Tailscale on a NAS, a tunnel from a LAN box, a jump host).
+- **Inbound is deliberately not cut.** WAN→LAN flows through a port forward
+  keep working; those exist only where the operator created them, and
+  `portfw_ctl pause` is the control for them.
+- `conntrack -D` is issued per monitored subnet on engage (established and
+  offloaded flows outlive a new drop rule), never as a global `conntrack -F`.
+
+**Persistence.** The engaged state lives in `/var/run/trafficctl/cut.state`
+(tmpfs), so a reboot always clears it. This is the one control that can lock out
+its own operator, and the remedy must never become "be physically present".
+Ticking *Keep after reboot* additionally writes `/etc/trafficctl/cut.state`,
+restored on `ifup lan` by `trafficctl-cut.sh restore` — guarded on that file's
+own `persist=1`, **not** on the global `persist_rules` flag, and honouring the
+original absolute deadline rather than restarting the clock. It is deliberately
+absent from `root/lib/upgrade/keep.d/`: a cut outliving a *firmware upgrade* is
+strictly worse than one outliving a reboot.
+
+**Auto-revert.** `/etc/init.d/trafficctl-cut` supervises a keeper that ticks
+every 5s: it enforces the deadline and re-asserts the rule if the table went
+missing (a wholesale `nft flush ruleset` still takes it). `status` reconciles
+independently — it releases a cut whose deadline has passed and starts a
+replacement keeper if one died — which is why it is a **write** method despite
+reading like one, the same reasoning that makes `activity_log` a write method.
 
 ---
 

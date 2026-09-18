@@ -29,7 +29,8 @@
 					"config_set",
 					"telegram_config_set", "telegram_test",
 					"logging_config_set", "activity_log",
-					"newdevice_config_set"
+					"newdevice_config_set",
+					"cut_status", "cut_set"
 				]
 			},
 			"uci": [ "trafficctl" ]

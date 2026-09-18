@@ -66,6 +66,8 @@ list)
 	printf '"newdevice_config_set":{"enabled":"bool","limit_kbit":"int","limit_mode":"str"},'
 	printf '"logging_config_get":{},'
 	printf '"logging_config_set":{"enabled":"bool","log_file":"str","max_lines":"int","syslog":"bool","log_blocks":"bool","log_ratelimits":"bool","log_shapes":"bool","log_telegram":"bool","log_config":"bool"},'
+	printf '"cut_status":{},'
+	printf '"cut_set":{"active":"bool","duration":"int","persist":"bool"},'
 	printf '"activity_log":{"lines":"int"},'
 	printf '"version":{}'
 	printf '}'
@@ -470,6 +472,40 @@ call)
 		tctl_commit
 		tctl_log "config_change" "newdevice" "" "luci" "${TCTL_SRC:-local}"
 		echo '{"ok":true}'
+		;;
+	cut_status)
+		# A write method, like activity_log, because it is not purely
+		# observational: it enforces the auto-revert deadline and starts a
+		# replacement keeper if one died. That reconciliation is what stops
+		# the UI reporting a cut as ON after it has lapsed or run out, which
+		# is the one direction in which a wrong answer is dangerous.
+		"$SCRIPTS/trafficctl-cut.sh" status
+		;;
+	cut_set)
+		read -r input
+		active=$(echo "$input" | jsonfilter -e '@.active' 2>/dev/null)
+		duration=$(echo "$input" | jsonfilter -e '@.duration' 2>/dev/null)
+		persist=$(echo "$input" | jsonfilter -e '@.persist' 2>/dev/null)
+		if [ "$active" = "true" ]; then
+			case "$duration" in
+				''|*[!0-9]*) echo '{"ok":false,"msg":"duration must be a number of seconds (0 = indefinite)"}'; exit 0 ;;
+			esac
+			pflag=0
+			[ "$persist" = "true" ] && pflag=1
+			# Remember what the operator picked so the control comes back the
+			# way they left it. PREFERENCES only: the engaged state never
+			# touches uci, because /etc/config survives a reboot and this
+			# control must not.
+			uci -q get trafficctl.cut >/dev/null 2>&1 || uci set trafficctl.cut=cut
+			uci set trafficctl.cut.default_duration="$duration"
+			uci set trafficctl.cut.persist="$pflag"
+			tctl_commit
+			"$SCRIPTS/trafficctl-cut.sh" engage "$duration" "$pflag"
+		elif [ "$active" = "false" ]; then
+			"$SCRIPTS/trafficctl-cut.sh" release
+		else
+			echo '{"ok":false,"msg":"active must be true or false"}'
+		fi
 		;;
 	activity_log)
 		read -r input
