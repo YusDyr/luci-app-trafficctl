@@ -45,9 +45,12 @@ assert_eq() {
     fi
 }
 
+# The haystack is often a whole script, and `grep -q` exits at the first match,
+# so printf takes a SIGPIPE and bash prints "write error: Broken pipe". That is
+# noise, not a failure, but it buries real output in the CI log.
 assert_contains() {
     local desc="$1" needle="$2" haystack="$3"
-    if printf '%s' "$haystack" | grep -qF -- "$needle"; then
+    if printf '%s' "$haystack" 2>/dev/null | grep -qF -- "$needle"; then
         PASS=$((PASS + 1))
     else
         FAIL=$((FAIL + 1))
@@ -57,7 +60,7 @@ assert_contains() {
 
 assert_not_contains() {
     local desc="$1" needle="$2" haystack="$3"
-    if printf '%s' "$haystack" | grep -qF -- "$needle"; then
+    if printf '%s' "$haystack" 2>/dev/null | grep -qF -- "$needle"; then
         FAIL=$((FAIL + 1))
         printf "FAIL: %s\n  should NOT contain: '%s'\n  in:\n%s\n" "$desc" "$needle" "$haystack"
     else
@@ -82,8 +85,12 @@ for must in "$STATE" "$TMPDIR/lock.d" "$TMPDIR/scratch." "$MOCKBIN/bytes"; do
     assert_contains "rewrote path into the script under test: $must" \
         "$must" "$(cat "$TMPDIR/totals.sh")"
 done
-assert_eq "nothing under test still writes to the real /tmp" "" \
-    "$(grep -n '"/tmp/' "$TMPDIR/totals.sh")"
+# Matched against the PRODUCTION path names, not against "/tmp" — on Linux
+# mktemp -d hands back /tmp/tmp.XXXX, so the correctly rewritten paths live
+# under /tmp too and a bare "/tmp" test fails there while passing on a macOS
+# /var/folders temp dir.
+assert_eq "no production path survives the rewrite" "" \
+    "$(grep -nE '/tmp/(\.)?trafficctl_totals' "$TMPDIR/totals.sh")"
 
 cat > "$MOCKBIN/bytes" <<MOCK
 #!/bin/sh
