@@ -16,6 +16,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      # The runner has gawk and mawk, both 64-bit clean on "%d". The byte
+      # overflow the exporter hits is a busybox-awk behaviour, so without
+      # busybox here test_byte_overflow.sh passes whether or not the bug is
+      # present. mawk is pulled in for the same reason test_changelog_gen.sh
+      # wants several awks: the interpreters disagree.
+      - name: Install extra awk implementations
+        run: sudo apt-get install -y --no-install-recommends busybox-static mawk
       - name: Shell unit tests
         run: bash tests/test_fw.sh
       - name: nft bytes parser tests
@@ -46,6 +53,8 @@ jobs:
         run: bash tests/test_macfilter.sh
       - name: Metrics CGI endpoint tests
         run: bash tests/test_metrics_cgi.sh
+      - name: Byte counter overflow tests
+        run: bash tests/test_byte_overflow.sh
       - name: Regression tests
         run: bash tests/test_regressions.sh
       - name: Release version-bump tests
