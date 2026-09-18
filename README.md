@@ -168,6 +168,7 @@ I hope it turns out as useful for you as it has been for me.
 - **Telegram Bot** -- Optional bot for remote control: device list, block/unblock, rate limit, shape traffic, new device notifications. Runs on the router via long polling, no external server needed.
 - **New Device Detection** -- Discovers new devices via three sources: ARP table, DHCP leases, Wi-Fi station list. Instant DHCP hotplug trigger for near-realtime alerts.
 - **Activity Logging** -- Configurable logging of all actions (blocks, ratelimits, shapes, config changes) to a local file and/or syslog. Includes source IP, username, and trigger (LuCI/Telegram/CLI).
+- **Default Limit for New Devices** -- Optionally rate-limit or shape a device the first time it appears on the network (Settings > New Device Defaults). Off by default. Switching it on records the devices already present, so only genuinely new ones are affected, and a device that already carries a limit is never overridden.
 - **Reboot Persistence** -- Shaping, block, and rate-limit rules optionally survive reboot via hotplug restore. Configurable per UCI option `persist_rules`.
 
 ---

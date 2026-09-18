@@ -170,6 +170,17 @@ var callLoggingSet = rpc.declare({
 		'log_blocks', 'log_ratelimits', 'log_shapes', 'log_telegram', 'log_config', 'persist_rules']
 });
 
+var callNewDeviceGet = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'newdevice_config_get'
+});
+
+var callNewDeviceSet = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'newdevice_config_set',
+	params: ['enabled', 'limit_kbit', 'limit_mode']
+});
+
 var callActivityLog = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'activity_log',
@@ -3069,6 +3080,109 @@ return view.extend({
 			});
 		}
 		settingsBody.appendChild(loggingSection.el);
+
+		// ── New Device Defaults section (lazy-loaded) ──────────────────────
+		var newDevSection = mkCollapsible(_('New Device Defaults'), null, false);
+		var newDevLoaded = false;
+		newDevSection.label.addEventListener('click', function() {
+			if (!newDevLoaded && !newDevSection.body.classList.contains('tc-hidden')) {
+				newDevLoaded = true;
+				loadNewDeviceUI(newDevSection.body);
+			}
+		});
+
+		function loadNewDeviceUI(container) {
+			var statusSpan = E('span', {'style':'font-size:12px;color:var(--tc-muted)'}, _('Loading…'));
+			container.appendChild(statusSpan);
+
+			callNewDeviceGet().then(function(cfg) {
+				while (container.firstChild) container.removeChild(container.firstChild);
+
+				var saveStatus = E('span', {'class':'tg-save-status'});
+				var hint = E('div', {'style':'font-size:11px;color:var(--tc-muted);margin-top:6px'});
+				var modePick = null;
+				var saveTimer = null;
+
+				// The baseline is what stops the feature limiting the whole
+				// LAN, so its size is shown rather than left implicit: an
+				// operator can tell a populated ledger from an empty one.
+				function renderHint(c) {
+					var kbit = parseInt(rateInput.value, 10);
+					if (enabledToggle.querySelector('input').checked && (!kbit || kbit <= 0)) {
+						hint.textContent = _('Set a rate above 0 — with no rate this does nothing.');
+						hint.style.color = 'var(--tc-warn)';
+						return;
+					}
+					hint.style.color = 'var(--tc-muted)';
+					if (c && c.seeded) {
+						hint.textContent = _('Devices already known:') + ' ' + (c.seen_count || 0) +
+							' — ' + _('these are never limited by this setting.');
+					} else {
+						hint.textContent = _('No baseline recorded yet. It is taken from the current leases when you switch this on.');
+					}
+				}
+
+				var doSave = function() {
+					if (saveTimer) clearTimeout(saveTimer);
+					saveTimer = setTimeout(function() {
+						saveStatus.textContent = _('Saving…');
+						saveStatus.style.color = 'var(--tc-muted)';
+						var kbit = parseInt(rateInput.value, 10);
+						if (isNaN(kbit) || kbit < 0) kbit = 0;
+						callNewDeviceSet(
+							enabledToggle.querySelector('input').checked,
+							kbit,
+							modePick.getValue()
+						).then(function(res) {
+							saveStatus.textContent = (res && res.ok) ? '✓' : '✗';
+							saveStatus.style.color = (res && res.ok) ? 'var(--tc-ok)' : 'var(--tc-err)';
+							if (res && res.ok) {
+								callNewDeviceGet().then(renderHint).catch(function() {});
+							}
+						}).catch(function() {
+							saveStatus.textContent = '✗';
+							saveStatus.style.color = 'var(--tc-err)';
+						});
+					}, 400);
+				};
+
+				var enabledToggle = mkToggle('tm-nd-enabled', _('Limit new devices'), cfg.enabled, function() {
+					renderHint(cfg);
+					doSave();
+				});
+
+				var rateInput = E('input', {
+					'type': 'number',
+					'min': '0',
+					'class': 'tg-input tg-input--chat',
+					'value': cfg.limit_kbit || 0,
+					'placeholder': _('kbit/s')
+				});
+				rateInput.addEventListener('change', function() {
+					renderHint(cfg);
+					doSave();
+				});
+
+				modePick = mkChipPick([
+					{ v: 'limiter', l: _('Limiter') },
+					{ v: 'shaper', l: _('Shaper') }
+				], cfg.limit_mode || 'limiter', doSave);
+
+				container.appendChild(E('div', {'class':'tc-log-row'}, [
+					enabledToggle, mkLabel(_('Rate')), rateInput, mkLabel(_('kbit/s')),
+					modePick.el, saveStatus
+				]));
+				container.appendChild(hint);
+				container.appendChild(E('div', {'style':'font-size:11px;color:var(--tc-muted);margin-top:4px'},
+					_('Applied once, the first time a device appears on the network. A device that already has a limit is left alone.')));
+
+				renderHint(cfg);
+			}).catch(function(e) {
+				statusSpan.textContent = '✗ ' + e.message;
+				statusSpan.style.color = 'var(--tc-err)';
+			});
+		}
+		settingsBody.appendChild(newDevSection.el);
 
 		// ── Flow Offload section (lazy-loaded) ─────────────────────────────
 		var offloadSection = mkCollapsible(_('Flow Offload'), null, false);

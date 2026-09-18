@@ -62,6 +62,8 @@ list)
 	printf '"telegram_config_get":{},'
 	printf '"telegram_config_set":{"enabled":"bool","bot_token":"str","chat_id":"str","poll_interval":"int","notify_new_device":"bool","notify_known_device":"bool","control_enabled":"bool","notify_template":"str","btn_block_inet":"bool","btn_block_wifi":"bool","btn_limiter":"bool","btn_shaper":"bool"},'
 	printf '"telegram_test":{"bot_token":"str","chat_id":"str","message":"str"},'
+	printf '"newdevice_config_get":{},'
+	printf '"newdevice_config_set":{"enabled":"bool","limit_kbit":"int","limit_mode":"str"},'
 	printf '"logging_config_get":{},'
 	printf '"logging_config_set":{"enabled":"bool","log_file":"str","max_lines":"int","syslog":"bool","log_blocks":"bool","log_ratelimits":"bool","log_shapes":"bool","log_telegram":"bool","log_config":"bool"},'
 	printf '"activity_log":{"lines":"int"},'
@@ -422,6 +424,51 @@ call)
 		[ -n "$val" ] && uci set "trafficctl.main.persist_rules=$([ "$val" = "true" ] && echo 1 || echo 0)"
 		tctl_commit
 		tctl_log "config_change" "logging" "" "luci" "${TCTL_SRC:-local}"
+		echo '{"ok":true}'
+		;;
+	newdevice_config_get)
+		nd_enabled=$(uci -q get trafficctl.newdevice.enabled)
+		nd_kbit=$(uci -q get trafficctl.newdevice.limit_kbit)
+		nd_mode=$(uci -q get trafficctl.newdevice.limit_mode)
+		# seen_count lets the UI say how large the baseline is, so an operator
+		# can tell "the ledger knows my 23 devices" from "the ledger is empty
+		# and everything is about to look new".
+		printf '{"enabled":%s,"limit_kbit":%d,"limit_mode":"%s","seen_count":%d,"seeded":%s}' \
+			"$([ "$nd_enabled" = "1" ] && echo true || echo false)" \
+			"${nd_kbit:-0}" \
+			"${nd_mode:-limiter}" \
+			"$(tctl_seen_count)" \
+			"$(tctl_seen_ready && echo true || echo false)"
+		;;
+	newdevice_config_set)
+		read -r input
+		uci -q get trafficctl.newdevice >/dev/null 2>&1 || uci set trafficctl.newdevice=newdevice
+		val=$(echo "$input" | jsonfilter -e '@.limit_kbit' 2>/dev/null)
+		if [ -n "$val" ]; then
+			case "$val" in
+				''|*[!0-9]*) echo '{"ok":false,"msg":"limit_kbit must be a number"}'; exit 0 ;;
+			esac
+			uci set trafficctl.newdevice.limit_kbit="$val"
+		fi
+		val=$(echo "$input" | jsonfilter -e '@.limit_mode' 2>/dev/null)
+		if [ -n "$val" ]; then
+			case "$val" in
+				limiter|shaper) uci set trafficctl.newdevice.limit_mode="$val" ;;
+				*) echo '{"ok":false,"msg":"limit_mode must be limiter or shaper"}'; exit 0 ;;
+			esac
+		fi
+		val=$(echo "$input" | jsonfilter -e '@.enabled' 2>/dev/null)
+		if [ -n "$val" ]; then
+			# Seed the ledger BEFORE the feature can fire. Done here rather
+			# than in the hotplug because this runs on an operator action,
+			# when the leases and the neighbour table are populated; seeding
+			# early in boot would record an empty LAN and then treat every
+			# device as new.
+			[ "$val" = "true" ] && tctl_seen_seed
+			uci set "trafficctl.newdevice.enabled=$([ "$val" = "true" ] && echo 1 || echo 0)"
+		fi
+		tctl_commit
+		tctl_log "config_change" "newdevice" "" "luci" "${TCTL_SRC:-local}"
 		echo '{"ok":true}'
 		;;
 	activity_log)

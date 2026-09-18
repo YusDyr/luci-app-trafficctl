@@ -55,6 +55,8 @@ jobs:
         run: bash tests/test_metrics_cgi.sh
       - name: Byte counter overflow tests
         run: bash tests/test_byte_overflow.sh
+      - name: New device default-limit tests
+        run: bash tests/test_newdevice.sh
       - name: Regression tests
         run: bash tests/test_regressions.sh
       - name: Release version-bump tests

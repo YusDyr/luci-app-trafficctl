@@ -26,6 +26,15 @@ config trafficctl 'main'
 	# IFB device used to shape upload pre-NAT (needs kmod-ifb).
 	option shape_ifb 'tctl-ifb0'
 
+config newdevice 'newdevice'
+	# Apply a limit automatically the first time a device is seen. Off by
+	# default: it is the only setting here that restricts a device nobody
+	# has looked at yet. limit_kbit 0 means "no limit" and makes enabled
+	# a no-op. An existing limit is never overwritten.
+	option enabled '0'
+	option limit_kbit '0'
+	option limit_mode 'limiter'
+
 config logging 'logging'
 	option enabled '1'
 	option log_file '/tmp/trafficctl/activity.log'

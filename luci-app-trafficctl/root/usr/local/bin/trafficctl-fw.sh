@@ -536,6 +536,112 @@ tctl_persist_remove() {
     mv "$tmp" "$TCTL_RULES_FILE"
 }
 
+# ── New-device ledger ─────────────────────────────────────────────────────
+#
+# Which MAC addresses this router has already seen. The default-limit feature
+# keys off it, which makes the ledger safety-critical in one direction only:
+# wrongly calling a device NEW applies an unasked-for limit, while wrongly
+# calling it KNOWN merely does nothing. Every ambiguous case below therefore
+# resolves to "known".
+#
+# It lives in /etc/trafficctl (kept across sysupgrade by keep.d) rather than
+# in tmpfs. A ledger that reset on reboot would make every device on the LAN
+# new again on the next lease renewal — the same mass-limiting accident, just
+# reached more slowly. Flash cost is bounded by device count, not by DHCP
+# traffic: an entry is appended only for a MAC that is not already listed.
+TCTL_SEEN_FILE="/etc/trafficctl/seen_macs"
+TCTL_SEEN_MAX=1000
+TCTL_LEASES_FILE="/tmp/dhcp.leases"
+TCTL_SHAPES_FILE="/etc/trafficctl/shapes.json"
+
+tctl_seen_normalize() {
+    printf '%s' "$1" | tr 'A-Z' 'a-z'
+}
+
+# Take the baseline from the devices already on the network, so switching the
+# feature on does not declare the existing LAN to be new. Callers should do
+# this at a moment when the network is up (i.e. from the rpcd setter, on an
+# operator's action) rather than early in boot, when both sources are empty.
+tctl_seen_seed() {
+    [ -f "$TCTL_SEEN_FILE" ] && return 0
+    mkdir -p "$(dirname "$TCTL_SEEN_FILE")" 2>/dev/null
+    {
+        awk '{ print $2 }' "$TCTL_LEASES_FILE" 2>/dev/null
+        ip neigh show 2>/dev/null | awk '/lladdr/ { print $5 }'
+    } | tr 'A-Z' 'a-z' \
+      | grep -E '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' \
+      | sort -u > "${TCTL_SEEN_FILE}.tmp" 2>/dev/null
+    mv "${TCTL_SEEN_FILE}.tmp" "$TCTL_SEEN_FILE" 2>/dev/null
+}
+
+tctl_seen_count() {
+    [ -f "$TCTL_SEEN_FILE" ] || { echo 0; return 0; }
+    wc -l < "$TCTL_SEEN_FILE" 2>/dev/null | tr -d ' ' || echo 0
+}
+
+# "Known" is the safe answer, so an unreadable MAC or a missing ledger says
+# yes. Whether the ledger EXISTS is a separate question, asked by the caller
+# through tctl_seen_ready before it acts on a negative.
+tctl_seen_known() {
+    local mac
+    mac=$(tctl_seen_normalize "$1")
+    [ -n "$mac" ] || return 0
+    [ -f "$TCTL_SEEN_FILE" ] || return 0
+    grep -qxF "$mac" "$TCTL_SEEN_FILE" 2>/dev/null
+}
+
+tctl_seen_ready() {
+    [ -f "$TCTL_SEEN_FILE" ]
+}
+
+tctl_seen_mark() {
+    local mac n keep
+    mac=$(tctl_seen_normalize "$1")
+    [ -n "$mac" ] || return 0
+    # Not tctl_seen_known alone: it answers "known" for a missing ledger,
+    # which here would mean never writing the first entry.
+    if [ -f "$TCTL_SEEN_FILE" ] && tctl_seen_known "$mac"; then
+        return 0
+    fi
+    mkdir -p "$(dirname "$TCTL_SEEN_FILE")" 2>/dev/null
+    printf '%s\n' "$mac" >> "$TCTL_SEEN_FILE"
+
+    # Trim from the head when the ledger outgrows the cap. A device dropped
+    # this way can be seen as new again later; the cap sits far above any
+    # plausible LAN, so that is a theoretical cost against an unbounded file.
+    n=$(tctl_seen_count)
+    if [ "$n" -gt "$TCTL_SEEN_MAX" ]; then
+        keep=$((TCTL_SEEN_MAX * 4 / 5))
+        tail -n "$keep" "$TCTL_SEEN_FILE" > "${TCTL_SEEN_FILE}.tmp" 2>/dev/null &&
+            mv "${TCTL_SEEN_FILE}.tmp" "$TCTL_SEEN_FILE"
+    fi
+}
+
+# Does this address already carry a limit somebody set deliberately?
+#
+# Live nft/tc state alone is not a sufficient answer. After a reboot the
+# restore hook runs on `ifup lan` and only when persist_rules is on, so a
+# device with a manual limit reads as unlimited until then — and a default
+# limit applied in that window would silently overwrite the operator's
+# choice. The persisted files are consulted as well.
+tctl_has_limit() {
+    local ip="$1"
+    [ -n "$ip" ] || return 1
+
+    /usr/local/bin/trafficctl-ratelimit-stats.sh 2>/dev/null \
+        | grep -qF "\"ip\":\"$ip\"" && return 0
+    /usr/local/bin/trafficctl-shape-stats.sh 2>/dev/null \
+        | grep -qF "\"ip\":\"$ip\"" && return 0
+
+    if [ -f "$TCTL_RULES_FILE" ]; then
+        grep -qF "\"ip\":\"$ip\"" "$TCTL_RULES_FILE" 2>/dev/null && return 0
+    fi
+    if [ -f "$TCTL_SHAPES_FILE" ]; then
+        grep -qF "\"ip\":\"$ip\"" "$TCTL_SHAPES_FILE" 2>/dev/null && return 0
+    fi
+    return 1
+}
+
 # ── Activity Logging ──────────────────────────────────────────────────────
 
 TCTL_LOG_TAG="trafficctl"

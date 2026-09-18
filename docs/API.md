@@ -42,6 +42,7 @@ method because it returns the contents of the configured log file.
 | `config_get` | (inline) | (none) — returns `enabled`, `default_mode`, `offload_mode`, `sw`, `hw` | read |
 | `telegram_config_get` | (inline) | (none) — `bot_token` is masked as `***` | read |
 | `logging_config_get` | (inline) | (none) | read |
+| `newdevice_config_get` | (inline) | (none) — returns `enabled`, `limit_kbit`, `limit_mode`, plus `seeded` and `seen_count` describing the seen-MAC ledger | read |
 | `version` | (inline) | (none) | read |
 | `block` | `trafficctl-block.sh` | `ip`, `label` | write |
 | `unblock` | `trafficctl-unblock.sh` | `ip`, `label` | write |
@@ -58,7 +59,15 @@ method because it returns the contents of the configured log file.
 | `telegram_config_set` | (inline) | `enabled`, `bot_token`, `chat_id`, `poll_interval`, `notify_new_device`, `notify_known_device`, `control_enabled`, `notify_template`, `btn_block_inet`, `btn_block_wifi`, `btn_limiter`, `btn_shaper` | write |
 | `telegram_test` | `trafficctl-telegram-test.sh` | `bot_token`, `chat_id`, `message` | write |
 | `logging_config_set` | (inline) | `enabled`, `log_file`, `max_lines`, `syslog`, `log_blocks`, `log_ratelimits`, `log_shapes`, `log_telegram`, `log_config` | write |
+| `newdevice_config_set` | (inline) | `enabled`, `limit_kbit`, `limit_mode` (`limiter`\|`shaper`) | write |
 | `activity_log` | (inline) | `lines` (default 50, capped at 1000) | write |
+
+Setting `newdevice.enabled` to true seeds the seen-MAC ledger
+(`/etc/trafficctl/seen_macs`) from the current DHCP leases and neighbour table, so
+switching the feature on does not classify the devices already on the network as
+new. The ledger is authoritative: the hotplug hook applies nothing at all on a run
+that finds no ledger, because a missing one cannot distinguish "new device" from
+"router has not noticed this device yet".
 
 `port` accepts a single port or a `lo-hi` range. On the iptables path a range is
 passed through as `lo:hi`; it used to be truncated to the low port, which left the

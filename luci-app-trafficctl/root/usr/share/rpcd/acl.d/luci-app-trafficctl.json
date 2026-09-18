@@ -10,7 +10,7 @@
 					"portfw_list", "names_list", "netify_status", "netify_list",
 					"shape_status",
 					"config_get", "telegram_config_get",
-					"logging_config_get"
+					"logging_config_get", "newdevice_config_get"
 				],
 				"file": [ "read" ]
 			},
@@ -28,7 +28,8 @@
 					"portfw_ctl", "name_set", "name_clear", "netify_collect",
 					"config_set",
 					"telegram_config_set", "telegram_test",
-					"logging_config_set", "activity_log"
+					"logging_config_set", "activity_log",
+					"newdevice_config_set"
 				]
 			},
 			"uci": [ "trafficctl" ]
