@@ -208,7 +208,7 @@ NR == FNR {
     if (classid in qd_mem) mem = qd_mem[classid]
 
     if (first) printf ","
-    printf "{\"ip\":\"%s\",\"rate_kbit\":%d,\"bytes\":%d,\"packets\":%d,\"backlog\":%d,\"drops\":%d,\"overlimits\":%d,\"requeues\":%d,\"lended\":%d,\"borrowed\":%d,\"ecn_mark\":%d,\"new_flows\":%d,\"old_flows\":%d,\"target_us\":%d,\"memory_used\":%d}", \
+    printf "{\"ip\":\"%s\",\"rate_kbit\":%d,\"bytes\":%.0f,\"packets\":%.0f,\"backlog\":%d,\"drops\":%.0f,\"overlimits\":%.0f,\"requeues\":%.0f,\"lended\":%.0f,\"borrowed\":%.0f,\"ecn_mark\":%.0f,\"new_flows\":%d,\"old_flows\":%d,\"target_us\":%d,\"memory_used\":%d}", \
         ip, rate, bytes, pkts, backlog, drops, overlimits, requeues, lended, borrowed, ecn, nf, of, tgt, mem
     first = 1
 }

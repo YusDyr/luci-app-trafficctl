@@ -379,7 +379,7 @@ do_list() {
         done
 
         if [ "$first" = "1" ]; then first=0; else printf ','; fi
-        printf '{"id":"%s","kind":"%s","name":"%s","zone":"%s","proto":"%s","ext_port":"%s","ip":"%s","port":"%s","enabled":%s,"paused":%s,"limit_kbit":%d,"conns":%d,"clients":%d,"bytes_in":%d,"bytes_out":%d}' \
+        printf '{"id":"%s","kind":"%s","name":"%s","zone":"%s","proto":"%s","ext_port":"%s","ip":"%s","port":"%s","enabled":%s,"paused":%s,"limit_kbit":%d,"conns":%d,"clients":%d,"bytes_in":%.0f,"bytes_out":%.0f}' \
             "$id" "$kind" "$ename" "$zone" "$protos" "$extport" "$ip" "$port" \
             "$([ "$en" != "0" ] && echo true || echo false)" \
             "$paused" "$limit_kbit" "$conns" "$clients" "$b_in" "$b_out"

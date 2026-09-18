@@ -170,7 +170,7 @@ parse_flows() {
         for (d in seen) total[seen[d]] += dbytes[d]
         for (k in total) {
             split(k, p, SUBSEP)
-            printf "%s %s %d %d\n", p[1], p[2], total[k], flows[k]
+            printf "%s %s %.0f %d\n", p[1], p[2], total[k], flows[k]
         }
     }'
 }
@@ -210,7 +210,7 @@ do_collect() {
             first = 1
         }
         if (!first) printf ","
-        printf "{\"name\":\"%s\",\"bytes\":%d,\"flows\":%d}", $2, $3, $4
+        printf "{\"name\":\"%s\",\"bytes\":%.0f,\"flows\":%d}", $2, $3, $4
         first = 0
     }
     END {

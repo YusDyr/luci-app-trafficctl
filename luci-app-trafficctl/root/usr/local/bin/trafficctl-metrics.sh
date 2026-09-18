@@ -95,7 +95,7 @@ END {
         # Drop devices that have gone quiet AND carry no total, so the state
         # file cannot grow without bound on a busy network.
         if (!(ip in live) && rxa[ip] + txa[ip] == 0) continue
-        printf "%s %d %d %d %d %d\n", ip, rxa[ip], txa[ip], rxl[ip], txl[ip], now > tmp
+        printf "%s %.0f %.0f %.0f %.0f %d\n", ip, rxa[ip], txa[ip], rxl[ip], txl[ip], now > tmp
     }
     close(tmp)
     system("mv " tmp " " state " 2>/dev/null")
@@ -103,8 +103,8 @@ END {
     print "# HELP trafficctl_device_bytes_total Bytes transferred per device since the exporter started."
     print "# TYPE trafficctl_device_bytes_total counter"
     for (ip in rxa) {
-        printf "trafficctl_device_bytes_total{ip=\"%s\",direction=\"rx\"} %d\n", ip, rxa[ip]
-        printf "trafficctl_device_bytes_total{ip=\"%s\",direction=\"tx\"} %d\n", ip, txa[ip]
+        printf "trafficctl_device_bytes_total{ip=\"%s\",direction=\"rx\"} %.0f\n", ip, rxa[ip]
+        printf "trafficctl_device_bytes_total{ip=\"%s\",direction=\"tx\"} %.0f\n", ip, txa[ip]
     }
 }'
 
@@ -161,10 +161,10 @@ BEGIN {
     printf "trafficctl_device_limit_kbit{ip=\"%s\",mode=\"limiter\"} %d\n", ip, num($0, "rate_limit_kbit")
     printf "trafficctl_device_limit_kbit{ip=\"%s\",mode=\"shaper\"} %d\n", ip, num($0, "shape_kbit")
     # Conntrack view: current in-flight totals and the protocol split.
-    printf "trafficctl_device_conntrack_bytes{ip=\"%s\",proto=\"all\"} %d\n", ip, num($0, "total")
-    printf "trafficctl_device_conntrack_bytes{ip=\"%s\",proto=\"tcp\"} %d\n", ip, num($0, "tcp")
-    printf "trafficctl_device_conntrack_bytes{ip=\"%s\",proto=\"udp\"} %d\n", ip, num($0, "udp")
-    printf "trafficctl_device_blocked_bytes{ip=\"%s\"} %d\n", ip, num($0, "block_bytes")
+    printf "trafficctl_device_conntrack_bytes{ip=\"%s\",proto=\"all\"} %.0f\n", ip, num($0, "total")
+    printf "trafficctl_device_conntrack_bytes{ip=\"%s\",proto=\"tcp\"} %.0f\n", ip, num($0, "tcp")
+    printf "trafficctl_device_conntrack_bytes{ip=\"%s\",proto=\"udp\"} %.0f\n", ip, num($0, "udp")
+    printf "trafficctl_device_blocked_bytes{ip=\"%s\"} %.0f\n", ip, num($0, "block_bytes")
     # Names/MACs live on an info metric rather than on the counters: churn in a
     # label would otherwise start a brand new time series for the same device.
     # Hoisted rather than inlined as esc(ip in rdns ? ...): BusyBox awk parses
@@ -221,8 +221,8 @@ BEGIN {
     printf "trafficctl_portfw_paused{%s} %d\n", lbl, (index($0, "\"paused\":true") ? 1 : 0)
     printf "trafficctl_portfw_enabled{%s} %d\n", lbl, (index($0, "\"enabled\":true") ? 1 : 0)
     printf "trafficctl_portfw_limit_kbit{%s} %d\n", lbl, num($0, "limit_kbit")
-    printf "trafficctl_portfw_bytes{%s,direction=\"rx\"} %d\n", lbl, num($0, "bytes_in")
-    printf "trafficctl_portfw_bytes{%s,direction=\"tx\"} %d\n", lbl, num($0, "bytes_out")
+    printf "trafficctl_portfw_bytes{%s,direction=\"rx\"} %.0f\n", lbl, num($0, "bytes_in")
+    printf "trafficctl_portfw_bytes{%s,direction=\"tx\"} %.0f\n", lbl, num($0, "bytes_out")
 }'
 fi
 
@@ -248,7 +248,7 @@ BEGIN {
         app = substr(rec, RSTART + 8, RLENGTH - 9)
         if (!match(rec, /"bytes":[0-9]+/)) continue
         b = substr(rec, RSTART + 8, RLENGTH - 8) + 0
-        printf "trafficctl_app_bytes{ip=\"%s\",app=\"%s\"} %d\n", ip, app, b
+        printf "trafficctl_app_bytes{ip=\"%s\",app=\"%s\"} %.0f\n", ip, app, b
         if (match(rec, /"flows":[0-9]+/))
             printf "trafficctl_app_flows{ip=\"%s\",app=\"%s\"} %d\n", ip, app, \
                 substr(rec, RSTART + 8, RLENGTH - 8) + 0

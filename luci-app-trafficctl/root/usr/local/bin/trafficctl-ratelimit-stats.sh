@@ -28,7 +28,7 @@ if [ "$TCTL_FW" = "nft" ]; then
         }
         if (ip != "") {
             if (first) printf ","
-            printf "{\"ip\":\"%s\",\"rate_kbit\":%d,\"packets\":%d,\"bytes\":%d,\"pass_packets\":0,\"pass_bytes\":0}", ip, rate, packets, bytes
+            printf "{\"ip\":\"%s\",\"rate_kbit\":%d,\"packets\":%.0f,\"bytes\":%.0f,\"pass_packets\":0,\"pass_bytes\":0}", ip, rate, packets, bytes
             first = 1
         }
     }
@@ -58,7 +58,7 @@ else
         }
         if (ip != "" && ip != "0.0.0.0/0") {
             if (first) printf ","
-            printf "{\"ip\":\"%s\",\"rate_kbit\":%d,\"packets\":%d,\"bytes\":%d,\"pass_packets\":0,\"pass_bytes\":0}", ip, rate, packets, bytes
+            printf "{\"ip\":\"%s\",\"rate_kbit\":%d,\"packets\":%.0f,\"bytes\":%.0f,\"pass_packets\":0,\"pass_bytes\":0}", ip, rate, packets, bytes
             first = 1
         }
     }
