@@ -51,6 +51,25 @@ LOCKD="/tmp/trafficctl_totals.lock.d"
 ALL=0
 [ "$1" = "--all" ] && ALL=1
 
+SAMPLE="/tmp/.trafficctl_totals.sample.$$"
+# Per-process, NOT a shared "$STATE.tmp". The lock below can be stolen after a
+# timeout, so two writers coexisting is a reachable state rather than an
+# impossible one; with a shared scratch name they would interleave lines into
+# it and the surviving state file would be garbage. With one name each, the
+# worst outcome is the benign one the lock is really for — a lost delta.
+TMPF="/tmp/.trafficctl_totals.write.$$"
+# shellcheck disable=SC2064 # expand the paths now, not at trap time
+trap "rm -f '$SAMPLE' '$TMPF'" EXIT INT TERM
+
+# Sample BEFORE taking the lock. Reading /proc/net/nf_conntrack on a busy
+# router is by far the slowest thing here, and holding the lock across it would
+# put every poll in a queue behind it: two browser tabs at a 2 s interval would
+# then routinely hit the steal-on-timeout path below, which exists for a killed
+# sampler, not for ordinary load. The file is in tmpfs and is streamed into
+# awk, so this costs no more memory than the pipeline it replaces — and keeps
+# the promise that no large value is ever held in a shell variable.
+/usr/local/bin/trafficctl-bytes.sh 2>/dev/null | sed 's/},{/}\n{/g' > "$SAMPLE"
+
 # mkdir is atomic, so unlike a test-then-create lock file two samplers cannot
 # both believe they hold it. Without this a LuCI poll and a metrics scrape
 # landing together would read the same state, and the later writer would
@@ -67,16 +86,16 @@ while ! mkdir "$LOCKD" 2>/dev/null; do
     fi
     sleep 0.1 2>/dev/null || sleep 1
 done
+# Re-armed only now that the lock is actually held: a signal arriving during
+# the sample above must not make this process rmdir a lock it never took.
 # shellcheck disable=SC2064 # expand the paths now, not at trap time
-trap "rm -f '$STATE.tmp'; rmdir '$LOCKD' 2>/dev/null" EXIT INT TERM
+trap "rm -f '$SAMPLE' '$TMPF'; rmdir '$LOCKD' 2>/dev/null" EXIT INT TERM
 
 NOW=$(date +%s)
 
-# Memory discipline (this runs on 128–512 MB routers): the sample is streamed
-# straight into awk, and the only in-memory table is bounded by device count.
-/usr/local/bin/trafficctl-bytes.sh 2>/dev/null \
-    | sed 's/},{/}\n{/g' \
-    | awk -v state="$STATE" -v now="$NOW" -v all="$ALL" '
+# Everything from here to the end of awk is the critical section, and it is
+# only a state-file read plus one pass over the sample — milliseconds.
+awk -v state="$STATE" -v tmp="$TMPF" -v now="$NOW" -v all="$ALL" '
 # Returns -1 for a missing key, an unparseable value, or an explicit -1 in the
 # JSON — all three mean the same thing to every caller here: "not available".
 function num(line, key,   re, seg) {
@@ -176,7 +195,6 @@ BEGIN {
     srx[ip] = rx; stx[ip] = tx; stc[ip] = tcv; sud[ip] = udv
 }
 END {
-    tmp = state ".tmp"
     for (ip in rxl) {
         # Drop devices that have gone quiet AND carry no total, so the state
         # file cannot grow without bound on a busy network.
@@ -195,16 +213,22 @@ END {
         islive = 0
         if (ip in live) islive = 1
         if (!islive && !all) continue
-        if (!islive) {
-            # Not in this sample: report the last observed values, so a
-            # consumer can tell a stalled series from a zeroed one.
-            srx[ip] = rxl[ip]; stx[ip] = txl[ip]
-            stc[ip] = tcl[ip]; sud[ip] = udl[ip]
-        }
+
+        # A device absent from this sample has no CURRENT reading at all.
+        # Re-emitting its last one would hand a consumer a frozen number that
+        # looks live, with only the "live" flag to give it away — so the raw
+        # fields report -1, "not sampled", the same sentinel the protocol split
+        # uses. The accumulated totals below are unaffected: those are real
+        # history and stay exact.
+        crx = -1; ctx = -1; ctc = -1; cud = -1
+        if (islive) { crx = srx[ip]; ctx = stx[ip]; ctc = stc[ip]; cud = sud[ip] }
+
         # -1, never 0, when the source cannot split by protocol: a UI that
-        # printed 0 would be claiming the device sent no TCP.
-        tt = -1; if (stc[ip] >= 0) tt = tca[ip] + 0
-        ut = -1; if (sud[ip] >= 0) ut = uda[ip] + 0
+        # printed 0 would be claiming the device sent no TCP. Keyed off the
+        # stored baseline rather than this sample, so a quiet device under
+        # --all still reports the protocol history it does have.
+        tt = -1; if (tcl[ip] >= 0) tt = tca[ip] + 0
+        ut = -1; if (udl[ip] >= 0) ut = uda[ip] + 0
         # Hoisted out of the printf argument list rather than inlined as
         # ternaries: BusyBox awk is the interpreter on the target and has been
         # seen to mis-parse expressions in call arguments (see the note in
@@ -214,9 +238,9 @@ END {
         lv = "false"; if (islive) lv = "true"
         if (n > 0) printf ","
         printf "{\"ip\":\"%s\",\"bytes_in\":%.0f,\"bytes_out\":%.0f,\"bytes_tcp\":%.0f,\"bytes_udp\":%.0f,\"src\":\"%s\",\"bytes_in_total\":%.0f,\"bytes_out_total\":%.0f,\"bytes_tcp_total\":%.0f,\"bytes_udp_total\":%.0f,\"total_since\":%d,\"live\":%s}", \
-            ip, srx[ip], stx[ip], stc[ip], sud[ip], sv, \
+            ip, crx, ctx, ctc, cud, sv, \
             rxa[ip], txa[ip], tt, ut, since[ip], lv
         n++
     }
     printf "]\n"
-}'
+}' "$SAMPLE"

@@ -178,6 +178,16 @@ assert_contains "--all keeps the quiet device for the exporter" "$IP" "$OUT"
 assert_contains "--all preserves its accumulated total" '"bytes_in_total":3000' "$OUT"
 assert_contains "--all marks it not live" '"live":false' "$OUT"
 
+# There is no current reading for a device that is not in the sample. Echoing
+# its last one back would hand any consumer reading bytes_in a frozen number
+# that looks live, with only the "live" flag to give it away.
+assert_contains "--all reports no current download reading for a quiet device" \
+    '"bytes_in":-1' "$OUT"
+assert_contains "--all reports no current upload reading for a quiet device" \
+    '"bytes_out":-1' "$OUT"
+assert_not_contains "--all does not echo the last observed sample as current" \
+    '"bytes_in":900002000' "$OUT"
+
 # ── the state file must not grow without bound ──────────────────────────────
 # A device that was seen once, carried nothing, and went away must be evicted;
 # one that carried bytes is kept so its counter survives an idle period.
@@ -266,6 +276,56 @@ assert_contains "metrics.sh consumes the shared accumulator" \
     "$(cat "$BIN/trafficctl-metrics.sh")"
 assert_eq "metrics.sh keeps no state file of its own" "" \
     "$(grep -n 'trafficctl_metrics.state' "$BIN/trafficctl-metrics.sh")"
+
+# ── concurrent samplers must not corrupt the store ──────────────────────────
+# A LuCI poll and a metrics scrape land together routinely. The lock serialises
+# the read-modify-write, but it can be STOLEN after a timeout, so two writers
+# coexisting is reachable rather than impossible — which is why each writes to
+# its own scratch file. With one shared name they interleave lines into it and
+# whichever rename lands last publishes garbage.
+#
+# This asserts the invariant, not the interleaving: a race that only sometimes
+# reproduces would make this test flaky rather than useful, so the property
+# checked is "the state file is always well-formed and monotonic", which holds
+# no matter how the processes interleave.
+rm -f "$STATE"
+sample '[{"ip":"10.0.20.99","bytes_in":1000,"bytes_out":0,"bytes_tcp":-1,"bytes_udp":-1,"src":"ct"}]'
+run >/dev/null
+for i in $(seq 1 12); do
+    PATH="$MOCKBIN:$PATH" sh "$TMPDIR/totals.sh" >/dev/null 2>&1 &
+done
+wait
+assert_eq "concurrent samplers leave exactly one line per device" "1" \
+    "$(wc -l < "$STATE" | tr -d ' ')"
+assert_eq "every state line still has all 12 fields" "" \
+    "$(awk 'NF != 12 { print NR": "NF" fields" }' "$STATE")"
+assert_eq "the accumulated total is not corrupted" "1000" \
+    "$(awk '{print $2}' "$STATE")"
+OUT=$(run)
+assert_contains "the store still reads back cleanly afterwards" \
+    '"bytes_in_total":1000' "$OUT"
+
+# The lock must be released, not leaked: a directory left behind would make
+# every later sampler wait out the steal timeout before it could accumulate.
+assert_eq "the lock directory is released" "1" \
+    "$([ -d "$TMPDIR/lock.d" ] && echo 0 || echo 1)"
+
+# Each writer needs its OWN scratch file. A shared "$STATE.tmp" is the shape
+# that breaks once the lock is stolen, and it is invisible to any test that
+# does not happen to interleave, so it is pinned statically.
+assert_contains "the state is staged through a per-process scratch file" \
+    'TMPF="/tmp/.trafficctl_totals.write.$$"' "$(cat "$BIN/trafficctl-totals.sh")"
+assert_eq "no shared scratch filename remains" "" \
+    "$(grep -n 'state ".tmp"' "$BIN/trafficctl-totals.sh")"
+assert_eq "no scratch file is left behind" "" \
+    "$(find /tmp -maxdepth 1 -name '.trafficctl_totals.*' 2>/dev/null)"
+
+# Sampling happens before the lock is taken, so the slow conntrack read is not
+# inside the critical section. If that order is reversed, every poll queues
+# behind a full conntrack parse and the steal-on-timeout path — which exists
+# for a killed sampler — starts firing under ordinary load.
+assert_contains "the byte source is sampled before the lock is taken" \
+    "$MOCKBIN/bytes" "$(sed -n '1,/^while ! mkdir/p' "$TMPDIR/totals.sh")"
 
 # ── the shell ↔ frontend field contract ─────────────────────────────────────
 # These names cross a process boundary with nothing to typecheck them. Renaming
