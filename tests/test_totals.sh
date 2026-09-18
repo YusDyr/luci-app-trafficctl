@@ -68,18 +68,22 @@ assert_not_contains() {
 sed -e "s|/usr/local/bin/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" \
     -e "s|STATE=\"/tmp/trafficctl_totals.state\"|STATE=\"$STATE\"|" \
     -e "s|LOCKD=\"/tmp/trafficctl_totals.lock.d\"|LOCKD=\"$TMPDIR/lock.d\"|" \
+    -e "s|\"/tmp/\.trafficctl_totals\.|\"$TMPDIR/scratch.|" \
     -e "s|/usr/local/bin/trafficctl-bytes.sh|$MOCKBIN/bytes|" \
     "$BIN/trafficctl-totals.sh" > "$TMPDIR/totals.sh"
 
 # Every substitution above must have landed: sed exits 0 on no-match, so a
 # renamed path would silently leave the script pointing at the REAL /tmp state
-# file and the tests would pass while measuring the wrong thing.
-for must in "$STATE" "$TMPDIR/lock.d" "$MOCKBIN/bytes"; do
+# file and the tests would pass while measuring the wrong thing. The scratch
+# files matter as much as the state file: left pointing at /tmp, the leak check
+# further down would be scanning a directory this test does not own, where a
+# stale file from anything else fails it and a never-exercised path passes it.
+for must in "$STATE" "$TMPDIR/lock.d" "$TMPDIR/scratch." "$MOCKBIN/bytes"; do
     assert_contains "rewrote path into the script under test: $must" \
         "$must" "$(cat "$TMPDIR/totals.sh")"
 done
-assert_not_contains "no stale reference to the production state file" \
-    "/tmp/trafficctl_totals.state" "$(cat "$TMPDIR/totals.sh")"
+assert_eq "nothing under test still writes to the real /tmp" "" \
+    "$(grep -n '"/tmp/' "$TMPDIR/totals.sh")"
 
 cat > "$MOCKBIN/bytes" <<MOCK
 #!/bin/sh
@@ -440,7 +444,7 @@ assert_contains "the state is staged through a per-process scratch file" \
 assert_eq "no shared scratch filename remains" "" \
     "$(grep -n 'state ".tmp"' "$BIN/trafficctl-totals.sh")"
 assert_eq "no scratch file is left behind" "" \
-    "$(find /tmp -maxdepth 1 -name '.trafficctl_totals.*' 2>/dev/null)"
+    "$(find "$TMPDIR" -maxdepth 1 -name 'scratch.*' 2>/dev/null)"
 
 # Sampling happens before the lock is taken, so the slow conntrack read is not
 # inside the critical section. If that order is reversed, every poll queues
