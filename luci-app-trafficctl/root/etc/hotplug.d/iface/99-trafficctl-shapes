@@ -74,6 +74,19 @@ if [ -f "$RULES_FILE" ] && tctl_persist_enabled; then
     done
 fi
 
+# Restore a global internet cut the operator explicitly asked to keep.
+#
+# Guarded on the cut's OWN opt-in, not on tctl_persist_enabled: the global
+# persist_rules flag exists so per-device rate limits survive a reboot, and
+# inheriting a persistent internet kill from it would be a lockout reached
+# through an unrelated decision. Only a cut engaged with "keep after reboot"
+# leaves a file in /etc, so the file's existence is the consent. The restore
+# path honours the original deadline and refuses to restart the clock.
+if [ -f /etc/trafficctl/cut.state ]; then
+    /usr/local/bin/trafficctl-cut.sh restore >/dev/null 2>&1 || \
+        logger -t trafficctl "Failed to restore the global internet cut"
+fi
+
 # Pre-create nft monitor table if software offload is active
 if [ "$(tctl_get_offload_mode)" = "software" ]; then
     /usr/local/bin/trafficctl-bytes-nft.sh >/dev/null 2>&1 &
