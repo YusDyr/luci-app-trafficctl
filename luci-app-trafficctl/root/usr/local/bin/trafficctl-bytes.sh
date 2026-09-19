@@ -2,12 +2,18 @@
 # shellcheck shell=dash
 # Per-device byte counters from conntrack (for speed calculation).
 # Output: JSON array
-#   [{"ip":"…","bytes_in":N,"bytes_out":N,"bytes_tcp":N,"bytes_udp":N,"src":"ct"}]
+#   [{"ip":"…","bytes_in":N,"bytes_out":N,"bytes_tcp":N,"bytes_udp":N,
+#     "src":"ct","degraded":false}]
 #
 # "src" names the counter source. trafficctl-totals.sh accumulates these into
 # lifetime totals and the two sources have unrelated magnitudes (conntrack
 # reports only live flows, the nft maps count since the table was built), so it
 # has to be able to tell a source switch from a burst of traffic.
+#
+# "degraded" says whether the numbers can be believed AT ALL — see below. It is
+# separate from "src" on purpose: src is about magnitude (and drives the
+# rebaseline), degraded is about trust, and conflating them would make a change
+# in trust look like a change of counter and throw away a delta for nothing.
 #
 # bytes_tcp / bytes_udp carry both directions summed, and exist only on the
 # conntrack path — nft counter maps are keyed by address alone and cannot split
@@ -25,13 +31,32 @@
 # TCTL_FORCE_CONNTRACK is set by that fallback when the kernel lacks dynamic
 # counter maps, so we don't bounce between the two.
 _offload=$(tctl_get_offload_mode)
+_uncountered=0
 case "$_offload" in
     none|*-counter) ;;
     *)
+        _uncountered=1
         [ "$TCTL_FW" = "nft" ] && [ -z "$TCTL_FORCE_CONNTRACK" ] && \
             exec /usr/local/bin/trafficctl-bytes-nft.sh
         ;;
 esac
+
+# Reaching here with uncountered offload means the nft fallback was unavailable
+# and we are about to read counters the forwarding path does not update.
+#
+# Two ways in, and the second is easy to miss:
+#   * TCTL_FORCE_CONNTRACK — bytes-nft.sh bounced back because the kernel has
+#     no dynamic counter map support. Observed on real hardware.
+#   * fw3/iptables — there is no nft fallback to reach in the first place.
+#
+# The numbers that follow are not merely imprecise, they are FROZEN for every
+# offloaded flow: they stop moving while traffic continues. Left unflagged, a
+# lifetime total accumulated from them looks authoritative and simply stalls,
+# which reads as stale statistics rather than as a broken counter — the same
+# shape as the 2 GiB %d freeze (#56), and harder to notice than the tiny live
+# values that prompted #26, because the number is plausible.
+_degraded=false
+[ "$_uncountered" = "1" ] && _degraded=true
 
 # All monitored subnets (connected LANs + routed downstream subnets +
 # trafficctl.main.extra_subnets), as awk membership spec.
@@ -41,7 +66,7 @@ MATCH_SPEC=$(tctl_monitored_subnets | awk '{printf "%s%s:%s:%s",(NR>1?" ":""),$2
 # Router-owned IPv4 addresses, excluded from the NAT fallback below.
 LOCAL_IPS=$(ip -4 addr show 2>/dev/null | awk '/inet /{split($2,a,"/");print a[1]}' | tr '\n' ' ')
 
-cat /proc/net/nf_conntrack 2>/dev/null | awk -v spec="$MATCH_SPEC" -v localips="$LOCAL_IPS" '
+cat /proc/net/nf_conntrack 2>/dev/null | awk -v spec="$MATCH_SPEC" -v localips="$LOCAL_IPS" -v degraded="$_degraded" '
 function ip2int(ip,   a) {
     split(ip, a, ".")
     return a[1]*16777216 + a[2]*65536 + a[3]*256 + a[4]
@@ -104,8 +129,8 @@ END {
     n = 0
     for (ip in in_total) {
         if (n > 0) printf ","
-        printf "{\"ip\":\"%s\",\"bytes_in\":%.0f,\"bytes_out\":%.0f,\"bytes_tcp\":%.0f,\"bytes_udp\":%.0f,\"src\":\"ct\"}", \
-            ip, in_total[ip], out_total[ip], tcp_total[ip]+0, udp_total[ip]+0
+        printf "{\"ip\":\"%s\",\"bytes_in\":%.0f,\"bytes_out\":%.0f,\"bytes_tcp\":%.0f,\"bytes_udp\":%.0f,\"src\":\"ct\",\"degraded\":%s}", \
+            ip, in_total[ip], out_total[ip], tcp_total[ip]+0, udp_total[ip]+0, degraded
         n++
     }
     printf "]\n"

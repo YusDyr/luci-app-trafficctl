@@ -42,6 +42,15 @@
 #   bytes_in_total / bytes_out_total / bytes_tcp_total / bytes_udp_total,
 #   total_since (unix time accumulation began for that device) and live.
 #   The proto totals are -1 when the active source cannot split by protocol.
+#
+# TRUST: "degraded" is carried through from the sampler and is STICKY per
+#   device. It means the counters the total was built from are frozen for
+#   offloaded flows (uncountered offload with no usable nft fallback), so the
+#   total is a lower bound that stops growing while traffic continues. One
+#   tainted sample understates the total for the rest of its life, so the flag
+#   cannot be cleared just because the next sample looked healthy — that would
+#   re-present the same understated number as trustworthy. Consumers must
+#   refuse to show it as a total, exactly as they refuse to show -1 as 0.
 
 . /usr/local/bin/trafficctl-fw.sh
 
@@ -133,6 +142,7 @@ BEGIN {
         }
         srcof[ip] = (n >= 11 ? f[11] : "?")
         since[ip] = (n >= 12 ? f[12] + 0 : now)
+        degof[ip] = (n >= 13 ? f[13] : "false")
     }
     close(state)
 }
@@ -145,6 +155,11 @@ BEGIN {
     udv = num($0, "bytes_udp")
     s = str($0, "src")
     if (s == "") s = "?"
+    # Trust, not magnitude. Deliberately NOT folded into the source-switch test
+    # below: conntrack counters are continuous across a change in trust, so
+    # rebaselining on it would throw away a real delta for nothing.
+    dg = "false"
+    if (index($0, "\"degraded\":true") > 0) dg = "true"
 
     # A source switch swaps "bytes carried by live flows" for "bytes since the
     # nft table was built", or the reverse. Either way the jump is not traffic,
@@ -190,6 +205,12 @@ BEGIN {
 
     known[ip] = 1
     srcof[ip] = s
+    # Sticky: a total accumulated from frozen counters stays understated for
+    # the rest of its life, so one degraded sample taints it until the counter
+    # is reset. Clearing the flag as soon as the next sample looked healthy
+    # would quietly re-present that same understated number as trustworthy.
+    if (dg == "true") degof[ip] = "true"
+    else if (!(ip in degof)) degof[ip] = "false"
     seenat[ip] = now
     live[ip] = 1
     srx[ip] = rx; stx[ip] = tx; stc[ip] = tcv; sud[ip] = udv
@@ -200,9 +221,10 @@ END {
         # file cannot grow without bound on a busy network.
         if (!(ip in live) && rxa[ip] + txa[ip] + tca[ip] + uda[ip] == 0) continue
         sv = srcof[ip]; if (sv == "") sv = "?"
-        printf "%s %.0f %.0f %.0f %.0f %d %.0f %.0f %.0f %.0f %s %d\n", \
+        dv = degof[ip]; if (dv == "") dv = "false"
+        printf "%s %.0f %.0f %.0f %.0f %d %.0f %.0f %.0f %.0f %s %d %s\n", \
             ip, rxa[ip], txa[ip], rxl[ip], txl[ip], seenat[ip], \
-            tca[ip]+0, uda[ip]+0, tcl[ip], udl[ip], sv, since[ip] > tmp
+            tca[ip]+0, uda[ip]+0, tcl[ip], udl[ip], sv, since[ip], dv > tmp
     }
     close(tmp)
     system("mv " tmp " " state " 2>/dev/null")
@@ -243,9 +265,10 @@ END {
         # corrupt the JSON for every consumer.
         sv = srcof[ip]; if (sv == "") sv = "?"
         lv = "false"; if (islive) lv = "true"
+        dv = degof[ip]; if (dv == "") dv = "false"
         if (n > 0) printf ","
-        printf "{\"ip\":\"%s\",\"bytes_in\":%.0f,\"bytes_out\":%.0f,\"bytes_tcp\":%.0f,\"bytes_udp\":%.0f,\"src\":\"%s\",\"bytes_in_total\":%.0f,\"bytes_out_total\":%.0f,\"bytes_tcp_total\":%.0f,\"bytes_udp_total\":%.0f,\"total_since\":%d,\"live\":%s}", \
-            ip, crx, ctx, ctc, cud, sv, \
+        printf "{\"ip\":\"%s\",\"bytes_in\":%.0f,\"bytes_out\":%.0f,\"bytes_tcp\":%.0f,\"bytes_udp\":%.0f,\"src\":\"%s\",\"degraded\":%s,\"bytes_in_total\":%.0f,\"bytes_out_total\":%.0f,\"bytes_tcp_total\":%.0f,\"bytes_udp_total\":%.0f,\"total_since\":%d,\"live\":%s}", \
+            ip, crx, ctx, ctc, cud, sv, dv, \
             rxa[ip], txa[ip], tt, ut, since[ip], lv
         n++
     }

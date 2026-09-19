@@ -63,6 +63,8 @@ function str(line, key,   re, seg) {
 BEGIN {
     print "# HELP trafficctl_device_bytes_total Bytes transferred per device since the counter started. The store is tmpfs, so this resets on reboot; it advances whenever anything samples (a scrape, or the LuCI page)."
     print "# TYPE trafficctl_device_bytes_total counter"
+    print "# HELP trafficctl_device_bytes_degraded 1 when the counter above was built from byte counters the forwarding path does not update (uncountered flow offload with no usable nftables fallback). The counter is then a lower bound that stalls while traffic continues; alert on this rather than trusting a flat rate()."
+    print "# TYPE trafficctl_device_bytes_degraded gauge"
 }
 {
     ip = str($0, "ip")
@@ -71,6 +73,11 @@ BEGIN {
     tx = num($0, "bytes_out_total"); if (tx < 0) tx = 0
     printf "trafficctl_device_bytes_total{ip=\"%s\",direction=\"rx\"} %.0f\n", ip, rx
     printf "trafficctl_device_bytes_total{ip=\"%s\",direction=\"tx\"} %.0f\n", ip, tx
+    # A counter that stops moving is indistinguishable from an idle device on a
+    # dashboard, which is exactly how this failure hides. Exported alongside so
+    # the condition is alertable instead of being inferred from a flat line.
+    printf "trafficctl_device_bytes_degraded{ip=\"%s\"} %d\n", ip, \
+        (index($0, "\"degraded\":true") ? 1 : 0)
 }'
 
 # ── per-device state gauges ─────────────────────────────────────────────────

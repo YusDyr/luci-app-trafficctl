@@ -161,6 +161,18 @@ assert_contains "app metric emitted when enabled" 'trafficctl_app_bytes{ip="10.0
 assert_contains "second app on the same device" 'trafficctl_app_bytes{ip="10.0.20.11",app="ntp"} 300' "$OUT"
 assert_contains "per-app flow counts too" 'trafficctl_app_flows{ip="10.0.20.11",app="google"} 2' "$OUT"
 
+# A counter built from frozen byte counters stalls, and on a dashboard that is
+# indistinguishable from an idle device — so the condition is exported as its
+# own gauge rather than left to be inferred from a flat rate().
+assert_contains "degraded gauge is exported alongside the counter" \
+    'trafficctl_device_bytes_degraded{ip="10.0.20.11"} 0' "$OUT"
+echo '[{"ip":"10.0.20.11","bytes_in":900,"bytes_out":100,"bytes_tcp":-1,"bytes_udp":-1,"src":"ct","degraded":true}]' > "$BYTES_FILE"
+DEG_OUT=$(run_metrics)
+assert_contains "degraded gauge goes high when the sampler flags it" \
+    'trafficctl_device_bytes_degraded{ip="10.0.20.11"} 1' "$DEG_OUT"
+assert_contains "the counter is still exported while degraded" \
+    'trafficctl_device_bytes_total{ip="10.0.20.11",direction="rx"} ' "$DEG_OUT"
+
 assert_contains "up metric" 'trafficctl_up 1' "$OUT"
 assert_contains "counter is typed for prometheus" '# TYPE trafficctl_device_bytes_total counter' "$OUT"
 

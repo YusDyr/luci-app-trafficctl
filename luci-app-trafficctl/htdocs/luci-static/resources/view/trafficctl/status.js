@@ -268,13 +268,23 @@ function fmtBytes(b) {
 // zero: under flow offload the byte source becomes nftables counter maps keyed
 // by address alone, which cannot split TCP from UDP. Printing 0 there would be
 // a confident wrong answer, i.e. the very failure this change removes.
-function renderTotalCell(cell, total, liveVal, since, pending) {
+function renderTotalCell(cell, total, liveVal, since, pending, degraded) {
 	while (cell.firstChild) {
 		cell.removeChild(cell.firstChild);
 	}
 	if (pending) {
 		cell.appendChild(E('span', { 'class': 'tc-c-faint' }, '…'));
 		cell.title = _('Waiting for the first byte sample.');
+		return;
+	}
+	// The router told us these counters are frozen for offloaded flows, so the
+	// total is a lower bound that stalls while traffic continues. Refused
+	// rather than shown: a plausible number that quietly stops growing reads as
+	// stale statistics, not as a broken counter, and is far harder to notice
+	// than the implausibly small live values that prompted issue #26.
+	if (degraded) {
+		cell.appendChild(E('span', { 'class': 'tc-c-err tc-fw-bold' }, '⚠'));
+		cell.title = _('Not counted: flow offload is active and this router cannot provide the nftables counters trafficctl uses in that mode, so the kernel byte counters stop updating for offloaded connections. Any total here would be far too low. See Settings → Flow Offload.');
 		return;
 	}
 	if (total == null || total < 0) {
@@ -1244,9 +1254,9 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		cellMap.total = E('div', { 'class': 'td tc-right tc-mono tc-sm', 'data-total-ip': r.ip });
 		cellMap.tcp   = E('div', { 'class': 'td tc-right tc-mono tc-sm tc-c-speed', 'data-total-tcp-ip': r.ip });
 		cellMap.udp   = E('div', { 'class': 'td tc-right tc-mono tc-sm tc-c-warn', 'data-total-udp-ip': r.ip });
-		renderTotalCell(cellMap.total, r.total, r._live_total, r._total_since, r._total_pending);
-		renderTotalCell(cellMap.tcp,   r.tcp,   r._live_tcp,   r._total_since, r._total_pending);
-		renderTotalCell(cellMap.udp,   r.udp,   r._live_udp,   r._total_since, r._total_pending);
+		renderTotalCell(cellMap.total, r.total, r._live_total, r._total_since, r._total_pending, r._total_degraded);
+		renderTotalCell(cellMap.tcp,   r.tcp,   r._live_tcp,   r._total_since, r._total_pending, r._total_degraded);
+		renderTotalCell(cellMap.udp,   r.udp,   r._live_udp,   r._total_since, r._total_pending, r._total_degraded);
 
 		var inetBadge = r.blocked
 			? E('span', { 'class': 'tc-c-warn tc-fw-bold' }, '⏸ ' + _('blocked'))
@@ -2613,7 +2623,8 @@ return view.extend({
 						liveTotal: (Number(d.bytes_in) || 0) + (Number(d.bytes_out) || 0),
 						liveTcp: liveTcp,
 						liveUdp: liveUdp,
-						since: Number(d.total_since) || 0
+						since: Number(d.total_since) || 0,
+						degraded: (d.degraded === true)
 					};
 				});
 				if (isAllMode()) {
@@ -2826,6 +2837,7 @@ return view.extend({
 				r._total_pending = !t;
 				if (!t) {
 					r.total = -1; r.tcp = -1; r.udp = -1;
+					r._total_degraded = false;
 					return;
 				}
 				r.total = t.total;
@@ -2835,6 +2847,7 @@ return view.extend({
 				r._live_tcp = t.liveTcp;
 				r._live_udp = t.liveUdp;
 				r._total_since = t.since;
+				r._total_degraded = t.degraded;
 			});
 		}
 
@@ -2855,7 +2868,7 @@ return view.extend({
 					if (!cell) {
 						return;
 					}
-					renderTotalCell(cell, t[spec[1]], t[spec[2]], t.since, false);
+					renderTotalCell(cell, t[spec[1]], t[spec[2]], t.since, false, t.degraded);
 				});
 			});
 		}
@@ -2905,6 +2918,20 @@ return view.extend({
 			if (activeFilter) {
 				statsDiv.appendChild(E('span', {'style':'margin-left:10px;cursor:pointer;color:var(--tc-muted);font-size:11px'}, '✕ ' + _('clear filter')));
 				statsDiv.lastChild.addEventListener('click', function() { self._tableFilter = null; renderSummary(rows); });
+			}
+
+			// Says once, in words, what the ⚠ in every byte cell means. The
+			// Flow Offload banner above already explains the mode, but on this
+			// hardware its reassurance — that trafficctl switches to nftables
+			// counters — is exactly what does not hold.
+			if (rows.some(function(r) { return r._total_degraded; })) {
+				statsDiv.appendChild(E('div', {
+					'style': 'margin-top:8px;padding:6px 8px;border-left:3px solid var(--tc-err);' +
+						'background:rgba(211,84,0,0.10);font-size:11px'
+				}, [
+					E('strong', {}, '⚠ ' + _('Byte totals unavailable on this router.')),
+					document.createTextNode(' ' + _('Flow offload is active and the kernel does not support the nftables counter maps trafficctl uses in that mode, so byte counters stop updating for offloaded connections. Speeds and totals would be far too low, so they are not shown. Disabling hardware offload in Settings → Flow Offload restores them.'))
+				]));
 			}
 
 			var filtered = applyTableFilter(rows);

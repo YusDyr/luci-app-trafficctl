@@ -3,7 +3,13 @@
 # Per-device byte counters using nftables maps.
 # Works with software flow offload (hook priority -200, before flowtable at -150).
 # Output: JSON array
-#   [{"ip":"…","bytes_in":N,"bytes_out":N,"bytes_tcp":-1,"bytes_udp":-1,"src":"nft"}]
+#   [{"ip":"…","bytes_in":N,"bytes_out":N,"bytes_tcp":-1,"bytes_udp":-1,
+#     "src":"nft","degraded":false}]
+#
+# "degraded" is always false here, and that is the entire point of this script:
+# these counters sit ahead of the flowtable, so they keep moving under offload
+# where conntrack freezes. If this path is unavailable, trafficctl-bytes.sh
+# reports degraded:true instead of quietly handing back frozen numbers.
 #
 # The counters here are cumulative since the table was created, unlike the
 # conntrack sums trafficctl-bytes.sh returns, which cover live flows only.
@@ -78,14 +84,14 @@ END {
     n = 0
     for (ip in in_b) {
         if (n > 0) printf ","
-        printf "{\"ip\":\"%s\",\"bytes_in\":%.0f,\"bytes_out\":%.0f,\"bytes_tcp\":-1,\"bytes_udp\":-1,\"src\":\"nft\"}", \
+        printf "{\"ip\":\"%s\",\"bytes_in\":%.0f,\"bytes_out\":%.0f,\"bytes_tcp\":-1,\"bytes_udp\":-1,\"src\":\"nft\",\"degraded\":false}", \
             ip, in_b[ip], out_b[ip]+0
         n++
     }
     for (ip in out_b) {
         if (!(ip in in_b)) {
             if (n > 0) printf ","
-            printf "{\"ip\":\"%s\",\"bytes_in\":0,\"bytes_out\":%.0f,\"bytes_tcp\":-1,\"bytes_udp\":-1,\"src\":\"nft\"}", \
+            printf "{\"ip\":\"%s\",\"bytes_in\":0,\"bytes_out\":%.0f,\"bytes_tcp\":-1,\"bytes_udp\":-1,\"src\":\"nft\",\"degraded\":false}", \
                 ip, out_b[ip]
             n++
         }

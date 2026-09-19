@@ -204,6 +204,20 @@ not a lifetime total — see `trafficctl-totals.sh` below.
 | `bytes_tcp` | number | TCP bytes, both directions. `-1` when the source cannot split by protocol |
 | `bytes_udp` | number | UDP bytes, both directions. `-1` when the source cannot split by protocol |
 | `src` | string | `ct` = conntrack, `nft` = nftables counter maps |
+| `degraded` | bool | `true` when these counters are **frozen** for offloaded flows — see below |
+
+`degraded` is about *trust*; `src` is about *magnitude*. They are separate
+fields because conntrack counters are continuous across a change in trust, so
+folding the two together would make a trust change look like a source change
+and throw away a real delta.
+
+`degraded` is `true` when the router has **uncountered** flow offload (plain
+`hardware` or `software`) *and* the nftables fallback is unavailable — either
+because the kernel has no dynamic counter map support (`trafficctl-bytes-nft.sh`
+re-execs with `TCTL_FORCE_CONNTRACK=1`), or because the router runs fw3/iptables
+and there is no fallback to reach. The counters then stop moving for every
+offloaded flow while traffic continues, so any total built from them is a lower
+bound that stalls. Consumers must refuse to present it as a total.
 
 Which source is used is decided per call: with flow offload active and no
 working `counter` flag, conntrack stops accounting for offloaded flows, so the
@@ -274,6 +288,13 @@ accumulated history and stay exact.
   scraper configured, the counters stand still. There is no background tick.
 - **Concurrent samplers are serialised** with an atomic `mkdir` lock, so a LuCI
   poll and a scrape landing together cannot discard one another's delta.
+- **`degraded` is sticky per device.** A total accumulated from frozen counters
+  stays understated for the rest of its life, so one tainted sample marks it
+  until the counter resets. Clearing the flag as soon as a later sample looked
+  healthy would re-present that same understated number as trustworthy. The
+  exporter surfaces it as `trafficctl_device_bytes_degraded`, and the LuCI
+  columns show `⚠` instead of a number — a counter that silently stalls reads
+  as an idle device, which is how this failure hides.
 
 ---
 

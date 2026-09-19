@@ -257,8 +257,8 @@ for a in $AWKS; do
 
     # Prior state: a device sitting just under the clamp. Fields are
     # ip rx_acc tx_acc rx_last tx_last seen tcp_acc udp_acc tcp_last udp_last
-    # src since.
-    printf '192.168.0.50 2100000000 10 2100000000 10 1700000000 0 0 -1 -1 ct 1700000000\n' > "$STATE"
+    # src since degraded.
+    printf '192.168.0.50 2100000000 10 2100000000 10 1700000000 0 0 -1 -1 ct 1700000000 false\n' > "$STATE"
     # Live conntrack has moved on by 200 MB, which must push the accumulator
     # past 2^31-1 rather than parking it there.
     printf '[{"ip":"192.168.0.50","bytes_in":2300000000,"bytes_out":10,"bytes_tcp":-1,"bytes_udp":-1,"src":"ct"}]\n' > "$BYTES_FILE"
@@ -316,7 +316,7 @@ assert_contains "netify.sh: per-app byte total uses %.0f" \
     'printf "%s %s %.0f %d\n", p[1], p[2], total[k], flows[k]' \
     "$(cat "$BIN/trafficctl-netify.sh")"
 assert_contains "totals.sh: persisted accumulator uses %.0f" \
-    'printf "%s %.0f %.0f %.0f %.0f %d %.0f %.0f %.0f %.0f %s %d\n", \' \
+    'printf "%s %.0f %.0f %.0f %.0f %d %.0f %.0f %.0f %.0f %s %d %s\n", \' \
     "$(cat "$BIN/trafficctl-totals.sh")"
 # The accumulated totals are re-emitted into JSON as well; a %d there would
 # clamp the number the Bytes column shows even while the store stayed intact.
