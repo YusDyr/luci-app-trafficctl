@@ -47,10 +47,17 @@ config cut 'cut'
 	# flag: somebody who turned that on so their rate limits survive a reboot
 	# must not inherit a persistent internet kill as a side effect.
 	option persist '0'
-	# Duration offered by default, in seconds. 0 would mean indefinite; 15
-	# minutes is the default instead, so auto-revert is the safety net rather
-	# than something the operator has to remember.
-	option default_duration '900'
+	# Duration offered by default, in seconds; 0 means indefinite — the cut
+	# stays on until it is switched off.
+	#
+	# Indefinite is the default because it is what the feature is FOR: the
+	# requester's case (#55) is holding a new device off the internet until it
+	# has been configured, which has no predictable duration, and a cut that
+	# auto-released halfway through would silently let the device out. The
+	# safety net is that the engaged state lives in tmpfs, so a reboot always
+	# restores the internet — a timer is a convenience on top of that, not the
+	# thing standing between the operator and a permanent lockout.
+	option default_duration '0'
 
 config logging 'logging'
 	option enabled '1'

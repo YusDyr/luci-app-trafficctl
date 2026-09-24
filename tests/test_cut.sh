@@ -288,6 +288,37 @@ reset_state
 cat > "$TMP/uci.empty" <<'VALS'
 trafficctl.logging.enabled=0
 VALS
+# The DEFAULT duration with nothing configured is indefinite, not a timer.
+# That is the requester's stated requirement in #55 — hold a new device off the
+# internet until it has been configured, which has no predictable length — and
+# an auto-release halfway through would quietly let the device out. The thing
+# standing between the operator and a permanent lockout is the state living in
+# tmpfs, not the timer, so the timer is free to default to "off".
+reset_state
+cat > "$TMP/uci.nodur" <<'VALS'
+firewall.@zone[0].name=lan
+firewall.@zone[0].network=lan
+firewall.@zone[1].name=wan
+firewall.@zone[1].network=wan
+network.lan.device=br-lan
+network.wan.device=eth1
+trafficctl.logging.enabled=0
+VALS
+OUT=$(PATH="$MOCKBIN:$PATH" sh -c "cp '$TMP/uci.nodur' '$UCIVALS'; sh '$CUT' status" 2>&1)
+assert_contains "unset default_duration falls back to indefinite, not a timer" \
+    '"default_duration":0' "$OUT"
+cat > "$UCIVALS" <<'VALS'
+firewall.@zone[0].name=lan
+firewall.@zone[0].network=lan
+firewall.@zone[1].name=wan
+firewall.@zone[1].network=wan
+network.lan.device=br-lan
+network.wan.device=eth1
+trafficctl.logging.enabled=0
+trafficctl.cut.default_duration=900
+trafficctl.cut.persist=0
+VALS
+
 OUT=$(PATH="$MOCKBIN:$PATH" sh -c "UCIVALS_OVERRIDE=1; cp '$TMP/uci.empty' '$UCIVALS'; sh '$CUT' engage 900 0" 2>&1)
 assert_contains "no LAN interfaces: refuses instead of cutting" '"ok":false' "$OUT"
 assert_contains "no LAN interfaces: says why" "no LAN interfaces" "$OUT"
