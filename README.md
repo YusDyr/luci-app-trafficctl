@@ -163,7 +163,7 @@ I hope it turns out as useful for you as it has been for me.
 - **Interface Detection** -- Shows actual connection interface: WiFi band (2.4G/5G/6G), LAN port name (lan2/lan3/lan4), or `routed` for clients behind a downstream router.
 - **Downstream Routers** -- Devices on subnets behind a second router are monitored too: subnets with a route via a LAN next-hop are detected automatically, any flow this router NATs is attributed to its original source, and additional CIDRs can be listed in `trafficctl.main.extra_subnets`.
 - **Port Forwards tab** -- Inbound traffic control for DNAT port forwards and router-local open ports: live connection/client/byte stats per forward, instant pause/resume (drop rule, no firewall reload) and inbound rate limiting.
-- **Live Speed Polling** -- Optional polling with configurable interval (default 2s); shows sparkline per device with spike filtering.
+- **Live Speed Polling** -- Optional polling with configurable interval (Off/1/2/5/10/30s) and averaging window (5s-5min); shows sparkline per device with spike filtering. Both can be stored as router-wide defaults via UCI (`poll_interval`, `avg_window`) for browsers that have not chosen their own.
 - **Reverse DNS** -- Optional hostname resolution for external destination IPs with in-memory cache (no repeated lookups).
 - **Searchable Device Picker** -- Command palette (search by name, IP, or MAC) with recent devices quick-access bar stored in localStorage.
 - **Telegram Bot** -- Optional bot for remote control: device list, block/unblock, rate limit, shape traffic, new device notifications. Runs on the router via long polling, no external server needed.

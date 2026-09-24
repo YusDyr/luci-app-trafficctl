@@ -25,6 +25,19 @@ config trafficctl 'main'
 	option netify_interval '45'
 	# IFB device used to shape upload pre-NAT (needs kmod-ifb).
 	option shape_ifb 'tctl-ifb0'
+	# Dashboard defaults for a browser that has not chosen its own. The Poll
+	# and Window chips still override per-browser — these only decide what a
+	# fresh session starts with, which is the part an admin can usefully set
+	# once for a router rather than per person (#12).
+	#
+	# poll_interval: seconds between live samples; 0 disables polling.
+	#   A smaller number costs a conntrack read per tick on the router, which
+	#   is the overhead the request was about.
+	# avg_window: seconds of history the displayed speed is averaged over.
+	#   Samples kept per device are avg_window/poll_interval, so a long window
+	#   with a short poll is the expensive combination.
+	option poll_interval '2'
+	option avg_window '15'
 
 config newdevice 'newdevice'
 	# Apply a limit automatically the first time a device is seen. Off by
