@@ -529,7 +529,7 @@ cut_default_duration() {
 	local d
 	d=$(uci -q get trafficctl.cut.default_duration 2>/dev/null)
 	case "$d" in
-		''|*[!0-9]*) echo 900 ;;
+		''|*[!0-9]*) echo 0 ;;
 		*) echo "$d" ;;
 	esac
 }
