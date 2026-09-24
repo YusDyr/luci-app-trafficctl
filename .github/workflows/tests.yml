@@ -61,6 +61,8 @@ jobs:
         run: bash tests/test_newdevice.sh
       - name: Per-interface counter tests (global overview)
         run: bash tests/test_ifaces.sh
+      - name: Postinst parity tests
+        run: bash tests/test_postinst_parity.sh
       - name: Regression tests
         run: bash tests/test_regressions.sh
       - name: Release version-bump tests
