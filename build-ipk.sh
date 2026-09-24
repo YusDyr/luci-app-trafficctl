@@ -94,6 +94,16 @@ if [ -z "${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-telegram ]; then
     /etc/init.d/trafficctl-telegram stop 2>/dev/null || true
     /etc/init.d/trafficctl-telegram disable 2>/dev/null || true
 fi
+# Fail open. A global internet cut left engaged by a package that is going away
+# is a lockout with no UI left to undo it — the rule would sit in nftables with
+# nothing on the router admitting to owning it.
+if [ -z "${IPKG_INSTROOT}" ] && [ -x /usr/local/bin/trafficctl-cut.sh ]; then
+    /usr/local/bin/trafficctl-cut.sh release >/dev/null 2>&1 || true
+fi
+if [ -z "${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-cut ]; then
+    /etc/init.d/trafficctl-cut stop 2>/dev/null || true
+    /etc/init.d/trafficctl-cut disable 2>/dev/null || true
+fi
 exit 0
 EOF
 chmod +x "$CTRL/prerm"

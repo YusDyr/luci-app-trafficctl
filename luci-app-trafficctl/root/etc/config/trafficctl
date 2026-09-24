@@ -35,6 +35,30 @@ config newdevice 'newdevice'
 	option limit_kbit '0'
 	option limit_mode 'limiter'
 
+config cut 'cut'
+	# Global internet cut (all devices at once). Only PREFERENCES live here —
+	# whether the cut is currently engaged never does, because /etc/config
+	# survives a reboot and this control must not. It is the one control that
+	# can lock out its own operator: anyone administering the router through a
+	# LAN host (Tailscale on a NAS, a tunnel from a LAN box, a jump host) loses
+	# that path while it is on, and a reboot has to be able to undo it.
+	#
+	# persist is its own opt-in and deliberately NOT the global persist_rules
+	# flag: somebody who turned that on so their rate limits survive a reboot
+	# must not inherit a persistent internet kill as a side effect.
+	option persist '0'
+	# Duration offered by default, in seconds; 0 means indefinite — the cut
+	# stays on until it is switched off.
+	#
+	# Indefinite is the default because it is what the feature is FOR: the
+	# requester's case (#55) is holding a new device off the internet until it
+	# has been configured, which has no predictable duration, and a cut that
+	# auto-released halfway through would silently let the device out. The
+	# safety net is that the engaged state lives in tmpfs, so a reboot always
+	# restores the internet — a timer is a convenience on top of that, not the
+	# thing standing between the operator and a permanent lockout.
+	option default_duration '0'
+
 config logging 'logging'
 	option enabled '1'
 	option log_file '/tmp/trafficctl/activity.log'
