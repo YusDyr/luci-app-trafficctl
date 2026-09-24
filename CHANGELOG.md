@@ -4,6 +4,19 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.16.1] - 2026-09-24
+
+### Bug Fixes
+- released packages left rpcd unaware of the plugin ([#62](https://github.com/YusDyr/luci-app-trafficctl/issues/62)) ([f55906a](https://github.com/YusDyr/luci-app-trafficctl/commit/f55906a12c4434348d15900bfe8642f199ac3bf6))
+  Installing a published package and opening the dashboard gave "RPC call to
+  luci.trafficctl/summary failed with error -32000: Object not found" until the
+  router was rebooted. rpcd only scans for plugins when it starts, and the
+  postinst never restarted it.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.16.0...v1.16.1
+
+---
+
 ## [1.16.0] - 2026-09-19
 
 ### Features
