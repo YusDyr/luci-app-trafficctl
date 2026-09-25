@@ -59,7 +59,7 @@ list)
 	printf '"portfw_list":{},'
 	printf '"portfw_ctl":{"action":"str","scope":"str","proto":"str","ip":"str","port":"str","rate_kbit":"int"},'
 	printf '"config_get":{},'
-	printf '"config_set":{"enabled":"bool","default_mode":"str","sw":"bool","hw":"bool"},'
+	printf '"config_set":{"enabled":"bool","default_mode":"str","sw":"bool","hw":"bool","poll_interval":"int","avg_window":"int"},'
 	printf '"telegram_config_get":{},'
 	printf '"telegram_config_set":{"enabled":"bool","bot_token":"str","chat_id":"str","poll_interval":"int","notify_new_device":"bool","notify_known_device":"bool","control_enabled":"bool","notify_template":"str","btn_block_inet":"bool","btn_block_wifi":"bool","btn_limiter":"bool","btn_shaper":"bool"},'
 	printf '"telegram_test":{"bot_token":"str","chat_id":"str","message":"str"},'
@@ -283,12 +283,16 @@ call)
 		offload=$(tctl_get_offload_mode)
 		sw=$(uci -q get firewall.@defaults[0].flow_offloading)
 		hw=$(uci -q get firewall.@defaults[0].flow_offloading_hw)
-		printf '{"enabled":%s,"default_mode":"%s","offload_mode":"%s","sw":%s,"hw":%s}' \
+		poll=$(uci -q get trafficctl.main.poll_interval)
+		window=$(uci -q get trafficctl.main.avg_window)
+		printf '{"enabled":%s,"default_mode":"%s","offload_mode":"%s","sw":%s,"hw":%s,"poll_interval":%d,"avg_window":%d}' \
 			"$([ "$enabled" = "1" ] && echo true || echo false)" \
 			"${mode:-limiter}" \
 			"$offload" \
 			"$([ "$sw" = "1" ] && echo true || echo false)" \
-			"$([ "$hw" = "1" ] && echo true || echo false)"
+			"$([ "$hw" = "1" ] && echo true || echo false)" \
+			"${poll:-2}" \
+			"${window:-15}"
 		;;
 	config_set)
 		read -r input
@@ -296,8 +300,37 @@ call)
 		mode=$(echo "$input" | jsonfilter -e '@.default_mode' 2>/dev/null)
 		sw=$(echo "$input" | jsonfilter -e '@.sw' 2>/dev/null)
 		hw=$(echo "$input" | jsonfilter -e '@.hw' 2>/dev/null)
+		poll=$(echo "$input" | jsonfilter -e '@.poll_interval' 2>/dev/null)
+		window=$(echo "$input" | jsonfilter -e '@.avg_window' 2>/dev/null)
 		[ -n "$enabled" ] && uci set trafficctl.main.enabled="$([ "$enabled" = "true" ] && echo 1 || echo 0)"
 		[ -n "$mode" ] && uci set trafficctl.main.default_mode="$mode"
+		# Bounded rather than free-form. 0 means "do not poll"; below a second
+		# the browser cannot keep up and the router pays a conntrack read per
+		# tick for frames nobody sees. The upper bound keeps a "live" dashboard
+		# recognisably live.
+		if [ -n "$poll" ]; then
+			case "$poll" in
+				''|*[!0-9]*) echo '{"ok":false,"msg":"poll_interval must be a number"}'; exit 0 ;;
+			esac
+			if [ "$poll" != "0" ] && { [ "$poll" -lt 1 ] || [ "$poll" -gt 300 ]; }; then
+				echo '{"ok":false,"msg":"poll_interval must be 0 (off) or between 1 and 300 seconds"}'
+				exit 0
+			fi
+			uci set trafficctl.main.poll_interval="$poll"
+		fi
+		# The window is what the speed is averaged over, and the per-device
+		# sample history is sized from it — so an unbounded value is an
+		# unbounded array in every open browser, one per device.
+		if [ -n "$window" ]; then
+			case "$window" in
+				''|*[!0-9]*) echo '{"ok":false,"msg":"avg_window must be a number"}'; exit 0 ;;
+			esac
+			if [ "$window" -lt 2 ] || [ "$window" -gt 3600 ]; then
+				echo '{"ok":false,"msg":"avg_window must be between 2 and 3600 seconds"}'
+				exit 0
+			fi
+			uci set trafficctl.main.avg_window="$window"
+		fi
 		tctl_commit
 		if [ -n "$sw" ] || [ -n "$hw" ]; then
 			[ -n "$sw" ] && uci set "firewall.@defaults[0].flow_offloading=$([ "$sw" = "true" ] && echo 1 || echo 0)"

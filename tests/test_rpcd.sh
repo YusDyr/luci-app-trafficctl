@@ -285,6 +285,44 @@ assert_contains "config_set: reports ok" '"ok":true' "$OUT"
 assert_contains "config_set: writes enabled=0" "trafficctl.main.enabled=0" "$(cat "$UCI_LOG")"
 assert_contains "config_set: writes default_mode" "trafficctl.main.default_mode=shaper" "$(cat "$UCI_LOG")"
 
+# ── Router-wide Poll / Window defaults (#12) ──────────────────────────────
+# These are bounded rather than free-form. avg_window sizes the per-device
+# sample history every open browser keeps, and poll_interval costs the router
+# a conntrack read per tick, so neither is safe to accept unchecked.
+assert_contains "config_get: reports the poll default" '"poll_interval":2' "$(run_call config_get)"
+assert_contains "config_get: reports the window default" '"avg_window":15' "$(run_call config_get)"
+
+: > "$UCI_LOG"
+OUT=$(run_call config_set '{"poll_interval":30,"avg_window":300}')
+assert_contains "config_set: accepts a valid poll/window pair" '"ok":true' "$OUT"
+assert_contains "config_set: writes poll_interval" "trafficctl.main.poll_interval=30" "$(cat "$UCI_LOG")"
+assert_contains "config_set: writes avg_window" "trafficctl.main.avg_window=300" "$(cat "$UCI_LOG")"
+
+# 0 is a real choice — "do not poll" — and must not be rejected as out of range.
+: > "$UCI_LOG"
+OUT=$(run_call config_set '{"poll_interval":0}')
+assert_contains "config_set: 0 means polling off, not an invalid value" '"ok":true' "$OUT"
+assert_contains "config_set: writes poll_interval=0" "trafficctl.main.poll_interval=0" "$(cat "$UCI_LOG")"
+
+: > "$UCI_LOG"
+OUT=$(run_call config_set '{"poll_interval":301}')
+assert_contains "config_set: rejects a poll interval above the bound" '"ok":false' "$OUT"
+assert_eq "config_set: writes nothing when the poll interval is rejected" "" "$(cat "$UCI_LOG")"
+
+: > "$UCI_LOG"
+OUT=$(run_call config_set '{"avg_window":3601}')
+assert_contains "config_set: rejects a window above the bound" '"ok":false' "$OUT"
+assert_eq "config_set: writes nothing when the window is rejected" "" "$(cat "$UCI_LOG")"
+
+: > "$UCI_LOG"
+OUT=$(run_call config_set '{"avg_window":1}')
+assert_contains "config_set: rejects a window shorter than two seconds" '"ok":false' "$OUT"
+
+: > "$UCI_LOG"
+OUT=$(run_call config_set '{"poll_interval":"abc"}')
+assert_contains "config_set: rejects a non-numeric poll interval" '"ok":false' "$OUT"
+assert_eq "config_set: writes nothing for a non-numeric poll interval" "" "$(cat "$UCI_LOG")"
+
 # ════════════════════════════════════════════════════════════════════════════
 # telegram_config_get / set — bot_token must never leak in cleartext
 # ════════════════════════════════════════════════════════════════════════════

@@ -209,7 +209,7 @@ var callVersion = rpc.declare({
 var callConfigSet = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'config_set',
-	params: ['enabled', 'default_mode', 'sw', 'hw']
+	params: ['enabled', 'default_mode', 'sw', 'hw', 'poll_interval', 'avg_window']
 });
 
 var callNetworkRrdnsLookup = rpc.declare({
@@ -244,9 +244,26 @@ var GROUP_OPTS = [
 	{v:'proto',   l: _('Protocol')}
 ];
 
+// Router-wide defaults for a browser that has not chosen its own, read from
+// UCI at load (#12). The Poll and Window chips still win per-browser — these
+// only decide where a fresh session starts, which is the part an admin can
+// usefully set once for the router instead of once per person.
+//
+// Seeded with the same numbers the config ships so the dashboard behaves
+// identically before the rpc answers, and if the call fails.
+var siteDefaults = { pollInterval: 2, avgWindow: 15 };
+
 function loadOpts() {
 	try { return JSON.parse(window.localStorage.getItem(STORAGE_KEY) || '{}'); }
 	catch(e) { return {}; }
+}
+// 0 is a real choice here — "do not poll" — so an explicit undefined check,
+// not a falsy one.
+function optPoll(o) {
+	return (o && o.pollInterval !== undefined) ? o.pollInterval : siteDefaults.pollInterval;
+}
+function optWindow(o) {
+	return (o && o.avgWindow) ? o.avgWindow : siteDefaults.avgWindow;
 }
 function saveOpts(o) {
 	try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(o)); } catch(e) {}
@@ -1341,7 +1358,7 @@ function updateUrlParams(opts) {
 	if (opts.lastIp && opts.lastIp !== '__all__') params.set('ip', opts.lastIp);
 	if (opts.refresh && opts.refresh > 0) params.set('refresh', String(opts.refresh));
 	if (opts.pollInterval) params.set('poll', String(opts.pollInterval));
-	if (opts.avgWindow && opts.avgWindow !== 15) params.set('avg', String(opts.avgWindow));
+	if (opts.avgWindow && opts.avgWindow !== siteDefaults.avgWindow) params.set('avg', String(opts.avgWindow));
 	if (opts.avgMethod && opts.avgMethod !== 'simple') params.set('method', opts.avgMethod);
 	if (opts.extendedStats) params.set('extended', '1');
 	if (opts.showOverview) params.set('overview', '1');
@@ -1372,7 +1389,7 @@ function applyUrlParams(opts) {
 	if (paramIp) opts.lastIp = paramIp;
 	if (paramRefresh) opts.refresh = parseInt(paramRefresh) || 0;
 	if (paramPoll) opts.pollInterval = parseInt(paramPoll) || 0;
-	if (paramAvg) opts.avgWindow = parseInt(paramAvg) || 15;
+	if (paramAvg) opts.avgWindow = parseInt(paramAvg) || siteDefaults.avgWindow;
 	if (paramMethod && (paramMethod === 'ewma' || paramMethod === 'simple')) opts.avgMethod = paramMethod;
 	if (paramExtended === '1') opts.extendedStats = true;
 	if (paramOverview === '1') opts.showOverview = true;
@@ -1729,10 +1746,28 @@ return view.extend({
 	_queryGen:   0,
 
 	load: function() {
-		return fs.read('/tmp/dhcp.leases').catch(function() { return ''; });
+		// config_get rides along with the leases so the router-wide Poll and
+		// Window defaults are known BEFORE the first render. Fetching them
+		// afterwards would paint the chips with the built-in numbers and then
+		// move them, and would start the poll timer at the wrong interval.
+		// It is allowed to fail: siteDefaults already holds the shipped values.
+		return Promise.all([
+			fs.read('/tmp/dhcp.leases').catch(function() { return ''; }),
+			callConfigGet().catch(function() { return null; })
+		]);
 	},
 
-	render: function(leasesRaw) {
+	render: function(loaded) {
+		var leasesRaw = loaded[0];
+		var siteCfg = loaded[1];
+		if (siteCfg) {
+			if (typeof siteCfg.poll_interval === 'number') {
+				siteDefaults.pollInterval = siteCfg.poll_interval;
+			}
+			if (typeof siteCfg.avg_window === 'number' && siteCfg.avg_window > 0) {
+				siteDefaults.avgWindow = siteCfg.avg_window;
+			}
+		}
 		var self = this;
 		var opts = loadOpts();
 		opts = applyUrlParams(opts);
@@ -1927,17 +1962,57 @@ return view.extend({
 			var o = loadOpts(); o.refresh = parseInt(v); saveOpts(o); updateUrlParams(o); self._setupTimer();
 		});
 
+		// 10s and 30s exist for the reason they were asked for: on a smaller
+		// router a 1s poll is a full conntrack read every second for numbers
+		// nobody is watching that closely.
 		var pollIntervalPick = mkChipPick([
-			{v:'0',l:_('Off')},{v:'1',l:'1s'},{v:'2',l:'2s'},{v:'5',l:'5s'}
-		], String(opts.pollInterval !== undefined ? opts.pollInterval : 2), function(v) {
+			{v:'0',l:_('Off')},{v:'1',l:'1s'},{v:'2',l:'2s'},{v:'5',l:'5s'},
+			{v:'10',l:'10s'},{v:'30',l:'30s'}
+		], String(optPoll(opts)), function(v) {
 			var o = loadOpts(); o.pollInterval = parseInt(v); saveOpts(o); updateUrlParams(o);
 			self._restartBytesPoll();
 		});
 
+		// Samples kept per device are window/poll, so the history sizes itself
+		// to the window — a longer one is memory, not a truncated average.
 		var avgWindowPick = mkChipPick([
-			{v:'5',l:'5s'},{v:'15',l:'15s'},{v:'30',l:'30s'},{v:'60',l:'60s'}
-		], String(opts.avgWindow||15), function(v) {
+			{v:'5',l:'5s'},{v:'15',l:'15s'},{v:'30',l:'30s'},{v:'60',l:'60s'},
+			{v:'120',l:'2m'},{v:'300',l:'5m'}
+		], String(optWindow(opts)), function(v) {
 			var o = loadOpts(); o.avgWindow = parseInt(v); saveOpts(o); updateUrlParams(o);
+		});
+
+		// The chips above are per-browser (localStorage). This writes the two
+		// that cost the ROUTER something — poll rate and the history each
+		// device keeps — to UCI as the starting point for anyone who has not
+		// chosen their own. Asked for in #12, where the request was explicitly
+		// for a router-level setting rather than a per-tab one.
+		var defaultsSaveStatus = E('span', {'class':'tg-save-status'});
+		var defaultsSaveBtn = E('button', {
+			'class': 'tg-btn',
+			'data-tip': _('Store the current Poll and Window as this router\'s defaults, for browsers that have not set their own')
+		}, _('Save as router default'));
+		defaultsSaveBtn.addEventListener('click', function() {
+			var o = loadOpts();
+			var poll = optPoll(o);
+			var win = optWindow(o);
+			defaultsSaveBtn.disabled = true;
+			defaultsSaveStatus.textContent = _('Saving…');
+			defaultsSaveStatus.style.color = 'var(--tc-muted)';
+			callConfigSet(null, null, null, null, poll, win).then(function(res) {
+				var ok = res && res.ok;
+				defaultsSaveStatus.textContent = ok ? '✓' : ('✗ ' + ((res && res.msg) || ''));
+				defaultsSaveStatus.style.color = ok ? 'var(--tc-ok)' : 'var(--tc-err)';
+				if (ok) {
+					siteDefaults.pollInterval = poll;
+					siteDefaults.avgWindow = win;
+				}
+				defaultsSaveBtn.disabled = false;
+			}).catch(function(e) {
+				defaultsSaveStatus.textContent = '✗ ' + e.message;
+				defaultsSaveStatus.style.color = 'var(--tc-err)';
+				defaultsSaveBtn.disabled = false;
+			});
 		});
 
 		var avgMethodPick = mkChipPick([
@@ -2492,7 +2567,7 @@ return view.extend({
 					var oo = loadOpts(); oo.ovShowOther = next; saveOpts(oo);
 					renderOverview();
 				},
-				(o.pollInterval !== undefined ? o.pollInterval : 2) <= 0
+				optPoll(o) <= 0
 			);
 			while (overviewDiv.firstChild) overviewDiv.removeChild(overviewDiv.firstChild);
 			overviewDiv.appendChild(panel);
@@ -2507,8 +2582,8 @@ return view.extend({
 				if (!Array.isArray(data)) return;
 				var now = Date.now();
 				var o = loadOpts();
-				var pollInterval = o.pollInterval || 2;
-				var avgWindow = o.avgWindow || 15;
+				var pollInterval = optPoll(o) || siteDefaults.pollInterval;
+				var avgWindow = optWindow(o);
 				var avgMethod = o.avgMethod || 'simple';
 				var maxSamples = Math.max(2, Math.round(avgWindow / (pollInterval || 2)));
 
@@ -3074,7 +3149,7 @@ return view.extend({
 		this._startBytesPoll = function() {
 			if (self._bytesTimer) return;
 			var o = loadOpts();
-			var pollMs = (o.pollInterval !== undefined ? o.pollInterval : 2) * 1000;
+			var pollMs = optPoll(o) * 1000;
 			if (pollMs <= 0) return;
 			pollBytes();
 			self._bytesTimer = setInterval(pollBytes, pollMs);
@@ -3776,7 +3851,9 @@ return view.extend({
 				sep(),
 				E('span', {'data-tip':_('Time window for speed averaging')}, [mkLabel(_('Window')+':'), avgWindowPick.el]),
 				sep(),
-				E('span', {'data-tip':_('Simple = arithmetic mean, EWMA = exponential weighted moving average')}, [mkLabel(_('Method')+':'), avgMethodPick.el])
+				E('span', {'data-tip':_('Simple = arithmetic mean, EWMA = exponential weighted moving average')}, [mkLabel(_('Method')+':'), avgMethodPick.el]),
+				sep(),
+				defaultsSaveBtn, defaultsSaveStatus
 			]),
 			E('div', {'style':'font-size:11px;color:var(--tc-muted);margin-bottom:4px'}, _('Visible columns')),
 			colChipsContainer,

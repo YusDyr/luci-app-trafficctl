@@ -40,7 +40,7 @@ method because it returns the contents of the configured log file.
 | `portfw_list` | `trafficctl-portfw.sh list` | (none) | read |
 | `netify_status` | `trafficctl-netify.sh status` | (none) | read |
 | `netify_list` | `trafficctl-netify.sh list` | (none) | read |
-| `config_get` | (inline) | (none) — returns `enabled`, `default_mode`, `offload_mode`, `sw`, `hw` | read |
+| `config_get` | (inline) | (none) — returns `enabled`, `default_mode`, `offload_mode`, `sw`, `hw`, `poll_interval`, `avg_window` | read |
 | `telegram_config_get` | (inline) | (none) — `bot_token` is masked as `***` | read |
 | `logging_config_get` | (inline) | (none) | read |
 | `newdevice_config_get` | (inline) | (none) — returns `enabled`, `limit_kbit`, `limit_mode`, plus `seeded` and `seen_count` describing the seen-MAC ledger | read |
@@ -56,7 +56,7 @@ method because it returns the contents of the configured log file.
 | `name_clear` | `trafficctl-names.sh remove` | `ip` | write |
 | `portfw_ctl` | `trafficctl-portfw.sh` | `action`, `scope`, `proto`, `ip`, `port`, `rate_kbit` | write |
 | `netify_collect` | `trafficctl-netify.sh collect` | `secs` | write |
-| `config_set` | (inline) | `enabled`, `default_mode`, `sw`, `hw` (all optional) | write |
+| `config_set` | (inline) | `enabled`, `default_mode`, `sw`, `hw`, `poll_interval`, `avg_window` (all optional) | write |
 | `telegram_config_set` | (inline) | `enabled`, `bot_token`, `chat_id`, `poll_interval`, `notify_new_device`, `notify_known_device`, `control_enabled`, `notify_template`, `btn_block_inet`, `btn_block_wifi`, `btn_limiter`, `btn_shaper` | write |
 | `telegram_test` | `trafficctl-telegram-test.sh` | `bot_token`, `chat_id`, `message` | write |
 | `logging_config_set` | (inline) | `enabled`, `log_file`, `max_lines`, `syslog`, `log_blocks`, `log_ratelimits`, `log_shapes`, `log_telegram`, `log_config` | write |
@@ -69,6 +69,13 @@ switching the feature on does not classify the devices already on the network as
 new. The ledger is authoritative: the hotplug hook applies nothing at all on a run
 that finds no ledger, because a missing one cannot distinguish "new device" from
 "router has not noticed this device yet".
+
+`poll_interval` and `avg_window` are the dashboard defaults for a browser that
+has not chosen its own; the Poll and Window chips still override them per
+browser. Both are bounded: `poll_interval` is 0 (polling off) or 1–300 seconds,
+`avg_window` is 2–3600. The bounds are not cosmetic — `avg_window / poll_interval`
+is how many samples every open browser keeps *per device*, and each poll costs
+the router a conntrack read.
 
 `port` accepts a single port or a `lo-hi` range. On the iptables path a range is
 passed through as `lo:hi`; it used to be truncated to the low port, which left the
