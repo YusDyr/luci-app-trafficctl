@@ -4,6 +4,19 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.17.0] - 2026-09-25
+
+### Features
+- wider Poll/Window choices and router-wide defaults for them ([#63](https://github.com/YusDyr/luci-app-trafficctl/issues/63)) ([b32b8d3](https://github.com/YusDyr/luci-app-trafficctl/commit/b32b8d3045abf42e233a4c1b330469664e98fb2d))
+  The Poll chips offered Off/1/2/5s and Window 5/15/30/60s, both hard-coded, so
+  there was no way to ask for the slower polling the request was about: on a
+  smaller router a 1s poll is a full conntrack read every second for numbers
+  nobody is watching that closely. Poll gains 10s and 30s, Window gains 2m and 5m.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.16.1...v1.17.0
+
+---
+
 ## [1.16.1] - 2026-09-24
 
 ### Bug Fixes
