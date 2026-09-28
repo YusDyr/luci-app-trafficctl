@@ -253,6 +253,60 @@
     border: 1px solid var(--tc-border);
 }
 
+/* ── Subnet target: the each/shared explanation and its warning ──── */
+.tc-scope-row {
+    margin-bottom: 6px;
+}
+/* Full sentences rather than a tooltip: "5 Mbit each" and "5 Mbit between
+   them" are the two halves of this feature and are easy to read backwards. */
+.tc-scope-explain {
+    font-size: 11px;
+    color: var(--tc-muted);
+    margin-top: 4px;
+}
+.tc-scope-warn {
+    font-size: 11px;
+    color: var(--tc-warn);
+    margin-top: 4px;
+    line-height: 1.4;
+}
+
+/* ── Active subnet limits ────────────────────────────────────────── */
+.tc-subnet-limits {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--tc-border);
+}
+.tc-subnet-limits__title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--tc-muted);
+    margin-bottom: 4px;
+}
+.tc-subnet-limits__row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 0;
+    font-size: 12px;
+}
+.tc-subnet-limits__target {
+    font-weight: 600;
+    min-width: 130px;
+}
+.tc-subnet-limits__mode {
+    font-size: 11px;
+    padding: 1px 8px;
+    border-radius: 10px;
+    border: 1px solid var(--tc-border);
+    color: var(--tc-muted);
+}
+.tc-subnet-limits__drops {
+    font-size: 11px;
+    flex: 1 1 auto;
+}
+
 /* ── Chips (rate preset pills) ───────────────────────────────────── */
 .tc-chip {
     display: inline-block;
