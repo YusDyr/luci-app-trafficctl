@@ -40,7 +40,10 @@ function ip2s(v,   o1, o2, o3, o4, rem) {
     while (b > 1) { b = b / 2; mask-- }
     # router_int is 0 for a subnet that has no local address inside it, which
     # is what tells a routed subnet from a connected one.
-    kind = ($4 + 0 == 0) ? "routed" : "lan"
+    # Written long-hand: the bashism linter reads the whole file, and
+    # `name = (...)` at the start of a line looks like a shell array to it.
+    kind = "lan"
+    if ($4 + 0 == 0) { kind = "routed" }
     if (n++) printf ","
     else printf "["
     printf "{\"cidr\":\"%s/%d\",\"device\":\"%s\",\"kind\":\"%s\"}", ip2s(base), mask, $1, kind
