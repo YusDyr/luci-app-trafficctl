@@ -131,6 +131,21 @@ tctl_ratelimit_list() {
     fi
 }
 
+# Which bucket layout a target gets when the caller names no mode.
+#
+# A block limited "shared" would let one device starve the rest, so per-device
+# is the sane default whenever the target covers more than one address. Lives
+# here rather than in trafficctl-ratelimit.sh because the reboot-restore hook
+# has to reach the same answer for a record written before modes were stored —
+# two copies of this rule would mean a limit that changes meaning on reboot.
+tctl_ratelimit_default_mode() {
+    case "$1" in
+        */32) echo "shared" ;;   # a /32 is one host; both modes are identical
+        */*)  echo "each" ;;     # any wider block: per-device buckets
+        *)    echo "shared" ;;   # bare host address
+    esac
+}
+
 # ── Internet Blocking ──────────────────────────────────────────────────────
 
 tctl_block_add() {
@@ -490,12 +505,17 @@ tctl_persist_enabled() {
 }
 
 tctl_persist_save() {
-    local type="$1" ip="$2" param="$3"
+    local type="$1" ip="$2" param="$3" mode="$4"
     [ -d "$(dirname "$TCTL_RULES_FILE")" ] || mkdir -p "$(dirname "$TCTL_RULES_FILE")"
     [ -f "$TCTL_RULES_FILE" ] || echo '[]' > "$TCTL_RULES_FILE"
     local tmp="${TCTL_RULES_FILE}.tmp"
+    # The mode field is written only when the caller has one, so records for
+    # rule types that have no bucket layout (blocks, port forwards) keep their
+    # exact previous shape.
+    local extra=""
+    [ -n "$mode" ] && extra=",\"mode\":\"$mode\""
     # Remove existing entry for same ip+type, append new one
-    awk -v ip="$ip" -v t="$type" -v p="$param" '
+    awk -v ip="$ip" -v t="$type" -v p="$param" -v x="$extra" '
     {
         gsub(/^\[/,""); gsub(/\]$/,"")
         n=split($0, items, "},{")
@@ -509,7 +529,7 @@ tctl_persist_save() {
             first=0
         }
         if (!first) printf ","
-        printf "{\"type\":\"%s\",\"ip\":\"%s\",\"param\":\"%s\"}]", t, ip, p
+        printf "{\"type\":\"%s\",\"ip\":\"%s\",\"param\":\"%s\"%s}]", t, ip, p, x
     }' "$TCTL_RULES_FILE" > "$tmp"
     mv "$tmp" "$TCTL_RULES_FILE"
 }

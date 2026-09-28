@@ -26,14 +26,8 @@ TARGET=$(tctl_validate_target "$IP") || {
 }
 IP="$TARGET"
 
-# A block limited "shared" would let one device starve the rest, so per-device
-# is the sane default whenever the target covers more than one address.
 if [ -z "$MODE" ]; then
-    case "$IP" in
-        */32) MODE="shared" ;;   # a /32 is one host; both modes are identical
-        */*)  MODE="each" ;;     # any wider block: per-device buckets
-        *)    MODE="shared" ;;   # bare host address
-    esac
+    MODE=$(tctl_ratelimit_default_mode "$IP")
 fi
 case "$MODE" in
     each|shared) ;;
@@ -67,7 +61,10 @@ else
         echo "{\"ok\":false,\"msg\":\"failed to set rate limit for $IP (no usable WAN or LAN ingress device)\"}"
         exit 1
     fi
-    tctl_persist_enabled && tctl_persist_save "ratelimit" "$IP" "$RATE"
+    # The mode is persisted with the rate. Without it the restore hook fell back
+    # to tctl_ratelimit_add's own default ("shared"), so a subnet limited
+    # "5 Mbit each" came back after a reboot as 5 Mbit for the entire subnet.
+    tctl_persist_enabled && tctl_persist_save "ratelimit" "$IP" "$RATE" "$MODE"
     tctl_log "ratelimit_set" "$IP" "${RATE}kbit" "${TCTL_VIA:-cli}" "${TCTL_SRC:-local}"
     if [ "$TCTL_RL_DOWNLOAD_FAILED" = "1" ]; then
         echo "{\"ok\":true,\"msg\":\"rate limit ${RATE} kbit/s applied to $IP UPLOAD ONLY — WAN device not resolvable\"}"

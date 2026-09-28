@@ -111,6 +111,7 @@ for sub in trafficctl-summary.sh trafficctl-device.sh trafficctl-bytes.sh \
            trafficctl-block.sh trafficctl-unblock.sh \
            trafficctl-macfilter-add.sh trafficctl-macfilter-remove.sh \
            trafficctl-ratelimit.sh trafficctl-ratelimit-stats.sh \
+           trafficctl-subnets.sh \
            trafficctl-shape.sh trafficctl-shape-stats.sh \
            trafficctl-rdns.sh trafficctl-netify.sh trafficctl-names.sh \
            trafficctl-portfw.sh trafficctl-telegram-test.sh; do
@@ -137,7 +138,7 @@ run_call() {
 
 LIST_OUT=$(run_list)
 for m in summary device bytes block unblock macfilter_add macfilter_remove \
-         ratelimit ratelimit_stats shape_add shape_remove shape_status shape_stats \
+         ratelimit ratelimit_stats subnets shape_add shape_remove shape_status shape_stats \
          rdns netify_status netify_list netify_collect names_list name_set name_clear \
          portfw_list portfw_ctl config_get config_set telegram_config_get \
          ifaces \
@@ -159,6 +160,14 @@ assert_contains "summary: dispatches to trafficctl-summary.sh" '"ok":true,"msg":
 OUT=$(run_call ifaces)
 assert_contains "ifaces: wraps sub-script output under result" '{"result":' "$OUT"
 assert_contains "ifaces: dispatches to trafficctl-ifaces.sh" '"ok":true,"msg":"stub-trafficctl-ifaces.sh"' "$OUT"
+
+# The dashboard builds its subnet-limit target picker from this, and warns off
+# a target that is not in it, so an unreachable method has to fail loudly here
+# rather than look like "this router monitors nothing".
+OUT=$(run_call subnets)
+assert_contains "subnets: wraps sub-script output under result" '{"result":' "$OUT"
+assert_contains "subnets: dispatches to trafficctl-subnets.sh" \
+    '"ok":true,"msg":"stub-trafficctl-subnets.sh"' "$OUT"
 
 # `bytes` must go through the accumulator, not the raw sampler: the lifetime
 # totals the Bytes/TCP/UDP columns show are added there, and it is the LuCI

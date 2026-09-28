@@ -45,6 +45,7 @@ list)
 	printf '"macfilter_remove":{"ip":"str"},'
 	printf '"ratelimit":{"ip":"str","rate_kbit":"int","label":"str","mode":"str"},'
 	printf '"ratelimit_stats":{},'
+	printf '"subnets":{},'
 	printf '"shape_add":{"ip":"str","rate_kbit":"int","label":"str"},'
 	printf '"shape_remove":{"ip":"str","label":"str"},'
 	printf '"shape_status":{"ip":"str"},'
@@ -167,6 +168,11 @@ call)
 	ratelimit_stats)
 		printf '{"result":'
 		"$SCRIPTS/trafficctl-ratelimit-stats.sh"
+		printf '}'
+		;;
+	subnets)
+		printf '{"result":'
+		"$SCRIPTS/trafficctl-subnets.sh"
 		printf '}'
 		;;
 	shape_add)
