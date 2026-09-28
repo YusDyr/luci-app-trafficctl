@@ -189,7 +189,9 @@ assert_not_contains "harness: no production rules path survived the rewrite" \
 
 # Every script under test sources fw.sh by absolute path too.
 patch_script() {
-    sed -e "s|/usr/local/bin/trafficctl-fw.sh|$FW|" "$1" > "$2"
+    sed -e "s|/usr/local/bin/trafficctl-fw.sh|$FW|" \
+        -e "s|SHAPES_FILE=\"/etc/trafficctl/shapes.json\"|SHAPES_FILE=\"$SHAPES\"|" \
+        "$1" > "$2"
     chmod +x "$2"
 }
 patch_script "$BIN/trafficctl-ratelimit-stats.sh" "$TMP/ratelimit-stats.sh"
@@ -343,6 +345,46 @@ RESTORED=$(restore '[{"type":"ratelimit","ip":"192.168.1.50","param":"5000"}]')
 assert_contains "restore: a legacy host record still applies" \
     "ip daddr 192.168.1.50 limit rate over 625 kbytes/second" "$RESTORED"
 assert_not_contains "restore: a host needs no meter" "meter" "$RESTORED"
+
+# ════════════════════════════════════════════════════════════════════════════
+# 4. The shaper declining under SQM says so
+# ════════════════════════════════════════════════════════════════════════════
+#
+# The requester in #64 runs SQM. Refusing to replace a root qdisc it does not
+# recognise is deliberate — it is what stops this app destroying an SQM setup —
+# but the refusal used to surface as "tc setup failed", which reads as a bug
+# and does not point anywhere. The limiter is a policer, owns no qdisc, and is
+# the answer on such a router; a subnet target only ever uses it.
+patch_script "$BIN/trafficctl-shape.sh" "$TMP/shape.sh"
+
+cat > "$MOCKBIN/tc" <<'MOCK'
+#!/bin/sh
+case "$*" in
+    "qdisc show dev br-lan") echo "qdisc cake 8001: root refcnt 2 bandwidth 100Mbit" ;;
+    *"class show"*) exit 0 ;;
+esac
+exit 0
+MOCK
+chmod +x "$MOCKBIN/tc"
+
+SQM_OUT=$(PATH="$MOCKBIN:$PATH" sh "$TMP/shape.sh" add 192.168.1.50 5000 2>/dev/null)
+assert_contains "shaper: declines rather than claiming success under SQM" '"ok":false' "$SQM_OUT"
+assert_contains "shaper: names the root qdisc as the reason" "root qdisc" "$SQM_OUT"
+assert_contains "shaper: points at the limiter, which coexists with SQM" "limiter" "$SQM_OUT"
+
+# A qdisc the kernel or OpenWrt put there carries no configuration worth
+# keeping, so that path must NOT produce the decline message.
+cat > "$MOCKBIN/tc" <<'MOCK'
+#!/bin/sh
+case "$*" in
+    "qdisc show dev br-lan") echo "qdisc fq_codel 0: root refcnt 2" ;;
+esac
+exit 0
+MOCK
+chmod +x "$MOCKBIN/tc"
+PLAIN_OUT=$(PATH="$MOCKBIN:$PATH" sh "$TMP/shape.sh" add 192.168.1.50 5000 2>/dev/null)
+assert_not_contains "shaper: a default root qdisc is not reported as somebody's QoS" \
+    "will not be torn down" "$PLAIN_OUT"
 
 # ── the default itself ──────────────────────────────────────────────────────
 mode_of() { PATH="$MOCKBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; tctl_ratelimit_default_mode '$1'" 2>/dev/null; }
