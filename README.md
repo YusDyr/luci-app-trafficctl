@@ -44,6 +44,7 @@ I hope it turns out as useful for you as it has been for me.
 - [Features](#features)
 - [System Requirements](#system-requirements)
 - [Compatibility](#compatibility)
+- [IPv6 coverage](#ipv6-coverage)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
@@ -227,6 +228,54 @@ Runs on all architectures (no compiled code, pure shell + LuCI JavaScript).
 | **snapshot** | ✓ | | ✓ | ✓ | | | ✓ | | |
 
 Each test builds the `.ipk`, runs `opkg install --force-depends` inside the real OpenWrt rootfs container for that version/arch, then verifies all files are present and all scripts pass `ash -n` syntax check.
+
+---
+
+## IPv6 coverage
+
+Everything here is keyed on a device's IPv4 address, so **IPv6 coverage is
+partial and this table is the whole of it.** Read it before relying on any of
+these controls on a dual-stack network.
+
+| Control | IPv4 | IPv6 | Keyed on |
+|---|:---:|:---:|---|
+| Global internet cut (all devices) | ✅ | ✅ | interface (`oifname`/`fib`) — family-independent |
+| WiFi block (MAC deny) | ✅ | ✅ | MAC — the client cannot associate at all |
+| Block internet (per device) | ✅ | ✅ | address for v4, **MAC** for v6 |
+| Rate limit — **upload** | ✅ | ✅ | address for v4, **MAC** for v6 |
+| Rate limit — **download** | ✅ | ❌ | address only |
+| Traffic shaping (tc/HTB), both directions | ✅ | ❌ | address only |
+| Port-forward pause / limit | ✅ | ❌ | address only |
+| Byte counters, speed graphs, totals, Prometheus | ✅ | ❌ | address only |
+
+**Why not simply match `ip6 saddr` as well?** Because a client's IPv6 addresses
+are not stable. With SLAAC and privacy extensions a device holds several at
+once and rotates them on a timer, so a rule written against the address seen
+today stops matching tomorrow — silently, which is worse than not having the
+rule. The MAC does not rotate, so the rules that *can* be keyed on it are.
+
+**Where a MAC cannot be used, and what happens then:**
+
+- **Download** cannot be. By the time a reply is on its way to the client the
+  destination MAC is the next hop's, and the rule sits on an address-matching
+  hook. Doing this properly needs a named nft set per device, populated from
+  `ip -6 neigh`/DHCPv6 and refreshed as addresses rotate — a data-model change,
+  not a one-line match. A stale set is a silent bypass, so it is being done
+  separately rather than quickly.
+- **A device with no DHCP lease and no neighbour entry** — a client behind a
+  downstream router, reached through `extra_subnets` or a static route — has no
+  MAC this router can see. Its IPv4 rules are applied as before and the reply
+  says **"IPv4 only"** in the message, in the LuCI status line and in the
+  Telegram bot's answer, rather than reporting an unqualified success.
+- **A downstream router itself** is excluded on purpose. Its MAC is the source
+  address of every packet it forwards, so a MAC-keyed rule aimed at it would
+  black-hole or throttle every client behind it. It too is reported as
+  "IPv4 only", naming the reason.
+- **fw3 / iptables (OpenWrt 21.02)** stays IPv4-only throughout.
+
+If a device must be cut off completely and its IPv6 cannot be covered, the
+**WiFi block** (for wireless clients) and the **global internet cut** (for all
+devices) are family-independent and work regardless.
 
 ---
 

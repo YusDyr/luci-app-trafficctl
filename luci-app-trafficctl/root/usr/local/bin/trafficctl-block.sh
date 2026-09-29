@@ -35,15 +35,33 @@ if tctl_is_blocked "$IP"; then
     exit 0
 fi
 
+TCTL_BLOCK_IPV6=0
 if tctl_block_add "$IP" "$COMMENT"; then
     conntrack -D -s "$IP" >/dev/null 2>&1
     conntrack -D -d "$IP" >/dev/null 2>&1
+    # The v4 flush above leaves every established IPv6 flow running, and with
+    # flow offload those are never re-evaluated against the new rule — the
+    # device would stay online over v6 indefinitely while the UI reads blocked.
+    MAC=$(tctl_target_mac "$IP" 2>/dev/null) && tctl_conntrack_flush_v6 "$MAC"
+
     tctl_persist_enabled && tctl_persist_save "block" "$IP" "$LABEL"
     tctl_log "block" "$IP" "$LABEL" "${TCTL_VIA:-cli}" "${TCTL_SRC:-local}"
-    if [ "$SELF_BLOCK" = "true" ]; then
-        echo "{\"ok\":true,\"msg\":\"internet blocked for $IP (your device — LuCI access preserved)\"}"
+
+    # Say which families are actually covered. Reporting plain success while
+    # half the traffic walks past the rule is the bug this fixes, so the
+    # no-MAC case is stated rather than left to be discovered (same reasoning
+    # as the half-applied-limit messages in trafficctl-ratelimit.sh).
+    if [ "$TCTL_BLOCK_IPV6" = "1" ]; then
+        NOTE=""
+    elif tctl_ip_is_nexthop "$IP"; then
+        NOTE=" — IPv4 only: $IP is a routed next hop, and a MAC-keyed IPv6 rule would also block everything behind it"
     else
-        echo "{\"ok\":true,\"msg\":\"internet blocked for $IP\"}"
+        NOTE=" — IPv4 only: no MAC known for $IP (no DHCP lease, no neighbour entry), so IPv6 is not covered"
+    fi
+    if [ "$SELF_BLOCK" = "true" ]; then
+        echo "{\"ok\":true,\"ipv6\":$([ "$TCTL_BLOCK_IPV6" = "1" ] && echo true || echo false),\"msg\":\"internet blocked for $IP (your device — LuCI access preserved)$NOTE\"}"
+    else
+        echo "{\"ok\":true,\"ipv6\":$([ "$TCTL_BLOCK_IPV6" = "1" ] && echo true || echo false),\"msg\":\"internet blocked for $IP$NOTE\"}"
     fi
 else
     echo "{\"ok\":false,\"msg\":\"failed to block $IP\"}"

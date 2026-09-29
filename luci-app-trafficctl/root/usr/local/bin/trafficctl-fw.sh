@@ -10,6 +10,102 @@ else
     TCTL_FW="iptables"
 fi
 
+# ── MAC-keyed matching (address-family independent) ────────────────────────
+#
+# Everything in this package is keyed on the IPv4 address a DHCP lease gives a
+# device, and every enforcement rule matches "ip saddr"/"ip daddr" — so IPv6
+# walks past all of it (issue #67: 9.96 Mbit/s over v4 against a 10 Mbit/s cap,
+# 151 Mbit/s over v6 to the same endpoint).
+#
+# The fix is NOT "add ip6 saddr next to ip saddr": with SLAAC and privacy
+# extensions a client holds several v6 addresses at once and rotates them on a
+# timer, so a rule written against one stops matching without warning — the
+# same silent bypass, reached more slowly. The MAC does not rotate, and on the
+# hooks used here the client's own frame is still intact, so it is what the v6
+# rules are keyed on.
+#
+# Only the directions where that holds are covered; see tctl_block_add and
+# tctl_ratelimit_add for which, and README/COMPATIBILITY for what is not.
+
+# Named by absolute path, as it must be on the router; the tests sed this line
+# into their scratch directory rather than have the shipped script carry a
+# test-only override (same approach as the ledger and shapes paths below).
+TCTL_LEASES_FILE="/tmp/dhcp.leases"
+
+# The MAC behind an IPv4 address: DHCP lease first, neighbour table second.
+# Fails (non-zero, no output) when neither knows it — a routed/downstream
+# client has no lease and no neighbour entry here, and there is nothing to key
+# a rule on. Callers must report that rather than assume coverage.
+#
+# The result is validated strictly, not merely trimmed: it is interpolated
+# into an nft rule string, so anything but six hex pairs is refused.
+tctl_lookup_mac() {
+    local addr="$1" mac
+    tctl_validate_ip "$addr" || return 1
+    mac=$(awk -v ip="$addr" '$3 == ip { print $2; exit }' "$TCTL_LEASES_FILE" 2>/dev/null)
+    [ -z "$mac" ] && mac=$(ip neigh show 2>/dev/null | awk -v ip="$addr" '
+        $1 == ip { for (i = 1; i < NF; i++) if ($i == "lladdr") { print $(i+1); exit } }')
+    mac=$(printf '%s' "$mac" | tr 'A-F' 'a-f')
+    case "$mac" in
+        [0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]) ;;
+        *) return 1 ;;
+    esac
+    printf '%s\n' "$mac"
+}
+
+# True when this address is the next hop of a route, i.e. a router rather than
+# an end device. Its MAC is the source of every packet it FORWARDS, so a
+# MAC-keyed rule aimed at it would also hit every client behind it — blocking
+# one device would black-hole a whole subnet. Those addresses are excluded and
+# the caller says so out loud.
+tctl_ip_is_nexthop() {
+    local addr="$1"
+    [ -n "$addr" ] || return 1
+    ip route show 2>/dev/null | awk -v n="$addr" '
+        { for (i = 1; i < NF; i++) if ($i == "via" && $(i+1) == n) { hit = 1; exit } }
+        END { exit hit ? 0 : 1 }'
+}
+
+# The MAC to key a target's IPv6 rules on, or failure. A CIDR target has no
+# single MAC; a next hop's MAC is not its own traffic.
+tctl_target_mac() {
+    local t="$1"
+    case "$t" in
+        */32) t=${t%/32} ;;
+        */*)  return 1 ;;
+    esac
+    tctl_ip_is_nexthop "$t" && return 1
+    tctl_lookup_mac "$t"
+}
+
+# Flush a device's live IPv6 flows.
+#
+# "conntrack -D -s <v4addr>" only touches the IPv4 table, so without this an
+# established v6 flow survives a block that was just installed — and with flow
+# offload it is never re-evaluated by the forward chain again, so it survives
+# indefinitely. That is the same "a block that does not block" failure in a new
+# place, on the offload-enabled hardware most likely to hit it.
+#
+# Addresses come from a one-shot neighbour snapshot. Reading them is sound even
+# though a RULE written against them would not be: the snapshot cannot go stale
+# between here and the next statement, whereas a rule has to stay correct for
+# as long as the block lasts.
+tctl_conntrack_flush_v6() {
+    local mac="$1" addr
+    [ -n "$mac" ] || return 0
+    command -v conntrack >/dev/null 2>&1 || return 0
+    ip -6 neigh show 2>/dev/null | awk -v m="$mac" '
+        { for (i = 1; i < NF; i++) if ($i == "lladdr" && tolower($(i+1)) == m) { print $1; break } }
+    ' | while read -r addr; do
+        case "$addr" in
+            ''|*[!0-9a-fA-F:]*) continue ;;
+        esac
+        conntrack -D -f ipv6 -s "$addr" >/dev/null 2>&1
+        conntrack -D -f ipv6 -d "$addr" >/dev/null 2>&1
+    done
+    return 0
+}
+
 # ── Rate Limiting (policer) ────────────────────────────────────────────────
 
 # Rate limits are symmetric: the same ceiling is policed in both directions.
@@ -27,7 +123,7 @@ tctl_ratelimit_add() {
     local rate_kbyte=$((rate_kbit / 8))
     [ "$rate_kbyte" -lt 1 ] && rate_kbyte=1
 
-    local slug dl_expr ul_expr
+    local slug dl_expr ul_expr ul6_expr mac
     slug=$(tctl_target_slug "$ip")
     if [ "$mode" = "each" ]; then
         dl_expr="ip daddr $ip meter tctl_d_$slug { ip daddr limit rate over ${rate_kbyte} kbytes/second }"
@@ -35,6 +131,31 @@ tctl_ratelimit_add() {
     else
         dl_expr="ip daddr $ip limit rate over ${rate_kbyte} kbytes/second"
         ul_expr="ip saddr $ip limit rate over ${rate_kbyte} kbytes/second"
+    fi
+
+    # Upload over IPv6, keyed on the MAC. This direction and only this one:
+    # at LAN ingress the frame is still the client's own, so "ether saddr"
+    # identifies it whatever address family it is using. Download over IPv6 is
+    # policed at LAN egress, where the destination MAC is the next hop's — it
+    # needs the device's current v6 address set and is deliberately not
+    # attempted here.
+    #
+    # Scoped to IPv6 on purpose: IPv4 keeps being policed by exactly the rule it
+    # always was, so nothing about existing behaviour depends on whether this
+    # lookup succeeds — and an unscoped ether rule would police a dual-stack
+    # client's v4 traffic TWICE, halving the ceiling it was given. Its own
+    # bucket, too: sharing one would make the v4 and v6 halves cannibalise each
+    # other's allowance, which is not what "10 Mbit/s" has ever meant here.
+    #
+    # The scope is "meta protocol ip6", NOT "meta nfproto ipv6" — these chains
+    # are in the NETDEV family, where nft rejects nfproto outright ("meta
+    # nfproto is only useful in the inet family", verified with nft --check
+    # against nftables 1.1.1 / kernel 6.6). nfproto is what tctl_block_add uses,
+    # because that rule lives in inet fw4. Same intent, different family, and
+    # the wrong one does not silently under-match — it fails to load.
+    ul6_expr=""
+    if mac=$(tctl_target_mac "$ip"); then
+        ul6_expr="meta protocol ip6 ether saddr $mac limit rate over ${rate_kbyte} kbytes/second"
     fi
 
     if [ "$TCTL_FW" = "nft" ]; then
@@ -79,7 +200,7 @@ tctl_ratelimit_add() {
         # One chain per ingress device: a device that refuses the hook then
         # only loses its own chain instead of taking the whole set with it.
         local dev chain
-        local ul_ok=0
+        local ul_ok=0 ul6_ok=0
         for dev in $(tctl_ingress_devices); do
             chain=$(tctl_ingress_chain "$dev")
             nft add chain netdev tm_ratelimit "$chain" \
@@ -87,10 +208,21 @@ tctl_ratelimit_add() {
             nft add rule netdev tm_ratelimit "$chain" \
                 "$ul_expr counter drop comment \"${comment}_ul\"" 2>/dev/null \
                 && ul_ok=1
+            [ -n "$ul6_expr" ] || continue
+            nft add rule netdev tm_ratelimit "$chain" \
+                "$ul6_expr counter drop comment \"${comment}_ul6\"" 2>/dev/null \
+                && ul6_ok=1
         done
         # shellcheck disable=SC2034
         [ "$ul_ok" = "1" ] || TCTL_RL_UPLOAD_FAILED=1
+        # Set for the caller to report: "limited" means v4 only unless this is 1.
+        # shellcheck disable=SC2034
+        TCTL_RL_UPLOAD6_OK="$ul6_ok"
     else
+        # fw3/iptables stays IPv4-only. A half-built ip6tables path would be
+        # worse than a stated gap; see docs/COMPATIBILITY.md.
+        # shellcheck disable=SC2034
+        TCTL_RL_UPLOAD6_OK=0
         iptables -t mangle -A FORWARD -d "$ip" -m hashlimit \
             --hashlimit-above "${rate_kbit}kbit/sec" --hashlimit-burst "${rate_kbit}kbit" \
             --hashlimit-mode dstip --hashlimit-name "rl_${comment}" \
@@ -107,11 +239,18 @@ tctl_ratelimit_remove() {
     local chain h
 
     if [ "$TCTL_FW" = "nft" ]; then
-        # Scan the whole table once: rules for this IP live in dl (daddr) and
-        # in one ul_<dev> chain per ingress device (saddr).
+        # Scan the whole table once: rules for this IP live in dl (daddr), in
+        # one ul_<dev> chain per ingress device (saddr), and — for a host with
+        # a known MAC — a second, IPv6-scoped rule in each of those (_ul6).
+        #
+        # Each comment is matched in FULL, closing quote included. The suffixes
+        # are prefixes of one another ("_ul" of "_ul6"), and every comment ends
+        # in an address slug, so a substring match would have a limit on
+        # 192.168.1.1 delete 192.168.1.10's rules as well.
         nft -a list table netdev tm_ratelimit 2>/dev/null | awk -v cmt="$comment" '
             /^[ \t]*chain [a-zA-Z0-9_]+ \{/ { chain = $2; next }
-            index($0, "\"" cmt "\"") || index($0, "\"" cmt "_ul\"") {
+            index($0, "\"" cmt "\"") || index($0, "\"" cmt "_ul\"") ||
+            index($0, "\"" cmt "_ul6\"") {
                 for (i = 1; i < NF; i++)
                     if ($i == "handle") { print chain, $(i+1); break }
             }' | while read -r chain h; do
@@ -133,12 +272,45 @@ tctl_ratelimit_list() {
 
 # ── Internet Blocking ──────────────────────────────────────────────────────
 
+# A block is two rules: the address-keyed one for IPv4, and a MAC-keyed one
+# scoped to IPv6.
+#
+# This is the row of issue #67 that matters most. A rate limit that under-
+# delivers shows up in a speed test; a block that reports success while the
+# device keeps full, unmetered IPv6 access is invisible until it matters — and
+# "block internet" is what people reach for as a parental control.
+#
+# The MAC is resolved HERE rather than in trafficctl-block.sh because three
+# callers reach this function: the block script, the Telegram bot, and the
+# ifup-lan restore hook. Resolving it in the script would bring every persisted
+# block back IPv4-only after each reboot.
+#
+# "meta nfproto ipv6" keeps the two rules disjoint: IPv4 is still dropped by
+# precisely the rule it always was, so a failed MAC lookup costs the v6 half
+# and nothing else. (nfproto is correct HERE, in the inet family; the limiter's
+# netdev chains need "meta protocol ip6" instead — see tctl_ratelimit_add.)
+# `insert`, not `add`, for the same reason the v4 rule uses it — fw4's forward
+# chain accepts established/offloaded flows near the top, and a rule appended
+# below that is dead.
 tctl_block_add() {
-    local ip="$1" comment="$2"
+    local ip="$1" comment="$2" mac rc
 
     if [ "$TCTL_FW" = "nft" ]; then
         nft insert rule inet fw4 forward "ip saddr $ip counter drop comment \"$comment\""
+        rc=$?
+        # Whether the v6 half is live. Read by callers; see trafficctl-block.sh.
+        # shellcheck disable=SC2034
+        TCTL_BLOCK_IPV6=0
+        if mac=$(tctl_target_mac "$ip"); then
+            nft insert rule inet fw4 forward \
+                "meta nfproto ipv6 ether saddr $mac counter drop comment \"${comment}_mac\"" \
+                2>/dev/null && TCTL_BLOCK_IPV6=1
+        fi
+        return "$rc"
     else
+        # fw3/iptables stays IPv4-only; see docs/COMPATIBILITY.md.
+        # shellcheck disable=SC2034
+        TCTL_BLOCK_IPV6=0
         iptables -I FORWARD -s "$ip" -j DROP -m comment --comment "$comment"
     fi
 }
@@ -149,8 +321,12 @@ tctl_block_remove() {
     if [ "$TCTL_FW" = "nft" ]; then
         # Match the quoted comment in full: comments end in the address, so a
         # substring match on 192.168.1.1 also deletes the rule for 192.168.1.10.
+        # The IPv6 half carries no address to match on at all, only its own
+        # "_mac" comment — which is why it is listed explicitly here rather
+        # than being caught by a looser pattern.
         for h in $(nft -a list chain inet fw4 forward 2>/dev/null \
-                   | awk -v cmt="$comment" 'index($0, "\"" cmt "\"") {
+                   | awk -v cmt="$comment" 'index($0, "\"" cmt "\"") ||
+                                            index($0, "\"" cmt "_mac\"") {
                           for (i = 1; i < NF; i++)
                               if ($i == "handle") { print $(i+1); break }
                       }'); do
@@ -162,9 +338,17 @@ tctl_block_remove() {
 }
 
 tctl_is_blocked() {
-    local ip="$1"
+    local ip="$1" dump comment
     if [ "$TCTL_FW" = "nft" ]; then
-        nft list chain inet fw4 forward 2>/dev/null | grep -q "ip saddr $ip .*drop"
+        dump=$(nft list chain inet fw4 forward 2>/dev/null)
+        # The v4 rule is still found by address, so blocks written by versions
+        # that derived the comment from the caller's label keep reading as
+        # blocked.
+        echo "$dump" | grep -q "ip saddr $ip .*drop" && return 0
+        # The v6 rule names a MAC, not an address — its comment is the only
+        # handle on it, and it is matched in full for the reason above.
+        comment=$(tctl_block_comment "$ip")
+        echo "$dump" | grep -qF "comment \"${comment}_mac\""
     else
         # The source renders as its own column, "ip" or "ip/32"; an unanchored
         # match would report 192.168.1.10's rule as belonging to 192.168.1.1.
@@ -551,7 +735,7 @@ tctl_persist_remove() {
 # traffic: an entry is appended only for a MAC that is not already listed.
 TCTL_SEEN_FILE="/etc/trafficctl/seen_macs"
 TCTL_SEEN_MAX=1000
-TCTL_LEASES_FILE="/tmp/dhcp.leases"
+# TCTL_LEASES_FILE is set once at the top of this file (overridable for tests).
 TCTL_SHAPES_FILE="/etc/trafficctl/shapes.json"
 
 tctl_seen_normalize() {

@@ -59,7 +59,18 @@ else
     tctl_ratelimit_remove "$IP" "$COMMENT" 2>/dev/null
     TCTL_RL_DOWNLOAD_FAILED=0
     TCTL_RL_UPLOAD_FAILED=0
+    TCTL_RL_UPLOAD6_OK=0
     tctl_ratelimit_add "$IP" "$RATE" "$COMMENT" "$MODE"
+
+    # IPv6 coverage is partial by construction and the operator has to know
+    # which part: upload is policed on the MAC, download is not policed at all
+    # over v6 (see tctl_ratelimit_add). Claiming "both directions" without
+    # this note is how issue #67 stayed invisible.
+    if [ "$TCTL_RL_UPLOAD6_OK" = "1" ]; then
+        V6NOTE=" [IPv6: upload only]"
+    else
+        V6NOTE=" [IPv4 only]"
+    fi
 
     # A half-applied limit is a silent trap: report exactly which direction
     # is live rather than claiming success for both.
@@ -70,10 +81,10 @@ else
     tctl_persist_enabled && tctl_persist_save "ratelimit" "$IP" "$RATE"
     tctl_log "ratelimit_set" "$IP" "${RATE}kbit" "${TCTL_VIA:-cli}" "${TCTL_SRC:-local}"
     if [ "$TCTL_RL_DOWNLOAD_FAILED" = "1" ]; then
-        echo "{\"ok\":true,\"msg\":\"rate limit ${RATE} kbit/s applied to $IP UPLOAD ONLY — WAN device not resolvable\"}"
+        echo "{\"ok\":true,\"ipv6_upload\":$([ "$TCTL_RL_UPLOAD6_OK" = "1" ] && echo true || echo false),\"msg\":\"rate limit ${RATE} kbit/s applied to $IP UPLOAD ONLY — WAN device not resolvable$V6NOTE\"}"
     elif [ "$TCTL_RL_UPLOAD_FAILED" = "1" ]; then
-        echo "{\"ok\":true,\"msg\":\"rate limit ${RATE} kbit/s applied to $IP DOWNLOAD ONLY — no LAN ingress device\"}"
+        echo "{\"ok\":true,\"ipv6_upload\":false,\"msg\":\"rate limit ${RATE} kbit/s applied to $IP DOWNLOAD ONLY — no LAN ingress device [IPv4 only]\"}"
     else
-        echo "{\"ok\":true,\"msg\":\"rate limit ${RATE} kbit/s for $IP (both directions, $MODE)\"}"
+        echo "{\"ok\":true,\"ipv6_upload\":$([ "$TCTL_RL_UPLOAD6_OK" = "1" ] && echo true || echo false),\"msg\":\"rate limit ${RATE} kbit/s for $IP (both directions, $MODE)$V6NOTE\"}"
     fi
 fi

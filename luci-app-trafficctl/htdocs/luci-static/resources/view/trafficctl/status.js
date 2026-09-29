@@ -3145,7 +3145,13 @@ return view.extend({
 			inetBtn.disabled = true;
 			var action = inetBtn._action;
 			var fn = action === 'block' ? callBlock : callUnblock;
-			fn(ip, '').then(function() {
+			fn(ip, '').then(function(res) {
+				// A block without a known MAC covers IPv4 only, and the backend
+				// says so in msg. Swallowing it here would put the UI back to
+				// reporting a block that does not block (issue #67).
+				if (res && res.ipv6 === false) {
+					setStatus(statusDiv, 'error', (res && res.msg) || '?');
+				}
 				runQuery();
 			}).catch(function(e) {
 				setStatus(statusDiv, 'error', e.message);

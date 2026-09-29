@@ -116,7 +116,9 @@ In practice, both achieve the same result (excess packets are dropped), but the 
 
 ### General
 
-1. **IPv4 only** -- The current implementation only handles IPv4 addresses. IPv6 connections are not tracked, blocked, or shaped.
+1. **IPv6 is covered only where a rule can be keyed on a MAC** -- devices are identified by their IPv4 address, and most enforcement matches on that address. Covered for both families: the global internet cut (interface-matched), the WiFi block (MAC-matched), the per-device internet block and the **upload** direction of rate limiting (both gain a second `meta nfproto ipv6 ether saddr <mac>` rule on fw4). **Not covered**: download rate limiting, tc/HTB shaping, port-forward pause/limit, and all byte accounting -- speed graphs, totals and the Prometheus counters understate a dual-stack device's usage. Matching `ip6 saddr` instead is not the fix: SLAAC privacy extensions rotate a client's addresses, so such a rule stops matching without warning. A client with no DHCP lease and no neighbour entry -- anything behind a downstream router -- has no MAC this router can see; its IPv4 rules still apply and the reply says *"IPv4 only"* rather than reporting unqualified success. A downstream router is excluded deliberately, because its MAC is the source of every packet it forwards. See [API.md](API.md#address-family-coverage-ipv6).
+
+   On **fw3 / iptables (21.02)** nothing above applies: that path stays IPv4-only. A partial `ip6tables` implementation would be worse than a stated gap.
 
 2. **Multiple LAN subnets** -- Device discovery is multi-bridge / multi-VLAN aware: all interfaces in non-WAN firewall zones are scanned (VPN/tunnel zones such as WireGuard/AmneziaWG are excluded because they are masqueraded). The one remaining caveat is the **shaping** class ID encoding (`third_octet * 256 + fourth_octet`): two devices on different subnets that share the same last two octets (e.g. `192.168.0.5` and `10.0.0.5`) map to the same HTB class. Monitoring, blocking and rate-limiting are unaffected; only simultaneous shaping of such a colliding pair is.
 

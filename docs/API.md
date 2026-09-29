@@ -17,6 +17,65 @@ All backend functionality is exposed through shell scripts in `/usr/local/bin/tr
 
 ---
 
+## Address family coverage (IPv6)
+
+Every device here is identified by its IPv4 address, and most enforcement
+matches on that address. **IPv6 coverage is partial, and this section is the
+complete statement of it** (issue #67).
+
+| Control | IPv4 | IPv6 | Match |
+|---|:---:|:---:|---|
+| `cut` (all devices) | ✅ | ✅ | `fib daddr . iif oifname` / `oifname` — no address at all |
+| `macfilter_add` (WiFi) | ✅ | ✅ | MAC, at association |
+| `block` / `unblock` | ✅ | ✅ | `ip saddr` **+** `meta nfproto ipv6 ether saddr <mac>` |
+| `ratelimit` — upload | ✅ | ✅ | `ip saddr` **+** `meta protocol ip6 ether saddr <mac>` |
+| `ratelimit` — download | ✅ | ❌ | `ip daddr` |
+| `shape_add` (tc/HTB) | ✅ | ❌ | `u32 match ip src`/`dst`; the `mirred` redirect into the IFB is itself `protocol ip` |
+| `portfw` pause/limit | ✅ | ❌ | `ip daddr` |
+| `bytes`, `totals`, `summary`, metrics | ✅ | ❌ | conntrack rows parsed as IPv4 |
+
+**Why MAC and not `ip6 saddr`.** A client's IPv6 addresses are not stable:
+SLAAC with privacy extensions gives it several at once and rotates them on a
+timer. A rule written against one stops matching when it rotates, silently —
+the same bypass as having no rule, reached more slowly. A MAC does not rotate.
+
+**Where a MAC is not usable.**
+
+- **Download.** On the LAN egress hook the outgoing L2 header does not exist
+  yet — the destination MAC a packet carries there is the previous hop's — so
+  `ether daddr` is not the client. Doing this correctly needs a named nft set
+  per device fed from `ip -6 neigh`/DHCPv6 and refreshed as addresses rotate.
+  That is a data-model change, and a stale set is a silent bypass, so it is
+  deliberately **not** attempted here.
+- **A client with no DHCP lease and no neighbour entry** (`extra_subnets`, a
+  static route, anything behind a downstream router) has no MAC visible to this
+  router. `tctl_lookup_mac` **fails** rather than guessing; the IPv4 rules are
+  applied unchanged and the reply carries `"ipv6":false` plus an explicit
+  *"IPv4 only: no MAC known…"* in `msg`. Installing nothing and reporting
+  success is the failure this issue was about.
+- **A downstream router** is excluded even when its MAC *is* known
+  (`tctl_ip_is_nexthop`): its MAC is the source of every packet it forwards, so
+  a MAC-keyed rule would hit every client behind it. Reported the same way,
+  naming the reason.
+- **fw3 / iptables (21.02)** is IPv4-only throughout; no `ip6tables` path.
+
+**The IPv6 scope expression differs by family.** The block lives in `inet fw4
+forward` and uses `meta nfproto ipv6`. The limiter's chains are in the **netdev**
+family, where nft rejects that outright — *"meta nfproto is only useful in the
+inet family"* — so those rules use `meta protocol ip6`. Same intent; using the
+wrong one does not under-match quietly, the rule fails to load. Scoping at all
+is required: an unscoped `ether saddr` rule would match a dual-stack client's
+IPv4 as well and police it twice, halving the ceiling it was given.
+
+**Comment suffixes.** The v6 rules carry no address, so their comment is the
+only handle on them: `tctl_block_<slug>_mac` for a block and
+`rl_ratelimit_<slug>_ul6` for an upload limit. Removal matches comments **in
+full, closing quote included** — `_ul` is a prefix of `_ul6` and `<slug>` of a
+longer slug, so a substring match would delete another device's rules (this
+already happened once: unblocking `192.168.1.1` removed `192.168.1.10`'s rule).
+
+---
+
 ## rpcd Methods
 
 The frontend calls these via `rpc.declare()`:
@@ -442,12 +501,26 @@ Block/unblock a device's internet access.
 
 **Output:**
 ```json
-{"ok": true, "msg": "blocked 192.168.0.100 (label: Kids-iPad)"}
+{"ok":true,"ipv6":true,"msg":"internet blocked for 192.168.0.100"}
+{"ok":true,"ipv6":false,"msg":"internet blocked for 10.0.5.20 — IPv4 only: no MAC known for 10.0.5.20 (no DHCP lease, no neighbour entry), so IPv6 is not covered"}
 ```
 
+`ipv6` says whether the IPv6 half of the block is live. It is `false` only when
+no MAC can be keyed on — see [Address family coverage](#address-family-coverage-ipv6);
+`msg` names the reason, and LuCI and the Telegram bot both surface it.
+
 **Side effects (block):**
-- Inserts drop rule in `inet fw4 forward` (nft) or `FORWARD` chain (iptables).
-- Kills existing conntrack entries for the device.
+- Inserts a drop rule matching `ip saddr` in `inet fw4 forward` (nft) or the
+  `FORWARD` chain (iptables).
+- Inserts a second drop rule matching `meta nfproto ipv6 ether saddr <mac>`
+  (nft only), when the device has a resolvable MAC and is not a routed next
+  hop. `insert`, not `add`: fw4's forward chain accepts established and
+  offloaded flows near the top, and a rule below that never fires.
+- Kills existing conntrack entries for the device — IPv4 by address, and IPv6
+  for every address the neighbour table currently maps to that MAC
+  (`conntrack -D -f ipv6`). Without the second pass an established v6 flow
+  survives the block, and under flow offload it is never re-evaluated against
+  the new rule at all.
 
 ---
 
@@ -516,8 +589,10 @@ table inet tctl_cut {
   accepted. A prerouting drop without that escape hatch would be a total LAN
   lockout, which is also why the install is atomic (see below).
 - **Interface matching, not addresses.** IPv4 *and* IPv6 are cut by the same
-  rules — the per-device block matches `ip saddr` and is v4-only, which for a
-  global cut would let a device walk out over a SLAAC address. LAN↔LAN, VLAN
+  rules — an address-keyed cut would let a device walk out over a SLAAC
+  address. (The per-device block reaches the same end differently: a second
+  rule keyed on the client's MAC. Neither can be keyed on a v6 address,
+  because those rotate.) LAN↔LAN, VLAN
   ↔VLAN and downstream routed subnets all resolve to a LAN device and are
   spared; same-subnet traffic is bridged and reaches neither hook. At
   prerouting there is no `oifname` yet, so the same question is put to the FIB:

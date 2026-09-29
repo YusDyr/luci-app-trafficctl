@@ -127,9 +127,13 @@ BLOCK_BYTES=0
 if tctl_is_blocked "$IP"; then
     BLOCKED=true
     if [ "$TCTL_FW" = "nft" ]; then
-        block_line=$(nft list chain inet fw4 forward 2>/dev/null | grep "ip saddr $IP.*drop")
-        BLOCK_PACKETS=$(echo "$block_line" | grep -oE 'packets [0-9]+' | awk '{print $2}')
-        BLOCK_BYTES=$(echo "$block_line" | grep -oE 'bytes [0-9]+' | awk '{print $2}')
+        # A block is two rules — the v4 one keyed on the address and the v6 one
+        # keyed on the MAC (see tctl_block_add) — so the counters are summed
+        # across both. The v6 rule carries no address, only its "_mac" comment.
+        block_line=$(nft list chain inet fw4 forward 2>/dev/null \
+            | grep -e "ip saddr $IP.*drop" -e "comment \"$(tctl_block_comment "$IP")_mac\"")
+        BLOCK_PACKETS=$(echo "$block_line" | grep -oE 'packets [0-9]+' | awk '{ t += $2 } END { printf "%.0f", t }')
+        BLOCK_BYTES=$(echo "$block_line" | grep -oE 'bytes [0-9]+' | awk '{ t += $2 } END { printf "%.0f", t }')
     else
         block_line=$(iptables -L FORWARD -nvx 2>/dev/null | grep "DROP" | grep "$IP")
         BLOCK_PACKETS=$(echo "$block_line" | awk '{print $1}')

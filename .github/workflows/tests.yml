@@ -51,6 +51,8 @@ jobs:
         run: bash tests/test_rpcd.sh
       - name: Block/unblock tests
         run: bash tests/test_block.sh
+      - name: IPv6 enforcement tests
+        run: bash tests/test_ipv6.sh
       - name: WiFi MAC filter tests
         run: bash tests/test_macfilter.sh
       - name: Metrics CGI endpoint tests
