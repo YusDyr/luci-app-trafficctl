@@ -109,6 +109,7 @@ Returns a summary of all active LAN devices with traffic control status and conn
     "blocked": false,
     "block_bytes": 0,
     "wifi_blocked": false,
+    "wifi_block_pending": false,
     "rate_limit_kbit": 0,
     "shape_kbit": 10000
   }
@@ -130,6 +131,7 @@ Returns a summary of all active LAN devices with traffic control status and conn
 | `blocked` | boolean | Whether internet is blocked |
 | `block_bytes` | number | Bytes matched by the block rule (cumulative) |
 | `wifi_blocked` | boolean | Whether MAC is in WiFi deny list |
+| `wifi_block_pending` | boolean | MAC is on a WiFi deny list **and the device is associated on a radio right now**, so the running hostapd ACL does not carry the block. A device in this state is not blocked, however the deny list reads |
 | `rate_limit_kbit` | number | Active policer rate in kbit/s (0 = not limited) |
 | `shape_kbit` | number | Active shaper rate in kbit/s (0 = not shaped) |
 
@@ -159,6 +161,7 @@ Returns detailed connection information for a single device.
   "block_packets": 0,
   "block_bytes": 0,
   "wifi_blocked": false,
+  "wifi_block_pending": false,
   "total": 101,
   "protocols": {"tcp": 91, "udp": 10, "other": 0},
   "tcp_states": {"established": 22, "time_wait": 3, "syn_sent": 63, "close_wait": 0},
@@ -600,13 +603,34 @@ Block/unblock a device from WiFi (MAC filter).
 
 **Output:**
 ```json
-{"ok": true, "msg": "wifi blocked for 06:2b:92:a8:bd:8c on 2 interface(s)"}
+{"ok":true,"enforcement":"acl","msg":"MAC 06:2b:92:a8:bd:8c blocked on wifi for 192.168.1.50"}
 ```
 
+A WiFi block has two halves: the uci `maclist`, which survives a reboot, and
+hostapd's running ACL, which decides whether the device is on the air right
+now. `enforcement` reports how far the runtime half actually got, and `ok` is
+true only when the operator's intent is in force:
+
+| `enforcement` | `ok` | Meaning |
+|---------------|------|---------|
+| `acl` | `true` | The running ACL was changed, and the change was read back from hostapd. |
+| `no-radio` | `true` | ubus answered and no AP is running, so there is nothing to program; the `maclist` applies when wifi next starts. |
+| `ban` | `false` | No usable `hostapd_cli`, so hostapd's ubus `del_client` deauthenticated and banned the client instead. That ban **expires by itself** (one hour) and is not an ACL entry. |
+| `none` | `false` | Nothing could be applied or verified on the running radio. The `maclist` is written and takes effect at the next wifi restart; until then the device stays online. |
+
+`msg` always names the remedy for the `ban` and `none` cases (install
+`hostapd-utils`, or restart wifi -- which disconnects every client on the
+radio, so it is never done automatically).
+
 **Side effects:**
-- Sets `macfilter=deny` on all wifi-iface sections.
+- Sets `macfilter=deny` on all wifi-iface sections that have no policy yet; an existing `allow` (whitelist) policy is respected, and blocking there means dropping the MAC from the accept list.
 - Adds/removes MAC from `maclist`.
-- Applies at runtime via `hostapd_cli deny_acl` + `deauthenticate` (no wifi reload -- only target client affected).
+- Applies at runtime via `hostapd_cli deny_acl`/`accept_acl` + `deauthenticate` (no wifi reload -- only the target client is affected), then reads the ACL back with `deny_acl SHOW` / `accept_acl SHOW` to confirm. An exit status of 0 is not treated as proof.
+- Runs the runtime half **unconditionally**, even when uci already listed the MAC, so that a block which was previously only written to config can be repaired by repeating the action.
+- Where `hostapd_cli` is unavailable, falls back to `ubus call hostapd.<iface> del_client` with `ban_time`, confirmed via `list_bans`. hostapd's ubus object exposes no ACL method, so this is a timed ban, never a substitute for the durable `maclist` entry.
+
+**Requires:** `hostapd-utils` (declared in `LUCI_DEPENDS`). Without it only the
+degraded `ban` path is available and every block reports `ok:false`.
 
 ---
 

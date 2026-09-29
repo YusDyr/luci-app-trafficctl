@@ -461,8 +461,14 @@ opkg install curl
 
 When a device is WiFi-blocked:
 - Its MAC is added to the deny list on **all** wifi-iface sections via UCI.
-- `macfilter=deny` is set on each interface.
+- `macfilter=deny` is set on each interface that has no ACL policy yet. An interface already using `allow` (whitelist) keeps it, and blocking there means removing the MAC from the accept list.
 - At runtime, `hostapd_cli deny_acl ADD_MAC` adds the MAC to the deny ACL and `deauthenticate` disconnects only that client. No wifi reload -- other clients stay connected.
+- The ACL is then **read back** to confirm the entry landed. The UCI entry is durable but only applies at the next wifi restart, so a runtime step that did not happen is reported as a failure rather than as a block -- see `enforcement` in [docs/API.md](docs/API.md).
+
+This needs the `hostapd-utils` package (pulled in by `LUCI_DEPENDS`). If it is
+missing, trafficctl falls back to a temporary hostapd ban over ubus, says so,
+and tells you to install it -- a device on the deny list that is still
+connected is shown in the table as **not applied** rather than as blocked.
 
 ---
 
