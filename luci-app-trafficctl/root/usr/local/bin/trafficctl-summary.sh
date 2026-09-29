@@ -436,16 +436,21 @@ for ip in $ACTIVE_IPS; do
         fi
     fi
 
+    # Needs CONN_TYPE, so it is decided here rather than next to WIFI_BLK.
+    WIFI_PENDING=0
+    tctl_wifi_block_pending "$WIFI_BLK" "$CONN_TYPE" && WIFI_PENDING=1
+
     if [ "$FIRST" = "1" ]; then
         FIRST=0
     else
         printf ","
     fi
-    printf '{"ip":"%s","name":"%s","mac":"%s","conn_type":"%s","conn_last":"%s","app":"%s","conns":%d,"total":%.0f,"tcp":%.0f,"udp":%.0f,"blocked":%s,"block_bytes":%.0f,"wifi_blocked":%s,"rate_limit_kbit":%.0f,"shape_kbit":%.0f}' \
+    printf '{"ip":"%s","name":"%s","mac":"%s","conn_type":"%s","conn_last":"%s","app":"%s","conns":%d,"total":%.0f,"tcp":%.0f,"udp":%.0f,"blocked":%s,"block_bytes":%.0f,"wifi_blocked":%s,"wifi_block_pending":%s,"rate_limit_kbit":%.0f,"shape_kbit":%.0f}' \
         "$ip" "$NAME" "$MAC" "$CONN_TYPE" "$CONN_LAST" "$APP" "$CONNS" "$TOTAL" "$TCP" "$UDP" \
         "$([ "$BLOCKED" = "1" ] && echo true || echo false)" \
         "$BLOCK_BYTES" \
         "$([ "$WIFI_BLK" = "1" ] && echo true || echo false)" \
+        "$([ "$WIFI_PENDING" = "1" ] && echo true || echo false)" \
         "$RATE_LIM" "$SHAPE"
 done
 printf "]\n"

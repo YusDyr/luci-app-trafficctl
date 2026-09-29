@@ -431,6 +431,21 @@ function mkEthIcon(size) {
 	return svg;
 }
 
+// Marks a device that the WiFi MAC filter lists as blocked. `pending` is the
+// backend's wifi_block_pending: the device is on the deny list AND associated
+// on a radio right now, which is proof the running hostapd ACL never got the
+// block. Saying "blocked" there is the lie this whole change exists to remove,
+// so that case gets its own wording and colour.
+function mkWifiBlockBadge(pending) {
+	return E('span', {
+		'class': pending ? 'tc-c-err tc-fw-bold' : 'tc-c-warn tc-fw-bold',
+		'style': 'margin-left:4px;cursor:help;white-space:nowrap',
+		'title': pending
+			? _('On the WiFi deny list but still connected — the block is NOT in effect on the running radio. Install hostapd-utils so blocks apply immediately, or restart WiFi (disconnects every client).')
+			: _('Blocked from WiFi (MAC deny list)')
+	}, pending ? '📵⚠' : '📵');
+}
+
 function renderSparkline(history, globalMax, width, height, limitKbit) {
 	if (!history || history.length < 2) return null;
 	var maxVal = globalMax || 1;
@@ -1322,6 +1337,15 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 			linkBadge = E('span', { 'class': 'tc-c-muted' }, [mkEthIcon(14), document.createTextNode(ethLabel)]);
 		}
 		cellMap.conn_type = E('div', { 'class': 'td tc-center' }, linkBadge);
+		// A WiFi block used to show in the row only as the line-through above,
+		// which lives inside the isWifi branch — so it disappeared from the row
+		// in the two cases that matter most: a block that WORKED (the device
+		// stops associating, the cell falls through to "?" or eth) and a device
+		// blocked while sitting on cable. Mark it in every branch, with a label
+		// and a tooltip rather than a text decoration nobody reads as "blocked".
+		if (r.wifi_blocked) {
+			cellMap.conn_type.appendChild(mkWifiBlockBadge(r.wifi_block_pending));
+		}
 
 		var appBadge;
 		if (r.app) {
@@ -2791,9 +2815,18 @@ return view.extend({
 							parts.push(_('Dropped') + ': <b style="color:var(--tc-err)">🚫 '+(Number(dm.packets) || 0)+' pkts / '+fmtBytes(dm.bytes||0)+'</b>');
 						}
 					}
-					var wifiPart = data.wifi_blocked
-						? ' &nbsp;|&nbsp; <b style="color:var(--tc-warn)">📵 ' + _('WiFi blocked') + '</b> ('+escHtml(data.mac||'') + ')'
-						: (data.mac ? ' &nbsp;|&nbsp; <span style="color:var(--tc-faint)">MAC: '+escHtml(data.mac)+'</span>' : '');
+					// Listed but still associated is not a block, so it must not
+					// read as one — that claim is the whole bug.
+					var wifiPart;
+					if (data.wifi_blocked && data.wifi_block_pending) {
+						wifiPart = ' &nbsp;|&nbsp; <b style="color:var(--tc-err)">📵⚠ ' + _('WiFi block NOT in effect') + '</b> — ' +
+							_('on the deny list but still connected; install hostapd-utils or restart WiFi') +
+							' ('+escHtml(data.mac||'') + ')';
+					} else if (data.wifi_blocked) {
+						wifiPart = ' &nbsp;|&nbsp; <b style="color:var(--tc-warn)">📵 ' + _('WiFi blocked') + '</b> ('+escHtml(data.mac||'') + ')';
+					} else {
+						wifiPart = data.mac ? ' &nbsp;|&nbsp; <span style="color:var(--tc-faint)">MAC: '+escHtml(data.mac)+'</span>' : '';
+					}
 					statsDiv.className = 'alert-message ' + (data.blocked ? 'error' : 'info');
 					statsDiv.innerHTML = (data.blocked
 						? '<b>⛔ ' + _('BLOCKED') + '</b> — '+(Number(data.block_packets) || 0)+' pkts, '+fmtBytes(Number(data.block_bytes) || 0)+' ' + _('dropped') + ' &nbsp;|&nbsp; '
@@ -2969,6 +3002,7 @@ return view.extend({
 			var shaped  = rows.filter(function(r){return (r.shape_kbit||0) > 0;}).length;
 			var blocked = rows.filter(function(r){return r.blocked;}).length;
 			var wifiBlk = rows.filter(function(r){return r.wifi_blocked;}).length;
+			var wifiPending = rows.filter(function(r){return r.wifi_block_pending;}).length;
 			var totalDropPkts = Object.keys(self._dropMap).reduce(function(s, ip) { return s + (self._dropMap[ip].packets||0); }, 0);
 
 			var lnk = 'cursor:pointer;text-decoration:underline;text-decoration-style:dashed';
@@ -2987,6 +3021,15 @@ return view.extend({
 			parts.push(E('span', {}, [document.createTextNode(_('Active') + ': '), E('b', {}, String(rows.length))]));
 			parts.push(E('span', {}, [document.createTextNode(_('Blocked') + ': '), mkFilterVal('blocked', 'var(--tc-err)', String(blocked))]));
 			parts.push(E('span', {}, [document.createTextNode(_('WiFi') + ': '), mkFilterVal('wifi_blocked', 'var(--tc-warn)', String(wifiBlk))]));
+			// Without this the header counts a device as blocked on the strength of
+			// the uci maclist alone — which is how a router can report "WiFi: 2"
+			// while both of those devices are browsing.
+			if (wifiPending > 0) {
+				parts.push(E('span', {
+					'style': 'color:var(--tc-err);font-weight:700;cursor:help',
+					'title': _('Devices on the WiFi deny list that are still connected — those blocks are not in effect on the running radio.')
+				}, '⚠ ' + wifiPending + ' ' + _('not applied')));
+			}
 			if (limited > 0) parts.push(E('span', {}, [document.createTextNode(_('Limited') + ': '), mkFilterVal('limited', 'var(--tc-warn)', '⚡' + limited)]));
 			if (shaped > 0) parts.push(E('span', {}, [document.createTextNode(_('Shaped') + ': '), mkFilterVal('shaped', 'var(--tc-speed)', '🌊' + shaped)]));
 			if (totalDropPkts > 0) {
@@ -3130,7 +3173,19 @@ return view.extend({
 			setStatus(statusDiv, 'loading', (action==='block' ? _('Adding to') : _('Removing from')) + ' ' + _('WiFi deny list') + ': ' + name + '…');
 			var fn = action === 'block' ? callMacfilterAdd : callMacfilterRemove;
 			fn(ip).then(function(res) {
-				setStatus(statusDiv, (res && res.ok) ? (action==='block'?'action':'ok') : 'error', (res && res.msg) || '?');
+				// res.ok is now true only when the RUNNING radio was verified to
+				// carry the change, so a config-only write must not paint green.
+				// "ban" is the partial middle state (temporary hostapd ban, no
+				// ACL) and gets the attention colour rather than a hard error.
+				var state;
+				if (res && res.ok) {
+					state = (action === 'block') ? 'action' : 'ok';
+				} else if (res && res.enforcement === 'ban') {
+					state = 'action';
+				} else {
+					state = 'error';
+				}
+				setStatus(statusDiv, state, (res && res.msg) || '?');
 				runQuery();
 			}).catch(function(e) {
 				setStatus(statusDiv, 'error', '✗ '+e.message);

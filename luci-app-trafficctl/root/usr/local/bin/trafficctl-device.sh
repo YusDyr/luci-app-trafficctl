@@ -374,8 +374,13 @@ if [ "$DO_RDNS" = "1" ]; then
     fi
 fi
 
+# Listed as blocked yet associated right now = the radio never got the block.
+WIFI_PENDING=false
+tctl_wifi_block_pending "$([ "$WIFI_BLOCKED" = "true" ] && echo 1 || echo 0)" "$CONN_TYPE" \
+    && WIFI_PENDING=true
+
 # Output final JSON
-printf '{"ip":"%s","name":"%s","mac":"%s","conn_type":"%s","conn_last":"%s","timestamp":%d,"blocked":%s,"block_packets":%d,"block_bytes":%.0f,"wifi_blocked":%s,"total":%.0f,"protocols":{"tcp":%d,"udp":%d,"other":%d},"tcp_states":{"established":%d,"time_wait":%d,"syn_sent":%d,"close_wait":%d},"connections":[%s],"rate_limit_kbit":%d,"shape_kbit":%d}\n' \
+printf '{"ip":"%s","name":"%s","mac":"%s","conn_type":"%s","conn_last":"%s","timestamp":%d,"blocked":%s,"block_packets":%d,"block_bytes":%.0f,"wifi_blocked":%s,"wifi_block_pending":%s,"total":%.0f,"protocols":{"tcp":%d,"udp":%d,"other":%d},"tcp_states":{"established":%d,"time_wait":%d,"syn_sent":%d,"close_wait":%d},"connections":[%s],"rate_limit_kbit":%d,"shape_kbit":%d}\n' \
     "$IP" "$NAME" "$MAC" "$CONN_TYPE" "$CONN_LAST" "$TIMESTAMP" "$BLOCKED" "$BLOCK_PACKETS" "$BLOCK_BYTES" \
-    "$WIFI_BLOCKED" "$TOTAL" "$N_TCP" "$N_UDP" "$N_OTHER" \
+    "$WIFI_BLOCKED" "$WIFI_PENDING" "$TOTAL" "$N_TCP" "$N_UDP" "$N_OTHER" \
     "$EST" "$TW" "$SS" "$CW" "$CONNS_OUT" "$RATE_LIM" "$SHAPE_KBIT"
