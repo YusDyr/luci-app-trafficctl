@@ -429,10 +429,13 @@ tctl_get_hostapd_ifaces() {
     local out
     command -v ubus >/dev/null 2>&1 || return 1
     out=$(ubus list 2>/dev/null) || return 1
+    # An empty result is a valid answer -- "no AP is running" -- so the grep
+    # matching nothing must not be reported as a failed query. Only ubus itself
+    # failing, above, is that.
     printf '%s\n' "$out" | grep '^hostapd\.' | cut -d. -f2-
+    return 0
 }
 
-# Add MAC to hostapd deny ACL at runtime + deauth the client (no wifi reload)
 # Which ACL policy a wifi-iface uses: "allow" (whitelist — only listed MACs may
 # associate) or "deny" (blacklist — listed MACs are rejected). Anything else,
 # including unset, means no filtering is configured yet, reported as "deny"
