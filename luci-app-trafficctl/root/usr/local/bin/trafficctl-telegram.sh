@@ -97,6 +97,14 @@ tg_send() {
 
 tg_answer_cb() {
 	local cb_id="$1" text="$2"
+	# The Bot API caps a callback toast at 200 characters and rejects the whole
+	# call when it is longer — so an over-long message does not get trimmed, it
+	# vanishes. Backend results carrying remediation advice can reach that
+	# length, and a silently missing answer is exactly the failure mode this
+	# plugin is being fixed for.
+	if [ "${#text}" -gt 200 ]; then
+		text="$(printf '%.196s' "$text")..."
+	fi
 	text=$(tg_json_escape "$text")
 	tg_api "answerCallbackQuery" \
 		"$(printf '{"callback_query_id":"%s","text":"%s"}' "$cb_id" "$text")" >/dev/null

@@ -418,9 +418,18 @@ tctl_get_wifi_interfaces() {
     uci show wireless 2>/dev/null | grep '=wifi-iface' | cut -d. -f2 | cut -d= -f1
 }
 
-# Get running WiFi interface names (e.g. wlan0, wlan1)
+# Running AP interface names, one per line (e.g. phy0-ap0), taken from the
+# hostapd ubus objects.
+#
+# Returns non-zero when ubus itself could not be consulted. That is NOT the
+# same as "no AP is running", and callers must not read an empty list as
+# "nothing to enforce" unless the query actually succeeded — doing so would
+# turn a broken router into a silent "blocked".
 tctl_get_hostapd_ifaces() {
-    ubus list 2>/dev/null | grep '^hostapd\.' | cut -d. -f2
+    local out
+    command -v ubus >/dev/null 2>&1 || return 1
+    out=$(ubus list 2>/dev/null) || return 1
+    printf '%s\n' "$out" | grep '^hostapd\.' | cut -d. -f2-
 }
 
 # Add MAC to hostapd deny ACL at runtime + deauth the client (no wifi reload)
@@ -434,51 +443,187 @@ tctl_get_wifi_filter_mode() {
     [ "$mode" = "allow" ] && echo "allow" || echo "deny"
 }
 
-# Block a MAC at runtime. In deny mode that means adding it to the deny ACL; in
-# allow (whitelist) mode it means dropping it from the accept ACL. Either way
-# the client is deauthenticated so the change takes effect immediately.
+# ── Runtime WiFi enforcement ──────────────────────────────────────────────
+#
+# The uci maclist is the durable half of a WiFi block; hostapd's running ACL is
+# the half that decides whether the device is on the air *now*. The two drift
+# apart whenever the runtime call cannot be made, and for a long time that
+# drift was invisible: the calls below were fire-and-forget, their exit status
+# discarded, so a router without hostapd-utils reported every block as done
+# while the device kept browsing.
+#
+# So every entry point here reports how far enforcement actually got, as one
+# of these words, and proves it by reading the state back rather than trusting
+# a return code:
+#
+#   acl      - the running ACL was changed and the change was read back
+#   ban      - no usable hostapd_cli; hostapd's ubus deauthed and banned the
+#              client, which expires on its own (see TCTL_WIFI_BAN_MS)
+#   none     - nothing could be applied or verified on the running radio
+#   no-radio - ubus answered and no AP is running, so there is nothing to
+#              enforce; the uci maclist applies when wifi next starts
+#
+# Only "acl" and "no-radio" mean the operator's intent is in force, and the
+# functions return 0 for exactly those two.
+
+# How long a ubus ban lasts, in milliseconds. Used only where hostapd_cli is
+# unavailable: hostapd's ubus object has no ACL method (del_client, list_bans,
+# get_clients, reload), so a timed ban is the strongest immediate measure it
+# can offer. One hour is long enough to be worth doing and short enough that
+# callers must keep calling it temporary rather than done.
+TCTL_WIFI_BAN_MS=3600000
+
+# hostapd_cli exists AND this AP's control socket answers. Both halves matter:
+# the package can be absent (the router this bug was found on), or present
+# while hostapd is not listening, and only a PONG shows the ACL commands will
+# reach anything.
+tctl_hostapd_cli_alive() {
+    command -v hostapd_cli >/dev/null 2>&1 || return 1
+    hostapd_cli -i "$1" ping 2>/dev/null | grep -q PONG
+}
+
+# Does the running ACL currently keep this MAC off the air? Read back from
+# hostapd instead of inferred from our own call: hostapd_cli exits 0 for
+# "command delivered", and an ACL that stays empty afterwards is exactly the
+# failure being guarded against. hostapd also reloads its maclist file at times
+# of its own choosing, so the entry present may not be the one we added — which
+# is fine, and another reason to ask rather than assume.
+tctl_hostapd_acl_blocks() {
+    local iface="$1" mac="$2" mode="$3" acl
+    if [ "$mode" = "allow" ]; then
+        acl=$(hostapd_cli -i "$iface" accept_acl SHOW 2>/dev/null)
+        ! printf '%s\n' "$acl" | grep -qi "$mac"
+    else
+        acl=$(hostapd_cli -i "$iface" deny_acl SHOW 2>/dev/null)
+        printf '%s\n' "$acl" | grep -qi "$mac"
+    fi
+}
+
+tctl_hostapd_ubus_banned() {
+    local iface="$1" mac="$2"
+    command -v ubus >/dev/null 2>&1 || return 1
+    ubus call "hostapd.$iface" list_bans 2>/dev/null | grep -qi "$mac"
+}
+
+# Fallback when hostapd_cli is unusable. del_client deauthenticates and refuses
+# the client for ban_time, which is not an ACL entry — the durable half stays
+# the uci maclist. The call's own exit status is deliberately ignored: it can
+# fail for a client that is not currently associated while the ban still lands,
+# and list_bans is the only answer worth having.
+tctl_hostapd_ubus_ban() {
+    local iface="$1" mac="$2"
+    command -v ubus >/dev/null 2>&1 || return 1
+    ubus call "hostapd.$iface" del_client \
+        "{\"addr\":\"$mac\",\"reason\":1,\"deauth\":true,\"ban_time\":$TCTL_WIFI_BAN_MS}" \
+        >/dev/null 2>&1
+    tctl_hostapd_ubus_banned "$iface" "$mac"
+}
+
+# acl > ban > none, so a loop over several APs can keep the worst result.
+tctl_enforce_rank() {
+    case "$1" in
+        acl) echo 3 ;;
+        ban) echo 2 ;;
+        *)   echo 1 ;;
+    esac
+}
+
+tctl_hostapd_block_iface() {
+    local iface="$1" mac="$2" mode="$3"
+    if tctl_hostapd_cli_alive "$iface"; then
+        if [ "$mode" = "allow" ]; then
+            hostapd_cli -i "$iface" accept_acl DEL_MAC "$mac" >/dev/null 2>&1
+        else
+            hostapd_cli -i "$iface" deny_acl ADD_MAC "$mac" >/dev/null 2>&1
+        fi
+        hostapd_cli -i "$iface" deauthenticate "$mac" >/dev/null 2>&1
+        if tctl_hostapd_acl_blocks "$iface" "$mac" "$mode"; then
+            echo acl
+            return
+        fi
+    fi
+    if tctl_hostapd_ubus_ban "$iface" "$mac"; then
+        echo ban
+        return
+    fi
+    echo none
+}
+
+tctl_hostapd_unblock_iface() {
+    local iface="$1" mac="$2" mode="$3"
+    if tctl_hostapd_cli_alive "$iface"; then
+        if [ "$mode" = "allow" ]; then
+            hostapd_cli -i "$iface" accept_acl ADD_MAC "$mac" >/dev/null 2>&1
+        else
+            hostapd_cli -i "$iface" deny_acl DEL_MAC "$mac" >/dev/null 2>&1
+        fi
+        if ! tctl_hostapd_acl_blocks "$iface" "$mac" "$mode"; then
+            # The ACL permits the MAC again, but a ban left over from an
+            # earlier hostapd_cli-less block would still keep it off the air,
+            # and there is no ubus method to lift one.
+            if tctl_hostapd_ubus_banned "$iface" "$mac"; then
+                echo ban
+            else
+                echo acl
+            fi
+            return
+        fi
+    fi
+    if tctl_hostapd_ubus_banned "$iface" "$mac"; then
+        echo ban
+        return
+    fi
+    echo none
+}
+
+# Applies $2 ("allow"/"deny" ACL policy) to every running AP and echoes the
+# worst per-AP outcome. Always safe to re-run: it enforces from the runtime
+# state, so calling it on a MAC that uci already lists is how a block that was
+# only ever written to config gets applied for real.
+tctl_hostapd_apply_mac() {
+    local op="$1" mac="$2" mode="$3"
+    local ifaces iface state rank worst=3
+    ifaces=$(tctl_get_hostapd_ifaces) || { echo none; return 1; }
+    if [ -z "$ifaces" ]; then
+        echo no-radio
+        return 0
+    fi
+    for iface in $ifaces; do
+        case "$op" in
+            block) state=$(tctl_hostapd_block_iface "$iface" "$mac" "$mode") ;;
+            *)     state=$(tctl_hostapd_unblock_iface "$iface" "$mac" "$mode") ;;
+        esac
+        rank=$(tctl_enforce_rank "$state")
+        [ "$rank" -lt "$worst" ] && worst="$rank"
+    done
+    case "$worst" in
+        3) echo acl; return 0 ;;
+        2) echo ban ;;
+        *) echo none ;;
+    esac
+    return 1
+}
+
 tctl_hostapd_block_mac() {
-    local mac="$1" mode="$2"
-    local iface
-    for iface in $(tctl_get_hostapd_ifaces); do
-        if [ "$mode" = "allow" ]; then
-            hostapd_cli -i "$iface" accept_acl DEL_MAC "$mac" 2>/dev/null
-        else
-            hostapd_cli -i "$iface" deny_acl ADD_MAC "$mac" 2>/dev/null
-        fi
-        hostapd_cli -i "$iface" deauthenticate "$mac" 2>/dev/null
-    done
+    tctl_hostapd_apply_mac block "$1" "$2"
 }
 
-# Unblock a MAC at runtime — the inverse of tctl_hostapd_block_mac.
 tctl_hostapd_unblock_mac() {
-    local mac="$1" mode="$2"
-    local iface
-    for iface in $(tctl_get_hostapd_ifaces); do
-        if [ "$mode" = "allow" ]; then
-            hostapd_cli -i "$iface" accept_acl ADD_MAC "$mac" 2>/dev/null
-        else
-            hostapd_cli -i "$iface" deny_acl DEL_MAC "$mac" 2>/dev/null
-        fi
-    done
+    tctl_hostapd_apply_mac unblock "$1" "$2"
 }
 
-tctl_hostapd_deny_mac() {
-    local mac="$1"
-    local iface
-    for iface in $(tctl_get_hostapd_ifaces); do
-        hostapd_cli -i "$iface" deny_acl ADD_MAC "$mac" 2>/dev/null
-        hostapd_cli -i "$iface" deauthenticate "$mac" 2>/dev/null
-    done
-}
-
-# Remove MAC from hostapd deny ACL at runtime (client can reassociate immediately)
-tctl_hostapd_allow_mac() {
-    local mac="$1"
-    local iface
-    for iface in $(tctl_get_hostapd_ifaces); do
-        hostapd_cli -i "$iface" deny_acl DEL_MAC "$mac" 2>/dev/null
-    done
+# A device listed as WiFi-blocked while it is associated on a radio right now
+# is proof the running ACL does not carry the block — the state a silent
+# enforcement failure leaves a router in. Keyed off conn_type rather than the
+# station dump so it still holds where iw is missing and the connection type
+# came from the bridge port instead.
+tctl_wifi_block_pending() {
+    local blocked="$1" conn_type="$2"
+    [ "$blocked" = "1" ] || return 1
+    case "$conn_type" in
+        wifi|2.4G|5G|6G) return 0 ;;
+    esac
+    return 1
 }
 
 # ── Persistence ───────────────────────────────────────────────────────────

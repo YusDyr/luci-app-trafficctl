@@ -1,7 +1,9 @@
 #!/bin/sh
 # shellcheck shell=dash
 # Remove device WiFi MAC filter (unblock from wifi deny list).
-# Uses hostapd beacon update — no wifi reload, other clients stay connected.
+# Updates the uci maclist and the running hostapd ACL, so the client can
+# reassociate without a wifi reload and other clients stay connected. Reports
+# how far the runtime half got — see the enforcement words in trafficctl-fw.sh.
 # Usage: trafficctl-macfilter-remove.sh <ip>
 
 . /usr/local/bin/trafficctl-fw.sh
@@ -68,11 +70,32 @@ for iface in $IFACES; do
     fi
 done
 
-if [ "$CHANGED" = "1" ]; then
-    uci commit wireless
-    # Update the runtime ACL — the client can reassociate immediately.
-    tctl_hostapd_unblock_mac "$MAC" "$MODE"
-fi
+[ "$CHANGED" = "1" ] && uci commit wireless
 
-tctl_log "wifi_unblock" "$IP" "MAC=$MAC" "${TCTL_VIA:-cli}" "${TCTL_SRC:-local}"
-echo "{\"ok\":true,\"msg\":\"MAC $MAC removed from wifi filter for $IP\"}"
+# Unconditional for the same reason as the add path, and the stakes are higher
+# here: a MAC that uci no longer lists but the radio still denies leaves a real
+# person off the network while the UI says they are not blocked.
+ENFORCE=$(tctl_hostapd_unblock_mac "$MAC" "$MODE")
+BAN_MIN=$(( TCTL_WIFI_BAN_MS / 60000 ))
+
+case "$ENFORCE" in
+    acl)
+        OK=true
+        MSG="MAC $MAC removed from wifi filter for $IP"
+        ;;
+    no-radio)
+        OK=true
+        MSG="MAC $MAC removed from the wifi filter for $IP; no radio is running"
+        ;;
+    ban)
+        OK=false
+        MSG="MAC $MAC removed from the wifi filter, but hostapd still bans it for up to $BAN_MIN min. Restart wifi (drops all clients) to clear it now"
+        ;;
+    *)
+        OK=false
+        MSG="MAC $MAC removed from the wifi filter, but the radio ACL could not be read back: it may still be blocked. Install hostapd-utils, or restart wifi"
+        ;;
+esac
+
+tctl_log "wifi_unblock" "$IP" "MAC=$MAC enforce=$ENFORCE" "${TCTL_VIA:-cli}" "${TCTL_SRC:-local}"
+printf '{"ok":%s,"enforcement":"%s","msg":"%s"}\n' "$OK" "$ENFORCE" "$MSG"

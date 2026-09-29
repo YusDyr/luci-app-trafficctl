@@ -1,7 +1,9 @@
 #!/bin/sh
 # shellcheck shell=dash
 # Block device WiFi access by adding its MAC to deny maclist on all interfaces.
-# Uses hostapd to deauth only the target client — no wifi reload needed.
+# The uci maclist is the durable half; hostapd is then programmed at runtime so
+# only the target client is kicked, with no wifi reload. Reports how far that
+# runtime half actually got — see the enforcement words in trafficctl-fw.sh.
 # Usage: trafficctl-macfilter-add.sh <ip>
 
 . /usr/local/bin/trafficctl-fw.sh
@@ -76,11 +78,41 @@ for iface in $IFACES; do
     fi
 done
 
-if [ "$CHANGED" = "1" ]; then
-    uci commit wireless
-    # Apply at runtime and deauth just this client — no wifi reload.
-    tctl_hostapd_block_mac "$MAC" "$MODE"
-fi
+[ "$CHANGED" = "1" ] && uci commit wireless
 
-tctl_log "wifi_block" "$IP" "MAC=$MAC" "${TCTL_VIA:-cli}" "${TCTL_SRC:-local}"
-echo "{\"ok\":true,\"msg\":\"MAC $MAC blocked on wifi for $IP\"}"
+# Applied unconditionally, not just when uci needed editing. Config and runtime
+# are two pieces of state: a router whose maclist already names the MAC but
+# whose radio never got the ACL entry used to make this a no-op that still
+# reported success, so pressing Block again — the obvious reaction to "it did
+# not work" — could never recover it.
+ENFORCE=$(tctl_hostapd_block_mac "$MAC" "$MODE")
+BAN_MIN=$(( TCTL_WIFI_BAN_MS / 60000 ))
+
+# The uci entry is kept even when the radio could not be programmed. It is the
+# only durable record of the operator's intent and it does take effect at the
+# next wifi restart, so discarding it would throw away the half that worked and
+# leave the device unblocked forever. What made keeping it dangerous was the
+# claim of success, not the entry — so the claim is what goes. A wifi reload
+# would apply it now, but it disconnects every client on the radio, which is
+# not something a per-device click should do behind the operator's back.
+case "$ENFORCE" in
+    acl)
+        OK=true
+        MSG="MAC $MAC blocked on wifi for $IP"
+        ;;
+    no-radio)
+        OK=true
+        MSG="MAC $MAC added to the wifi deny list for $IP; no radio is running, it applies when wifi starts"
+        ;;
+    ban)
+        OK=false
+        MSG="MAC $MAC is NOT permanently blocked: hostapd_cli is missing, so the block is temporary ($BAN_MIN min). Install hostapd-utils, or restart wifi (drops all clients)"
+        ;;
+    *)
+        OK=false
+        MSG="MAC $MAC saved to the wifi deny list but NOT applied to the radio, so the device stays online. Install hostapd-utils, or restart wifi (drops all clients)"
+        ;;
+esac
+
+tctl_log "wifi_block" "$IP" "MAC=$MAC enforce=$ENFORCE" "${TCTL_VIA:-cli}" "${TCTL_SRC:-local}"
+printf '{"ok":%s,"enforcement":"%s","msg":"%s"}\n' "$OK" "$ENFORCE" "$MSG"
