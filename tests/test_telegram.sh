@@ -174,6 +174,32 @@ ESCAPED_NEWLINE=$(PATH="$MOCKBIN:$PATH" sh -c ". '$NEUTERED'; tg_json_escape \"l
 line2\"")
 assert_contains "json escape: real newline becomes \\n" 'line1\nline2' "$ESCAPED_NEWLINE"
 
+# ── tg_answer_cb length cap ────────────────────────────────────
+# The Bot API caps a callback toast at 200 characters and REJECTS the call when
+# it is longer, so an over-long message does not arrive truncated -- it does not
+# arrive at all. Backend results that carry remediation advice (the WiFi
+# enforcement ones run to ~170 characters) sit close enough to that limit that a
+# silently missing toast is a live risk, and "the operator is told nothing" is
+# the exact failure this plugin is being fixed for.
+
+LONG_TOAST=$(printf 'x%.0s' $(seq 1 300))
+: > "$CURL_LOG"
+PATH="$MOCKBIN:$PATH" sh -c ". '$NEUTERED'; tg_answer_cb 'cb123' '$LONG_TOAST'" >/dev/null 2>&1
+TOAST_BODY=$(cat "$CURL_LOG")
+assert_contains "answer_cb: over-long toast is trimmed with an ellipsis" \
+    "..." "$TOAST_BODY"
+assert_not_contains "answer_cb: nothing at or over the 200-char API limit is sent" \
+    "$(printf 'x%.0s' $(seq 1 200))" "$TOAST_BODY"
+
+# A message that already fits must go through untouched -- the cap must not
+# start mangling the ordinary case.
+SHORT_TOAST="MAC aa:bb:cc:dd:ee:ff blocked on wifi for 192.168.1.50"
+: > "$CURL_LOG"
+PATH="$MOCKBIN:$PATH" sh -c ". '$NEUTERED'; tg_answer_cb 'cb123' '$SHORT_TOAST'" >/dev/null 2>&1
+TOAST_BODY=$(cat "$CURL_LOG")
+assert_contains "answer_cb: a toast within the limit is sent whole" "$SHORT_TOAST" "$TOAST_BODY"
+assert_not_contains "answer_cb: a toast within the limit gains no ellipsis" "..." "$TOAST_BODY"
+
 # ── Known devices JSON manipulation (real add_known_mac / is_known_mac) ────
 
 KNOWN_TEST="$TMPDIR/known.json"
