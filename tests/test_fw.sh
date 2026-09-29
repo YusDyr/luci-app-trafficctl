@@ -124,6 +124,47 @@ assert_eq "wifi filter mode: deny" "deny" "$(_filter_mode deny)"
 assert_eq "wifi filter mode: unset defaults to deny" "deny" "$(_filter_mode '')"
 assert_eq "wifi filter mode: unknown value defaults to deny" "deny" "$(_filter_mode bogus)"
 
+
+# --- tctl_wifi_block_pending ---
+# "Listed as WiFi-blocked, yet associated on a radio right now" is the only
+# evidence available at poll time that the running hostapd ACL never got the
+# block. It is what the dashboard needs in order to stop reporting a device as
+# blocked while it is browsing. Keyed off conn_type rather than the station
+# dump so it still works where iw is missing and the connection type came from
+# the bridge port instead.
+
+_pending() { tctl_wifi_block_pending "$1" "$2" && echo yes || echo no; }
+
+assert_eq "pending: blocked + on 5G = not enforced" "yes" "$(_pending 1 5G)"
+assert_eq "pending: blocked + on 2.4G = not enforced" "yes" "$(_pending 1 2.4G)"
+assert_eq "pending: blocked + on 6G = not enforced" "yes" "$(_pending 1 6G)"
+assert_eq "pending: blocked + generic wifi (bridge-port path) = not enforced" "yes" "$(_pending 1 wifi)"
+# A block that actually works makes the device stop associating, so these are
+# the states a working block leaves behind — never "pending".
+assert_eq "pending: blocked + unreachable is not proof of anything" "no" "$(_pending 1 '?')"
+assert_eq "pending: blocked + on cable says nothing about the radio" "no" "$(_pending 1 ethernet)"
+assert_eq "pending: blocked + behind a downstream router" "no" "$(_pending 1 routed)"
+# Not blocked at all: never pending, whatever the device is connected over.
+assert_eq "pending: not blocked + on 5G" "no" "$(_pending 0 5G)"
+assert_eq "pending: not blocked + unreachable" "no" "$(_pending 0 '?')"
+assert_eq "pending: empty blocked flag" "no" "$(_pending '' 5G)"
+
+# --- tctl_enforce_rank ---
+# Ordering matters: a block applied on one radio and missed on another must
+# report the miss, so the worst outcome has to sort lowest.
+assert_eq "enforce rank: acl is best" "3" "$(tctl_enforce_rank acl)"
+assert_eq "enforce rank: ban is partial" "2" "$(tctl_enforce_rank ban)"
+assert_eq "enforce rank: none is worst" "1" "$(tctl_enforce_rank none)"
+assert_eq "enforce rank: unknown words sort as worst" "1" "$(tctl_enforce_rank wat)"
+
+# --- tctl_get_hostapd_ifaces ---
+# An empty list must be distinguishable from a failed query: reading "ubus is
+# not usable" as "no AP is running" would let a router report a block as
+# applied with nothing enforcing it. The `command` stub at the top of this file
+# makes `command -v ubus` fail, i.e. ubus is unavailable here.
+assert_eq "hostapd ifaces: unusable ubus returns non-zero, not an empty success" \
+    "1" "$(tctl_get_hostapd_ifaces >/dev/null 2>&1 && echo 0 || echo 1)"
+
 # --- Results ---
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
