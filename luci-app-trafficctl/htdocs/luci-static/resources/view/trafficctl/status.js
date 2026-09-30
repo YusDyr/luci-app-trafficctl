@@ -3837,7 +3837,7 @@ return view.extend({
 						var limitBtns = [];
 						RATE_PRESETS.forEach(function(p) {
 							if (p.v === '0' || p.v === 'custom') return;
-							limitBtns.push(E('span', {'class':'tg-kbd-btn'},  + p.l.replace(' Mbit/s', 'M').replace(/\s/g, '')));
+							limitBtns.push(E('span', {'class':'tg-kbd-btn'}, p.l.replace(' Mbit/s', 'M').replace(/\s/g, '')));
 						});
 						for (var li = 0; li < limitBtns.length; li += 3) {
 							kbdBubble.appendChild(E('div', {'class':'tg-kbd-row'}, limitBtns.slice(li, li + 3)));
@@ -4105,6 +4105,10 @@ return view.extend({
 				var modeLabels = {
 					'none':              ['⊘', _('No offload'),              'var(--tc-muted)'],
 					'software':          ['◑', _('Software offload'),        'var(--tc-speed)'],
+					// tctl_get_offload_mode splits software offload on the flowtable
+					// counter flag, so this value reaches the badge too. Without an
+					// entry the badge fell through to '?' and the raw mode string.
+					'software-counter':  ['◑', _('Software offload'),        'var(--tc-speed)'],
 					'hardware-counter':  ['●', _('Hardware offload'),        'var(--tc-warn)'],
 					'hardware':          ['●', _('Hardware offload'),        'var(--tc-warn)']
 				};
