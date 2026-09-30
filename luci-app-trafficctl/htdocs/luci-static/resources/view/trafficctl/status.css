@@ -252,6 +252,21 @@
     overflow: hidden;
     border: 1px solid var(--tc-border);
 }
+/* Unit picker inside .tc-custom-unit-btns. The download row's pair still
+   carries these as inline styles; new controls use the class so the active
+   state is not another inline override to hunt down. */
+.tc-unit-btn {
+    padding: 4px 8px;
+    font-size: 11px;
+    cursor: pointer;
+    background: var(--tc-bg);
+    color: currentColor;
+    user-select: none;
+}
+.tc-unit-btn--on {
+    background: var(--tc-speed);
+    color: var(--tc-on-accent);
+}
 
 /* ── Subnet target: the each/shared explanation and its warning ──── */
 .tc-scope-row {

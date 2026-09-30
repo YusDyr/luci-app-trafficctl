@@ -393,5 +393,77 @@ assert_contains "shape_add passes it to the script" \
 assert_eq "both handlers normalise a zero upload rate away" "2" \
     "$(grep -c '\[ "\$rate_up" = "0" \] && rate_up=""' "$RPCD")"
 
+# ════════════════════════════════════════════════════════════════════════════
+# 6. The frontend
+# ════════════════════════════════════════════════════════════════════════════
+#
+# getRateKbitUp is the one place in the UI that decides between "symmetric" and
+# "a second ceiling", and the distinction it has to preserve is empty-vs-zero:
+# an empty string means symmetric, while a 0 would reach the backend as a
+# ceiling and floor to one kbyte/second — a total upload block. It is sliced out
+# of status.js rather than restated, so this cannot drift into testing a copy.
+
+JS="$ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js"
+
+if command -v node >/dev/null 2>&1; then
+    sed -n '/^\t\tfunction getRateKbitUp()/,/^\t\t}/p' "$JS"  > "$TMP/ui.js"
+    sed -n '/^\t\tfunction rateLabel(/,/^\t\t}/p'      "$JS" >> "$TMP/ui.js"
+    [ -s "$TMP/ui.js" ] || { echo "FAIL: could not slice the UI helpers out of status.js"; FAIL=$((FAIL + 1)); }
+
+    cat > "$TMP/ui_run.js" <<'NODE'
+function _(s) { return s; }
+String.prototype.format = function () {
+    var a = arguments, i = 0;
+    return this.replace(/%s/g, function () { return a[i++]; });
+};
+// Only what the slices touch.
+function fmtRate(kbit) {
+    if (!kbit || kbit <= 0) return '—';
+    var mbit = kbit / 1000;
+    if (mbit >= 1) return (mbit % 1 === 0 ? mbit.toFixed(0) : mbit.toFixed(1)) + ' Mbit/s';
+    return kbit + ' kbit/s';
+}
+var _hidden = true, _upUnit = 'mbit';
+var upInput = { value: '' };
+var upRow = { classList: { contains: function () { return _hidden; } } };
+NODE
+    cat "$TMP/ui.js" | sed 's/^\t\t//' >> "$TMP/ui_run.js"
+    cat >> "$TMP/ui_run.js" <<'NODE'
+function probe(hidden, unit, value) {
+    _hidden = hidden; _upUnit = unit; upInput.value = value;
+    return getRateKbitUp();
+}
+var out = [
+    probe(true,  'mbit', '2'),      // control closed -> symmetric
+    probe(false, 'mbit', ''),       // opened but empty -> symmetric
+    probe(false, 'mbit', '0'),      // zero -> symmetric, never a 0 ceiling
+    probe(false, 'mbit', '-5'),     // negative -> symmetric
+    probe(false, 'mbit', '2'),      // 2 Mbit -> 2000 kbit
+    probe(false, 'kbit', '800'),    // 800 kbit stays 800
+    probe(false, 'mbit', '1.5'),    // fractional Mbit rounds
+    rateLabel('8000', ''),          // symmetric label
+    rateLabel('8000', '8000'),      // explicitly equal is still one figure
+    rateLabel('20000', '2000')      // asymmetric label
+].join('|');
+console.log(out);
+NODE
+    got=$(node "$TMP/ui_run.js" 2>&1)
+    assert_eq "the upload reader distinguishes empty from zero, and converts units" \
+        "||||2000|800|1500|8 Mbit/s|8 Mbit/s|20 Mbit/s down / 2 Mbit/s up" \
+        "$got"
+else
+    printf 'skip: no node, not exercising the frontend slices\n'
+fi
+
+# Static checks on the wiring the slices cannot see.
+js_src=$(cat "$JS")
+assert_contains "the ratelimit rpc call carries an upload rate" \
+    "params: ['ip', 'rate_kbit', 'label', 'mode', 'rate_kbit_up']" "$js_src"
+assert_contains "the shape_add rpc call carries an upload rate" \
+    "params: ['ip', 'rate_kbit', 'label', 'rate_kbit_up']" "$js_src"
+# null rather than 0 for the symmetric case: 0 would be a ceiling.
+assert_eq "every apply path sends null, not 0, when symmetric" "3" \
+    "$(grep -c "kbitUp ? parseInt(kbitUp) : null" "$JS")"
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
