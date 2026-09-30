@@ -93,6 +93,7 @@ method because it returns the contents of the configured log file.
 | `ifaces` | `trafficctl-ifaces.sh` | (none) | read |
 | `rdns` | `trafficctl-rdns.sh` | `ip` | read |
 | `ratelimit_stats` | `trafficctl-ratelimit-stats.sh` | (none) | read |
+| `subnets` | `trafficctl-subnets.sh` | (none) | read |
 | `shape_stats` | `trafficctl-shape-stats.sh` | (none) | read |
 | `shape_status` | `trafficctl-shape.sh status` | `ip` | read |
 | `names_list` | `trafficctl-names.sh list` | (none) | read |
@@ -108,7 +109,7 @@ method because it returns the contents of the configured log file.
 | `cut_set` | `trafficctl-cut.sh engage`/`release` | `active` (bool), `duration` (seconds, `0` = indefinite), `persist` (bool) | write |
 | `block` | `trafficctl-block.sh` | `ip`, `label` | write |
 | `unblock` | `trafficctl-unblock.sh` | `ip`, `label` | write |
-| `ratelimit` | `trafficctl-ratelimit.sh` | `ip`, `rate_kbit`, `label`, `mode` (`each`\|`shared`) | write |
+| `ratelimit` | `trafficctl-ratelimit.sh` | `ip` (host, CIDR or `all`), `rate_kbit`, `label`, `mode` (`each`\|`shared`) | write |
 | `shape_add` | `trafficctl-shape.sh add` | `ip`, `rate_kbit`, `label` | write |
 | `shape_remove` | `trafficctl-shape.sh remove` | `ip`, `label` | write |
 | `macfilter_add` | `trafficctl-macfilter-add.sh` | `ip` | write |
@@ -450,11 +451,21 @@ Returns drop counters from the nftables rate-limiter.
 
 ```json
 [
-  {"ip": "192.168.0.100", "rate_kbit": 5000, "packets": 1423, "bytes": 2134567}
+  {"ip": "192.168.0.100", "mode": "shared", "rate_kbit": 5000, "packets": 1423, "bytes": 2134567},
+  {"ip": "192.168.20.0/24", "mode": "each", "rate_kbit": 5000, "packets": 88, "bytes": 12000}
 ]
 ```
 
-Returns `[]` if no rate limits are active or on iptables backends.
+`ip` is the limit's target, so it may be a CIDR block rather than a host, and
+`mode` is the bucket layout (`each`/`shared`) read back from the live rule — an
+nft meter keyed on the address is what makes a bucket per-device.
+
+One entry per target: the download rule is installed on every LAN device's
+egress chain, so a router with several bridges holds several copies of the same
+limit, and their counters are summed here. Only the copy on the device the
+target sits behind ever matches.
+
+Returns `[]` if no rate limits are active.
 
 ---
 
@@ -637,16 +648,83 @@ reading like one, the same reasoning that makes `activity_log` a write method.
 
 ### trafficctl-ratelimit.sh
 
-Set or remove a download rate limit (policer).
+Set or remove a rate limit (policer, both directions).
 
-**Arguments:** `<ip> <rate_kbit> [label]`
+**Arguments:** `<target> <rate_kbit> [label] [each|shared]`
 
 Rate of `0` removes the limit.
 
+`target` is a host (`10.0.20.122`), a **CIDR block** (`10.0.20.0/24`), or `all`
+(every address, equivalent to `0.0.0.0/0`).
+
+`mode` decides how many buckets the block gets, and the two readings of
+"5 Mbit for the IoT VLAN" are easy to swap:
+
+| Mode | Meaning |
+|------|---------|
+| `each` | every address inside the target gets its **own** bucket — "5 Mbit **each**" |
+| `shared` | the whole target shares **one** bucket — "5 Mbit **between them**", an aggregate cap |
+
+The default is `each` for a block wider than `/32` and `shared` for a single
+host (where the two are identical). `each` is the default deliberately: one
+device cannot then starve the rest of a subnet. An aggregate VLAN cap — the
+usual reason to limit a subnet at all — must ask for `shared` explicitly.
+
+```sh
+# 20 Mbit shared by the whole IoT VLAN
+trafficctl-ratelimit.sh 192.168.20.0/24 20000 "iot-cap" shared
+# 5 Mbit for each device on the guest VLAN
+trafficctl-ratelimit.sh 10.0.0.0/24 5000 "guest-cap" each
+# remove (mode is irrelevant when removing)
+trafficctl-ratelimit.sh 192.168.20.0/24 0 "iot-cap"
+```
+
 **Output:**
 ```json
-{"ok": true, "msg": "rate limit set: 5000 kbit/s for 192.168.0.100"}
+{"ok": true, "msg": "rate limit 5000 kbit/s for 192.168.0.100 (both directions, shared)"}
 ```
+
+**Two constraints worth knowing before relying on a subnet limit:**
+
+- **The subnet has to be one this router monitors.** The policing hooks are
+  attached to the devices that `tctl_lan_subnets` resolves, which skips
+  `wan`/`wan6` and any zone other than `lan` with `masq=1`. A guest VLAN
+  isolated with `masq 1` is therefore not covered: the rule is accepted and
+  never matches a packet. `trafficctl-subnets.sh` lists what is covered, and
+  the dashboard warns when a target falls outside it.
+- **`shared` needs nftables.** On the iptables fallback the policer is
+  `hashlimit --hashlimit-mode dstip`, which is per-address whatever mode was
+  asked for; `trafficctl-ratelimit-stats.sh` reports `each` there for that
+  reason.
+
+**Persistence:** with `persist_rules` on, the target, rate **and mode** are
+written to `/etc/trafficctl/rules.json` and restored on `ifup lan`. Records
+written before the mode was stored fall back to the same default the CLI would
+have picked for that target.
+
+---
+
+### trafficctl-subnets.sh
+
+Lists the subnets a limit can actually be enforced on: directly connected LANs,
+plus subnets routed via a LAN next-hop and any `trafficctl.main.extra_subnets`.
+Backs the dashboard's target picker and its "this subnet is not monitored"
+warning.
+
+**Arguments:** None
+
+**Output:**
+
+```json
+[
+  {"cidr": "192.168.1.0/24", "device": "br-lan", "kind": "lan"},
+  {"cidr": "10.0.5.0/24", "device": "br-lan", "kind": "routed"}
+]
+```
+
+`kind` is `lan` for a directly connected subnet and `routed` for one reached
+through a next-hop. A zone excluded from monitoring (see above) appears in
+neither.
 
 ---
 

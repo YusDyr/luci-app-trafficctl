@@ -244,7 +244,15 @@ do_add() {
 
     # Download: queue on the LAN device, matching traffic destined to the client.
     if ! shape_attach "$LAN_DEV" dst "$IP" "$classid" "$RATE" "$burst_bytes"; then
-        echo "{\"ok\":false,\"msg\":\"tc setup failed for $IP on $LAN_DEV\"}"
+        # Naming the cause matters here: declining to replace a foreign root
+        # qdisc is deliberate (it is how an SQM/cake setup survives this app),
+        # but "tc setup failed" reads as a bug and gives no way to act on it.
+        # The rate limiter is a policer, owns no qdisc, and works alongside SQM.
+        if ! root_qdisc_replaceable "$LAN_DEV"; then
+            echo "{\"ok\":false,\"msg\":\"shaping declined on $LAN_DEV: another QoS setup (SQM/cake or a custom HTB tree) owns the root qdisc and will not be torn down. Use the limiter instead — it is a policer and coexists with SQM.\"}"
+        else
+            echo "{\"ok\":false,\"msg\":\"tc setup failed for $IP on $LAN_DEV\"}"
+        fi
         return 1
     fi
 

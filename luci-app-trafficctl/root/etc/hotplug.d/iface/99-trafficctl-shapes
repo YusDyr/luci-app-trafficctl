@@ -51,8 +51,13 @@ if [ -f "$RULES_FILE" ] && tctl_persist_enabled; then
                     logger -t trafficctl "Failed to restore block for $ip"
                 ;;
             ratelimit)
+                # Records written before the mode was stored have none; they
+                # get the same default the CLI would have given the target, so
+                # a subnet does not change meaning across the upgrade.
+                mode=$(jsonfilter -i "$RULES_FILE" -e "@[$idx].mode" 2>/dev/null)
+                [ -z "$mode" ] && mode=$(tctl_ratelimit_default_mode "$ip")
                 [ -n "$param" ] && [ "$param" != "0" ] && \
-                    tctl_ratelimit_add "$ip" "$param" "$(tctl_ratelimit_comment "$ip")" 2>/dev/null || \
+                    tctl_ratelimit_add "$ip" "$param" "$(tctl_ratelimit_comment "$ip")" "$mode" 2>/dev/null || \
                     logger -t trafficctl "Failed to restore ratelimit for $ip (${param}kbit)"
                 ;;
             pfw_pause|pfw_limit)

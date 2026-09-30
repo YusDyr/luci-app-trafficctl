@@ -14,7 +14,7 @@
 	}
 })();
 
-var TRAFFICCTL_BUILD = '20260918a';
+var TRAFFICCTL_BUILD = '20260928a';
 console.log('[trafficctl] build:' + TRAFFICCTL_BUILD);
 
 // Per-device DPI app breakdown from netifyd, keyed by IP. Stays empty when the
@@ -120,6 +120,12 @@ var callRatelimit = rpc.declare({
 var callRatelimitStats = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'ratelimit_stats',
+	expect: { result: [] }
+});
+
+var callSubnets = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'subnets',
 	expect: { result: [] }
 });
 
@@ -1051,6 +1057,45 @@ function buildOverviewPanel(ifaces, ifHistory, speedMap, nameByIp, showOther, on
 
 var PRIVATE_RE = /^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/;
 
+// ── Rate-limit targets that are not a single device ─────────────────────────
+//
+// A limit can be placed on a block of addresses ("10.0.20.0/24") or on the
+// whole network ("0.0.0.0/0") as well as on one device. Those have no row in
+// the device table, so the dashboard has to recognise them to show them at all.
+// A /32 is a single host written in CIDR form and belongs with the devices.
+function isSubnetTarget(t) {
+	if (!t || t.indexOf('/') < 0) { return false; }
+	return parseInt(t.split('/')[1], 10) < 32;
+}
+
+// "a.b.c.d/m" (or a bare address, read as /32) → { base: int, mask: int }.
+function parseCidr(t) {
+	if (!t) { return null; }
+	var parts = String(t).trim().split('/');
+	var mask = parts.length > 1 ? parseInt(parts[1], 10) : 32;
+	var oct = parts[0].split('.');
+	if (oct.length !== 4 || isNaN(mask) || mask < 0 || mask > 32) { return null; }
+	var base = 0, i, n;
+	for (i = 0; i < 4; i++) {
+		n = parseInt(oct[i], 10);
+		if (isNaN(n) || n < 0 || n > 255 || !/^[0-9]+$/.test(oct[i])) { return null; }
+		// Multiplication rather than shifts: the packed address exceeds 2^31
+		// and JS bitwise operators are signed 32-bit.
+		base = base * 256 + n;
+	}
+	return { base: base, mask: mask };
+}
+
+// Do two prefixes share any address? The shorter mask is the one that has to
+// contain the other's network address.
+function cidrOverlaps(a, b) {
+	if (!a || !b) { return false; }
+	var m = Math.min(a.mask, b.mask);
+	if (m === 0) { return true; }
+	var block = Math.pow(2, 32 - m);
+	return Math.floor(a.base / block) === Math.floor(b.base / block);
+}
+
 function groupConnections(conns, groupBy) {
 	if (groupBy === 'none') return null;
 	var keyFn;
@@ -1506,7 +1551,7 @@ function buildExtendedStatsLegend(shapeMap, dropMap) {
 	var valueStyle = 'font-family:monospace;font-weight:600;color:currentColor;font-size:13px';
 	var totalDrops = 0, totalOverlimits = 0, totalEcn = 0, totalMemory = 0;
 	var totalDropPkts = 0, totalDropBytes = 0;
-	var shapedCount = 0, limitedCount = 0;
+	var shapedCount = 0, limitedCount = 0, limitedSubnets = 0;
 
 	Object.keys(shapeMap).forEach(function(ip) {
 		var sm = shapeMap[ip];
@@ -1521,7 +1566,14 @@ function buildExtendedStatsLegend(shapeMap, dropMap) {
 	Object.keys(dropMap).forEach(function(ip) {
 		var dm = dropMap[ip];
 		if (dm && dm.rate_kbit > 0) {
-			limitedCount++;
+			// A subnet limit covers many devices and is counted apart from
+			// them: folded in, it read as one more "limited device" that no
+			// row in the table below corresponded to.
+			if (isSubnetTarget(ip)) {
+				limitedSubnets++;
+			} else {
+				limitedCount++;
+			}
 			totalDropPkts += (dm.packets || 0);
 			totalDropBytes += (dm.bytes || 0);
 		}
@@ -1545,6 +1597,11 @@ function buildExtendedStatsLegend(shapeMap, dropMap) {
 	}
 	if (limitedCount > 0) {
 		addRow(_('Limited devices'), String(limitedCount), 'var(--tc-warn)');
+	}
+	if (limitedSubnets > 0) {
+		addRow(_('Limited subnets'), String(limitedSubnets), 'var(--tc-warn)');
+	}
+	if (limitedCount > 0 || limitedSubnets > 0) {
 		addRow(_('Total dropped'), totalDropPkts + ' ' + _('pkts') + ' / ' + fmtBytes(totalDropBytes), totalDropPkts > 0 ? 'var(--tc-err)' : null);
 	}
 	if (rows.length === 0) {
@@ -1763,6 +1820,8 @@ return view.extend({
 	_speedMap:     {},
 	_totalsMap:    {},
 	_dropMap:      {},
+	// Limits whose target is a block of addresses rather than one device.
+	_subnetLimits: [],
 	_shapeMap:     {},
 	_speedEwma:    {},
 	_speedEwmaUp:  {},
@@ -2231,6 +2290,8 @@ return view.extend({
 			if (_rateSelected === 'custom') {
 				rateChips.forEach(function(c) { c.className = c._val === '0' ? 'tc-chip tc-chip' : 'tc-chip'; });
 			}
+			// The each/shared sentence quotes the rate, so it moves with it.
+			updateScopeExplain();
 		}
 
 		// Custom input row
@@ -2299,10 +2360,15 @@ return view.extend({
 
 		// ── Network-wide / subnet target ──────────────────────────────
 		// With "All active devices" selected there is no single IP to act on,
-		// so the target is typed instead: "all" or a CIDR. Only the limiter
+		// so the target is a subnet instead: "all" or a CIDR. Only the limiter
 		// supports blocks — tc classids are derived from a single address, so
-		// the shaper cannot express a subnet.
+		// the shaper cannot express a subnet. That is also why a subnet limit
+		// is safe next to SQM: the limiter is a policer and owns no qdisc,
+		// while the shaper refuses to touch a root qdisc it does not recognise.
 		var _scopeSelected = 'each';
+		// Subnets the router actually monitors. A limit on anything else is
+		// written into a chain no packet of that subnet passes through.
+		var _monitoredSubnets = [];
 		var scopeInput = E('input', {
 			'type': 'text',
 			'class': 'tc-custom-input',
@@ -2311,29 +2377,184 @@ return view.extend({
 			'style': 'width:150px',
 			'data-tip': _('"all" for every device, or a CIDR such as 10.0.20.0/24')
 		});
+		scopeInput.addEventListener('input', function() {
+			updateSubnetChips();
+			updateScopeExplain();
+		});
+
+		// One chip per monitored subnet, so the common case is a click and the
+		// operator cannot mistype a target that exists but is spelled wrong.
+		var subnetChips = E('div', {'class':'tc-chips-row', 'style':'gap:4px'});
+		function updateSubnetChips() {
+			var cur = (scopeInput.value || '').trim();
+			Array.prototype.forEach.call(subnetChips.children, function(c) {
+				c.className = (c._target === cur) ? 'tc-chip tc-chip--active' : 'tc-chip';
+			});
+		}
+		function addSubnetChip(target, label, tip) {
+			var c = E('span', {'class':'tc-chip', 'data-tip': tip}, label);
+			c._target = target;
+			c.addEventListener('click', function() {
+				scopeInput.value = target;
+				updateSubnetChips();
+				updateScopeExplain();
+			});
+			subnetChips.appendChild(c);
+		}
+		addSubnetChip('all', _('Whole network'), _('Every device this router forwards for'));
 
 		var scopeChips = E('div', {'class':'tc-chips-row', 'style':'gap:4px'});
 		function updateScopeChips() {
 			Array.prototype.forEach.call(scopeChips.children, function(c) {
 				c.className = c._v === _scopeSelected ? 'tc-chip tc-chip--active' : 'tc-chip';
 			});
+			updateScopeExplain();
 		}
 		[
-			{ v: 'each',   l: _('per device'), tip: _('Every address gets its own bucket — 5 Mbit each') },
-			{ v: 'shared', l: _('shared'),     tip: _('One bucket for the whole target — 5 Mbit total') }
+			{ v: 'each',   l: _('per device') },
+			{ v: 'shared', l: _('shared') }
 		].forEach(function(o) {
-			var c = E('span', {'class':'tc-chip', 'data-tip': o.tip}, o.l);
+			var c = E('span', {'class':'tc-chip'}, o.l);
 			c._v = o.v;
 			c.addEventListener('click', function() { _scopeSelected = o.v; updateScopeChips(); });
 			scopeChips.appendChild(c);
 		});
-		updateScopeChips();
 
-		var scopeRow = E('div', {'class':'tc-custom-row tc-hidden', 'style':'align-items:center;gap:8px'}, [
-			E('span', {'class':'tc-inline-label'}, _('Target:')),
-			scopeInput,
-			scopeChips
+		// The difference between the two is the whole point and is easy to get
+		// backwards, so it is spelled out in full sentences with the rate and
+		// the target filled in — not left to a tooltip nobody hovers.
+		var scopeExplain = E('div', {'class':'tc-scope-explain'});
+		var scopeWarn = E('div', {'class':'tc-scope-warn tc-hidden'});
+
+		function targetIsMonitored(t) {
+			if (!t || t === 'all' || t === 'any' || t === '0.0.0.0/0') { return true; }
+			var want = parseCidr(t);
+			if (!want) { return true; }   // malformed: the backend rejects it
+			// Unknown list (the call failed, or nothing is monitored yet) is
+			// not evidence of a problem — say nothing rather than cry wolf.
+			if (!_monitoredSubnets.length) { return true; }
+			for (var i = 0; i < _monitoredSubnets.length; i++) {
+				if (cidrOverlaps(want, parseCidr(_monitoredSubnets[i].cidr))) { return true; }
+			}
+			return false;
+		}
+
+		function updateScopeExplain() {
+			// Reachable from updateRateChips, which the rate presets call before
+			// this row exists on the first render.
+			if (!scopeExplain) { return; }
+			var t = (scopeInput.value || 'all').trim();
+			var shown = (t === 'all' || t === 'any') ? _('every device') : t;
+			var kbit = parseInt(getRateKbit(), 10);
+			if (!kbit || kbit <= 0) {
+				scopeExplain.textContent =
+					_('Pick a rate to apply it to this target, or Off to remove its limit.');
+			} else if (_scopeSelected === 'shared') {
+				scopeExplain.textContent = _('All of') + ' ' + shown + ' ' + _('share') + ' ' +
+					fmtRate(kbit) + ' ' + _('between them — one bucket for the whole subnet.');
+			} else {
+				scopeExplain.textContent = _('Every device in') + ' ' + shown + ' ' +
+					_('may use') + ' ' + fmtRate(kbit) + ' ' + _('of its own.');
+			}
+
+			var bad = !targetIsMonitored(t);
+			scopeWarn.classList.toggle('tc-hidden', !bad);
+			if (bad) {
+				// A limit here would be accepted and then never match a packet:
+				// the netdev hooks are attached to the devices the monitored
+				// subnets resolve to. A firewall zone other than lan with
+				// masq=1 — the usual way to isolate a guest VLAN — is excluded
+				// from that set, which is the likeliest reason to land here.
+				scopeWarn.textContent = '⚠ ' + t + ' ' +
+					_('is not one of the subnets this router monitors, so a limit on it would be accepted but never enforced. A firewall zone other than "lan" with masq=1 (the usual guest-VLAN setup) is excluded. Check with: uci show firewall | grep -E "name=|masq="');
+			}
+		}
+
+		var scopeRow = E('div', {'class':'tc-scope-row tc-hidden'}, [
+			E('div', {'class':'tc-custom-row', 'style':'align-items:center;gap:8px'}, [
+				E('span', {'class':'tc-inline-label'}, _('Target:')),
+				scopeInput,
+				E('span', {'class':'tc-inline-label'}, _('Share:')),
+				scopeChips
+			]),
+			subnetChips,
+			scopeExplain,
+			scopeWarn
 		]);
+
+		// ── Active subnet limits ──────────────────────────────────────
+		//
+		// An aggregate limit has no row in the device table — it is not
+		// attached to a device — so without this it was invisible once set and
+		// could only be removed by retyping the exact same target. It sits in
+		// the panel that creates it rather than in Settings: a rule that drops
+		// packets for a whole VLAN should be in front of whoever opens the
+		// page, not two clicks deep in a collapsed section.
+		var subnetLimitsBox = E('div', {'class':'tc-subnet-limits tc-hidden'});
+
+		function removeSubnetLimit(target, mode, btn) {
+			btn.disabled = true;
+			setStatus(statusDiv, 'loading', _('Removing limit on') + ' ' + target + '…');
+			callRatelimit(target, 0, '', mode).then(function(res) {
+				setStatus(statusDiv, (res && res.ok) ? 'ok' : 'error',
+					(res && res.msg) || _('Throttle removed'));
+				pollDrops();
+			}).catch(function(e) {
+				btn.disabled = false;
+				setStatus(statusDiv, 'error', '✗ ' + e.message);
+			});
+		}
+
+		function renderSubnetLimits() {
+			var limits = self._subnetLimits || [];
+			subnetLimitsBox.classList.toggle('tc-hidden', !limits.length || !isAllMode());
+			while (subnetLimitsBox.firstChild) {
+				subnetLimitsBox.removeChild(subnetLimitsBox.firstChild);
+			}
+			if (!limits.length) { return; }
+
+			subnetLimitsBox.appendChild(E('div', {'class':'tc-subnet-limits__title'},
+				_('Active subnet limits')));
+			limits.forEach(function(l) {
+				var isShared = l.mode === 'shared';
+				var target = (l.ip === '0.0.0.0/0') ? _('Whole network') : l.ip;
+				var removeBtn = E('button', {'class':'cbi-button cbi-button-remove'}, _('Remove'));
+				removeBtn.addEventListener('click', function() {
+					removeSubnetLimit(l.ip, l.mode, removeBtn);
+				});
+				subnetLimitsBox.appendChild(E('div', {'class':'tc-subnet-limits__row'}, [
+					E('span', {'class':'tc-mono tc-subnet-limits__target'}, target),
+					E('span', {'class':'tc-mono tc-c-speed'}, fmtRate(l.rate_kbit)),
+					E('span', {
+						'class': 'tc-subnet-limits__mode',
+						'data-tip': isShared
+							? _('One bucket for the whole subnet')
+							: _('One bucket per device inside the subnet')
+					}, isShared ? _('shared between them') : _('each')),
+					E('span', {'class':'tc-c-muted tc-subnet-limits__drops'},
+						l.packets > 0
+							? (String(l.packets) + ' ' + _('packets dropped') + ' (' + fmtBytes(l.bytes) + ')')
+							: _('nothing dropped yet')),
+					removeBtn
+				]));
+			});
+		}
+
+		callSubnets().then(function(list) {
+			if (!Array.isArray(list)) { return; }
+			_monitoredSubnets = list;
+			list.forEach(function(s) {
+				if (!s || !s.cidr) { return; }
+				addSubnetChip(s.cidr, s.cidr, s.kind === 'routed'
+					? (_('Routed via') + ' ' + s.device)
+					: (_('On') + ' ' + s.device));
+			});
+			updateSubnetChips();
+			updateScopeExplain();
+		}).catch(function() {});
+
+		updateSubnetChips();
+		updateScopeChips();
 
 		var rateLimitRow = E('div', {
 			'class': 'tc-rate-panel tc-hidden'
@@ -2344,7 +2565,8 @@ return view.extend({
 			]),
 			scopeRow,
 			rateChipsRow,
-			customRow
+			customRow,
+			subnetLimitsBox
 		]);
 
 		// Compat shims for existing code that uses ratePick/modePick interface
@@ -2439,6 +2661,7 @@ return view.extend({
 			// left no way to limit a subnet or the whole network at all.
 			rateLimitRow.classList.remove('tc-hidden');
 			scopeRow.classList.toggle('tc-hidden', !all);
+			renderSubnetLimits();
 			modeToggle.classList.toggle('tc-hidden', all);
 			rdnsCheck.classList.toggle('tc-hidden', all);
 			extStatsCheck.classList.toggle('tc-hidden', all);
@@ -2493,9 +2716,16 @@ return view.extend({
 			if (document.hidden) return;
 			callRatelimitStats().then(function(data) {
 				if (!Array.isArray(data)) return;
+				// Rebuilt from every response rather than accumulated the way
+				// _dropMap is: a limit that was just removed has to leave the
+				// list on the next poll, not linger until a page reload.
+				var subnetLimits = [];
 				data.forEach(function(d) {
-					self._dropMap[d.ip] = { packets: d.packets, bytes: d.bytes, rate_kbit: d.rate_kbit, pass_packets: d.pass_packets, pass_bytes: d.pass_bytes };
+					self._dropMap[d.ip] = { packets: d.packets, bytes: d.bytes, rate_kbit: d.rate_kbit, mode: d.mode, pass_packets: d.pass_packets, pass_bytes: d.pass_bytes };
+						if (isSubnetTarget(d.ip) && d.rate_kbit > 0) { subnetLimits.push(d); }
 				});
+				self._subnetLimits = subnetLimits;
+				renderSubnetLimits();
 				if (isAllMode()) {
 					Object.keys(self._dropMap).forEach(function(ip) {
 						var dp = self._dropMap[ip].packets || 0;
