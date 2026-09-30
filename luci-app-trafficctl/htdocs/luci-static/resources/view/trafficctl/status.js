@@ -2490,15 +2490,29 @@ return view.extend({
 			var t = (scopeInput.value || 'all').trim();
 			var shown = (t === 'all' || t === 'any') ? _('every device') : t;
 			var kbit = parseInt(getRateKbit(), 10);
+			// The sentence has to quote the rate that will actually be applied.
+			// Naming only the download figure while a split ceiling is set would
+			// describe a different rule than the one being installed — and these
+			// sentences exist precisely so the each/shared distinction cannot be
+			// misread.
+			var kbitUp = parseInt(getRateKbitUp(), 10);
+			var rateWords = (kbitUp && kbitUp !== kbit)
+				? _('%s down and %s up').format(fmtRate(kbit), fmtRate(kbitUp))
+				: fmtRate(kbit);
+			// A split ceiling is two buckets, one per direction, so the aggregate
+			// wording changes with it.
+			var sharedTail = (kbitUp && kbitUp !== kbit)
+				? _('between them — one bucket per direction for the whole subnet.')
+				: _('between them — one bucket for the whole subnet.');
 			if (!kbit || kbit <= 0) {
 				scopeExplain.textContent =
 					_('Pick a rate to apply it to this target, or Off to remove its limit.');
 			} else if (_scopeSelected === 'shared') {
 				scopeExplain.textContent = _('All of') + ' ' + shown + ' ' + _('share') + ' ' +
-					fmtRate(kbit) + ' ' + _('between them — one bucket for the whole subnet.');
+					rateWords + ' ' + sharedTail;
 			} else {
 				scopeExplain.textContent = _('Every device in') + ' ' + shown + ' ' +
-					_('may use') + ' ' + fmtRate(kbit) + ' ' + _('of its own.');
+					_('may use') + ' ' + rateWords + ' ' + _('of its own.');
 			}
 
 			var bad = !targetIsMonitored(t);
