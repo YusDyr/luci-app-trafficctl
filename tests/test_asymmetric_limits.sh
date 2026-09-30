@@ -520,5 +520,37 @@ assert_contains "the shape_add rpc call carries an upload rate" \
 assert_eq "every apply path sends null, not 0, when symmetric" "3" \
     "$(grep -c "kbitUp ? parseInt(kbitUp) : null" "$JS")"
 
+# ══════════════════════════════════════════════════════════════════════════
+# 7. Persisted records must not overwrite one another
+# ════════════════════════════════════════════════════════════════════════════
+#
+# tctl_persist_save replaces the record for one ip+type and keeps the rest. This
+# repository has shipped the undelimited version of that comparison twice — the
+# block comment that matched 192.168.1.1 inside 192.168.1.10, and the _ul rule
+# comment that is a prefix of _ul6 — so the case is pinned rather than reasoned
+# about, especially now that records carry an extra field.
+
+: > "$TCTL_TEST_PERSIST"
+printf '[]' > "$RULES"
+run "$TMP/ratelimit.sh" 192.168.1.10  4000 rl_test each     >/dev/null
+run "$TMP/ratelimit.sh" 192.168.1.100 5000 rl_test each     >/dev/null
+run "$TMP/ratelimit.sh" 192.168.1.1   6000 rl_test each 600 >/dev/null
+
+rules=$(cat "$RULES")
+assert_eq "three adjacent addresses keep three separate records" "3" \
+    "$(printf '%s' "$rules" | grep -o '"type":"ratelimit"' | wc -l | tr -d ' ')"
+assert_contains "the .10 record survives saving .1" '"ip":"192.168.1.10","param":"4000"' "$rules"
+assert_contains "the .100 record survives too" '"ip":"192.168.1.100","param":"5000"' "$rules"
+assert_contains "and .1 is stored with its own upload rate" '"param_up":"600"' "$rules"
+
+# Re-saving one target must replace exactly that record and leave its neighbours.
+run "$TMP/ratelimit.sh" 192.168.1.1 7000 rl_test each >/dev/null
+rules=$(cat "$RULES")
+assert_eq "re-saving one target still leaves three records" "3" \
+    "$(printf '%s' "$rules" | grep -o '"type":"ratelimit"' | wc -l | tr -d ' ')"
+assert_contains "the rewritten record has the new rate" '"ip":"192.168.1.1","param":"7000"' "$rules"
+assert_not_contains "and dropped the upload rate it no longer has" '"param_up"' "$rules"
+assert_contains "the .10 neighbour is untouched" '"ip":"192.168.1.10","param":"4000"' "$rules"
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
