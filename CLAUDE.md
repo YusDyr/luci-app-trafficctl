@@ -167,6 +167,15 @@ Elements hidden with an **inline style** (`style="display:none"` in the `E()` ca
 - Interactive graph popup on sparkline hover (crosshair, DL+UL, gradient fill, limit line)
 - `fmtSpeed()`: no ".0" for whole numbers, SI units (×1000)
 
+## i18n / lmo Rules
+
+- `_()` msgids must not contain leading or trailing whitespace. LuCI's `lmo_canon_hash()` trims trailing whitespace and collapses consecutive whitespace before hashing, so keys with leading/trailing spaces will not match the generated `.lmo` entries.
+  - Bad: ` _('Active: ')` or ` _(' flag should...')`
+  - Good: ` _('Active:') + ' '` and `' ' + _('flag should...')`
+- `.lmo` files must be generated with OpenWrt's `po2lmo`, not GNU `msgfmt`. `msgfmt` produces standard `.mo` files; LuCI expects the custom `lmo` format.
+- PO files should include a standard gettext header (`Content-Type`, `Language`, `Project-Id-Version`, etc.).
+- After deploying i18n changes, browser cache must be cleared and LuCI re-logged in because `rpcd` restarts and invalidates the session.
+
 ## Capture Script (docs/capture.js)
 
 - Playwright (Chromium CDP on port 9222)
