@@ -4,6 +4,23 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.19.1] - 2026-09-30
+
+### Bug Fixes
+- label the software-counter offload mode in the status badge ([a22e3ad](https://github.com/YusDyr/luci-app-trafficctl/commit/a22e3ad777a3f8c3ce148ab6119bfd395efb65d7))
+  tctl_get_offload_mode splits software offload on the flowtable counter
+  flag and returns "software-counter" when it is set, but modeLabels in
+  status.js only knew the four older values. Anyone on that configuration
+  saw the badge fall through to its fallback and print a question mark
+  next to the raw mode string, which reads like a fault rather than the
+  healthy state it actually is.
+- render the Telegram limit preset buttons instead of NaN ([9f40296](https://github.com/YusDyr/luci-app-trafficctl/commit/9f40296fc1480e69b9083faf80edb46512c38603))
+  The keyboard preview built its limit buttons as
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.19.0...v1.19.1
+
+---
+
 ## [1.19.0] - 2026-09-30
 
 ### Features
