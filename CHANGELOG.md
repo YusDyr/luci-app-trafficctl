@@ -4,6 +4,19 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.20.1] - 2026-09-30
+
+### Other
+- stop running every check two and three times ([#78](https://github.com/YusDyr/luci-app-trafficctl/issues/78)) ([9e43bdc](https://github.com/YusDyr/luci-app-trafficctl/commit/9e43bdc9dde250d6fdbb3c1143b8d945b19c243f))
+  The workflows nest: auto-release.yml calls ci.yml and compat.yml, and
+  ci.yml in turn calls shellcheck.yml, eslint.yml and tests.yml. All five
+  of those also carried their own push and pull_request triggers, so each
+  one ran standalone AND as a nested job.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.20.0...v1.20.1
+
+---
+
 ## [1.20.0] - 2026-09-30
 
 ### Features
