@@ -43,10 +43,10 @@ list)
 	printf '"unblock":{"ip":"str","label":"str"},'
 	printf '"macfilter_add":{"ip":"str"},'
 	printf '"macfilter_remove":{"ip":"str"},'
-	printf '"ratelimit":{"ip":"str","rate_kbit":"int","label":"str","mode":"str"},'
+	printf '"ratelimit":{"ip":"str","rate_kbit":"int","label":"str","mode":"str","rate_kbit_up":"int"},'
 	printf '"ratelimit_stats":{},'
 	printf '"subnets":{},'
-	printf '"shape_add":{"ip":"str","rate_kbit":"int","label":"str"},'
+	printf '"shape_add":{"ip":"str","rate_kbit":"int","label":"str","rate_kbit_up":"int"},'
 	printf '"shape_remove":{"ip":"str","label":"str"},'
 	printf '"shape_status":{"ip":"str"},'
 	printf '"shape_stats":{},'
@@ -159,10 +159,16 @@ call)
 		label=$(sanitize_label "$(echo "$input" | jsonfilter -e '@.label' 2>/dev/null)")
 		mode=$(echo "$input" | jsonfilter -e '@.mode' 2>/dev/null)
 		case "$mode" in each|shared) ;; *) mode="" ;; esac
+		rate_up=$(echo "$input" | jsonfilter -e '@.rate_kbit_up' 2>/dev/null)
+		# A caller that does not send the field — any UI older than this
+		# method signature — means "symmetric", NOT "no upload allowed". Zero
+		# is normalised away for the same reason: a zero ceiling polices every
+		# packet, which is a total upload block reporting itself as a limit.
+		[ "$rate_up" = "0" ] && rate_up=""
 		if [ -z "$ip" ]; then
 			echo '{"ok":false,"msg":"ip required"}'
 		else
-			"$SCRIPTS/trafficctl-ratelimit.sh" "$ip" "${rate:-0}" "$label" "$mode"
+			"$SCRIPTS/trafficctl-ratelimit.sh" "$ip" "${rate:-0}" "$label" "$mode" "$rate_up"
 		fi
 		;;
 	ratelimit_stats)
@@ -180,10 +186,13 @@ call)
 		ip=$(echo "$input" | jsonfilter -e '@.ip' 2>/dev/null)
 		rate=$(echo "$input" | jsonfilter -e '@.rate_kbit' 2>/dev/null)
 		label=$(sanitize_label "$(echo "$input" | jsonfilter -e '@.label' 2>/dev/null)")
+		rate_up=$(echo "$input" | jsonfilter -e '@.rate_kbit_up' 2>/dev/null)
+		# Same reading as the limiter: absent or zero means "same as download".
+		[ "$rate_up" = "0" ] && rate_up=""
 		if [ -z "$ip" ] || [ -z "$rate" ]; then
 			echo '{"ok":false,"msg":"ip and rate_kbit required"}'
 		else
-			"$SCRIPTS/trafficctl-shape.sh" add "$ip" "$rate" "$label"
+			"$SCRIPTS/trafficctl-shape.sh" add "$ip" "$rate" "$label" "$rate_up"
 		fi
 		;;
 	shape_remove)
