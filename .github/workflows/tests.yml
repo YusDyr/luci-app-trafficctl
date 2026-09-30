@@ -67,6 +67,10 @@ jobs:
       # the only frontend logic with a wrong answer an operator cannot see.
       - name: Subnet target warning (frontend slices)
         run: bash tests/test_subnet_ui.sh
+      # Cross-checks the offload modes the shell can emit against the badge
+      # table in status.js, and pins the Telegram preset button rendering.
+      - name: Offload badge / preset button rendering
+        run: bash tests/test_offload_ui.sh
       - name: Per-interface counter tests (global overview)
         run: bash tests/test_ifaces.sh
       - name: Postinst parity tests

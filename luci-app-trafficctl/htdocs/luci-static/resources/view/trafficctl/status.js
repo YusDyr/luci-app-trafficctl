@@ -3837,7 +3837,7 @@ return view.extend({
 						var limitBtns = [];
 						RATE_PRESETS.forEach(function(p) {
 							if (p.v === '0' || p.v === 'custom') return;
-							limitBtns.push(E('span', {'class':'tg-kbd-btn'},  + p.l.replace(' Mbit/s', 'M').replace(/\s/g, '')));
+							limitBtns.push(E('span', {'class':'tg-kbd-btn'}, p.l.replace(' Mbit/s', 'M').replace(/\s/g, '')));
 						});
 						for (var li = 0; li < limitBtns.length; li += 3) {
 							kbdBubble.appendChild(E('div', {'class':'tg-kbd-row'}, limitBtns.slice(li, li + 3)));

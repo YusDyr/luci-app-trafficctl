@@ -51,7 +51,8 @@
       { "selector": "ObjectPattern", "message": "ES5 only: no destructuring." },
       { "selector": "ArrayPattern", "message": "ES5 only: no destructuring." },
       { "selector": "CallExpression[callee.property.name='includes']", "message": "ES5 only: use indexOf(...) !== -1, not .includes()." },
-      { "selector": "CallExpression[callee.object.name='Object'][callee.property.name='assign']", "message": "ES5 only: no Object.assign()." }
+      { "selector": "CallExpression[callee.object.name='Object'][callee.property.name='assign']", "message": "ES5 only: no Object.assign()." },
+      { "selector": "UnaryExpression[operator='+']", "message": "Unary + is banned: a stray one in front of an E() child silently rendered NaN. Use Number(x) or parseInt(x, 10)." }
     ]
   }
 }
