@@ -8,286 +8,286 @@ msgstr ""
 "Plural-Forms: nplurals=1; plural=0;\n"
 
 msgid "\"all\" for every device, or a CIDR such as 10.0.20.0/24"
-msgstr ""
+msgstr "\"all\"表示全部设备，或类似 10.0.20.0/24 的 CIDR"
 
 msgid "%d not applied"
-msgstr ""
+msgstr "%d 个未生效"
 
 msgid "%d packets dropped (%s)"
-msgstr ""
+msgstr "%d 个丢包 (%s)"
 
 msgid "%d pkts, %s dropped"
-msgstr ""
+msgstr "%d 个包，%s 已丢弃"
 
 msgid "%s total"
-msgstr ""
+msgstr "%s 总计"
 
 msgid "1 Mbit/s"
-msgstr ""
+msgstr "1 Mbit/s"
 
 msgid "1 hour"
-msgstr ""
+msgstr "1 小时"
 
 msgid "10 Mbit/s"
-msgstr ""
+msgstr "10 Mbit/s"
 
 msgid "100 Mbit/s"
-msgstr ""
+msgstr "100 Mbit/s"
 
 msgid "15 min"
-msgstr ""
+msgstr "15 分钟"
 
 msgid "2 Mbit/s"
-msgstr ""
+msgstr "2 Mbit/s"
 
 msgid "25 Mbit/s"
-msgstr ""
+msgstr "25 Mbit/s"
 
 msgid "4 hours"
-msgstr ""
+msgstr "4 小时"
 
 msgid "5 Mbit/s"
-msgstr ""
+msgstr "5 Mbit/s"
 
 msgid "50 Mbit/s"
-msgstr ""
+msgstr "50 Mbit/s"
 
 msgid ""
 "Accelerates routing in the kernel via nftables flowtable. Speed monitoring and t"
 "raffic shaping work normally."
-msgstr ""
+msgstr "通过 nftables flowtable 在内核中加速路由。速度监控和流量整形正常工作。"
 
 msgid "Accumulated on the router"
-msgstr ""
+msgstr "在路由器上累计"
 
 msgid "Accumulated since %s"
-msgstr ""
+msgstr "自 %s 起累计"
 
 msgid "Action"
-msgstr ""
+msgstr "操作"
 
 msgid "Active connections in conntrack"
-msgstr ""
+msgstr "conntrack 中的活动连接"
 
 msgid "Active devices"
-msgstr ""
+msgstr "活动设备"
 
 msgid "Active inbound connections"
-msgstr ""
+msgstr "活动入站连接"
 
 msgid "Active subnet limits"
-msgstr ""
+msgstr "活动子网限速"
 
 msgid "Active:"
-msgstr ""
+msgstr "活动："
 
 msgid "Activity"
-msgstr ""
+msgstr "活动日志"
 
 msgid "Adding to"
-msgstr ""
+msgstr "添加到"
 
 msgid "All"
-msgstr ""
+msgstr "全部"
 
 msgid "All active devices"
-msgstr ""
+msgstr "全部活动设备"
 
 msgid "All devices"
-msgstr ""
+msgstr "所有设备"
 
 msgid "All of"
-msgstr ""
+msgstr "所有"
 
 msgid "App"
-msgstr ""
+msgstr "应用"
 
 msgid ""
 "Applied once, the first time a device appears on the network. A device that alre"
 "ady has a limit is left alone."
-msgstr ""
+msgstr "首次有设备出现在网络时应用一次。已有速度限制的设备不会受影响。"
 
 msgid "Applied — firewall reloading"
-msgstr ""
+msgstr "已应用 — 防火墙重新加载中"
 
 msgid "Apply"
-msgstr ""
+msgstr "应用"
 
 msgid "Applying…"
-msgstr ""
+msgstr "应用中…"
 
 msgid "Auto-refresh interval for summary table"
-msgstr ""
+msgstr "概览表自动刷新间隔"
 
 msgid "Avg"
-msgstr ""
+msgstr "平均"
 
 msgid "BLOCKED"
-msgstr ""
+msgstr "已阻断"
 
 msgid "Behind a downstream router (routed subnet)"
-msgstr ""
+msgstr "位于下游路由器后（路由子网）"
 
 msgid "Block Internet"
-msgstr ""
+msgstr "阻断互联网"
 
 msgid "Block WiFi"
-msgstr ""
+msgstr "阻断 WiFi"
 
 msgid "Blocked from WiFi (MAC deny list)"
-msgstr ""
+msgstr "已从 WiFi 阻断（MAC 拒绝列表）"
 
 msgid "Blocked:"
-msgstr ""
+msgstr "已阻断："
 
 msgid "Blocking, rate limiting, and traffic shaping continue to work regardless."
-msgstr ""
+msgstr "阻断、限速和流量整形功能仍然有效。"
 
 msgid "Blocks"
-msgstr ""
+msgstr "阻断"
 
 msgid "Bot commands:"
-msgstr ""
+msgstr "机器人命令："
 
 msgid "Bot is running"
-msgstr ""
+msgstr "机器人运行中"
 
 msgid "Bot is stopped"
-msgstr ""
+msgstr "机器人已停止"
 
 msgid "Bridge port — these bytes are also counted in its bridge"
-msgstr ""
+msgstr "桥接端口 — 这些字节也计入其所在网桥"
 
 msgid ""
 "Bridge ports, switch conduits and ifb mirrors. Their bytes are already counted i"
 "n the bridge or uplink above."
-msgstr ""
+msgstr "桥接端口、交换机通道和 ifb 镜像。它们的字节已计入上方网桥或上行链路。"
 
 msgid "Byte totals unavailable on this router."
-msgstr ""
+msgstr "此路由器的字节总计不可用。"
 
 msgid "Bytes"
-msgstr ""
+msgstr "字节"
 
 msgid "Bytes dropped"
-msgstr ""
+msgstr "丢包字节数"
 
 msgid "Bytes queued in tc"
-msgstr ""
+msgstr "tc 中队列字节数"
 
 msgid "Bytes queued in traffic shaper"
-msgstr ""
+msgstr "流量整形器中队列字节数"
 
 msgid "Bytes received from remote clients"
-msgstr ""
+msgstr "从远程客户端接收的字节数"
 
 msgid "Bytes sent back to remote clients"
-msgstr ""
+msgstr "发送回远程客户端的字节数"
 
 msgid "CPU load (1 min)"
-msgstr ""
+msgstr "CPU 负载（1 分钟）"
 
 msgid "Calculating…"
-msgstr ""
+msgstr "计算中…"
 
 msgid "Cancel"
-msgstr ""
+msgstr "取消"
 
 msgid "Carries the default route"
-msgstr ""
+msgstr "承载默认路由"
 
 msgid "Chat ID"
-msgstr ""
+msgstr "聊天 ID"
 
 msgid "Chat ID:"
-msgstr ""
+msgstr "聊天 ID："
 
 msgid "Click a row to inspect that device. Download speed updates every 2 seconds."
-msgstr ""
+msgstr "点击行查看该设备。下载速度每 2 秒更新。"
 
 msgid "Click again to confirm"
-msgstr ""
+msgstr "再次点击确认"
 
 msgid "Click header to sort."
-msgstr ""
+msgstr "点击表头排序。"
 
 msgid "Click to inspect %s"
-msgstr ""
+msgstr "点击查看 %s"
 
 msgid "Click to toggle column visibility"
-msgstr ""
+msgstr "点击切换列显示"
 
 msgid "Clients"
-msgstr ""
+msgstr "客户端"
 
 msgid "Collecting interface counters…"
-msgstr ""
+msgstr "正在收集接口计数器…"
 
 msgid "Config"
-msgstr ""
+msgstr "配置"
 
 msgid "Connection interface (WiFi band, LAN port or routed)"
-msgstr ""
+msgstr "连接接口（WiFi 频段、LAN 端口或路由）"
 
 msgid "Connections"
-msgstr ""
+msgstr "连接"
 
 msgid "Connections: <b>%d</b>"
-msgstr ""
+msgstr "连接数：<b>%d</b>"
 
 msgid "Conns"
-msgstr ""
+msgstr "连接数"
 
 msgid "Control"
-msgstr ""
+msgstr "控制"
 
 msgid "Current download speed (bytes/sec from router to device)"
-msgstr ""
+msgstr "当前下载速度（字节/秒，从路由器到设备）"
 
 msgid "Current mode:"
-msgstr ""
+msgstr "当前模式："
 
 msgid "Current upload speed (bytes/sec from device to router)"
-msgstr ""
+msgstr "当前上传速度（字节/秒，从设备到路由器）"
 
 msgid "Currently tracked connections hold %s"
-msgstr ""
+msgstr "当前跟踪的连接持有 %s"
 
 msgid "Custom"
-msgstr ""
+msgstr "自定义"
 
 msgid "Customize message"
-msgstr ""
+msgstr "自定义消息"
 
 msgid "Custom…"
-msgstr ""
+msgstr "自定义…"
 
 msgid "Cut all internet access"
-msgstr ""
+msgstr "切断所有互联网访问"
 
 msgid "Cut internet"
-msgstr ""
+msgstr "切断互联网"
 
 msgid "Cutting…"
-msgstr ""
+msgstr "切断中…"
 
 msgid "DL Speed"
-msgstr ""
+msgstr "下载速度"
 
 msgid "Destination"
-msgstr ""
+msgstr "目标"
 
 msgid "Device"
-msgstr ""
+msgstr "设备"
 
 msgid "Device hostname from DHCP lease"
-msgstr ""
+msgstr "来自 DHCP 租约的设备主机名"
 
 msgid "Device name"
-msgstr ""
+msgstr "设备名称"
 
 msgid "Devices already known:"
-msgstr ""
+msgstr "已知设备："
 
 msgid ""
 "Devices keep talking to each other and to the router — only the way out is close"
@@ -296,89 +296,91 @@ msgid ""
 "hrough a LAN host (Tailscale, a tunnel, a jump host) stops working while this is"
 " on."
 msgstr ""
+"设备之间及与路由器仍可通信 — 只是对外出口被关闭。入站流量也被阻止，因此路由器上的透明代理（podkop、passwall）也无法将其带出。通过 LAN 主机"
+"（Tailscale、隧道、跳转主机）到达路由器的远程访问在此期间停止工作。"
 
 msgid ""
 "Devices on the WiFi deny list that are still connected — those blocks are not in"
 " effect on the running radio."
-msgstr ""
+msgstr "仍在连接的 WiFi 拒绝列表设备 — 这些阻断在当前无线未生效。"
 
 msgid "Disable hardware offload (keeps software offload):"
-msgstr ""
+msgstr "关闭硬件卸载（保留软件卸载）："
 
 msgid "Dismiss"
-msgstr ""
+msgstr "关闭"
 
 msgid "Display"
-msgstr ""
+msgstr "显示"
 
 msgid "Distinct remote clients"
-msgstr ""
+msgstr "不同远程客户端数"
 
 msgid "Done"
-msgstr ""
+msgstr "完成"
 
 msgid "Download · %s"
-msgstr ""
+msgstr "下载 · %s"
 
 msgid "Drop"
-msgstr ""
+msgstr "丢包"
 
 msgid "Drop ratio"
-msgstr ""
+msgstr "丢包率"
 
 msgid "Dropped:"
-msgstr ""
+msgstr "已丢弃："
 
 msgid "Dropped: <b style=\"color:var(--tc-err)\">🚫 %d pkts / %s</b>"
-msgstr ""
+msgstr "已丢弃：<b style=\"color:var(--tc-err)\">🚫 %d 个包 / %s</b>"
 
 msgid "Drops"
-msgstr ""
+msgstr "丢包数"
 
 msgid "Drops excess packets (instant enforcement, low overhead)"
-msgstr ""
+msgstr "丢弃超额数据包（即时生效、开销低）"
 
 msgid "Dst IP"
-msgstr ""
+msgstr "目标 IP"
 
 msgid "ECN marks"
-msgstr ""
+msgstr "ECN 标记"
 
 msgid "EWMA"
-msgstr ""
+msgstr "指数加权移动平均"
 
 msgid "Enabled"
-msgstr ""
+msgstr "已启用"
 
 msgid "Enter a custom speed value"
-msgstr ""
+msgstr "输入自定义速度值"
 
 msgid "Every device in"
-msgstr ""
+msgstr "每个设备在"
 
 msgid "Every device this router forwards for"
-msgstr ""
+msgstr "此路由器转发的每个设备"
 
 msgid "Ext. port"
-msgstr ""
+msgstr "外部端口"
 
 msgid "Extended"
-msgstr ""
+msgstr "扩展"
 
 msgid "Extended Statistics"
-msgstr ""
+msgstr "扩展统计"
 
 msgid "Extended Statistics (all devices)"
-msgstr ""
+msgstr "扩展统计（所有设备）"
 
 msgid "External (WAN) port"
-msgstr ""
+msgstr "外部（WAN）端口"
 
 msgid "Filter connections by protocol"
-msgstr ""
+msgstr "按协议筛选连接"
 
 msgid "Flow Offload"
-msgstr ""
+msgstr "流卸载"
 
 msgid ""
 "Flow offload is active and the kernel does not support the nftables counter maps"
@@ -386,245 +388,247 @@ msgid ""
 "ections. Speeds and totals would be far too low, so they are not shown. Disablin"
 "g hardware offload in Settings → Flow Offload restores them."
 msgstr ""
+"流卸载已启用，但内核不支持 trafficctl 在该模式下使用的 nftables 计数器映射，因此卸载连接的字节计数器停止更新。速度和总计会严重偏低，故不显"
+"示。在 设置 → 流卸载 中关闭硬件卸载可恢复。"
 
 msgid "Flow: /devices → select device → inline keyboard with enabled actions above"
-msgstr ""
+msgstr "流程：/devices → 选择设备 → 使用上方启用的操作内联键盘"
 
 msgid "Flows"
-msgstr ""
+msgstr "流数"
 
 msgid ""
 "Forwarded traffic only — this kernel cannot install the prerouting rule, so traf"
 "fic handled by a transparent proxy on the router would not be caught."
-msgstr ""
+msgstr "仅转发流量 — 此内核无法安装 prerouting 规则，因此路由器上透明代理处理的流量不会被捕获。"
 
 msgid "Full control"
-msgstr ""
+msgstr "完全控制"
 
 msgid "Gbit/s"
-msgstr ""
+msgstr "Gbit/s"
 
 msgid "Global internet cut needs nftables (fw4). This router is running iptables."
-msgstr ""
+msgstr "全局断网需要 nftables（fw4）。此路由器正在运行 iptables。"
 
 msgid "Graph"
-msgstr ""
+msgstr "图表"
 
 msgid "Group"
-msgstr ""
+msgstr "分组"
 
 msgid "Group connections table rows"
-msgstr ""
+msgstr "对连接表行进行分组"
 
 msgid "HTML:"
-msgstr ""
+msgstr "HTML："
 
 msgid "Hardware MAC address"
-msgstr ""
+msgstr "硬件 MAC 地址"
 
 msgid "Hardware flow offload"
-msgstr ""
+msgstr "硬件流卸载"
 
 msgid "Hardware flow offloading active — real-time speed monitoring unavailable."
-msgstr ""
+msgstr "硬件流卸载已启用 — 实时速度监控不可用。"
 
 msgid "Hardware flow offloading is active."
-msgstr ""
+msgstr "硬件流卸载已启用。"
 
 msgid "Hardware offload"
-msgstr ""
+msgstr "硬件卸载"
 
 msgid "Hostname"
-msgstr ""
+msgstr "主机名"
 
 msgid "Hostname / Dst IP"
-msgstr ""
+msgstr "主机名 / 目标 IP"
 
 msgid ""
 "How often live data is polled: speeds, graphs, drop/backlog counters, and the co"
 "nnection table in device view"
-msgstr ""
+msgstr "实时数据轮询频率：速度、图表、丢包/队列计数器以及设备视图的连接表"
 
 msgid "How to get full functionality without disabling offload:"
-msgstr ""
+msgstr "如何在不关闭卸载的情况下获得完整功能："
 
 msgid "IP address"
-msgstr ""
+msgstr "IP 地址"
 
 msgid ""
 "If your current firmware uses fw3 (iptables) or ships a kernel older than 5.7, a"
 " router with modern OpenWrt and fw4 support will have this working out of the bo"
 "x."
-msgstr ""
+msgstr "如果你当前固件使用 fw3（iptables）或内核版本低于 5.7，现代 OpenWrt 且支持 fw4 的路由器将开箱即用。"
 
 msgid "Iface"
-msgstr ""
+msgstr "接口"
 
 msgid "In"
-msgstr ""
+msgstr "入站"
 
 msgid ""
 "In this mode the kernel's conntrack, firewall, and tc are bypassed for offloaded"
 " flows:"
-msgstr ""
+msgstr "此模式下，内核的 conntrack、防火墙和 tc 会绕过已卸载流："
 
 msgid "Inbound rate limit (drops packets above the rate)"
-msgstr ""
+msgstr "入站速率限制（超过速率则丢包）"
 
 msgid ""
 "Inbound traffic control for DNAT port forwards and router-local open ports confi"
 "gured in the firewall. Pause drops all inbound traffic on the port instantly (wi"
 "thout touching the firewall config); Limit polices the inbound rate."
-msgstr ""
+msgstr "针对防火墙中配置的 DNAT 端口转发和路由器本地开放端口的入站流量控制。暂停会立即丢弃该端口所有入站流量（不修改防火墙配置）；限制会对入站速率进行管制。"
 
 msgid "Inet"
-msgstr ""
+msgstr "互联网"
 
 msgid "Inline keyboard preview:"
-msgstr ""
+msgstr "内联键盘预览："
 
 msgid "Interfaces"
-msgstr ""
+msgstr "接口"
 
 msgid "Internet access status (paused = traffic blocked)"
-msgstr ""
+msgstr "互联网访问状态（暂停 = 流量已阻断）"
 
 msgid "Internet is cut for all devices"
-msgstr ""
+msgstr "所有设备的互联网已切断"
 
 msgid "Kbit/s"
-msgstr ""
+msgstr "Kbit/s"
 
 msgid "Keep after reboot"
-msgstr ""
+msgstr "重启后保持"
 
 msgid "Kept after reboot — undoing it needs LAN or physical access."
-msgstr ""
+msgstr "重启后仍保持 — 撤销需要 LAN 或物理访问。"
 
 msgid "Known devices"
-msgstr ""
+msgstr "已知设备"
 
 msgid "LAN keeps working"
-msgstr ""
+msgstr "LAN 保持可用"
 
 msgid "Last seen: %s, %s ago"
-msgstr ""
+msgstr "上次出现：%s，%s 前"
 
 msgid "Lended / Borrowed"
-msgstr ""
+msgstr "借出 / 借用"
 
 msgid "Limit"
-msgstr ""
+msgstr "限速"
 
 msgid "Limit inbound to %s"
-msgstr ""
+msgstr "入站限速到 %s"
 
 msgid "Limit new devices"
-msgstr ""
+msgstr "限制新设备"
 
 msgid "Limit: %s"
-msgstr ""
+msgstr "限速：%s"
 
 msgid "Limited devices"
-msgstr ""
+msgstr "已限速设备"
 
 msgid "Limited subnets"
-msgstr ""
+msgstr "已限速子网"
 
 msgid "Limited:"
-msgstr ""
+msgstr "已限速："
 
 msgid "Limiter"
-msgstr ""
+msgstr "限速器"
 
 msgid "Limiter (nft drop)"
-msgstr ""
+msgstr "限速器（nft 丢包）"
 
 msgid "Limiting %s → %s (%s)…"
-msgstr ""
+msgstr "正在限速 %s → %s (%s)…"
 
 msgid "Limiting → %s…"
-msgstr ""
+msgstr "正在限速 → %s…"
 
 msgid "Link"
-msgstr ""
+msgstr "链路"
 
 msgid "Linux kernel: nf_flowtable ↗"
-msgstr ""
+msgstr "Linux 内核：nf_flowtable ↗"
 
 msgid "Loading…"
-msgstr ""
+msgstr "加载中…"
 
 msgid "Local IP address"
-msgstr ""
+msgstr "本地 IP 地址"
 
 msgid "Log categories"
-msgstr ""
+msgstr "日志类别"
 
 msgid "Logging"
-msgstr ""
+msgstr "日志记录"
 
 msgid "Logging & Persistence"
-msgstr ""
+msgstr "日志与持久化"
 
 msgid "MAC address"
-msgstr ""
+msgstr "MAC 地址"
 
 msgid "MAC:"
-msgstr ""
+msgstr "MAC："
 
 msgid "Max"
-msgstr ""
+msgstr "最大"
 
 msgid "Mbit/s"
-msgstr ""
+msgstr "Mbit/s"
 
 msgid "Method"
-msgstr ""
+msgstr "方法"
 
 msgid "Name"
-msgstr ""
+msgstr "名称"
 
 msgid "New Device Defaults"
-msgstr ""
+msgstr "新设备默认值"
 
 msgid "New devices"
-msgstr ""
+msgstr "新设备"
 
 msgid "No action buttons enabled"
-msgstr ""
+msgstr "未启用任何操作按钮"
 
 msgid "No active connections."
-msgstr ""
+msgstr "无活动连接。"
 
 msgid "No active devices"
-msgstr ""
+msgstr "无活动设备"
 
 msgid "No activity recorded yet."
-msgstr ""
+msgstr "尚未记录活动。"
 
 msgid ""
 "No baseline recorded yet. It is taken from the current leases when you switch th"
 "is on."
-msgstr ""
+msgstr "尚未记录基线。开启时会从当前租约获取。"
 
 msgid "No devices match filter."
-msgstr ""
+msgstr "没有设备符合筛选条件。"
 
 msgid "No extended stats available for this device."
-msgstr ""
+msgstr "该设备无可用扩展统计。"
 
 msgid "No extended stats available."
-msgstr ""
+msgstr "无可用扩展统计。"
 
 msgid "No offload"
-msgstr ""
+msgstr "无卸载"
 
 msgid "No port forwards or WAN-open ports are configured in the firewall."
-msgstr ""
+msgstr "防火墙中未配置端口转发或 WAN 开放端口。"
 
 msgid "None (per-flow)"
-msgstr ""
+msgstr "无（每流）"
 
 msgid ""
 "Not counted: flow offload is active and this router cannot provide the nftables "
@@ -632,570 +636,578 @@ msgid ""
 " for offloaded connections. Any total here would be far too low. See Settings → "
 "Flow Offload."
 msgstr ""
+"未计数：流卸载已启用，此路由器无法提供 trafficctl 在该模式下使用的 nftables 计数器，因此内核字节计数器停止更新。任何显示值都会严重偏低。参"
+"见 设置 → 流卸载。"
 
 msgid "Not enough data yet"
-msgstr ""
+msgstr "数据不足"
 
 msgid ""
 "Not measurable while flow offload is active: in that mode the router counts byte"
 "s per address only, so traffic cannot be split by protocol. See Settings → Flow "
 "Offload."
-msgstr ""
+msgstr "流卸载启用时无法测量：该模式下路由器仅按地址计数字节，因此无法按协议拆分。参见 设置 → 流卸载。"
 
 msgid "Note: speed is measured before shaper — bursts above limit are normal"
-msgstr ""
+msgstr "注意：速度在整形器之前测量 — 超出限制的突发属正常"
 
 msgid "Notifications"
-msgstr ""
+msgstr "通知"
 
 msgid "Notifications only"
-msgstr ""
+msgstr "仅通知"
 
 msgid "Off"
-msgstr ""
+msgstr "关闭"
 
 msgid ""
 "Offloads routing to the hardware engine (PPE/NPU). Requires software offload. ⚠ "
 "On many platforms (e.g. Mediatek Filogic) the driver does not report byte counte"
 "rs back to the kernel — real-time speed monitoring will show zero."
 msgstr ""
+"将路由卸载到硬件引擎（PPE/NPU）。需要软件卸载。⚠ 在许多平台（如 Mediatek Filogic）上，驱动不会将字节计数器报告回内核 — 实时速度监控"
+"将显示为零。"
 
 msgid "On %s"
-msgstr ""
+msgstr "在 %s 上"
 
 msgid ""
 "On the WiFi deny list but still connected — the block is NOT in effect on the ru"
 "nning radio. Install hostapd-utils so blocks apply immediately, or restart WiFi "
 "(disconnects every client)."
-msgstr ""
+msgstr "在 WiFi 拒绝列表中但仍连接 — 阻断在当前无线未生效。安装 hostapd-utils 可立即生效，或重启 WiFi（会断开所有客户端）。"
 
 msgid "One bucket for the whole subnet"
-msgstr ""
+msgstr "整个子网一个桶"
 
 msgid "One bucket per device inside the subnet"
-msgstr ""
+msgstr "子网内每个设备一个桶"
 
 msgid "Open DHCP/DNS bindings"
-msgstr ""
+msgstr "打开 DHCP/DNS 绑定"
 
 msgid "OpenWrt: Flow offloading ↗"
-msgstr ""
+msgstr "OpenWrt：Flow offloading ↗"
 
 msgid "Operation failed"
-msgstr ""
+msgstr "操作失败"
 
 msgid "Or disable all flow offload in LuCI → Network → Firewall → General Settings."
-msgstr ""
+msgstr "或在 LuCI → 网络 → 防火墙 → 常规设置 中关闭所有流卸载。"
 
 msgid "Other interfaces"
-msgstr ""
+msgstr "其他接口"
 
 msgid "Out"
-msgstr ""
+msgstr "出站"
 
 msgid "Overlimits"
-msgstr ""
+msgstr "超限次数"
 
 msgid "Overrides the DHCP lease or DNS name. Leave empty to clear the custom name."
-msgstr ""
+msgstr "覆盖 DHCP 租约或 DNS 名称。留空可清除自定义名称。"
 
 msgid "Overview"
-msgstr ""
+msgstr "总览"
 
 msgid "Packets dropped"
-msgstr ""
+msgstr "丢包数"
 
 msgid "Packets dropped by rate limiter"
-msgstr ""
+msgstr "限速器丢包数"
 
 msgid "Passed: <b>%s</b>"
-msgstr ""
+msgstr "通过：<b>%s</b>"
 
 msgid "Paste bot token"
-msgstr ""
+msgstr "粘贴机器人令牌"
 
 msgid "Pause"
-msgstr ""
+msgstr "暂停"
 
 msgid "Persist rules"
-msgstr ""
+msgstr "持久化规则"
 
 msgid "Pick a rate to apply it to this target, or Off to remove its limit."
-msgstr ""
+msgstr "选择速率以应用到该目标，或选择关闭以移除其限制。"
 
 msgid "Poll"
-msgstr ""
+msgstr "轮询"
 
 msgid "Polling is off — set the Poll interval to see throughput."
-msgstr ""
+msgstr "轮询已关闭 — 设置轮询间隔以查看吞吐量。"
 
 msgid "Port"
-msgstr ""
+msgstr "端口"
 
 msgid "Port Forwards & Open Ports"
-msgstr ""
+msgstr "端口转发与开放端口"
 
 msgid "Preview:"
-msgstr ""
+msgstr "预览："
 
 msgid "Proto"
-msgstr ""
+msgstr "协议"
 
 msgid "Protocol"
-msgstr ""
+msgstr "协议"
 
 msgid "Queue"
-msgstr ""
+msgstr "队列"
 
 msgid "Queue memory"
-msgstr ""
+msgstr "队列内存"
 
 msgid "Queued: <b style=\\\"color:var(--tc-speed)\\\">%s</b>"
-msgstr ""
+msgstr "队列中：<b style=\\\"color:var(--tc-speed)\\\">%s</b>"
 
 msgid "Queues excess traffic (smoother streaming, lower jitter)"
-msgstr ""
+msgstr "对超额流量排队（更流畅流媒体、更低抖动）"
 
 msgid "Rate"
-msgstr ""
+msgstr "速率"
 
 msgid "Rate limiting — applies only to new connections"
-msgstr ""
+msgstr "速率限制 — 仅适用于新连接"
 
 msgid "Ratelimits"
-msgstr ""
+msgstr "速率限制"
 
 msgid "Received by this interface"
-msgstr ""
+msgstr "该接口接收"
 
 msgid "Recent"
-msgstr ""
+msgstr "最近"
 
 msgid "Refresh"
-msgstr ""
+msgstr "刷新"
 
 msgid "Remove"
-msgstr ""
+msgstr "移除"
 
 msgid "Remove limit"
-msgstr ""
+msgstr "移除限速"
 
 msgid "Removing from"
-msgstr ""
+msgstr "从…移除"
 
 msgid "Removing limit on %s…"
-msgstr ""
+msgstr "正在移除 %s 上的限速…"
 
 msgid "Removing throttle…"
-msgstr ""
+msgstr "正在移除节流…"
 
 msgid "Rename device"
-msgstr ""
+msgstr "重命名设备"
 
 msgid "Rename failed"
-msgstr ""
+msgstr "重命名失败"
 
 msgid "Resets when the router reboots."
-msgstr ""
+msgstr "路由器重启时重置。"
 
 msgid "Restore internet"
-msgstr ""
+msgstr "恢复互联网"
 
 msgid "Restores by itself in"
-msgstr ""
+msgstr "自动恢复于"
 
 msgid "Restoring…"
-msgstr ""
+msgstr "恢复中…"
 
 msgid "Resume"
-msgstr ""
+msgstr "恢复"
 
 msgid "Routed via %s"
-msgstr ""
+msgstr "经由 %s 路由"
 
 msgid "Running…"
-msgstr ""
+msgstr "运行中…"
 
 msgid "Save"
-msgstr ""
+msgstr "保存"
 
 msgid "Save as router default"
-msgstr ""
+msgstr "保存为路由器默认值"
 
 msgid "Saving…"
-msgstr ""
+msgstr "保存中…"
 
 msgid "Scanning all devices…"
-msgstr ""
+msgstr "正在扫描所有设备…"
 
 msgid "Search device (name, IP, MAC)…"
-msgstr ""
+msgstr "搜索设备（名称、IP、MAC）…"
 
 msgid "Sending…"
-msgstr ""
+msgstr "发送中…"
 
 msgid "Sent by this interface"
-msgstr ""
+msgstr "该接口发送"
 
 msgid "Service"
-msgstr ""
+msgstr "服务"
 
 msgid "Set a rate above 0 — with no rate this does nothing."
-msgstr ""
+msgstr "设置大于 0 的速率 — 否则无效。"
 
 msgid "Settings"
-msgstr ""
+msgstr "设置"
 
 msgid "Shaped devices"
-msgstr ""
+msgstr "已整形设备"
 
 msgid "Shaped devices are usually not offloaded (kernel detects the HTB qdisc)."
-msgstr ""
+msgstr "已整形设备通常不会被卸载（内核会检测到 HTB qdisc）。"
 
 msgid "Shaped:"
-msgstr ""
+msgstr "已整形："
 
 msgid "Shaped: <b style=\\\"color:var(--tc-speed)\\\">🌊 %s</b>"
-msgstr ""
+msgstr "已整形：<b style=\\\"color:var(--tc-speed)\\\">🌊 %s</b>"
 
 msgid "Shaper"
-msgstr ""
+msgstr "整形器"
 
 msgid "Shaper (tc/HTB queue)"
-msgstr ""
+msgstr "整形器（tc/HTB 队列）"
 
 msgid "Shapes"
-msgstr ""
+msgstr "整形"
 
 msgid "Shaping → %s…"
-msgstr ""
+msgstr "正在整形 → %s…"
 
 msgid "Share:"
-msgstr ""
+msgstr "共享："
 
 msgid "Show/hide token"
-msgstr ""
+msgstr "显示/隐藏令牌"
 
 msgid "Simple"
-msgstr ""
+msgstr "简单"
 
 msgid "Simple = arithmetic mean, EWMA = exponential weighted moving average"
-msgstr ""
+msgstr "简单 = 算术平均，EWMA = 指数加权移动平均"
 
 msgid "Software flow offload"
-msgstr ""
+msgstr "软件流卸载"
 
 msgid "Software flow offloading is active."
-msgstr ""
+msgstr "软件流卸载已启用。"
 
 msgid "Software offload"
-msgstr ""
+msgstr "软件卸载"
 
 msgid "Software offload (counter)"
-msgstr ""
+msgstr "软件流卸载（计数器模式）"
 
 msgid "Speed Limit"
-msgstr ""
+msgstr "速度限制"
 
 msgid "Speed graph. Window = avg time. Orange dashed line = speed limit"
-msgstr ""
+msgstr "速度图表。窗口 = 平均时间。橙色虚线 = 速度限制"
 
 msgid ""
 "Speed is measured via nftables counters installed at a higher priority (before t"
 "he flowtable), so graphs are accurate."
-msgstr ""
+msgstr "速度通过安装在更高优先级（flowtable 之前）的 nftables 计数器测量，因此图表准确。"
 
 msgid "Speed limit: <b style=\\\"color:var(--tc-warn)\\\">⚡ %s</b>"
-msgstr ""
+msgstr "速度限制：<b style=\\\"color:var(--tc-warn)\\\">⚡ %s</b>"
 
 msgid "Speed limit: shaper (queue) or limiter (drop)"
-msgstr ""
+msgstr "速度限制：整形器（队列）或限速器（丢包）"
 
 msgid "Speed monitoring — conntrack byte counters are not updated"
-msgstr ""
+msgstr "速度监控 — conntrack 字节计数器未更新"
 
 msgid "State"
-msgstr ""
+msgstr "状态"
 
 msgid "Stats"
-msgstr ""
+msgstr "统计"
 
 msgid "Stays off until you switch it back."
-msgstr ""
+msgstr "保持关闭直到你手动恢复。"
 
 msgid ""
 "Store the current Poll and Window as this router's defaults, for browsers that h"
 "ave not set their own"
-msgstr ""
+msgstr "将当前轮询和窗口保存为此路由器的默认值，供未自行设置的浏览器使用"
 
 msgid "Switch it off"
-msgstr ""
+msgstr "关闭它"
 
 msgid "Syslog"
-msgstr ""
+msgstr "系统日志"
 
 msgid ""
 "TCP bytes transferred, accumulated on the router. Not measurable while flow offl"
 "oad is active"
-msgstr ""
+msgstr "TCP 已传输字节，在路由器上累计。流卸载启用时无法测量"
 
 msgid "TCP: <b>%d</b>"
-msgstr ""
+msgstr "TCP：<b>%d</b>"
 
 msgid "Table & Speed"
-msgstr ""
+msgstr "表格与速度"
 
 msgid "Target:"
-msgstr ""
+msgstr "目标："
 
 msgid "Telegram"
-msgstr ""
+msgstr "Telegram"
 
 msgid "Telegram Bot"
-msgstr ""
+msgstr "Telegram 机器人"
 
 msgid "Test"
-msgstr ""
+msgstr "测试"
 
 msgid ""
 "The auto-revert helper is not running; this page re-checks the deadline while it"
 " is open."
-msgstr ""
+msgstr "自动恢复助手未运行；此页面在打开时会重新检查截止时间。"
 
 msgid "The flowtable"
-msgstr ""
+msgstr "flowtable"
 
 msgid "The internet cut is switched on, but its firewall rule is missing."
-msgstr ""
+msgstr "互联网切断已开启，但其防火墙规则缺失。"
 
 msgid ""
 "The kernel fast-paths established connections through a flowtable, bypassing con"
 "ntrack byte updates for higher throughput."
-msgstr ""
+msgstr "内核通过 flowtable 对已建立连接进行快速转发，绕过 conntrack 字节更新以提高吞吐量。"
 
 msgid ""
 "The router offloads established connections from the CPU to the hardware (NIC/So"
 "C), achieving 2–3× higher throughput and lower CPU usage."
-msgstr ""
+msgstr "路由器将已建立连接从 CPU 卸载到硬件（NIC/SoC），实现 2–3 倍更高吞吐量和更低 CPU 占用。"
 
 msgid "Throttle removed"
-msgstr ""
+msgstr "节流已移除"
 
 msgid "Time window for speed averaging"
-msgstr ""
+msgstr "速度平均时间窗口"
 
 msgid "To restore speed monitoring:"
-msgstr ""
+msgstr "恢复速度监控："
 
 msgid "Token:"
-msgstr ""
+msgstr "令牌："
 
 msgid "Top application by traffic"
-msgstr ""
+msgstr "按流量排序的热门应用"
 
 msgid "Top application by traffic (needs the netifyd DPI agent)"
-msgstr ""
+msgstr "按流量排序的热门应用（需要 netifyd DPI 代理）"
 
 msgid "Top talkers"
-msgstr ""
+msgstr " Top 发言人"
 
 msgid ""
 "Total bytes transferred (download + upload), accumulated on the router. Resets o"
 "n reboot; hover a cell for the start time"
-msgstr ""
+msgstr "总传输字节（下载 + 上传），在路由器上累计。重启时重置；悬停单元格查看开始时间"
 
 msgid "Total dropped"
-msgstr ""
+msgstr "总丢包"
 
 msgid "Total drops"
-msgstr ""
+msgstr "总丢包数"
 
 msgid "Total queue memory"
-msgstr ""
+msgstr "总队列内存"
 
 msgid "Total since boot (RX / TX)"
-msgstr ""
+msgstr "启动以来总计（RX / TX）"
 
 msgid "Traffic Control"
-msgstr ""
+msgstr "流量控制"
 
 msgid ""
 "Traffic is flowing right now. It is normally re-asserted within seconds — if thi"
 "s persists, switch it off and on again."
-msgstr ""
+msgstr "流量目前正在流通。通常会在数秒内重新生效 — 如持续存在，请关闭后再开启。"
 
 msgid "Traffic shaping (tc/HTB) — bypassed for offloaded flows"
-msgstr ""
+msgstr "流量整形（tc/HTB）— 对卸载流被绕过"
 
 msgid "Traffic shaping and blocking are not affected."
-msgstr ""
+msgstr "流量整形和阻断不受影响。"
 
 msgid ""
 "UDP bytes transferred, accumulated on the router. Not measurable while flow offl"
 "oad is active"
-msgstr ""
+msgstr "UDP 已传输字节，在路由器上累计。流卸载启用时无法测量"
 
 msgid "UDP: <b>%d</b>"
-msgstr ""
+msgstr "UDP：<b>%d</b>"
 
 msgid "UL Speed"
-msgstr ""
+msgstr "上传速度"
 
 msgid "Unblock Internet"
-msgstr ""
+msgstr "解除互联网阻断"
 
 msgid "Unblock WiFi"
-msgstr ""
+msgstr "解除 WiFi 阻断"
 
 msgid "Unknown error"
-msgstr ""
+msgstr "未知错误"
 
 msgid "Unknown — device unreachable"
-msgstr ""
+msgstr "未知 — 设备不可达"
 
 msgid "Until I switch it back"
-msgstr ""
+msgstr "直到我手动恢复"
 
 msgid "Upload · %s"
-msgstr ""
+msgstr "上传 · %s"
 
 msgid "Utilization"
-msgstr ""
+msgstr "利用率"
 
 msgid "Variables"
-msgstr ""
+msgstr "变量"
 
 msgid "Visible columns"
-msgstr ""
+msgstr "可见列"
 
 msgid "WAN IP"
-msgstr ""
+msgstr "WAN IP"
 
 msgid "Waiting for a second sample…"
-msgstr ""
+msgstr "等待第二个样本…"
 
 msgid "Waiting for the first byte sample."
-msgstr ""
+msgstr "等待第一个字节样本。"
 
 msgid "Whole network"
-msgstr ""
+msgstr "整个网络"
 
 msgid "WiFi SSID"
-msgstr ""
+msgstr "WiFi SSID"
 
 msgid "WiFi band (2.4/5GHz)"
-msgstr ""
+msgstr "WiFi 频段（2.4/5GHz）"
 
 msgid "WiFi block NOT in effect"
-msgstr ""
+msgstr "WiFi 阻断未生效"
 
 msgid "WiFi blocked"
-msgstr ""
+msgstr "WiFi 已阻断"
 
 msgid "WiFi blocking and internet blocking of new connections still work."
-msgstr ""
+msgstr "WiFi 阻断和新连接的互联网阻断仍然有效。"
 
 msgid "WiFi deny list"
-msgstr ""
+msgstr "WiFi 拒绝列表"
 
 msgid "WiFi signal (dBm)"
-msgstr ""
+msgstr "WiFi 信号（dBm）"
 
 msgid "WiFi:"
-msgstr ""
+msgstr "WiFi："
 
 msgid "Window"
-msgstr ""
+msgstr "窗口"
 
 msgid "You will need LAN or physical access to undo this — a reboot will not clear it."
-msgstr ""
+msgstr "你需要 LAN 或物理访问来撤销此操作 — 重启不会清除。"
 
 msgid "active concurrent connections in queue"
-msgstr ""
+msgstr "队列中活动并发连接"
 
 msgid "all active blocks, limits, and shapes"
-msgstr ""
+msgstr "所有活动阻断、限速和整形"
 
 msgid "between them — one bucket for the whole subnet."
-msgstr ""
+msgstr "它们之间 — 整个子网一个桶。"
 
 msgid "bit/s"
-msgstr ""
+msgstr "bit/s"
 
 msgid "blocked"
-msgstr ""
+msgstr "已阻断"
 
 msgid "bytes allocated by the queue discipline"
-msgstr ""
+msgstr "队列规则分配的字节数"
 
 msgid "clear filter"
-msgstr ""
+msgstr "清除筛选"
 
 msgid "command list and bot mode"
-msgstr ""
+msgstr "命令列表和机器人模式"
 
 msgid "congestion signals without drop"
-msgstr ""
+msgstr "未丢包的拥塞信号"
 
 msgid "connection type (5G, LAN)"
-msgstr ""
+msgstr "连接类型（5G、LAN）"
 
 msgid "connections"
-msgstr ""
+msgstr "个连接"
 
 msgid "current speed as percentage of rate limit"
-msgstr ""
+msgstr "当前速度占速率限制的百分比"
 
 msgid "date (2026-05-26)"
-msgstr ""
+msgstr "日期（2026-05-26）"
 
 msgid "date + time"
-msgstr ""
+msgstr "日期 + 时间"
 
 msgid "device connections"
-msgstr ""
+msgstr "设备连接数"
 
 msgid "device hostname"
-msgstr ""
+msgstr "设备主机名"
 
 msgid "device list → tap device → action buttons"
-msgstr ""
+msgstr "设备列表 → 点击设备 → 操作按钮"
 
 msgid "disabled"
-msgstr ""
+msgstr "已禁用"
 
 msgid "down"
-msgstr ""
+msgstr "断开"
 
 msgid "dropped"
-msgstr ""
+msgstr "已丢弃"
 
 msgid "each"
-msgstr ""
+msgstr "每个"
 
 msgid "every device"
-msgstr ""
+msgstr "每个设备"
 
 msgid "failed"
-msgstr ""
+msgstr "失败"
 
 msgid ""
 "flag (Linux 5.7+, set automatically by fw4/nftables) periodically syncs hardware"
 " byte counts back to conntrack — trafficctl detects this and all features work n"
 "ormally."
 msgstr ""
+" counter 标志（Linux 5.7+，由 fw4/nftables 自动设置）会定期将硬件字节数同步回 conntrack — trafficctl 检"
+"测到后所有功能均正常工作。"
 
 msgid ""
 "flag should sync hardware byte counts back to conntrack, but on many platforms ("
 "e.g. Mediatek Filogic) the driver does not implement the stats callback, so conn"
 "track counters remain frozen for active flows."
 msgstr ""
+" counter 标志应将硬件字节数同步回 conntrack，但在许多平台（如 Mediatek Filogic）上驱动未实现统计回调，因此 conntrac"
+"k 计数器对已激活流保持冻结。"
 
 msgid "groups from"
-msgstr ""
+msgstr "个分组来自"
 
 msgid "h"
-msgstr ""
+msgstr "小时"
 
 msgid ""
 "is not one of the subnets this router monitors, so a limit on it would be accept"
@@ -1203,143 +1215,145 @@ msgid ""
 "uest-VLAN setup) is excluded. Check with: uci show firewall | grep -E \"name=|mas"
 "q=\""
 msgstr ""
+"不是此路由器监控的子网之一，因此对其设置的限制会被接受但永不执行。除 \"lan\" 外且 masq=1 的防火墙区域（通常是访客 VLAN）被排除。检查：uci "
+"show firewall | grep -E \"name=|masq=\""
 
 msgid "kbit/s"
-msgstr ""
+msgstr "kbit/s"
 
 msgid "line break"
-msgstr ""
+msgstr "换行"
 
 msgid "may use"
-msgstr ""
+msgstr "可使用"
 
 msgid "min"
-msgstr ""
+msgstr "分钟"
 
 msgid "network interface"
-msgstr ""
+msgstr "网络接口"
 
 msgid "new"
-msgstr ""
+msgstr "新"
 
 msgid "nftables: Flowtables ↗"
-msgstr ""
+msgstr "nftables：Flowtables ↗"
 
 msgid "nothing dropped yet"
-msgstr ""
+msgstr "尚无丢包"
 
 msgid "of its own."
-msgstr ""
+msgstr "其自有速率。"
 
 msgid "old"
-msgstr ""
+msgstr "旧"
 
 msgid "on the deny list but still connected; install hostapd-utils or restart WiFi"
-msgstr ""
+msgstr "在拒绝列表中但仍连接；安装 hostapd-utils 或重启 WiFi"
 
 msgid "open port"
-msgstr ""
+msgstr "开放端口"
 
 msgid "own-rate vs parent-rate packets"
-msgstr ""
+msgstr "自身速率与父速率数据包"
 
 msgid "packets dropped by queue overflow"
-msgstr ""
+msgstr "队列溢出丢包数"
 
 msgid "paused"
-msgstr ""
+msgstr "已暂停"
 
 msgid "per device"
-msgstr ""
+msgstr "每个设备"
 
 msgid "percentage of total traffic that was dropped"
-msgstr ""
+msgstr "被丢弃流量占总流量的百分比"
 
 msgid "pkts"
-msgstr ""
+msgstr "包"
 
 msgid "port"
-msgstr ""
+msgstr "端口"
 
 msgid "port forward"
-msgstr ""
+msgstr "端口转发"
 
 msgid "rDNS"
-msgstr ""
+msgstr "rDNS"
 
 msgid "rate exceeded events"
-msgstr ""
+msgstr "速率超出事件"
 
 msgid "resolving…"
-msgstr ""
+msgstr "解析中…"
 
 msgid "routed"
-msgstr ""
+msgstr "已路由"
 
 msgid "router"
-msgstr ""
+msgstr "路由器"
 
 msgid "router hostname"
-msgstr ""
+msgstr "路由器主机名"
 
 msgid "router uptime"
-msgstr ""
+msgstr "路由器运行时间"
 
 msgid "s"
-msgstr ""
+msgstr "秒"
 
 msgid "saved"
-msgstr ""
+msgstr "已保存"
 
 msgid "sending or receiving now"
-msgstr ""
+msgstr "当前正在发送或接收"
 
 msgid "share"
-msgstr ""
+msgstr "共享"
 
 msgid "shared"
-msgstr ""
+msgstr "共享"
 
 msgid "shared between them"
-msgstr ""
+msgstr "它们之间共享"
 
 msgid "these are never limited by this setting."
-msgstr ""
+msgstr "这些从不受此设置限制。"
 
 msgid "time (14:32)"
-msgstr ""
+msgstr "时间（14:32）"
 
 msgid "total connected clients"
-msgstr ""
+msgstr "总连接客户端数"
 
 msgid "traffic discarded by nft policer"
-msgstr ""
+msgstr "nft 管制器丢弃的流量"
 
 msgid "under a minute"
-msgstr ""
+msgstr "不足一分钟"
 
 msgid "value"
-msgstr ""
+msgstr "数值"
 
 msgid "↑ UL"
-msgstr ""
+msgstr "↑ 上传"
 
 msgid ""
 "↓ / ↑ are relative to the interface: on the WAN ↓ is your download, on a LAN bri"
 "dge ↓ is what the LAN sent upstream."
-msgstr ""
+msgstr "↓ / ↑ 相对于接口：在 WAN 上 ↓ 是你的下载，在 LAN 网桥上 ↓ 是 LAN 向上游发送的数据。"
 
 msgid "↓ DL"
-msgstr ""
+msgstr "↓ 下载"
 
 msgid "⏸ Block Internet"
-msgstr ""
+msgstr "⏸ 阻断互联网"
 
 msgid "✕"
-msgstr ""
+msgstr "✕"
 
 msgid "⬅️ Back"
-msgstr ""
+msgstr "⬅️ 返回"
 
 msgid ""
 "🆕 <b>New device</b>\n"
@@ -1347,10 +1361,14 @@ msgid ""
 "MAC: <code>{{ mac }}</code>\n"
 "Link: {{ link }}\n"
 msgstr ""
+"🆕 <b>新设备</b>\n"
+"{{ name }} ({{ ip }})\n"
+"MAC：<code>{{ mac }}</code>\n"
+"Link：{{ link }}\n"
 
 msgid "🆕 New device\\n{{ name }} ({{ ip }})\\nMAC: {{ mac }}\\nLink: {{ link }}"
-msgstr ""
+msgstr "🆕 新设备\\n{{ name }} ({{ ip }})\\nMAC：{{ mac }}\\nLink：{{ link }}"
 
 msgid "📵 Block WiFi"
-msgstr ""
+msgstr "📵 阻断 WiFi"
 

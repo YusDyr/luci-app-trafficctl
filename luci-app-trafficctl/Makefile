@@ -11,7 +11,6 @@ LUCI_TITLE:=LuCI Traffic Control
 LUCI_DESCRIPTION:=Per-device traffic monitoring, rate limiting (nft/iptables), \
  traffic shaping (tc/HTB), internet blocking, and WiFi MAC filtering.
 LUCI_DEPENDS:=+conntrack +luci-base +rpcd +curl +tc +iw +hostapd-utils
-LUCI_PKGARCH:=all
 
 include $(TOPDIR)/feeds/luci/luci.mk
 
@@ -58,4 +57,3 @@ exit 0
 endef
 
 # call BuildPackage - OpenWrt buildroot will pick up the standard LuCI layout
-$(eval $(call BuildPackage,$(PKG_NAME)))
