@@ -455,6 +455,61 @@ else
     printf 'skip: no node, not exercising the frontend slices\n'
 fi
 
+# The each/shared sentence must quote the rate that will actually be applied.
+# Naming only the download figure next to a split ceiling describes a different
+# rule than the one being installed, in the one place the repository added full
+# sentences specifically so the bucket layout could not be misread.
+if command -v node >/dev/null 2>&1; then
+    sed -n '/^\t\tfunction updateScopeExplain()/,/^\t\t}/p' "$JS" > "$TMP/explain.js"
+    cat > "$TMP/explain_run.js" <<'NODE'
+function _(s) { return s; }
+String.prototype.format = function () {
+    var a = arguments, i = 0;
+    return this.replace(/%s/g, function () { return a[i++]; });
+};
+function fmtRate(kbit) {
+    if (!kbit || kbit <= 0) return '—';
+    var mbit = kbit / 1000;
+    if (mbit >= 1) return (mbit % 1 === 0 ? mbit.toFixed(0) : mbit.toFixed(1)) + ' Mbit/s';
+    return kbit + ' kbit/s';
+}
+var _dl = '5000', _up = '', _scopeSelected = 'each';
+function getRateKbit()   { return _dl; }
+function getRateKbitUp() { return _up; }
+var scopeInput   = { value: '10.0.20.0/24' };
+var scopeExplain = { textContent: '' };
+var scopeWarn    = { textContent: '', classList: { toggle: function () {} } };
+function targetIsMonitored() { return true; }
+NODE
+    cat "$TMP/explain.js" | sed 's/^\t\t//' >> "$TMP/explain_run.js"
+    cat >> "$TMP/explain_run.js" <<'NODE'
+function say(dl, up, scope) {
+    _dl = dl; _up = up; _scopeSelected = scope;
+    updateScopeExplain();
+    return scopeExplain.textContent;
+}
+console.log([
+    say('5000', '',     'each'),
+    say('5000', '500',  'each'),
+    say('5000', '',     'shared'),
+    say('5000', '500',  'shared')
+].join('\n'));
+NODE
+    explain=$(node "$TMP/explain_run.js" 2>&1)
+
+    assert_contains "symmetric per-device sentence is unchanged" \
+        "Every device in 10.0.20.0/24 may use 5 Mbit/s of its own." "$explain"
+    assert_contains "a split ceiling is spelled out per device" \
+        "may use 5 Mbit/s down and 500 kbit/s up of its own." "$explain"
+    assert_contains "symmetric aggregate sentence is unchanged" \
+        "share 5 Mbit/s between them — one bucket for the whole subnet." "$explain"
+    # Two rates in shared mode means two buckets, one per direction.
+    assert_contains "a split aggregate says one bucket PER DIRECTION" \
+        "one bucket per direction for the whole subnet." "$explain"
+    assert_not_contains "no sentence describes a split ceiling with the download figure alone" \
+        "may use 5 Mbit/s of its own. Every device in 10.0.20.0/24 may use 5 Mbit/s of its own." "$explain"
+fi
+
 # Static checks on the wiring the slices cannot see.
 js_src=$(cat "$JS")
 assert_contains "the ratelimit rpc call carries an upload rate" \
