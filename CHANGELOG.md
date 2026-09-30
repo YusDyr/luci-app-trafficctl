@@ -4,6 +4,21 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.20.0] - 2026-09-30
+
+### Features
+- ship translations in the release artifacts ([#76](https://github.com/YusDyr/luci-app-trafficctl/issues/76)) ([bac5cf7](https://github.com/YusDyr/luci-app-trafficctl/commit/bac5cf78da14216a328db34be614610e23cd5644))
+  Adding a .po to this repository had no effect on anything a user could
+  install from the Releases page. The OpenWrt feed build compiles po/ with
+  luci-base's po2lmo and emits one package per language; build-ipk.sh and
+  build-apk.sh, which produce every released artifact, copied root/ and
+  htdocs/ and nothing else. A release advertising a complete translation
+  would have been English end to end for anyone not building from a feed.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.19.1...v1.20.0
+
+---
+
 ## [1.19.1] - 2026-09-30
 
 ### Bug Fixes
