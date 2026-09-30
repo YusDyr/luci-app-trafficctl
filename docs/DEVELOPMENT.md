@@ -253,15 +253,25 @@ names — see the "Writing tests" section of `CONTRIBUTING.md` for why, and use
 
 ### CI
 
-GitHub Actions (`.github/workflows/`) runs on every push and PR:
+GitHub Actions (`.github/workflows/`). Only three workflows have triggers of
+their own — everything else is reached through `workflow_call`:
 
-| Workflow | What it checks |
-|----------|----------------|
-| `tests.yml` | Unit, mock, E2E, security, and build tests |
-| `shellcheck.yml` | ShellCheck (`-S warning`) on every script with a shell shebang |
-| `eslint.yml` | ESLint on the frontend — `ecmaVersion: 5` plus `no-restricted-syntax`, so ES6 syntax fails the build |
-| `compat.yml` | OpenWrt rootfs compatibility (52 version/arch combos); installs the built package and tests upgrades |
-| `auto-release.yml` | Waits for `ci.yml` **and** `compat.yml`, then bumps the version, tags, builds and publishes (on main only) |
+| Workflow | Trigger | What it checks |
+|----------|---------|----------------|
+| `ci.yml` | push to main, PR | Calls the three below plus the OpenWrt rootfs test |
+| `tests.yml` | called by `ci.yml` | Unit, mock, E2E, security, and build tests |
+| `shellcheck.yml` | called by `ci.yml` | ShellCheck (`-S warning`) on every script with a shell shebang |
+| `eslint.yml` | called by `ci.yml` | ESLint on the frontend — `ecmaVersion: 5` plus `no-restricted-syntax`, so ES6 syntax fails the build |
+| `compat.yml` | PR, called by `auto-release.yml` | OpenWrt rootfs compatibility (52 version/arch combos); installs the built package and tests upgrades |
+| `auto-release.yml` | push to main | Waits for `ci.yml` **and** `compat.yml`, then bumps the version, tags, builds and publishes |
+
+The nesting is why the leaf workflows carry no `push`/`pull_request` triggers.
+When they did, each check ran twice on a pull request — once standalone and
+once inside `ci.yml`, which is why the checks list showed both `ShellCheck` and
+`shellcheck / ShellCheck` — and three times on a push to main, where
+`auto-release.yml` calls `ci.yml` a second time. `compat.yml` lost its push
+trigger for the same reason: on main it already runs inside `auto-release.yml`,
+and it is by far the most expensive job here.
 
 The release depends on the compatibility matrix as well as the fast checks —
 otherwise a tag and the `releases/latest/download` URL could publish an

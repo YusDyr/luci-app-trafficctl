@@ -1,10 +1,7 @@
 name: Tests
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  # Called by ci.yml only — see the note in shellcheck.yml.
   workflow_call:
 
 permissions:

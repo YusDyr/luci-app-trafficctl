@@ -1,10 +1,11 @@
 name: ShellCheck
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  # Called by ci.yml only. A standalone push/pull_request trigger here made
+  # every check run twice on a pull request — once on its own and once nested
+  # inside ci.yml, which is why the checks list carried both "ShellCheck" and
+  # "shellcheck / ShellCheck" — and three times on a push to main, where
+  # auto-release.yml calls ci.yml again.
   workflow_call:
 
 permissions:
