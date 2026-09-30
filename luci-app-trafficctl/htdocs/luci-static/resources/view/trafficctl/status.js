@@ -114,7 +114,10 @@ var callMacfilterRemove = rpc.declare({
 var callRatelimit = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'ratelimit',
-	params: ['ip', 'rate_kbit', 'label', 'mode']
+	// rate_kbit_up is omitted for a symmetric limit rather than sent equal to
+	// rate_kbit: the backend reads absence as "same as download", and sending
+	// it always would make every record asymmetric-shaped on disk.
+	params: ['ip', 'rate_kbit', 'label', 'mode', 'rate_kbit_up']
 });
 
 var callRatelimitStats = rpc.declare({
@@ -132,7 +135,7 @@ var callSubnets = rpc.declare({
 var callShapeAdd = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'shape_add',
-	params: ['ip', 'rate_kbit', 'label']
+	params: ['ip', 'rate_kbit', 'label', 'rate_kbit_up']
 });
 
 var callShapeRemove = rpc.declare({
@@ -2334,6 +2337,47 @@ return view.extend({
 			customInput, customUnitBtns, customApplyBtn
 		]);
 
+		// ── Separate upload ceiling ────────────────────────────────────────
+		//
+		// Disclosed rather than always shown. Most limits are symmetric, and
+		// the backend treats an absent upload rate as "same as download", so
+		// the default state of this control matches the default meaning: one
+		// number, one click. Opening it is the opt-in into two.
+		//
+		// The rate chips above stay the DOWNLOAD ceiling in either state, so
+		// the common path does not change shape when this is revealed.
+		var upInput = E('input', { 'type':'number', 'min':'1', 'step':'1',
+			'placeholder': _('value'), 'class': 'tc-custom-input' });
+		var _upUnit = 'mbit';
+		var upMbitBtn = E('span', {'class':'tc-unit-btn'}, _('Mbit/s'));
+		var upKbitBtn = E('span', {'class':'tc-unit-btn'}, _('kbit/s'));
+		function updateUpUnitBtns() {
+			upMbitBtn.classList.toggle('tc-unit-btn--on', _upUnit === 'mbit');
+			upKbitBtn.classList.toggle('tc-unit-btn--on', _upUnit === 'kbit');
+		}
+		upMbitBtn.addEventListener('click', function() { _upUnit = 'mbit'; updateUpUnitBtns(); updateScopeExplain(); });
+		upKbitBtn.addEventListener('click', function() { _upUnit = 'kbit'; updateUpUnitBtns(); updateScopeExplain(); });
+		updateUpUnitBtns();
+		upInput.addEventListener('input', function() { updateScopeExplain(); });
+
+		var upRow = E('div', {'class':'tc-custom-row tc-hidden'}, [
+			E('span', {'class':'tc-c-muted','style':'font-size:11px'}, _('↑ Upload')),
+			upInput,
+			E('span', {'class':'tc-custom-unit-btns'}, [upMbitBtn, upKbitBtn])
+		]);
+
+		var upToggleBtn = E('span', {'class': 'tc-chip',
+			'data-tip': _('Give upload its own ceiling instead of matching download')
+		}, '⇅ ' + _('Split up/down'));
+		upToggleBtn.addEventListener('click', function() {
+			upRow.classList.toggle('tc-hidden');
+			var on = !upRow.classList.contains('tc-hidden');
+			upToggleBtn.classList.toggle('tc-chip--active', on);
+			if (on) { upInput.focus(); } else { upInput.value = ''; }
+			updateScopeExplain();
+		});
+		rateChipsRow.appendChild(upToggleBtn);
+
 		// Mode: segmented toggle (Shaper default)
 		var modeToggle = E('div', {'class':'tc-mode-toggle'});
 		var shaperBtn = E('span', {
@@ -2446,15 +2490,29 @@ return view.extend({
 			var t = (scopeInput.value || 'all').trim();
 			var shown = (t === 'all' || t === 'any') ? _('every device') : t;
 			var kbit = parseInt(getRateKbit(), 10);
+			// The sentence has to quote the rate that will actually be applied.
+			// Naming only the download figure while a split ceiling is set would
+			// describe a different rule than the one being installed — and these
+			// sentences exist precisely so the each/shared distinction cannot be
+			// misread.
+			var kbitUp = parseInt(getRateKbitUp(), 10);
+			var rateWords = (kbitUp && kbitUp !== kbit)
+				? _('%s down and %s up').format(fmtRate(kbit), fmtRate(kbitUp))
+				: fmtRate(kbit);
+			// A split ceiling is two buckets, one per direction, so the aggregate
+			// wording changes with it.
+			var sharedTail = (kbitUp && kbitUp !== kbit)
+				? _('between them — one bucket per direction for the whole subnet.')
+				: _('between them — one bucket for the whole subnet.');
 			if (!kbit || kbit <= 0) {
 				scopeExplain.textContent =
 					_('Pick a rate to apply it to this target, or Off to remove its limit.');
 			} else if (_scopeSelected === 'shared') {
 				scopeExplain.textContent = _('All of') + ' ' + shown + ' ' + _('share') + ' ' +
-					fmtRate(kbit) + ' ' + _('between them — one bucket for the whole subnet.');
+					rateWords + ' ' + sharedTail;
 			} else {
 				scopeExplain.textContent = _('Every device in') + ' ' + shown + ' ' +
-					_('may use') + ' ' + fmtRate(kbit) + ' ' + _('of its own.');
+					_('may use') + ' ' + rateWords + ' ' + _('of its own.');
 			}
 
 			var bad = !targetIsMonitored(t);
@@ -2588,6 +2646,22 @@ return view.extend({
 			return String(Math.round(n));
 		}
 
+		// Empty string means symmetric — never 0, which the backend would have
+		// to read as a ceiling and which is a total upload block.
+		function getRateKbitUp() {
+			if (upRow.classList.contains('tc-hidden')) return '';
+			var n = parseFloat(upInput.value);
+			if (!n || n <= 0) return '';
+			return String(_upUnit === 'mbit' ? Math.round(n * 1000) : Math.round(n));
+		}
+
+		// How the pending action is described. Naming one figure when the
+		// operator has entered two would hide the thing they just asked for.
+		function rateLabel(kbit, up) {
+			if (!up || up === kbit) return fmtRate(parseInt(kbit));
+			return _('%s down / %s up').format(fmtRate(parseInt(kbit)), fmtRate(parseInt(up)));
+		}
+
 		function applyRate() {
 			var all  = isAllMode();
 			// In all-devices mode the target is the typed scope ("all" or a
@@ -2595,6 +2669,7 @@ return view.extend({
 			var ip   = all ? (scopeInput.value || 'all').trim() : searchSelect.getValue();
 			var name = '';
 			var kbit = getRateKbit();
+			var kbitUp = getRateKbitUp();
 			// A block target has no single tc classid, so the shaper can't
 			// express it — force the limiter rather than silently doing nothing.
 			var mode = all ? 'limiter' : _modeSelected;
@@ -2602,8 +2677,8 @@ return view.extend({
 
 			if (all && kbit !== '0') {
 				setStatus(statusDiv, 'loading',
-					_('Limiting') + ' ' + ip + ' → ' + fmtRate(parseInt(kbit)) + ' (' + scope + ')…');
-				callRatelimit(ip, parseInt(kbit), name, scope).then(function(res) {
+					_('Limiting') + ' ' + ip + ' → ' + rateLabel(kbit, kbitUp) + ' (' + scope + ')…');
+				callRatelimit(ip, parseInt(kbit), name, scope, kbitUp ? parseInt(kbitUp) : null).then(function(res) {
 					setStatus(statusDiv, (res && res.ok) ? 'action' : 'error', (res && res.msg) || '?');
 					runQuery();
 				}).catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); });
@@ -2629,18 +2704,18 @@ return view.extend({
 					runQuery();
 				}).catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); });
 			} else if (mode === 'shaper') {
-				setStatus(statusDiv, 'loading', _('Shaping') + ' → ' + fmtRate(parseInt(kbit)) + '…');
+				setStatus(statusDiv, 'loading', _('Shaping') + ' → ' + rateLabel(kbit, kbitUp) + '…');
 				callRatelimit(ip, 0, name)
-					.then(function() { return callShapeAdd(ip, parseInt(kbit), name); })
+					.then(function() { return callShapeAdd(ip, parseInt(kbit), name, kbitUp ? parseInt(kbitUp) : null); })
 					.then(function(res) {
 						setStatus(statusDiv, (res && res.ok) ? 'action' : 'error', (res && res.msg) || '?');
 						runQuery();
 					})
 					.catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); });
 			} else {
-				setStatus(statusDiv, 'loading', _('Limiting') + ' → ' + fmtRate(parseInt(kbit)) + '…');
+				setStatus(statusDiv, 'loading', _('Limiting') + ' → ' + rateLabel(kbit, kbitUp) + '…');
 				callShapeRemove(ip, name)
-					.then(function() { return callRatelimit(ip, parseInt(kbit), name); })
+					.then(function() { return callRatelimit(ip, parseInt(kbit), name, '', kbitUp ? parseInt(kbitUp) : null); })
 					.then(function(res) {
 						setStatus(statusDiv, (res && res.ok) ? 'action' : 'error', (res && res.msg) || '?');
 						runQuery();
