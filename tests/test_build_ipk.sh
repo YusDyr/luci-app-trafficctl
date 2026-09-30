@@ -29,7 +29,8 @@ assert_contains() {
 cd "$(dirname "$0")/.."
 
 rm -rf dist/
-IPK=$(./build-ipk.sh 0.0.1-test 1)
+# The last line is the main package; translation packages precede it.
+IPK=$(./build-ipk.sh 0.0.1-test 1 | tail -1)
 
 assert_eq "ipk file exists" "yes" "$([ -f "$IPK" ] && echo yes || echo no)"
 

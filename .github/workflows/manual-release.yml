@@ -125,7 +125,12 @@ jobs:
             exit 1
           fi
           mkdir -p dist
-          cp /tmp/luci-app-trafficctl*.ipk dist/ 2>/dev/null || true
+          # luci-i18n-trafficctl-* as well as the main package: build-ipk.sh
+          # emits one translation package per language and the SDK action wiped
+          # dist/, so a glob anchored on the main package name drops them.
+          cp /tmp/luci-*trafficctl*.ipk dist/ 2>/dev/null || true
+          # The SDK builds the translation subpackages alongside the main one.
+          find bin/ -name "luci-i18n-trafficctl-*.apk" -exec cp {} dist/ \; 2>/dev/null || true
           DEST="dist/luci-app-trafficctl_${INPUT_VERSION}-r${INPUT_RELEASE_NUM}_noarch.apk"
           cp "$APK" "$DEST"
           ln -f "$DEST" dist/luci-app-trafficctl_noarch.apk

@@ -1,0 +1,49 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: test\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Language: ru\n"
+
+#: status.js:1
+msgid "Active:"
+msgstr "Активно:"
+
+#. a translation identical to its source must be dropped
+msgid "Telegram"
+msgstr "Telegram"
+
+msgid "1 Mbit/s"
+msgstr "1 Mbit/s"
+
+#: status.js:99
+msgid "🆕 New device\\n{{ name }} ({{ ip }})\\nMAC: {{ mac }}"
+msgstr "🆕 Новое устройство\\n{{ name }} ({{ ip }})\\nMAC: {{ mac }}"
+
+msgid "He said \"hello\" and left"
+msgstr "Он сказал \"привет\" и ушёл"
+
+msgid "a backslash \\\\ here"
+msgstr "обратный слэш \\\\ здесь"
+
+msgctxt "menu"
+msgid "Limit"
+msgstr "Ограничить"
+
+msgid "%d packet dropped"
+msgid_plural "%d packets dropped"
+msgstr[0] "отброшен %d пакет"
+msgstr[1] "отброшено %d пакета"
+
+msgid "untranslated on purpose"
+msgstr ""
+
+msgid ""
+"a very long source string that xgettext wrapped across "
+"several physical lines in the file"
+msgstr ""
+"очень длинная строка, которую xgettext перенёс на "
+"несколько физических строк"
+
+msgid "简体中文 mixed with ASCII"
+msgstr "简体中文 вперемешку с ASCII"

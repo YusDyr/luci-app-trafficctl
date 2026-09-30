@@ -5,3 +5,7 @@
 /tmp/
 .DS_Store
 /node_modules/
+
+# Python bytecode from tools/
+__pycache__/
+*.pyc

@@ -57,6 +57,12 @@ luci-app-trafficctl/
     iface/99-trafficctl-shapes              — Restore shapes+blocks+ratelimits on boot (ifup lan)
     dhcp/99-trafficctl-newdevice            — New device detection via DHCP events
   po/templates/                             — i18n templates
+  po/<lang>/*.po                            — translations; each becomes its own package
+
+tools/
+  po2lmo.py                                 — .po → LuCI .lmo compiler (bit-exact reimplementation of luci-base's C tool)
+  i18n.sh                                   — translation packaging shared by build-ipk.sh and build-apk.sh
+  luci-languages.tsv                        — language code / display name table mirrored from luci.mk
 
 docs/
   capture.js                                — Playwright screenshot/GIF automation (masks MACs & hostname)
@@ -103,6 +109,8 @@ chore: bump ESLint config
 **Flow:** merge to main → CI passes → auto-release creates tag + release + IPK. No manual steps.
 
 **Manual trigger:** `auto-release.yml` also supports `workflow_dispatch` to re-run.
+
+**Translations ship as separate packages.** Adding `po/<lang>/luci-app-trafficctl.po` is all it takes: the feed build (`luci.mk`) and both standalone builders emit `luci-i18n-trafficctl-<code>` — arch `all`, depending on the main package, carrying `/usr/lib/lua/luci/i18n/<po basename>.<code>.lmo` plus a `/etc/uci-defaults/` snippet that registers the language. The language code is LuCI's own (`zh_Hans` → `zh-cn`), so a new language must be present in `tools/luci-languages.tsv` or the build stops rather than emitting a package with a blank language name. LuCI reads `.lmo`, not `.mo` — GNU `msgfmt` cannot produce it.
 
 ## Deployment
 

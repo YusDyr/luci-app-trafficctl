@@ -109,7 +109,7 @@ check_bashism "$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/rpcd/luci.traffic
 # ── IPK build and structure ────────────────────────────────────────────────
 
 cd "$REPO_ROOT" || exit 1
-IPK=$(./build-ipk.sh 0.0.0-test 1 2>/dev/null)
+IPK=$(./build-ipk.sh 0.0.0-test 1 2>/dev/null | tail -1)
 assert_eq "ipk builds" "yes" "$([ -f "$IPK" ] && echo yes || echo no)"
 
 if [ -f "$IPK" ]; then
