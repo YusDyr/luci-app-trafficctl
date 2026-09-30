@@ -60,6 +60,11 @@ jobs:
         run: bash tests/test_newdevice.sh
       - name: Subnet / aggregate limit tests
         run: bash tests/test_subnet_limits.sh
+      # Independent up/down ceilings. Most of the risk is the shapes.json
+      # record format: a record the extraction pattern misses disappears from
+      # the classid allocator and two devices end up sharing an HTB class.
+      - name: Asymmetric rate limit tests
+        run: bash tests/test_asymmetric_limits.sh
       # Slices the CIDR helpers out of status.js and runs them under node —
       # the only frontend logic with a wrong answer an operator cannot see.
       - name: Subnet target warning (frontend slices)

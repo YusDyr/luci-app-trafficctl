@@ -119,18 +119,26 @@ tctl_conntrack_flush_v6() {
 # meter keyed by address); "shared" makes the whole target share one bucket.
 # For a single host the two are identical.
 tctl_ratelimit_add() {
-    local ip="$1" rate_kbit="$2" comment="$3" mode="${4:-shared}"
+    local ip="$1" rate_kbit="$2" comment="$3" mode="${4:-shared}" rate_kbit_up="$5"
+    # Empty means "same as download" — the only meaning this had before the two
+    # directions could differ. Not zero: a zero ceiling policed every packet and
+    # would be a silent total block reported as a successful limit.
+    [ -z "$rate_kbit_up" ] && rate_kbit_up="$rate_kbit"
     local rate_kbyte=$((rate_kbit / 8))
     [ "$rate_kbyte" -lt 1 ] && rate_kbyte=1
+    local rate_kbyte_up=$((rate_kbit_up / 8))
+    [ "$rate_kbyte_up" -lt 1 ] && rate_kbyte_up=1
 
     local slug dl_expr ul_expr ul6_expr mac
     slug=$(tctl_target_slug "$ip")
+    # The two directions were already separate rules on separate hooks — they
+    # were symmetric only because both took the same number.
     if [ "$mode" = "each" ]; then
         dl_expr="ip daddr $ip meter tctl_d_$slug { ip daddr limit rate over ${rate_kbyte} kbytes/second }"
-        ul_expr="ip saddr $ip meter tctl_u_$slug { ip saddr limit rate over ${rate_kbyte} kbytes/second }"
+        ul_expr="ip saddr $ip meter tctl_u_$slug { ip saddr limit rate over ${rate_kbyte_up} kbytes/second }"
     else
         dl_expr="ip daddr $ip limit rate over ${rate_kbyte} kbytes/second"
-        ul_expr="ip saddr $ip limit rate over ${rate_kbyte} kbytes/second"
+        ul_expr="ip saddr $ip limit rate over ${rate_kbyte_up} kbytes/second"
     fi
 
     # Upload over IPv6, keyed on the MAC. This direction and only this one:
@@ -155,7 +163,7 @@ tctl_ratelimit_add() {
     # the wrong one does not silently under-match — it fails to load.
     ul6_expr=""
     if mac=$(tctl_target_mac "$ip"); then
-        ul6_expr="meta protocol ip6 ether saddr $mac limit rate over ${rate_kbyte} kbytes/second"
+        ul6_expr="meta protocol ip6 ether saddr $mac limit rate over ${rate_kbyte_up} kbytes/second"
     fi
 
     if [ "$TCTL_FW" = "nft" ]; then
@@ -837,15 +845,18 @@ tctl_persist_enabled() {
 }
 
 tctl_persist_save() {
-    local type="$1" ip="$2" param="$3" mode="$4"
+    local type="$1" ip="$2" param="$3" mode="$4" param_up="$5"
     [ -d "$(dirname "$TCTL_RULES_FILE")" ] || mkdir -p "$(dirname "$TCTL_RULES_FILE")"
     [ -f "$TCTL_RULES_FILE" ] || echo '[]' > "$TCTL_RULES_FILE"
     local tmp="${TCTL_RULES_FILE}.tmp"
     # The mode field is written only when the caller has one, so records for
     # rule types that have no bucket layout (blocks, port forwards) keep their
-    # exact previous shape.
+    # exact previous shape. param_up follows the same rule: the caller passes it
+    # only for an asymmetric limit, so a symmetric one still writes the record
+    # it always wrote and an older package can still read it back.
     local extra=""
     [ -n "$mode" ] && extra=",\"mode\":\"$mode\""
+    [ -n "$param_up" ] && extra="$extra,\"param_up\":\"$param_up\""
     # Remove existing entry for same ip+type, append new one
     awk -v ip="$ip" -v t="$type" -v p="$param" -v x="$extra" '
     {

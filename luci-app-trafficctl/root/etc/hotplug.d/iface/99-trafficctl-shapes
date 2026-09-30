@@ -27,8 +27,13 @@ done
 if [ -f "$SHAPES_FILE" ]; then
     jsonfilter -i "$SHAPES_FILE" -e '@[*].ip' 2>/dev/null | while read -r ip; do
         rate=$(jsonfilter -i "$SHAPES_FILE" -e "@[@.ip='$ip'].rate_kbit" 2>/dev/null)
+        # Absent on symmetric records, which is all of them before asymmetric
+        # shaping existed; trafficctl-shape.sh reads empty as "same as
+        # download". The label has to be passed explicitly because the upload
+        # rate is the fifth positional.
+        rate_up=$(jsonfilter -i "$SHAPES_FILE" -e "@[@.ip='$ip'].rate_kbit_up" 2>/dev/null)
         if [ -n "$rate" ] && [ "$rate" != "0" ]; then
-            /usr/local/bin/trafficctl-shape.sh add "$ip" "$rate" || \
+            /usr/local/bin/trafficctl-shape.sh add "$ip" "$rate" "shape_$ip" "$rate_up" || \
                 logger -t trafficctl "Failed to restore shape for $ip (${rate}kbit)"
         fi
     done
@@ -56,8 +61,13 @@ if [ -f "$RULES_FILE" ] && tctl_persist_enabled; then
                 # a subnet does not change meaning across the upgrade.
                 mode=$(jsonfilter -i "$RULES_FILE" -e "@[$idx].mode" 2>/dev/null)
                 [ -z "$mode" ] && mode=$(tctl_ratelimit_default_mode "$ip")
+                # Absent on every record written before the directions could
+                # differ, and on every symmetric one since. tctl_ratelimit_add
+                # reads that as "same as download", which is what those records
+                # have always meant.
+                param_up=$(jsonfilter -i "$RULES_FILE" -e "@[$idx].param_up" 2>/dev/null)
                 [ -n "$param" ] && [ "$param" != "0" ] && \
-                    tctl_ratelimit_add "$ip" "$param" "$(tctl_ratelimit_comment "$ip")" "$mode" 2>/dev/null || \
+                    tctl_ratelimit_add "$ip" "$param" "$(tctl_ratelimit_comment "$ip")" "$mode" "$param_up" 2>/dev/null || \
                     logger -t trafficctl "Failed to restore ratelimit for $ip (${param}kbit)"
                 ;;
             pfw_pause|pfw_limit)

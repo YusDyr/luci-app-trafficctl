@@ -24,6 +24,13 @@ IP="$2"
 RATE="$3"
 # shellcheck disable=SC2034
 LABEL="${4:-shape_$IP}"
+# Upload ceiling. Appended as a fifth positional so every existing caller —
+# the rpcd backend, the Telegram bot, the DHCP new-device hook and the boot
+# restore — keeps working unchanged. Empty means "same as download", which is
+# what shaping did before this existed; it is deliberately NOT treated as zero,
+# since a zero ceiling is a total upload block that would report success.
+RATE_UP="$5"
+[ -z "$RATE_UP" ] && RATE_UP="$RATE"
 
 # A classid minor is 16 bit and two values are already taken — 1:1 is the root
 # class and 1:fffe the default one — so a minor cannot be derived from the
@@ -41,8 +48,14 @@ re_quote() {
     echo "$1" | sed 's/[].[^$*\/]/\\&/g'
 }
 
+# Records are extracted by pattern, not parsed, so this expression decides what
+# counts as a record at all. A record it does not match is not merely misread —
+# it disappears from used_minors(), alloc_classid hands its minor to another
+# device, and the two then share an HTB class: removing one tears down the
+# other. The optional rate_kbit_up group is therefore at the TAIL, and every
+# reader below tolerates both the old three-field form and the new one.
 shapes_entries() {
-    grep -oE '\{"ip":"[^"]+","rate_kbit":[0-9]+(,"classid":"1:[0-9a-f]+")?\}' \
+    grep -oE '\{"ip":"[^"]+","rate_kbit":[0-9]+(,"classid":"1:[0-9a-f]+")?(,"rate_kbit_up":[0-9]+)?\}' \
         "$SHAPES_FILE" 2>/dev/null
 }
 
@@ -52,7 +65,19 @@ lookup_classid() {
     ip="$1"
     esc=$(re_quote "$ip")
     shapes_entries \
-        | sed -n "s/^{\"ip\":\"$esc\",\"rate_kbit\":[0-9]*,\"classid\":\"\(1:[0-9a-f]*\)\"}$/\1/p" \
+        | sed -n "s/^{\"ip\":\"$esc\",\"rate_kbit\":[0-9]*,\"classid\":\"\(1:[0-9a-f]*\)\"\(,\"rate_kbit_up\":[0-9]*\)\{0,1\}}$/\1/p" \
+        | head -1
+}
+
+# Upload ceiling recorded for this address. Empty means the record predates
+# asymmetric shaping, or was written symmetric — both mean "same as download",
+# which is what every shape did before this existed.
+lookup_rate_up() {
+    local ip esc
+    ip="$1"
+    esc=$(re_quote "$ip")
+    shapes_entries \
+        | sed -n "s/^{\"ip\":\"$esc\",\"rate_kbit\":[0-9]*,\"classid\":\"1:[0-9a-f]*\",\"rate_kbit_up\":\([0-9]*\)}$/\1/p" \
         | head -1
 }
 
@@ -179,7 +204,7 @@ shape_detach() {
 }
 
 save_shape() {
-    local ip="$1" rate="$2" classid="$3"
+    local ip="$1" rate="$2" classid="$3" rate_up="$4"
     mkdir -p "$(dirname "$SHAPES_FILE")"
     [ ! -f "$SHAPES_FILE" ] && echo "[]" > "$SHAPES_FILE"
 
@@ -209,7 +234,12 @@ save_shape() {
     local filtered
     filtered=$(echo "$old_entries" | grep -v "^{\"ip\":\"$esc\"," || true)
     if [ "$rate" -gt 0 ] 2>/dev/null; then
-        local entry="{\"ip\":\"$ip\",\"rate_kbit\":$rate,\"classid\":\"$classid\"}"
+        # rate_kbit_up is written only when the two directions differ, so a
+        # symmetric shape still produces exactly the record it always did.
+        # Downgrading the package then keeps working for the common case.
+        local up_field=""
+        [ -n "$rate_up" ] && [ "$rate_up" != "$rate" ] && up_field=",\"rate_kbit_up\":$rate_up"
+        local entry="{\"ip\":\"$ip\",\"rate_kbit\":$rate,\"classid\":\"$classid\"$up_field}"
         if [ -n "$filtered" ]; then
             filtered=$(printf "%s\n%s" "$filtered" "$entry")
         else
@@ -258,16 +288,27 @@ do_add() {
 
     # Upload: shaped pre-NAT on the IFB device fed from LAN ingress.
     # Reported separately so a missing kmod-ifb doesn't look like total failure.
+    # The two directions are already separate HTB classes on separate devices,
+    # so giving them separate rates costs nothing beyond its own burst.
+    local ul_burst
+    ul_burst=$(( RATE_UP * 125 / 100 ))
+    [ "$ul_burst" -lt 1600 ] && ul_burst=1600
     local ul_ok=1
     if ensure_ifb; then
-        shape_attach "$IFB_DEV" src "$IP" "$classid" "$RATE" "$burst_bytes" || ul_ok=0
+        shape_attach "$IFB_DEV" src "$IP" "$classid" "$RATE_UP" "$ul_burst" || ul_ok=0
     else
         ul_ok=0
     fi
 
-    save_shape "$IP" "$RATE" "$classid"
+    save_shape "$IP" "$RATE" "$classid" "$RATE_UP"
+    local rates="${RATE} kbit/s"
+    [ "$RATE_UP" != "$RATE" ] && rates="${RATE} kbit/s down, ${RATE_UP} kbit/s up"
     if [ "$ul_ok" = "1" ]; then
-        echo "{\"ok\":true,\"msg\":\"shape ${RATE} kbit/s applied to $IP both directions (class $classid)\"}"
+        echo "{\"ok\":true,\"msg\":\"shape $rates applied to $IP both directions (class $classid)\"}"
+    elif [ "$RATE_UP" != "$RATE" ]; then
+        # Saying "applied" here would be a lie about the half the operator
+        # explicitly asked to differ.
+        echo "{\"ok\":true,\"msg\":\"shape ${RATE} kbit/s applied to $IP for download only — the ${RATE_UP} kbit/s upload ceiling was NOT applied, it needs kmod-ifb: opkg/apk install kmod-ifb kmod-sched\"}"
     else
         echo "{\"ok\":true,\"msg\":\"shape ${RATE} kbit/s applied to $IP (download only — upload needs kmod-ifb: opkg/apk install kmod-ifb kmod-sched)\"}"
     fi
