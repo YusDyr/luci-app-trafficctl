@@ -4,6 +4,17 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.21.0] - 2026-09-30
+
+### Features
+- set upload and download ceilings separately (UI) ([#83](https://github.com/YusDyr/luci-app-trafficctl/issues/83)) ([a8124e1](https://github.com/YusDyr/luci-app-trafficctl/commit/a8124e18317e61753320bf5aadf213577033e5ca))
+  The UI half of #66. The backend already takes two rates; this gives an
+  operator a way to enter the second one.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.20.1...v1.21.0
+
+---
+
 ## [1.20.1] - 2026-09-30
 
 ### Other
