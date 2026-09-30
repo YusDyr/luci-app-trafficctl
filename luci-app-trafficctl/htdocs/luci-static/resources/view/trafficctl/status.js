@@ -4105,6 +4105,10 @@ return view.extend({
 				var modeLabels = {
 					'none':              ['⊘', _('No offload'),              'var(--tc-muted)'],
 					'software':          ['◑', _('Software offload'),        'var(--tc-speed)'],
+					// tctl_get_offload_mode splits software offload on the flowtable
+					// counter flag, so this value reaches the badge too. Without an
+					// entry the badge fell through to '?' and the raw mode string.
+					'software-counter':  ['◑', _('Software offload'),        'var(--tc-speed)'],
 					'hardware-counter':  ['●', _('Hardware offload'),        'var(--tc-warn)'],
 					'hardware':          ['●', _('Hardware offload'),        'var(--tc-warn)']
 				};
