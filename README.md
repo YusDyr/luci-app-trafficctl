@@ -1,9 +1,7 @@
 # luci-app-trafficctl
 
-[![ShellCheck](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/shellcheck.yml/badge.svg)](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/shellcheck.yml)
-[![ESLint](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/eslint.yml/badge.svg)](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/eslint.yml)
-[![Tests](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/tests.yml/badge.svg)](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/tests.yml)
-[![Release](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/release.yml/badge.svg)](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/release.yml)
+[![CI](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/ci.yml/badge.svg)](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/ci.yml)
+[![Release](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/auto-release.yml/badge.svg)](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/auto-release.yml)
 [![CodeQL](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/YusDyr/luci-app-trafficctl/security/code-scanning)
 [![Latest Release](https://img.shields.io/github/v/release/YusDyr/luci-app-trafficctl)](https://github.com/YusDyr/luci-app-trafficctl/releases/latest)
 [![License](https://img.shields.io/github/license/YusDyr/luci-app-trafficctl)](LICENSE)
@@ -203,7 +201,7 @@ I hope it turns out as useful for you as it has been for me.
 
 ## Compatibility
 
-[![OpenWrt Compatibility](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat.yml/badge.svg)](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat.yml)
+[![OpenWrt Compatibility](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat.yml/badge.svg?event=pull_request)](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat.yml)
 
 Runs on all architectures (no compiled code, pure shell + LuCI JavaScript).
 
