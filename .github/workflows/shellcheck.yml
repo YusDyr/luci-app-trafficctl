@@ -26,7 +26,7 @@ jobs:
           shellcheck --version
           mapfile -t files < <(
             grep -rlE '^#!.*(sh|bash|dash|ash)' \
-              luci-app-trafficctl/root build-ipk.sh build-apk.sh tests \
+              luci-app-trafficctl/root build-ipk.sh build-apk.sh tests tools \
               | grep -v node_modules | sort -u
           )
           echo "Scanning ${#files[@]} shell scripts:"

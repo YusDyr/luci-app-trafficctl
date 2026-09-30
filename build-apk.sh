@@ -10,7 +10,8 @@ PKG_VERSION="${1:-1.0.0}"
 PKG_RELEASE="${2:-1}"
 
 # Package source tree (feed-compatible subdirectory layout)
-SRC="$(dirname "$0")/${PKG_NAME}"
+TCTL_ROOT="$(dirname "$0")"
+SRC="$TCTL_ROOT/${PKG_NAME}"
 
 OUTDIR="dist"
 WORKDIR=$(mktemp -d)
@@ -143,6 +144,65 @@ PKGINFO
     # APKv2: concatenate control + data
     cat "$WORKDIR/control.tar.gz" "$WORKDIR/data.tar.gz" > "$APK_FILE"
 fi
+
+# --- Translations, one package per language ---
+#
+# Same split the feed build produces (luci.mk's LuciTranslation) and the same
+# split build-ipk.sh produces: a separate arch-all package per language that
+# depends on the main one. These carry no lifecycle scripts — the uci-defaults
+# snippet that registers the language is run by OpenWrt itself on first boot
+# after install.
+# shellcheck source=tools/i18n.sh
+. "$TCTL_ROOT/tools/i18n.sh"
+
+for lang in $(i18n_langs); do
+    code=$(i18n_code "$lang") || { echo "unknown language '$lang' — add it to tools/luci-languages.tsv" >&2; exit 1; }
+    i18n_pkg=$(i18n_pkgname "$lang")
+    i18n_data="$WORKDIR/i18n-$code"
+
+    i18n_stage "$lang" "$i18n_data" || {
+        echo "no translatable strings for '$lang' — skipping $i18n_pkg" >&2
+        continue
+    }
+
+    i18n_file="$OUTDIR/${i18n_pkg}_${PKG_VERSION}-r${PKG_RELEASE}_noarch.apk"
+
+    if command -v apk >/dev/null 2>&1 && apk mkpkg --help >/dev/null 2>&1; then
+        apk mkpkg \
+            --info "name:${i18n_pkg}" \
+            --info "version:${PKG_VERSION}-r${PKG_RELEASE}" \
+            --info "description:Translation for ${PKG_NAME} - $(i18n_name "$lang")" \
+            --info "arch:noarch" \
+            --info "license:Apache-2.0" \
+            --info "origin:https://github.com/YusDyr/luci-app-trafficctl" \
+            --info "url:https://github.com/YusDyr/luci-app-trafficctl" \
+            --info "maintainer:Denis Iusupov <yusdyr@gmail.com>" \
+            --info "depends:${PKG_NAME}" \
+            --info "provides:${i18n_pkg}=${PKG_VERSION}-r${PKG_RELEASE}" \
+            --info "tags:openwrt:section=luci" \
+            --files "$i18n_data" \
+            --output "$i18n_file"
+    else
+        I18N_CTRL="$WORKDIR/i18n-control-$code"
+        mkdir -p "$I18N_CTRL"
+        cat > "$I18N_CTRL/.PKGINFO" <<PKGINFO
+pkgname = ${i18n_pkg}
+pkgver = ${PKG_VERSION}-r${PKG_RELEASE}
+pkgdesc = Translation for ${PKG_NAME} - $(i18n_name "$lang")
+arch = noarch
+license = Apache-2.0
+origin = https://github.com/YusDyr/luci-app-trafficctl
+url = https://github.com/YusDyr/luci-app-trafficctl
+maintainer = Denis Iusupov <yusdyr@gmail.com>
+depend = ${PKG_NAME}
+PKGINFO
+        tar -czf "$WORKDIR/i18n-control-$code.tar.gz" -C "$I18N_CTRL" .
+        tar -czf "$WORKDIR/i18n-data-$code.tar.gz" -C "$i18n_data" .
+        cat "$WORKDIR/i18n-control-$code.tar.gz" "$WORKDIR/i18n-data-$code.tar.gz" > "$i18n_file"
+    fi
+
+    echo "$i18n_file"
+done
 
 if ! command -v apk >/dev/null 2>&1; then
     # The fallback path emits the older concatenated-tarball layout. apk-tools 3

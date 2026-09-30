@@ -75,6 +75,11 @@ jobs:
         run: bash tests/test_ifaces.sh
       - name: Postinst parity tests
         run: bash tests/test_postinst_parity.sh
+      # po2lmo.py reimplements a C tool whose output is consumed by a hash
+      # lookup — a wrong bit yields no error, just silent English. The test
+      # compares against a golden .lmo built by the real po2lmo.
+      - name: Translation packaging tests
+        run: bash tests/test_i18n_packaging.sh
       - name: Global internet cut tests
         run: bash tests/test_cut.sh
       - name: Regression tests
