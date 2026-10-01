@@ -197,5 +197,56 @@ else
     PASS=$((PASS + 1))
 fi
 
+# ── Cancelling runs must never be able to kill a release ────────────────────
+#
+# ci.yml and compat.yml cancel superseded runs on a pull request. Both are also
+# reached through workflow_call from auto-release.yml, so an unconditional
+# cancel-in-progress there would let a later push to main abort a release that
+# is already tagging — the worst failure this pipeline has. The gating is the
+# safety property, so it is asserted rather than trusted to review.
+
+WF_DIR="$(dirname "$WF")"
+
+for wf in ci.yml compat.yml; do
+    f="$WF_DIR/$wf"
+    cip=$(awk '/^concurrency:/{f=1;next} f&&/^[a-z]/{exit} f&&/cancel-in-progress:/{sub(/^ *cancel-in-progress: */,"");print;exit}' "$f")
+
+    if [ -z "$cip" ]; then
+        FAIL=$((FAIL + 1))
+        printf "FAIL: %s declares no cancel-in-progress under concurrency\n" "$wf"
+    elif [ "$cip" = "true" ]; then
+        FAIL=$((FAIL + 1))
+        printf "FAIL: %s cancels unconditionally — a push to main could abort a release mid-tag\n" "$wf"
+    else
+        case "$cip" in
+            *"github.event_name == 'pull_request'"*) PASS=$((PASS + 1)) ;;
+            *)
+                FAIL=$((FAIL + 1))
+                printf "FAIL: %s gates cancellation on something other than a pull_request event: %s\n" "$wf" "$cip"
+                ;;
+        esac
+    fi
+
+    # A shared group across the standalone and the nested run would make one
+    # queue behind the other rather than run alongside it.
+    grp=$(awk '/^concurrency:/{f=1;next} f&&/^[a-z]/{exit} f&&/group:/{sub(/^ *group: */,"");print;exit}' "$f")
+    case "$grp" in
+        *"github.run_id"*) PASS=$((PASS + 1)) ;;
+        *)
+            FAIL=$((FAIL + 1))
+            printf "FAIL: %s has no per-run fallback in its concurrency group: %s\n" "$wf" "$grp"
+            ;;
+    esac
+done
+
+# The release workflow must keep serialising releases without cancelling them.
+rel_cip=$(awk '/^concurrency:/{f=1;next} f&&/^[a-z]/{exit} f&&/cancel-in-progress:/{sub(/^ *cancel-in-progress: */,"");print;exit}' "$WF")
+if [ "$rel_cip" = "false" ]; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    printf "FAIL: auto-release.yml must not cancel in-progress releases (got '%s')\n" "$rel_cip"
+fi
+
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
