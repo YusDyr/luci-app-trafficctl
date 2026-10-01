@@ -4,6 +4,18 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.21.2] - 2026-10-01
+
+### Other
+- match persisted records by fixed string, not by regex ([#84](https://github.com/YusDyr/luci-app-trafficctl/issues/84)) ([ee51ffa](https://github.com/YusDyr/luci-app-trafficctl/commit/ee51ffae7c587445df32ff95fa6b1f9b1353bb31))
+  tctl_persist_save and tctl_persist_remove pick the record to replace by
+  building an awk pattern from the target and matching it with ~, which
+  makes the value a regular expression.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.21.1...v1.21.2
+
+---
+
 ## [1.21.1] - 2026-10-01
 
 ### Bug Fixes
