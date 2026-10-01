@@ -866,7 +866,14 @@ tctl_persist_save() {
         first=1
         for (i=1; i<=n; i++) {
             sub(/^\{/,"",items[i]); sub(/\}$/,"",items[i])
-            if (items[i] ~ "\"ip\":\"" ip "\"" && items[i] ~ "\"type\":\"" t "\"") continue
+            # index(), not ~: these values reach awk as a REGEX otherwise, and
+            # its safety then rests on an argument about which characters the
+            # fields can hold. That argument happens to hold today — an address
+            # or a CIDR carries only the dot, which among valid values can line
+            # up with nothing but another dot — but it is not a property of the
+            # code, and the next field added here would not have it. A fixed
+            # string search needs no such argument.
+            if (index(items[i], "\"ip\":\"" ip "\"") && index(items[i], "\"type\":\"" t "\"")) continue
             if (!first) printf ","
             printf "{%s}", items[i]
             first=0
@@ -889,7 +896,14 @@ tctl_persist_remove() {
         first=1
         for (i=1; i<=n; i++) {
             sub(/^\{/,"",items[i]); sub(/\}$/,"",items[i])
-            if (items[i] ~ "\"ip\":\"" ip "\"" && items[i] ~ "\"type\":\"" t "\"") continue
+            # index(), not ~: these values reach awk as a REGEX otherwise, and
+            # its safety then rests on an argument about which characters the
+            # fields can hold. That argument happens to hold today — an address
+            # or a CIDR carries only the dot, which among valid values can line
+            # up with nothing but another dot — but it is not a property of the
+            # code, and the next field added here would not have it. A fixed
+            # string search needs no such argument.
+            if (index(items[i], "\"ip\":\"" ip "\"") && index(items[i], "\"type\":\"" t "\"")) continue
             if (!first) printf ","
             printf "{%s}", items[i]
             first=0
