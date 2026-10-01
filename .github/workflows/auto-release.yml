@@ -25,10 +25,19 @@ jobs:
     name: Compatibility checks
     uses: ./.github/workflows/compat.yml
 
-  release:
-    name: Tag, release & build
+  prepare:
+    name: Decide the version
     runs-on: ubuntu-latest
-    needs: [ci, compat]
+    # Deliberately NOT gated on ci/compat: this job only reads. Nothing it
+    # produces reaches main or the Releases page until `publish`, which is
+    # gated. Running it at t=0 is what lets `build` start alongside the
+    # compatibility matrix instead of queueing behind it.
+    outputs:
+      sha:         ${{ steps.sync.outputs.sha }}
+      bump:        ${{ steps.bump.outputs.bump }}
+      new_version: ${{ steps.bump.outputs.new_version }}
+      new_tag:     ${{ steps.bump.outputs.new_tag }}
+      body:        ${{ steps.changelog.outputs.body }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -50,10 +59,13 @@ jobs:
       # current main, the range the notes describe is the range the tag will
       # cover, and a run whose work another run already released finds an empty
       # range and exits as "none" instead of failing.
+
       - name: Sync to the tip of main
+        id: sync
         run: |
           git fetch origin main --tags
           git reset --hard origin/main
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Determine version bump
         id: bump
@@ -282,19 +294,148 @@ jobs:
             echo 'CHANGELOG_EOF'
           } >> "$GITHUB_OUTPUT"
 
-      - name: Update Makefile version and tag
-        if: steps.bump.outputs.bump != 'none'
-        env:
-          NEW_VERSION: ${{ steps.bump.outputs.new_version }}
-          NOTES_BODY: ${{ steps.changelog.outputs.body }}
+  build:
+    name: Build the artifacts
+    runs-on: ubuntu-latest
+    needs: [prepare]
+    if: needs.prepare.outputs.bump != 'none'
+    # Runs PARALLEL to ci and compat, not after them. The OpenWrt SDK build
+    # below is ~26 minutes and used to start only once the matrix had
+    # finished, which is what made a release take ~57 minutes for ~26 minutes
+    # of work done twice.
+    #
+    # Safe to run before the checks pass because it writes nowhere but the
+    # artifact store. If ci or compat go red, `publish` never runs and these
+    # artifacts are simply discarded.
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # The exact commit `prepare` measured. Resolving origin/main again
+          # here could build a different tree than the one `publish` tags —
+          # two green jobs, a tag on commit A and an artifact from commit B.
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+
+      - name: Set the package version
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${{ steps.bump.outputs.new_version }}/" luci-app-trafficctl/Makefile
+          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${{ needs.prepare.outputs.new_version }}/" luci-app-trafficctl/Makefile
           sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=1/" luci-app-trafficctl/Makefile
           # Fail loudly if the substitution did not take (e.g. Makefile format
           # changed) instead of tagging a release with an unbumped version.
-          grep -qx "PKG_VERSION:=${{ steps.bump.outputs.new_version }}" luci-app-trafficctl/Makefile \
+          grep -qx "PKG_VERSION:=${{ needs.prepare.outputs.new_version }}" luci-app-trafficctl/Makefile \
+          || { echo "ERROR: PKG_VERSION was not updated in the Makefile"; exit 1; }
+
+      - name: Build .ipk (standalone)
+        run: |
+          ./build-ipk.sh "${{ needs.prepare.outputs.new_version }}" 1
+          ln -f dist/luci-app-trafficctl_*_all.ipk dist/luci-app-trafficctl_all.ipk
+          ln -f dist/luci-app-trafficctl_*_all.ipk dist/luci-app-trafficctl.ipk
+          cp dist/*.ipk /tmp/
+
+      # Secrets are not readable from step `if:` expressions, so detect them
+      # in a run step. Forks won't have the upstream signing keys — they get
+      # an unsigned APK from build-apk.sh instead of a failed release.
+
+      - name: Check APK signing secrets
+        id: apk_secrets
+        env:
+          APK_KEY: ${{ secrets.APK_PRIVATE_KEY }}
+        run: |
+          if [ -n "$APK_KEY" ]; then
+            echo "have=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "have=0" >> "$GITHUB_OUTPUT"
+            echo "::notice::APK signing secrets not configured — building unsigned APK with build-apk.sh (installable with 'apk add --allow-untrusted')"
+          fi
+
+      - name: Build .apk (via OpenWrt SDK, signed)
+        if: needs.prepare.outputs.bump != 'none' && steps.apk_secrets.outputs.have == '1'
+        uses: openwrt/gh-action-sdk@7fc2640243284ecc44f4a9c3f749a61746ee02cb # v11
+        env:
+          ARCH: x86_64-25.12.4
+          FEEDNAME: trafficctl
+          PACKAGES: luci-app-trafficctl
+          PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
+          V: sc
+          KEY_BUILD: ${{ secrets.USIGN_PRIVATE_KEY }}
+
+      - name: Collect APK
+        if: needs.prepare.outputs.bump != 'none' && steps.apk_secrets.outputs.have == '1'
+        run: |
+          mkdir -p dist
+          # luci-i18n-trafficctl-* as well as the main package: build-ipk.sh
+          # emits one translation package per language and the SDK action wiped
+          # dist/, so a glob anchored on the main package name drops them.
+          cp /tmp/luci-*trafficctl*.ipk dist/ 2>/dev/null || true
+          # The SDK builds the translation subpackages alongside the main one.
+          find bin/ -name "luci-i18n-trafficctl-*.apk" -exec cp {} dist/ \; 2>/dev/null || true
+          APK=$(find bin/ -name "luci-app-trafficctl*.apk" 2>/dev/null | head -1)
+          if [ -n "$APK" ]; then
+            cp "$APK" "dist/luci-app-trafficctl_${{ needs.prepare.outputs.new_version }}-r1_noarch.apk"
+            ln -f "dist/luci-app-trafficctl_${{ needs.prepare.outputs.new_version }}-r1_noarch.apk" dist/luci-app-trafficctl_noarch.apk
+            ln -f "dist/luci-app-trafficctl_${{ needs.prepare.outputs.new_version }}-r1_noarch.apk" dist/luci-app-trafficctl.apk
+          else
+            echo "::error::APK not found in SDK output"
+            find bin/ -type f -name "*.apk" || true
+            exit 1
+          fi
+
+      - name: Build .apk (standalone, unsigned fallback)
+        if: needs.prepare.outputs.bump != 'none' && steps.apk_secrets.outputs.have != '1'
+        run: |
+          # build-apk.sh's fallback layout is NOT installable by apk-tools 3
+          # (see build-apk.sh) — it is a known-broken artifact, so it must not
+          # be uploaded as a release asset. Build it only to keep this path
+          # exercised, then deliberately drop it instead of copying it into
+          # dist/ where the release step's `dist/*.apk` glob would pick it up.
+          APK_FILE=$(sh build-apk.sh "${{ needs.prepare.outputs.new_version }}" 1 | tail -1)
+          if [ -f "$APK_FILE" ]; then
+            echo "::warning::APK signing secrets not configured — built APK is unsigned and not installable by apk-tools 3, omitting it from the release (IPK only)"
+          else
+            echo "::warning::build-apk.sh produced no APK — releasing IPK only"
+          fi
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: release-artifacts
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: Tag and release
+    runs-on: ubuntu-latest
+    needs: [ci, compat, prepare, build]
+    if: needs.prepare.outputs.bump != 'none'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # On the branch, not detached: this job pushes to main.
+          ref: main
+          fetch-depth: 0
+
+      - name: Refuse to publish if main moved since the version was decided
+        run: |
+          want="${{ needs.prepare.outputs.sha }}"
+          have="$(git rev-parse HEAD)"
+          if [ "$want" != "$have" ]; then
+            echo "::error::main moved from $want to $have while this release was building."
+            echo "The notes and the version were computed for $want, so they would not describe"
+            echo "what the tag covers. Re-run after the newer commit has had its own release."
+            exit 1
+          fi
+
+      - name: Update Makefile version and tag
+        env:
+          NEW_VERSION: ${{ needs.prepare.outputs.new_version }}
+          NOTES_BODY: ${{ needs.prepare.outputs.body }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${{ needs.prepare.outputs.new_version }}/" luci-app-trafficctl/Makefile
+          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=1/" luci-app-trafficctl/Makefile
+          # Fail loudly if the substitution did not take (e.g. Makefile format
+          # changed) instead of tagging a release with an unbumped version.
+          grep -qx "PKG_VERSION:=${{ needs.prepare.outputs.new_version }}" luci-app-trafficctl/Makefile \
             || { echo "ERROR: PKG_VERSION was not updated in the Makefile"; exit 1; }
           # Keep CHANGELOG.md current. The release notes are already generated by
           # the "Generate changelog" step; without this they only ever landed on
@@ -324,7 +465,7 @@ jobs:
               fh.write(text)
           PYEOF
           git add luci-app-trafficctl/Makefile CHANGELOG.md
-          git commit -m "chore: bump version to ${{ steps.bump.outputs.new_version }}"
+          git commit -m "chore: bump version to ${{ needs.prepare.outputs.new_version }}"
           # No rebase here on purpose. This commit was built on the tip of main
           # as of the "Sync to the tip of main" step, so there is nothing to
           # replay it over — and replaying it over another run's bump is exactly
@@ -332,87 +473,20 @@ jobs:
           # A non-fast-forward push means a third party pushed to main during
           # this job; failing is correct then, because the notes would no longer
           # describe what the tag covers.
-          git tag "${{ steps.bump.outputs.new_tag }}"
-          git push origin main "${{ steps.bump.outputs.new_tag }}"
+          git tag "${{ needs.prepare.outputs.new_tag }}"
+          git push origin main "${{ needs.prepare.outputs.new_tag }}"
 
-      - name: Build .ipk (standalone)
-        if: steps.bump.outputs.bump != 'none'
-        run: |
-          ./build-ipk.sh "${{ steps.bump.outputs.new_version }}" 1
-          ln -f dist/luci-app-trafficctl_*_all.ipk dist/luci-app-trafficctl_all.ipk
-          ln -f dist/luci-app-trafficctl_*_all.ipk dist/luci-app-trafficctl.ipk
-          cp dist/*.ipk /tmp/
-
-      # Secrets are not readable from step `if:` expressions, so detect them
-      # in a run step. Forks won't have the upstream signing keys — they get
-      # an unsigned APK from build-apk.sh instead of a failed release.
-      - name: Check APK signing secrets
-        id: apk_secrets
-        if: steps.bump.outputs.bump != 'none'
-        env:
-          APK_KEY: ${{ secrets.APK_PRIVATE_KEY }}
-        run: |
-          if [ -n "$APK_KEY" ]; then
-            echo "have=1" >> "$GITHUB_OUTPUT"
-          else
-            echo "have=0" >> "$GITHUB_OUTPUT"
-            echo "::notice::APK signing secrets not configured — building unsigned APK with build-apk.sh (installable with 'apk add --allow-untrusted')"
-          fi
-
-      - name: Build .apk (via OpenWrt SDK, signed)
-        if: steps.bump.outputs.bump != 'none' && steps.apk_secrets.outputs.have == '1'
-        uses: openwrt/gh-action-sdk@7fc2640243284ecc44f4a9c3f749a61746ee02cb # v11
-        env:
-          ARCH: x86_64-25.12.4
-          FEEDNAME: trafficctl
-          PACKAGES: luci-app-trafficctl
-          PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
-          V: sc
-          KEY_BUILD: ${{ secrets.USIGN_PRIVATE_KEY }}
-
-      - name: Collect APK
-        if: steps.bump.outputs.bump != 'none' && steps.apk_secrets.outputs.have == '1'
-        run: |
-          mkdir -p dist
-          # luci-i18n-trafficctl-* as well as the main package: build-ipk.sh
-          # emits one translation package per language and the SDK action wiped
-          # dist/, so a glob anchored on the main package name drops them.
-          cp /tmp/luci-*trafficctl*.ipk dist/ 2>/dev/null || true
-          # The SDK builds the translation subpackages alongside the main one.
-          find bin/ -name "luci-i18n-trafficctl-*.apk" -exec cp {} dist/ \; 2>/dev/null || true
-          APK=$(find bin/ -name "luci-app-trafficctl*.apk" 2>/dev/null | head -1)
-          if [ -n "$APK" ]; then
-            cp "$APK" "dist/luci-app-trafficctl_${{ steps.bump.outputs.new_version }}-r1_noarch.apk"
-            ln -f "dist/luci-app-trafficctl_${{ steps.bump.outputs.new_version }}-r1_noarch.apk" dist/luci-app-trafficctl_noarch.apk
-            ln -f "dist/luci-app-trafficctl_${{ steps.bump.outputs.new_version }}-r1_noarch.apk" dist/luci-app-trafficctl.apk
-          else
-            echo "::error::APK not found in SDK output"
-            find bin/ -type f -name "*.apk" || true
-            exit 1
-          fi
-
-      - name: Build .apk (standalone, unsigned fallback)
-        if: steps.bump.outputs.bump != 'none' && steps.apk_secrets.outputs.have != '1'
-        run: |
-          # build-apk.sh's fallback layout is NOT installable by apk-tools 3
-          # (see build-apk.sh) — it is a known-broken artifact, so it must not
-          # be uploaded as a release asset. Build it only to keep this path
-          # exercised, then deliberately drop it instead of copying it into
-          # dist/ where the release step's `dist/*.apk` glob would pick it up.
-          APK_FILE=$(sh build-apk.sh "${{ steps.bump.outputs.new_version }}" 1 | tail -1)
-          if [ -f "$APK_FILE" ]; then
-            echo "::warning::APK signing secrets not configured — built APK is unsigned and not installable by apk-tools 3, omitting it from the release (IPK only)"
-          else
-            echo "::warning::build-apk.sh produced no APK — releasing IPK only"
-          fi
+      - uses: actions/download-artifact@v5
+        with:
+          name: release-artifacts
+          path: dist/
 
       - name: Create GitHub Release
-        if: steps.bump.outputs.bump != 'none'
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ steps.bump.outputs.new_tag }}
-          name: ${{ steps.bump.outputs.new_tag }}
-          body: ${{ steps.changelog.outputs.body }}
+          tag_name: ${{ needs.prepare.outputs.new_tag }}
+          name: ${{ needs.prepare.outputs.new_tag }}
+          body: ${{ needs.prepare.outputs.body }}
           files: |
             dist/*.ipk
             dist/*.apk
