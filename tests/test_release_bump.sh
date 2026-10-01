@@ -145,5 +145,57 @@ docs: document every rpcd method and add contributor guidance
 
 test: exercise the real scripts and cover what had no tests'
 
+# ── Step order is what prevents two runs from racing (#85) ──────────────────
+#
+# The release job computes a version and then edits PKG_VERSION and CHANGELOG.md
+# to match. When two merges land within the ~50 minutes the SDK matrix takes,
+# two runs each build a bump commit touching those same two files; the second
+# one then rebased onto a main that already carried the first, conflicted on
+# both and died — which is how a feat: shipped inside a patch release with its
+# changelog entry lost. The defence is ordering, not conflict resolution: sync
+# to the tip BEFORE deciding anything, and never replay the bump commit.
+#
+# Asserted structurally because the failure only reproduces with two merges
+# landing minutes apart, which a unit test cannot stage.
+
+step_line() { grep -n "^      - name: $1\$" "$WF" | head -1 | cut -d: -f1; }
+
+sync_at=$(step_line "Sync to the tip of main")
+bump_at=$(step_line "Determine version bump")
+chlog_at=$(step_line "Generate changelog")
+
+if [ -z "$sync_at" ]; then
+    FAIL=$((FAIL + 1))
+    printf "FAIL: the release job no longer syncs to the tip of main before computing the bump\n"
+else
+    PASS=$((PASS + 1))
+fi
+
+if [ -n "$sync_at" ] && [ -n "$bump_at" ] && [ "$sync_at" -lt "$bump_at" ]; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    printf "FAIL: the sync step must come BEFORE the version bump is decided (sync=%s bump=%s)\n" \
+        "$sync_at" "$bump_at"
+fi
+
+if [ -n "$sync_at" ] && [ -n "$chlog_at" ] && [ "$sync_at" -lt "$chlog_at" ]; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    printf "FAIL: the sync step must come BEFORE the changelog is generated (sync=%s changelog=%s)\n" \
+        "$sync_at" "$chlog_at"
+fi
+
+# The bump commit must not be replayed over whatever else reached main: that is
+# the operation that conflicted on CHANGELOG.md and Makefile.
+if grep -qE '^ *git (pull --rebase|rebase)' "$WF"; then
+    FAIL=$((FAIL + 1))
+    printf "FAIL: the release job rebases its bump commit again — that is the #85 failure\n"
+    grep -nE '^ *git (pull --rebase|rebase)' "$WF"
+else
+    PASS=$((PASS + 1))
+fi
+
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
