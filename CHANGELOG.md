@@ -4,6 +4,19 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.21.1] - 2026-10-01
+
+### Bug Fixes
+- stop two release runs from killing each other's changelog ([#86](https://github.com/YusDyr/luci-app-trafficctl/issues/86)) ([c601798](https://github.com/YusDyr/luci-app-trafficctl/commit/c601798551d1d99c30756ca49f46f04a4d9ef281))
+  The release job computes a version from "what is on main that the last
+  tag does not cover", then edits PKG_VERSION and CHANGELOG.md to say so.
+  Both were computed from the commit the run was triggered for, and the
+  edits were committed and only then rebased onto main.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.21.0...v1.21.1
+
+---
+
 ## [1.21.0] - 2026-09-30
 
 ### Features
