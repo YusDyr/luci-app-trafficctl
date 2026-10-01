@@ -248,5 +248,68 @@ else
     printf "FAIL: auto-release.yml must not cancel in-progress releases (got '%s')\n" "$rel_cip"
 fi
 
+# ── The release is split in three; the split must stay safe ─────────────────
+#
+# `build` runs the ~26-minute OpenWrt SDK build PARALLEL to ci and compat rather
+# than after them, which is where the release's wall clock went. That is only
+# safe while three things hold, and none of them is visible from a diff:
+#
+#   1. `build` writes nowhere but the artifact store — no commit, no tag, no
+#      push. Otherwise an unverified tree would reach main before the checks.
+#   2. `publish` waits for ci AND compat as well as prepare and build.
+#   3. `build` and `publish` operate on the SAME commit. If either re-resolved
+#      origin/main, the tag could name commit A while the shipped artifact was
+#      built from commit B, with both jobs green.
+
+job_block() { awk -v j="  $1:" '$0==j{f=1;next} /^  [a-z_-]+:$/{if(f)exit} f' "$WF"; }
+
+build_block=$(job_block build)
+publish_block=$(job_block publish)
+
+if [ -z "$build_block" ] || [ -z "$publish_block" ]; then
+    FAIL=$((FAIL + 1))
+    printf "FAIL: could not find the build and publish jobs in auto-release.yml\n"
+else
+    PASS=$((PASS + 1))
+
+    if printf '%s\n' "$build_block" | grep -qE '^ *git (commit|tag|push)'; then
+        FAIL=$((FAIL + 1))
+        printf "FAIL: the build job commits/tags/pushes — it runs BEFORE ci and compat are green\n"
+        printf '%s\n' "$build_block" | grep -nE '^ *git (commit|tag|push)'
+    else
+        PASS=$((PASS + 1))
+    fi
+
+    # Both halves must be pinned to the commit prepare measured.
+    for j in build publish; do
+        blk=$(job_block "$j")
+        case "$blk" in
+            *"needs.prepare.outputs.sha"*) PASS=$((PASS + 1)) ;;
+            *)
+                # publish checks out `main` by name and then asserts the SHA,
+                # which is equivalent as long as the assertion is there.
+                if [ "$j" = publish ] && printf '%s\n' "$blk" | grep -q 'Refuse to publish if main moved'; then
+                    PASS=$((PASS + 1))
+                else
+                    FAIL=$((FAIL + 1))
+                    printf "FAIL: the %s job is not pinned to the commit prepare measured\n" "$j"
+                fi
+                ;;
+        esac
+    done
+fi
+
+# publish must wait for the checks, not just for the build.
+pub_needs=$(awk '/^  publish:/{f=1;next} f&&/^ *needs:/{print;exit}' "$WF")
+for dep in ci compat prepare build; do
+    case "$pub_needs" in
+        *"$dep"*) PASS=$((PASS + 1)) ;;
+        *)
+            FAIL=$((FAIL + 1))
+            printf "FAIL: publish does not depend on '%s' (needs: %s)\n" "$dep" "$pub_needs"
+            ;;
+    esac
+done
+
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
