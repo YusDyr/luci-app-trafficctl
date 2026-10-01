@@ -4,6 +4,21 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.21.3] - 2026-10-01
+
+### Other
+- cancel superseded runs on a pull request ([#87](https://github.com/YusDyr/luci-app-trafficctl/issues/87)) ([fb9d417](https://github.com/YusDyr/luci-app-trafficctl/commit/fb9d41730d1c0af15b3f8c35eb93fb673adb812f))
+  Neither ci.yml nor compat.yml declared a concurrency group, so every push
+  to a branch started another full OpenWrt compatibility matrix and the old
+  one kept running. On 2026-09-29 that put nine compat runs across three
+  branches in flight at once — four of them superseded commits on a single
+  branch — 153 jobs against the hosted concurrency limit, and runs stretched
+  to 34-55 minutes against a 24-27 minute uncontended baseline.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.21.2...v1.21.3
+
+---
+
 ## [1.21.2] - 2026-10-01
 
 ### Other
