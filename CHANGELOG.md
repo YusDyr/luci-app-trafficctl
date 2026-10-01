@@ -4,6 +4,21 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.21.4] - 2026-10-01
+
+### Other
+- build the release artifacts parallel to the checks, not after them ([#88](https://github.com/YusDyr/luci-app-trafficctl/issues/88)) ([4b4edc0](https://github.com/YusDyr/luci-app-trafficctl/commit/4b4edc00c8afba9cbade0d6ad5f7ffb9777455d3))
+  A release took 57 minutes for about 26 minutes of distinct work, because
+  the OpenWrt SDK build ran TWICE in sequence: once inside compat.yml as
+  `Build packages`, and again in the release job, which could only start
+  after `needs: [ci, compat]` was satisfied. Measured on run 36856850010 —
+  `Build packages` 30m47s, then the release job's SDK step 25m42s, while
+  every other step in that job together took 23 seconds.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.21.3...v1.21.4
+
+---
+
 ## [1.21.3] - 2026-10-01
 
 ### Other
