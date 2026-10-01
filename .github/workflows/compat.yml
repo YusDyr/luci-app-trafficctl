@@ -11,6 +11,26 @@ on:
 
 permissions:
   contents: read
+
+# Superseded runs on the same pull request are cancelled; nothing else is.
+#
+# The gating is the whole point here. This workflow is also reached through
+# workflow_call from auto-release.yml, and a release must never be cancelled by
+# a later push — so cancel-in-progress is true only for pull_request events.
+#
+# The group is keyed on the PR number, falling back to the run id when there is
+# no PR. That fallback matters: on a push to main this workflow runs both
+# standalone and nested inside the release run, and a shared group with
+# cancel-in-progress false would make one QUEUE BEHIND the other instead of
+# running alongside it. A per-run group keeps them independent.
+#
+# Measured cause: on 2026-09-29 nine compat runs across three branches were in
+# flight at once (four of them superseded commits on one branch), 153 jobs
+# against the hosted limit, and runs stretched to 34-55 minutes against a 24-27
+# minute uncontended baseline.
+concurrency:
+  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
   # gh release download in the upgrade job needs read access to releases
   # (covered by the default GITHUB_TOKEN's contents: read above)
 
