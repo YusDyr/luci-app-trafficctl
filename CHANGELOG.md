@@ -17,6 +17,23 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ## [1.20.1] - 2026-09-30
 
+> This release also contains the asymmetric rate-limit backend below, which the
+> release job failed to record at the time: a second release run was in flight
+> and its bump commit conflicted on this file, so its notes were lost (#85). The
+> entry is restored by hand, and the version number stays 1.20.1 rather than
+> being rewritten — the tag is published and must not change meaning.
+
+### Features
+- independent download and upload rate limits ([#80](https://github.com/YusDyr/luci-app-trafficctl/issues/80)) ([920cfb2](https://github.com/YusDyr/luci-app-trafficctl/commit/920cfb2f))
+  The enforcement was already two-sided — the limiter polices download at
+  LAN egress and upload at LAN ingress as separate nftables rules on
+  separate hooks, and the shaper builds separate HTB classes on separate
+  devices. They were symmetric only because both halves took the same
+  number. This threads a second number through the scripts, the rpcd
+  surface, the persisted records and the reboot restore. An absent upload
+  rate keeps meaning "same as download" everywhere, so every record written
+  before this reads back unchanged.
+
 ### Other
 - stop running every check two and three times ([#78](https://github.com/YusDyr/luci-app-trafficctl/issues/78)) ([9e43bdc](https://github.com/YusDyr/luci-app-trafficctl/commit/9e43bdc9dde250d6fdbb3c1143b8d945b19c243f))
   The workflows nest: auto-release.yml calls ci.yml and compat.yml, and

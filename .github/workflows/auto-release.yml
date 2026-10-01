@@ -34,6 +34,27 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Everything below describes "what is on main that the last tag does not
+      # cover", and then edits PKG_VERSION and CHANGELOG.md to say so. Both of
+      # those are computed from the commit this run was triggered for, so when a
+      # second merge lands while the SDK matrix is running — ~50 minutes — two
+      # runs each build a bump commit touching the same two files. The
+      # concurrency group serialises them, so the second one rebased its bump
+      # onto a main that already carried the first, conflicted on both files and
+      # died, losing its version bump and its release notes: that is how #80's
+      # feature shipped inside the v1.20.1 patch release with no changelog entry
+      # anywhere (#85).
+      #
+      # Syncing to the tip FIRST makes the problem structural rather than
+      # resolved: there is only ever one bump commit being created against
+      # current main, the range the notes describe is the range the tag will
+      # cover, and a run whose work another run already released finds an empty
+      # range and exits as "none" instead of failing.
+      - name: Sync to the tip of main
+        run: |
+          git fetch origin main --tags
+          git reset --hard origin/main
+
       - name: Determine version bump
         id: bump
         run: |
@@ -304,10 +325,13 @@ jobs:
           PYEOF
           git add luci-app-trafficctl/Makefile CHANGELOG.md
           git commit -m "chore: bump version to ${{ steps.bump.outputs.new_version }}"
-          # main may have advanced while CI ran; rebase rather than fail. The
-          # rebase rewrites the bump commit, so the tag must be created AFTER
-          # it — otherwise the tag points at an object no branch contains.
-          git pull --rebase origin main
+          # No rebase here on purpose. This commit was built on the tip of main
+          # as of the "Sync to the tip of main" step, so there is nothing to
+          # replay it over — and replaying it over another run's bump is exactly
+          # what conflicted on these two files and killed the release (#85).
+          # A non-fast-forward push means a third party pushed to main during
+          # this job; failing is correct then, because the notes would no longer
+          # describe what the tag covers.
           git tag "${{ steps.bump.outputs.new_tag }}"
           git push origin main "${{ steps.bump.outputs.new_tag }}"
 
