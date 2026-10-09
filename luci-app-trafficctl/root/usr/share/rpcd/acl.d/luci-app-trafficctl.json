@@ -10,7 +10,9 @@
 					"portfw_list", "names_list", "netify_status", "netify_list",
 					"shape_status",
 					"config_get", "telegram_config_get",
-					"logging_config_get", "newdevice_config_get"
+					"logging_config_get", "newdevice_config_get",
+					"history_status", "history_read", "history_periods",
+					"history_config_get"
 				],
 				"file": [ "read" ]
 			},
@@ -30,7 +32,8 @@
 					"telegram_config_set", "telegram_test",
 					"logging_config_set", "activity_log",
 					"newdevice_config_set",
-					"cut_status", "cut_set"
+					"cut_status", "cut_set",
+					"history_config_set", "history_flush"
 				]
 			},
 			"uci": [ "trafficctl" ]

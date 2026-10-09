@@ -79,6 +79,7 @@
 #   trafficctl-history.sh prune            drop periods beyond the retention count
 #   trafficctl-history.sh status           JSON: enabled, dir, writability, last error
 #   trafficctl-history.sh keeper           the procd service loop (sample + flush)
+#   trafficctl-history.sh validate-dir <p>  exit 0 if p is an allowed store dir
 
 . /usr/local/bin/trafficctl-fw.sh
 
@@ -104,18 +105,43 @@ hist_enabled() {
     [ "$(uci -q get trafficctl.history.enabled 2>/dev/null)" = "1" ]
 }
 
+# The store directory is both a mkdir -p target and a delete target (prune
+# removes *.tsv inside it), so an unconstrained value would hand the write ACL
+# arbitrary directory creation plus the removal of any .tsv on the filesystem.
+# That is the same mistake tctl_validate_log_file exists to prevent, and it is
+# enforced HERE as well as in the rpcd setter — a value that reached the config
+# by another route must not be honoured either.
+#
+# The allowed roots cover the cases the feature is for: the package's own state
+# directory, and the usual mount points, which is where a network share or a
+# USB disk lands.
+HIST_DIR_DEFAULT="/etc/trafficctl/history"
+
+hist_validate_dir() {
+    local d="$1"
+    case "$d" in
+        */../*|*/..|../*|..) return 1 ;;
+        *[\'\"\$\`\|\;\&\<\>]*) return 1 ;;
+        /etc/trafficctl/*|/mnt/*|/media/*|/srv/*|/tmp/*) ;;
+        *) return 1 ;;
+    esac
+    # A bare root would make prune's delete set the whole of /mnt.
+    case "$d" in
+        /etc/trafficctl/|/mnt/|/media/|/srv/|/tmp/) return 1 ;;
+    esac
+    return 0
+}
+
 hist_dir() {
     local d
     d=$(uci -q get trafficctl.history.dir 2>/dev/null)
-    [ -z "$d" ] && d="/etc/trafficctl/history"
-    # An absolute path only. A relative one would resolve against whatever
-    # directory the caller happened to be in — cron, rpcd and a shell all
-    # differ — and silently scatter period files.
-    case "$d" in
-        /*) ;;
-        *) d="/etc/trafficctl/history" ;;
-    esac
-    printf '%s\n' "${d%/}"
+    d="${d%/}"
+    # An absolute path inside an allowed root, or the default. A relative path
+    # would resolve against whatever directory the caller happened to be in —
+    # the procd service, rpcd and an interactive shell all differ — and
+    # silently scatter period files.
+    hist_validate_dir "$d" || d="$HIST_DIR_DEFAULT"
+    printf '%s\n' "$d"
 }
 
 hist_period_kind() {
@@ -702,12 +728,15 @@ case "$1" in
         ;;
     flush)   hist_flush ;;
     keeper)  hist_keeper ;;
+    # Exposed so the rpcd setter validates against THIS implementation rather
+    # than a second copy of the rule that can drift away from it.
+    validate-dir) hist_validate_dir "${2%/}" ;;
     read)    hist_read "$2" "$3" ;;
     periods) hist_periods ;;
     prune)   hist_prune ;;
     status)  hist_status ;;
     *)
-        printf 'Usage: %s {sample|flush|keeper|read [period [to]]|periods|prune|status}\n' "$0" >&2
+        printf 'Usage: %s {sample|flush|keeper|validate-dir <path>|read [period [to]]|periods|prune|status}\n' "$0" >&2
         exit 1
         ;;
 esac

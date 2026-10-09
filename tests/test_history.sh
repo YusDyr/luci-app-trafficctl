@@ -25,8 +25,13 @@ FAIL=0
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$REPO_ROOT/luci-app-trafficctl/root/usr/local/bin"
 
-TMPDIR=$(mktemp -d)
-trap 'rm -rf "$TMPDIR"' EXIT
+# Deliberately under /tmp rather than wherever mktemp defaults to. The store
+# directory is validated against a list of allowed roots (it is a mkdir -p AND
+# a delete target), and macOS mktemp hands back /var/folders/... which is
+# correctly refused — so a default temp dir would test the fallback instead of
+# the feature.
+TMPDIR=$(mktemp -d /tmp/tctl-history.XXXXXX)
+trap 'chmod -R u+w "$TMPDIR" 2>/dev/null; rm -rf "$TMPDIR"' EXIT
 
 MOCKBIN="$TMPDIR/bin"
 STORE="$TMPDIR/store"
@@ -321,10 +326,32 @@ assert_contains "uncountered software offload degrades the verdict" \
     '"accuracy":"degraded"' "$(run status)"
 uciset firewall.@defaults[0].flow_offloading 0
 
+# ── the store directory is constrained, because prune deletes inside it ─────
+# Unconstrained, the write ACL would get arbitrary directory creation plus the
+# removal of any .tsv on the filesystem — the same shape of hole
+# tctl_validate_log_file exists to close. A rejected value must fall back to
+# the default rather than being honoured.
+uciset trafficctl.history.dir /root/somewhere
+assert_contains "a path outside the allowed roots falls back to the default" \
+    '"dir":"/etc/trafficctl/history"' "$(run status)"
+uciset trafficctl.history.dir "/mnt/../etc/trafficctl/history"
+assert_contains "a traversal is refused" \
+    '"dir":"/etc/trafficctl/history"' "$(run status)"
+uciset trafficctl.history.dir "/mnt"
+assert_contains "a bare mount root is refused, or prune would delete all of it" \
+    '"dir":"/etc/trafficctl/history"' "$(run status)"
+uciset trafficctl.history.dir "/mnt/nas/tctl"
+assert_contains "a real mount point is allowed — that is the network-share case" \
+    '"dir":"/mnt/nas/tctl"' "$(run status)"
+uciset trafficctl.history.dir "$STORE"
+
 # ── an unwritable store is an error state, not a silent loss ────────────────
-uciset trafficctl.history.dir /proc/trafficctl-history-nope
+mkdir -p "$TMPDIR/ro"
+chmod 500 "$TMPDIR/ro"
+uciset trafficctl.history.dir "$TMPDIR/ro/sub"
 out=$(run flush)
 assert_contains "an unwritable store fails loudly" '"ok":false' "$out"
+chmod 700 "$TMPDIR/ro"
 uciset trafficctl.history.dir "$STORE"
 assert_contains "the failure is reported in status" '"error":"' "$(run status)"
 # And recovers: a later successful flush must clear it, or the UI would show a
