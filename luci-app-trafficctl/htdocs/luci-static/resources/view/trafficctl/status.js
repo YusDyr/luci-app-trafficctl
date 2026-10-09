@@ -114,10 +114,7 @@ var callMacfilterRemove = rpc.declare({
 var callRatelimit = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'ratelimit',
-	// rate_kbit_up is omitted for a symmetric limit rather than sent equal to
-	// rate_kbit: the backend reads absence as "same as download", and sending
-	// it always would make every record asymmetric-shaped on disk.
-	params: ['ip', 'rate_kbit', 'label', 'mode', 'rate_kbit_up']
+	params: ['ip', 'rate_kbit', 'label', 'mode']
 });
 
 var callRatelimitStats = rpc.declare({
@@ -135,7 +132,7 @@ var callSubnets = rpc.declare({
 var callShapeAdd = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'shape_add',
-	params: ['ip', 'rate_kbit', 'label', 'rate_kbit_up']
+	params: ['ip', 'rate_kbit', 'label']
 });
 
 var callShapeRemove = rpc.declare({
@@ -249,13 +246,13 @@ var callConfigGet = rpc.declare({
 
 var RATE_PRESETS = [
 	{v:'0',      l: _('Off')},
-	{v:'1000',   l:'1 Mbit/s'},
-	{v:'2000',   l:'2 Mbit/s'},
-	{v:'5000',   l:'5 Mbit/s'},
-	{v:'10000',  l:'10 Mbit/s'},
-	{v:'25000',  l:'25 Mbit/s'},
-	{v:'50000',  l:'50 Mbit/s'},
-	{v:'100000', l:'100 Mbit/s'},
+	{v:'1000',   l:_('1 Mbit/s')},
+	{v:'2000',   l:_('2 Mbit/s')},
+	{v:'5000',   l:_('5 Mbit/s')},
+	{v:'10000',  l:_('10 Mbit/s')},
+	{v:'25000',  l:_('25 Mbit/s')},
+	{v:'50000',  l:_('50 Mbit/s')},
+	{v:'100000', l:_('100 Mbit/s')},
 	{v:'custom', l: _('Custom…')}
 ];
 
@@ -334,11 +331,11 @@ function renderTotalCell(cell, total, liveVal, since, pending, degraded) {
 	}
 	cell.appendChild(document.createTextNode(fmtBytes(total)));
 	var tip = since
-		? (_('Accumulated since') + ' ' + new Date(since * 1000).toLocaleString())
+		? (_('Accumulated since %s').format(new Date(since * 1000).toLocaleString()))
 		: _('Accumulated on the router');
 	tip += '\n' + _('Resets when the router reboots.');
 	if (liveVal != null && liveVal >= 0) {
-		tip += '\n' + _('Currently tracked connections hold') + ' ' + fmtBytes(liveVal);
+		tip += '\n' + _('Currently tracked connections hold %s').format(fmtBytes(liveVal));
 	}
 	cell.title = tip;
 }
@@ -346,16 +343,16 @@ function renderTotalCell(cell, total, liveVal, since, pending, degraded) {
 function fmtSpeed(bps) {
 	if (!bps || bps < 1) return '—';
 	var bits = bps * 8;
-	if (bits < 1000) return bits.toFixed(0) + ' bit/s';
-	if (bits < 1000000) { var k = bits/1000; return (k % 1 === 0 ? k.toFixed(0) : k.toFixed(1)) + ' Kbit/s'; }
-	if (bits < 1000000000) { var m = bits/1000000; return (m % 1 === 0 ? m.toFixed(0) : m.toFixed(1)) + ' Mbit/s'; }
-	var g = bits/1000000000; return (g % 1 === 0 ? g.toFixed(0) : g.toFixed(2)) + ' Gbit/s';
+	if (bits < 1000) return bits.toFixed(0) + ' ' + _('bit/s');
+	if (bits < 1000000) { var k = bits/1000; return (k % 1 === 0 ? k.toFixed(0) : k.toFixed(1)) + ' ' + _('Kbit/s'); }
+	if (bits < 1000000000) { var m = bits/1000000; return (m % 1 === 0 ? m.toFixed(0) : m.toFixed(1)) + ' ' + _('Mbit/s'); }
+	var g = bits/1000000000; return (g % 1 === 0 ? g.toFixed(0) : g.toFixed(2)) + ' ' + _('Gbit/s');
 }
 function fmtRate(kbit) {
 	if (!kbit || kbit <= 0) return '—';
 	var mbit = kbit / 1000;
-	if (mbit >= 1) return (mbit % 1 === 0 ? mbit.toFixed(0) : mbit.toFixed(1)) + ' Mbit/s';
-	return kbit + ' kbit/s';
+	if (mbit >= 1) return (mbit % 1 === 0 ? mbit.toFixed(0) : mbit.toFixed(1)) + ' ' + _('Mbit/s');
+	return kbit + ' ' + _('kbit/s');
 }
 
 // Render a "↓ down / ↑ up" speed cell. Both halves come from the same
@@ -703,14 +700,14 @@ function renderFullGraph(history, limitKbit, width, height) {
 	dlLeg.setAttribute('x', legendX); dlLeg.setAttribute('y', legendY);
 	dlLeg.setAttribute('text-anchor', 'end'); dlLeg.setAttribute('font-size', '9');
 	dlLeg.setAttribute('fill', 'var(--tc-speed)'); dlLeg.setAttribute('font-weight', '600');
-	dlLeg.textContent = '↓ DL';
+	dlLeg.textContent = _('↓ DL');
 	svg.appendChild(dlLeg);
 	if (hasUpload) {
 		var ulLeg = document.createElementNS(ns, 'text');
 		ulLeg.setAttribute('x', legendX); ulLeg.setAttribute('y', legendY + 12);
 		ulLeg.setAttribute('text-anchor', 'end'); ulLeg.setAttribute('font-size', '9');
 		ulLeg.setAttribute('fill', 'var(--tc-ok)'); ulLeg.setAttribute('font-weight', '600');
-		ulLeg.textContent = '↑ UL';
+		ulLeg.textContent = _('↑ UL');
 		svg.appendChild(ulLeg);
 	}
 
@@ -967,10 +964,10 @@ function buildOverviewPanel(ifaces, ifHistory, speedMap, nameByIp, showOther, on
 
 	// ── headline tiles ──────────────────────────────────────────────────
 	var head = E('div', { 'class': 'tc-ov-tiles' }, [
-		mkOvTile(_('Download') + ' · ' + (primary.label || primary.dev),
-			fmtSpeed(primaryRate.down), fmtBytes(primary.rx_bytes) + ' ' + _('total'), 'tc-c-speed'),
-		mkOvTile(_('Upload') + ' · ' + (primary.label || primary.dev),
-			fmtSpeed(primaryRate.up), fmtBytes(primary.tx_bytes) + ' ' + _('total'), 'tc-c-ok'),
+		mkOvTile(_('Download · %s').format(primary.label || primary.dev),
+			fmtSpeed(primaryRate.down), _('%s total').format(fmtBytes(primary.rx_bytes)), 'tc-c-speed'),
+		mkOvTile(_('Upload · %s').format(primary.label || primary.dev),
+			fmtSpeed(primaryRate.up), _('%s total').format(fmtBytes(primary.tx_bytes)), 'tc-c-ok'),
 		mkOvTile(_('Active devices'), String(activeDevices),
 			_('sending or receiving now'), '')
 	]);
@@ -1337,7 +1334,7 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		if (sd && (sd.current_up||0) > 1024) { cellMap._speed_up.className = 'td tc-right tc-mono tc-speed-active'; cellMap._speed_up.textContent = fmtSpeed(sd.current_up); }
 		else { cellMap._speed_up.className = 'td tc-right tc-mono tc-speed-idle'; cellMap._speed_up.textContent = sd ? fmtSpeed(sd.current_up||0) : '—'; }
 
-		var sparkTip = r._throttle_kbit > 0 ? (_('Limit') + ': ' + fmtRate(r._throttle_kbit)) : '';
+		var sparkTip = r._throttle_kbit > 0 ? (_('Limit: %s').format(fmtRate(r._throttle_kbit))) : '';
 		cellMap._spark = E('div', { 'class': 'td tc-center', 'style': 'padding:2px 4px', 'data-spark-ip': r.ip, 'data-tip': sparkTip || undefined });
 		var sparkSvg = renderSparkline(speedHistory[r.ip], globalSpeedMax, 60, 20, r._throttle_kbit);
 		if (sparkSvg) cellMap._spark.appendChild(sparkSvg);
@@ -1369,7 +1366,7 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 				if (lastTs) {
 					var ago = Math.floor((Date.now()/1000) - lastTs);
 					var agoStr = ago < 60 ? ago + 's' : ago < 3600 ? Math.floor(ago/60) + 'm' : Math.floor(ago/3600) + 'h';
-					tip = _('Last seen') + ': ' + lastType + ', ' + agoStr + ' ' + _('ago');
+					tip = _('Last seen: %s, %s ago').format(lastType, agoStr);
 				}
 			}
 			linkBadge = E('span', { 'class': 'tc-c-faint', 'style': 'cursor:help', 'title': tip }, '?');
@@ -1425,7 +1422,7 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		cellMap._backlog = E('div', { 'class': 'td tc-center', 'data-backlog-ip': r.ip }, backlogBadge);
 
 		var cells = visibleCols.map(function(c) { return cellMap[c.key]; });
-		var row = E('div', { 'class': 'tr', 'title': _('Click to inspect') + ' ' + r.name }, cells);
+		var row = E('div', { 'class': 'tr', 'title': _('Click to inspect %s').format(r.name) }, cells);
 		row.addEventListener('click', function() { addRecentDevice(r.ip, r.name); onSelect(r.ip, r.name); });
 		return row;
 	});
@@ -1519,7 +1516,7 @@ function buildExtendedStatsPanel(ip, shapeMap, dropMap, speedMap) {
 		}
 		if (sm.memory_used != null) addRow(_('Queue memory'), fmtBytes(sm.memory_used), null);
 		if (sm.lended != null || sm.borrowed != null) {
-			addRow(_('Lended') + ' / ' + _('Borrowed'), (sm.lended || 0) + ' / ' + (sm.borrowed || 0), null);
+			addRow(_('Lended / Borrowed'), (sm.lended || 0) + ' / ' + (sm.borrowed || 0), null);
 		}
 		if (spd && sm.rate_kbit > 0) {
 			var currentBps = spd.current || 0;
@@ -1612,7 +1609,7 @@ function buildExtendedStatsLegend(shapeMap, dropMap) {
 	}
 
 	return E('div', { 'class': 'tc-ext-panel tc-ext-panel--sticky' }, [
-		E('div', { 'class': 'tc-ext-panel__title' }, _('Extended Statistics') + ' (' + _('all devices') + ')'),
+		E('div', { 'class': 'tc-ext-panel__title' }, _('Extended Statistics (all devices)')),
 		E('div', { 'class': 'tc-ext-col-flex' }, rows)
 	]);
 }
@@ -2302,8 +2299,8 @@ return view.extend({
 			'class': 'tc-custom-input' });
 		var customUnitBtns = E('span', {'class':'tc-custom-unit-btns'});
 		var _customUnit = 'mbit';
-		var mbitBtn = E('span', {'style':'padding:4px 8px;font-size:11px;cursor:pointer;background:var(--tc-speed);color:#fff'}, 'Mbit/s');
-		var kbitBtn = E('span', {'style':'padding:4px 8px;font-size:11px;cursor:pointer;background:var(--tc-bg);color:currentColor'}, 'kbit/s');
+		var mbitBtn = E('span', {'style':'padding:4px 8px;font-size:11px;cursor:pointer;background:var(--tc-speed);color:#fff'}, _('Mbit/s'));
+		var kbitBtn = E('span', {'style':'padding:4px 8px;font-size:11px;cursor:pointer;background:var(--tc-bg);color:currentColor'}, _('kbit/s'));
 		function updateUnitBtns() {
 			mbitBtn.style.background = _customUnit === 'mbit' ? 'var(--tc-speed)' : 'var(--tc-bg)';
 			mbitBtn.style.color = _customUnit === 'mbit' ? '#fff' : 'currentColor';
@@ -2336,47 +2333,6 @@ return view.extend({
 		var customRow = E('div', {'class':'tc-custom-row tc-hidden'}, [
 			customInput, customUnitBtns, customApplyBtn
 		]);
-
-		// ── Separate upload ceiling ────────────────────────────────────────
-		//
-		// Disclosed rather than always shown. Most limits are symmetric, and
-		// the backend treats an absent upload rate as "same as download", so
-		// the default state of this control matches the default meaning: one
-		// number, one click. Opening it is the opt-in into two.
-		//
-		// The rate chips above stay the DOWNLOAD ceiling in either state, so
-		// the common path does not change shape when this is revealed.
-		var upInput = E('input', { 'type':'number', 'min':'1', 'step':'1',
-			'placeholder': _('value'), 'class': 'tc-custom-input' });
-		var _upUnit = 'mbit';
-		var upMbitBtn = E('span', {'class':'tc-unit-btn'}, _('Mbit/s'));
-		var upKbitBtn = E('span', {'class':'tc-unit-btn'}, _('kbit/s'));
-		function updateUpUnitBtns() {
-			upMbitBtn.classList.toggle('tc-unit-btn--on', _upUnit === 'mbit');
-			upKbitBtn.classList.toggle('tc-unit-btn--on', _upUnit === 'kbit');
-		}
-		upMbitBtn.addEventListener('click', function() { _upUnit = 'mbit'; updateUpUnitBtns(); updateScopeExplain(); });
-		upKbitBtn.addEventListener('click', function() { _upUnit = 'kbit'; updateUpUnitBtns(); updateScopeExplain(); });
-		updateUpUnitBtns();
-		upInput.addEventListener('input', function() { updateScopeExplain(); });
-
-		var upRow = E('div', {'class':'tc-custom-row tc-hidden'}, [
-			E('span', {'class':'tc-c-muted','style':'font-size:11px'}, _('↑ Upload')),
-			upInput,
-			E('span', {'class':'tc-custom-unit-btns'}, [upMbitBtn, upKbitBtn])
-		]);
-
-		var upToggleBtn = E('span', {'class': 'tc-chip',
-			'data-tip': _('Give upload its own ceiling instead of matching download')
-		}, '⇅ ' + _('Split up/down'));
-		upToggleBtn.addEventListener('click', function() {
-			upRow.classList.toggle('tc-hidden');
-			var on = !upRow.classList.contains('tc-hidden');
-			upToggleBtn.classList.toggle('tc-chip--active', on);
-			if (on) { upInput.focus(); } else { upInput.value = ''; }
-			updateScopeExplain();
-		});
-		rateChipsRow.appendChild(upToggleBtn);
 
 		// Mode: segmented toggle (Shaper default)
 		var modeToggle = E('div', {'class':'tc-mode-toggle'});
@@ -2490,29 +2446,15 @@ return view.extend({
 			var t = (scopeInput.value || 'all').trim();
 			var shown = (t === 'all' || t === 'any') ? _('every device') : t;
 			var kbit = parseInt(getRateKbit(), 10);
-			// The sentence has to quote the rate that will actually be applied.
-			// Naming only the download figure while a split ceiling is set would
-			// describe a different rule than the one being installed — and these
-			// sentences exist precisely so the each/shared distinction cannot be
-			// misread.
-			var kbitUp = parseInt(getRateKbitUp(), 10);
-			var rateWords = (kbitUp && kbitUp !== kbit)
-				? _('%s down and %s up').format(fmtRate(kbit), fmtRate(kbitUp))
-				: fmtRate(kbit);
-			// A split ceiling is two buckets, one per direction, so the aggregate
-			// wording changes with it.
-			var sharedTail = (kbitUp && kbitUp !== kbit)
-				? _('between them — one bucket per direction for the whole subnet.')
-				: _('between them — one bucket for the whole subnet.');
 			if (!kbit || kbit <= 0) {
 				scopeExplain.textContent =
 					_('Pick a rate to apply it to this target, or Off to remove its limit.');
 			} else if (_scopeSelected === 'shared') {
 				scopeExplain.textContent = _('All of') + ' ' + shown + ' ' + _('share') + ' ' +
-					rateWords + ' ' + sharedTail;
+					fmtRate(kbit) + ' ' + _('between them — one bucket for the whole subnet.');
 			} else {
 				scopeExplain.textContent = _('Every device in') + ' ' + shown + ' ' +
-					_('may use') + ' ' + rateWords + ' ' + _('of its own.');
+					_('may use') + ' ' + fmtRate(kbit) + ' ' + _('of its own.');
 			}
 
 			var bad = !targetIsMonitored(t);
@@ -2552,7 +2494,7 @@ return view.extend({
 
 		function removeSubnetLimit(target, mode, btn) {
 			btn.disabled = true;
-			setStatus(statusDiv, 'loading', _('Removing limit on') + ' ' + target + '…');
+			setStatus(statusDiv, 'loading', _('Removing limit on %s…').format(target));
 			callRatelimit(target, 0, '', mode).then(function(res) {
 				setStatus(statusDiv, (res && res.ok) ? 'ok' : 'error',
 					(res && res.msg) || _('Throttle removed'));
@@ -2591,7 +2533,7 @@ return view.extend({
 					}, isShared ? _('shared between them') : _('each')),
 					E('span', {'class':'tc-c-muted tc-subnet-limits__drops'},
 						l.packets > 0
-							? (String(l.packets) + ' ' + _('packets dropped') + ' (' + fmtBytes(l.bytes) + ')')
+							? (_('%d packets dropped (%s)').format(l.packets, fmtBytes(l.bytes)))
 							: _('nothing dropped yet')),
 					removeBtn
 				]));
@@ -2604,8 +2546,8 @@ return view.extend({
 			list.forEach(function(s) {
 				if (!s || !s.cidr) { return; }
 				addSubnetChip(s.cidr, s.cidr, s.kind === 'routed'
-					? (_('Routed via') + ' ' + s.device)
-					: (_('On') + ' ' + s.device));
+					? (_('Routed via %s').format(s.device))
+					: (_('On %s').format(s.device)));
 			});
 			updateSubnetChips();
 			updateScopeExplain();
@@ -2646,22 +2588,6 @@ return view.extend({
 			return String(Math.round(n));
 		}
 
-		// Empty string means symmetric — never 0, which the backend would have
-		// to read as a ceiling and which is a total upload block.
-		function getRateKbitUp() {
-			if (upRow.classList.contains('tc-hidden')) return '';
-			var n = parseFloat(upInput.value);
-			if (!n || n <= 0) return '';
-			return String(_upUnit === 'mbit' ? Math.round(n * 1000) : Math.round(n));
-		}
-
-		// How the pending action is described. Naming one figure when the
-		// operator has entered two would hide the thing they just asked for.
-		function rateLabel(kbit, up) {
-			if (!up || up === kbit) return fmtRate(parseInt(kbit));
-			return _('%s down / %s up').format(fmtRate(parseInt(kbit)), fmtRate(parseInt(up)));
-		}
-
 		function applyRate() {
 			var all  = isAllMode();
 			// In all-devices mode the target is the typed scope ("all" or a
@@ -2669,7 +2595,6 @@ return view.extend({
 			var ip   = all ? (scopeInput.value || 'all').trim() : searchSelect.getValue();
 			var name = '';
 			var kbit = getRateKbit();
-			var kbitUp = getRateKbitUp();
 			// A block target has no single tc classid, so the shaper can't
 			// express it — force the limiter rather than silently doing nothing.
 			var mode = all ? 'limiter' : _modeSelected;
@@ -2677,8 +2602,8 @@ return view.extend({
 
 			if (all && kbit !== '0') {
 				setStatus(statusDiv, 'loading',
-					_('Limiting') + ' ' + ip + ' → ' + rateLabel(kbit, kbitUp) + ' (' + scope + ')…');
-				callRatelimit(ip, parseInt(kbit), name, scope, kbitUp ? parseInt(kbitUp) : null).then(function(res) {
+					_('Limiting %s → %s (%s)…').format(ip, fmtRate(parseInt(kbit)), scope));
+				callRatelimit(ip, parseInt(kbit), name, scope).then(function(res) {
 					setStatus(statusDiv, (res && res.ok) ? 'action' : 'error', (res && res.msg) || '?');
 					runQuery();
 				}).catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); });
@@ -2704,18 +2629,18 @@ return view.extend({
 					runQuery();
 				}).catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); });
 			} else if (mode === 'shaper') {
-				setStatus(statusDiv, 'loading', _('Shaping') + ' → ' + rateLabel(kbit, kbitUp) + '…');
+				setStatus(statusDiv, 'loading', _('Shaping → %s…').format(fmtRate(parseInt(kbit))));
 				callRatelimit(ip, 0, name)
-					.then(function() { return callShapeAdd(ip, parseInt(kbit), name, kbitUp ? parseInt(kbitUp) : null); })
+					.then(function() { return callShapeAdd(ip, parseInt(kbit), name); })
 					.then(function(res) {
 						setStatus(statusDiv, (res && res.ok) ? 'action' : 'error', (res && res.msg) || '?');
 						runQuery();
 					})
 					.catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); });
 			} else {
-				setStatus(statusDiv, 'loading', _('Limiting') + ' → ' + rateLabel(kbit, kbitUp) + '…');
+				setStatus(statusDiv, 'loading', _('Limiting → %s…').format(fmtRate(parseInt(kbit))));
 				callShapeRemove(ip, name)
-					.then(function() { return callRatelimit(ip, parseInt(kbit), name, '', kbitUp ? parseInt(kbitUp) : null); })
+					.then(function() { return callRatelimit(ip, parseInt(kbit), name); })
 					.then(function(res) {
 						setStatus(statusDiv, (res && res.ok) ? 'action' : 'error', (res && res.msg) || '?');
 						runQuery();
@@ -3098,10 +3023,10 @@ return view.extend({
 					var protoUdp = Number(data.protocols.udp) || 0;
 					var protoOther = Number(data.protocols.other) || 0;
 					var connCount = protoTcp + protoUdp + protoOther;
-					var parts = [_('Connections') + ': <b>'+connCount+'</b>'];
+					var parts = [_('Connections: <b>%d</b>').format(connCount)];
 					if (connCount > 0) {
-						parts.push('TCP: <b>'+protoTcp+'</b>');
-						parts.push('UDP: <b>'+protoUdp+'</b>');
+						parts.push(_('TCP: <b>%d</b>').format(protoTcp));
+						parts.push(_('UDP: <b>%d</b>').format(protoUdp));
 						if (data.tcp_states) {
 							Object.keys(data.tcp_states).forEach(function(s) {
 								parts.push(escHtml(s)+': <b>'+(Number(data.tcp_states[s]) || 0)+'</b>');
@@ -3109,15 +3034,15 @@ return view.extend({
 						}
 					}
 					if ((data.shape_kbit || 0) > 0) {
-						parts.push(_('Shaped') + ': <b style="color:var(--tc-speed)">🌊 '+fmtRate(data.shape_kbit)+'</b>');
+						parts.push(_('Shaped: <b style=\"color:var(--tc-speed)\">🌊 %s</b>').format(fmtRate(data.shape_kbit)));
 						var sm = self._shapeMap[data.ip || searchSelect.getValue()] || {};
-						if ((sm.backlog||0) > 0) parts.push(_('Queued') + ': <b style="color:var(--tc-speed)">'+fmtBytes(sm.backlog)+'</b>');
-						if ((sm.bytes||0) > 0) parts.push(_('Passed') + ': <b>'+fmtBytes(sm.bytes)+'</b>');
+						if ((sm.backlog||0) > 0) parts.push(_('Queued: <b style=\"color:var(--tc-speed)\">%s</b>').format(fmtBytes(sm.backlog)));
+						if ((sm.bytes||0) > 0) parts.push(_('Passed: <b>%s</b>').format(fmtBytes(sm.bytes)));
 					} else if ((data.rate_limit_kbit || 0) > 0) {
-						parts.push(_('Speed limit') + ': <b style="color:var(--tc-warn)">⚡ '+fmtRate(data.rate_limit_kbit)+'</b>');
+						parts.push(_('Speed limit: <b style=\"color:var(--tc-warn)\">⚡ %s</b>').format(fmtRate(data.rate_limit_kbit)));
 						var dm = self._dropMap[data.ip || searchSelect.getValue()] || {};
 						if ((dm.packets||0) > 0) {
-							parts.push(_('Dropped') + ': <b style="color:var(--tc-err)">🚫 '+(Number(dm.packets) || 0)+' pkts / '+fmtBytes(dm.bytes||0)+'</b>');
+							parts.push(_('Dropped: <b style="color:var(--tc-err)">🚫 %d pkts / %s</b>').format(Number(dm.packets) || 0, fmtBytes(dm.bytes||0)));
 						}
 					}
 					// Listed but still associated is not a block, so it must not
@@ -3130,11 +3055,11 @@ return view.extend({
 					} else if (data.wifi_blocked) {
 						wifiPart = ' &nbsp;|&nbsp; <b style="color:var(--tc-warn)">📵 ' + _('WiFi blocked') + '</b> ('+escHtml(data.mac||'') + ')';
 					} else {
-						wifiPart = data.mac ? ' &nbsp;|&nbsp; <span style="color:var(--tc-faint)">MAC: '+escHtml(data.mac)+'</span>' : '';
+						wifiPart = data.mac ? ' &nbsp;|&nbsp; <span style="color:var(--tc-faint)">' + _('MAC:') + ' ' + escHtml(data.mac) + '</span>' : '';
 					}
 					statsDiv.className = 'alert-message ' + (data.blocked ? 'error' : 'info');
 					statsDiv.innerHTML = (data.blocked
-						? '<b>⛔ ' + _('BLOCKED') + '</b> — '+(Number(data.block_packets) || 0)+' pkts, '+fmtBytes(Number(data.block_bytes) || 0)+' ' + _('dropped') + ' &nbsp;|&nbsp; '
+						? '<b>⛔ ' + _('BLOCKED') + '</b> — ' + _('%d pkts, %s dropped').format(Number(data.block_packets) || 0, fmtBytes(Number(data.block_bytes) || 0)) + ' &nbsp;|&nbsp; '
 						: '') + parts.join(' &nbsp;|&nbsp; ') + wifiPart;
 				}
 
@@ -3323,9 +3248,9 @@ return view.extend({
 			}
 
 			var parts = [];
-			parts.push(E('span', {}, [document.createTextNode(_('Active') + ': '), E('b', {}, String(rows.length))]));
-			parts.push(E('span', {}, [document.createTextNode(_('Blocked') + ': '), mkFilterVal('blocked', 'var(--tc-err)', String(blocked))]));
-			parts.push(E('span', {}, [document.createTextNode(_('WiFi') + ': '), mkFilterVal('wifi_blocked', 'var(--tc-warn)', String(wifiBlk))]));
+			parts.push(E('span', {}, [document.createTextNode(_('Active:') + ' '), E('b', {}, String(rows.length))]));
+			parts.push(E('span', {}, [document.createTextNode(_('Blocked:') + ' '), mkFilterVal('blocked', 'var(--tc-err)', String(blocked))]));
+			parts.push(E('span', {}, [document.createTextNode(_('WiFi:') + ' '), mkFilterVal('wifi_blocked', 'var(--tc-warn)', String(wifiBlk))]));
 			// Without this the header counts a device as blocked on the strength of
 			// the uci maclist alone — which is how a router can report "WiFi: 2"
 			// while both of those devices are browsing.
@@ -3333,13 +3258,13 @@ return view.extend({
 				parts.push(E('span', {
 					'style': 'color:var(--tc-err);font-weight:700;cursor:help',
 					'title': _('Devices on the WiFi deny list that are still connected — those blocks are not in effect on the running radio.')
-				}, '⚠ ' + wifiPending + ' ' + _('not applied')));
+				}, '⚠ ' + _('%d not applied').format(wifiPending)));
 			}
-			if (limited > 0) parts.push(E('span', {}, [document.createTextNode(_('Limited') + ': '), mkFilterVal('limited', 'var(--tc-warn)', '⚡' + limited)]));
-			if (shaped > 0) parts.push(E('span', {}, [document.createTextNode(_('Shaped') + ': '), mkFilterVal('shaped', 'var(--tc-speed)', '🌊' + shaped)]));
+			if (limited > 0) parts.push(E('span', {}, [document.createTextNode(_('Limited:') + ' '), mkFilterVal('limited', 'var(--tc-warn)', '⚡' + limited)]));
+			if (shaped > 0) parts.push(E('span', {}, [document.createTextNode(_('Shaped:') + ' '), mkFilterVal('shaped', 'var(--tc-speed)', '🌊' + shaped)]));
 			if (totalDropPkts > 0) {
 				parts.push(E('span', {}, [
-					document.createTextNode(_('Dropped') + ': '), E('b', {'style':'color:var(--tc-err)'}, '🚫' + totalDropPkts)
+					document.createTextNode(_('Dropped:') + ' '), E('b', {'style':'color:var(--tc-err)'}, '🚫' + totalDropPkts)
 				]));
 			}
 
@@ -3802,12 +3727,12 @@ return view.extend({
 				// ── Custom template ──
 				var templateArea = E('textarea', {
 					'class': 'tg-input tg-input--template',
-					'placeholder': '🆕 New device\\n{{ name }} ({{ ip }})\\nMAC: {{ mac }}\\nLink: {{ link }}'
+					'placeholder': _('🆕 New device\\n{{ name }} ({{ ip }})\\nMAC: {{ mac }}\\nLink: {{ link }}')
 				}, cfg.notify_template || '');
 				templateArea.addEventListener('input', function() { renderPreview(); doSave(); });
 
 				var previewBubble = E('div', {'class':'tg-bubble'});
-				var defaultTpl = '🆕 <b>New device</b>\n{{ name }} ({{ ip }})\nMAC: <code>{{ mac }}</code>\nLink: {{ link }}';
+				var defaultTpl = _('🆕 <b>New device</b>\n{{ name }} ({{ ip }})\nMAC: <code>{{ mac }}</code>\nLink: {{ link }}');
 				var renderPreview = function() {
 					var tpl = templateArea.value || defaultTpl;
 					var txt = tpl
@@ -3912,7 +3837,7 @@ return view.extend({
 						var limitBtns = [];
 						RATE_PRESETS.forEach(function(p) {
 							if (p.v === '0' || p.v === 'custom') return;
-							limitBtns.push(E('span', {'class':'tg-kbd-btn'}, p.l.replace(' Mbit/s', 'M').replace(/\s/g, '')));
+							limitBtns.push(E('span', {'class':'tg-kbd-btn'}, p.l.replace(' Mbit/s','M').replace(/\s/g,'')));
 						});
 						for (var li = 0; li < limitBtns.length; li += 3) {
 							kbdBubble.appendChild(E('div', {'class':'tg-kbd-row'}, limitBtns.slice(li, li + 3)));
@@ -3922,7 +3847,7 @@ return view.extend({
 						var shapeBtns = [];
 						RATE_PRESETS.forEach(function(p) {
 							if (p.v === '0' || p.v === 'custom') return;
-							shapeBtns.push(E('span', {'class':'tg-kbd-btn'}, '🔧 ' + p.l.replace(' Mbit/s', 'M').replace(/\s/g, '')));
+							shapeBtns.push(E('span', {'class':'tg-kbd-btn'}, '🔧 ' + p.l.replace(' Mbit/s','M').replace(/\s/g,'')));
 						});
 						for (var si = 0; si < shapeBtns.length; si += 3) {
 							kbdBubble.appendChild(E('div', {'class':'tg-kbd-row'}, shapeBtns.slice(si, si + 3)));
@@ -4180,17 +4105,14 @@ return view.extend({
 				var modeLabels = {
 					'none':              ['⊘', _('No offload'),              'var(--tc-muted)'],
 					'software':          ['◑', _('Software offload'),        'var(--tc-speed)'],
-					// tctl_get_offload_mode splits software offload on the flowtable
-					// counter flag, so this value reaches the badge too. Without an
-					// entry the badge fell through to '?' and the raw mode string.
-					'software-counter':  ['◑', _('Software offload'),        'var(--tc-speed)'],
+					'software-counter':  ['◑', _('Software offload (counter)'), 'var(--tc-speed)'],
 					'hardware-counter':  ['●', _('Hardware offload'),        'var(--tc-warn)'],
 					'hardware':          ['●', _('Hardware offload'),        'var(--tc-warn)']
 				};
 				var ml = modeLabels[cfg.offload_mode] || ['?', cfg.offload_mode, 'var(--tc-muted)'];
 				var modeBadge = E('div', {'style':'margin-bottom:10px;font-size:12px'}, [
 					E('span', {'style':'color:'+ml[2]+';font-size:15px;margin-right:4px'}, ml[0]),
-					E('span', {'style':'color:var(--tc-muted)'}, _('Current mode: ')),
+					E('span', {'style':'color:var(--tc-muted)'}, _('Current mode:') + ' '),
 					E('b', {}, ml[1])
 				]);
 
@@ -4320,9 +4242,9 @@ return view.extend({
 
 			var sep = E('span', {'style': 'opacity:0.35;margin:0 6px'}, '|');
 			var docLinks = para([
-				link(openwrtUrl, 'OpenWrt: Flow offloading ↗'), sep.cloneNode(true),
-				link(kernelUrl,  'Linux kernel: nf_flowtable ↗'), sep.cloneNode(true),
-				link(nftUrl,     'nftables: Flowtables ↗')
+				link(openwrtUrl, _('OpenWrt: Flow offloading ↗')), sep.cloneNode(true),
+				link(kernelUrl,  _('Linux kernel: nf_flowtable ↗')), sep.cloneNode(true),
+				link(nftUrl,     _('nftables: Flowtables ↗'))
 			]);
 
 			if (mode === 'hardware-counter') {
@@ -4331,15 +4253,15 @@ return view.extend({
 				icon   = '⚠️';
 				body   = E('div', {}, [
 					para(bold(_('Hardware flow offloading active — real-time speed monitoring unavailable.'))),
-					para([_('The flowtable '),
+					para([_('The flowtable') + ' ',
 						E('code', {}, 'counter'),
-						_(' flag should sync hardware byte counts back to conntrack, but on many ' +
+						' ' + _('flag should sync hardware byte counts back to conntrack, but on many ' +
 						  'platforms (e.g. Mediatek Filogic) the driver does not implement the stats ' +
 						  'callback, so conntrack counters remain frozen for active flows.')]),
 					para(bold(_('To restore speed monitoring:'))),
 					E('ul', {'class': 'tc-offload-ul'}, [
 						E('li', {}, [
-							_('Disable hardware offload (keeps software offload): '),
+							_('Disable hardware offload (keeps software offload):') + ' ',
 							E('code', {}, 'uci set firewall.@defaults[0].flow_offloading_hw=0 && uci commit firewall && fw4 reload'),
 						]),
 						E('li', {}, _('Or disable all flow offload in LuCI → Network → Firewall → General Settings.')),
@@ -4361,12 +4283,12 @@ return view.extend({
 						E('li', {}, _('Traffic shaping (tc/HTB) — bypassed for offloaded flows')),
 						E('li', {}, _('Rate limiting — applies only to new connections')),
 					]),
-					para([_('WiFi blocking and internet blocking of new connections still work. '),
+					para([_('WiFi blocking and internet blocking of new connections still work.') + ' ',
 						_('Shaped devices are usually not offloaded (kernel detects the HTB qdisc).')]),
 					para(bold(_('How to get full functionality without disabling offload:'))),
-					para([_('The flowtable '),
+					para([_('The flowtable') + ' ',
 						E('code', {}, 'counter'),
-						_(' flag (Linux 5.7+, set automatically by fw4/nftables) periodically syncs ' +
+						' ' + _('flag (Linux 5.7+, set automatically by fw4/nftables) periodically syncs ' +
 						  'hardware byte counts back to conntrack — trafficctl detects this and all features work normally.')]),
 					para(_('If your current firmware uses fw3 (iptables) or ships a kernel older than 5.7, ' +
 						  'a router with modern OpenWrt and fw4 support will have this working out of the box.')),
