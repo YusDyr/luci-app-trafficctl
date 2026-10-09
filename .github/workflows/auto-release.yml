@@ -23,7 +23,31 @@ jobs:
 
   compat:
     name: Compatibility checks
+    # Waits for `build` so it can test the packages that build produced
+    # instead of making its own copy. The same package for the same
+    # architecture used to be built twice per release, concurrently — 20m45s
+    # here and 30m52s in compat — and the matrix that consumes it finishes in
+    # 20 seconds. Serialising behind the shorter of the two and dropping the
+    # longer takes the critical path from ~31 to ~21 minutes, and the matrix
+    # now exercises the exact bytes that get published.
+    #
+    # !cancelled() rather than a plain dependency: `build` is skipped when
+    # there is nothing to release (a docs:/chore: push), and the compatibility
+    # matrix must still run on main in that case rather than vanish. It then
+    # receives an empty artifact name and builds its own packages, exactly as
+    # it does on a pull request.
+    needs: [prepare, build]
+    if: ${{ !cancelled() }}
     uses: ./.github/workflows/compat.yml
+    with:
+      # Reuse only when there is something complete to reuse. A skipped or
+      # failed build, or a fork without the signing secrets (where `build`
+      # deliberately produces no APK at all), falls back to building here —
+      # otherwise the APK half of the matrix would be testing a file that was
+      # never created.
+      package_artifact: >-
+        ${{ (needs.build.result == 'success' && needs.build.outputs.have_apk == '1')
+            && 'release-artifacts' || '' }}
 
   prepare:
     name: Decide the version
@@ -299,6 +323,12 @@ jobs:
     runs-on: ubuntu-latest
     needs: [prepare]
     if: needs.prepare.outputs.bump != 'none'
+    # Whether this build produced a signed APK. `compat` reuses these
+    # artifacts only when it did: the unsigned fallback path below is a
+    # known-broken artifact that is deliberately NOT placed in dist/, so the
+    # APK aliases the matrix addresses would not exist.
+    outputs:
+      have_apk: ${{ steps.apk_secrets.outputs.have }}
     # Runs PARALLEL to ci and compat, not after them. The OpenWrt SDK build
     # below is ~26 minutes and used to start only once the matrix had
     # finished, which is what made a release take ~57 minutes for ~26 minutes

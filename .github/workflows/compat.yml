@@ -8,6 +8,16 @@ on:
   pull_request:
     branches: [main]
   workflow_call:
+    inputs:
+      package_artifact:
+        description: >
+          Name of an artifact that already holds the built packages. When
+          given, this workflow does NOT build its own — it tests the exact
+          bytes the caller built. Empty (the default, and always the case on a
+          pull request) means build them here.
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -35,9 +45,31 @@ concurrency:
   # (covered by the default GITHUB_TOKEN's contents: read above)
 
 jobs:
+  # Skipped entirely when the caller already has the packages. On a push to
+  # main that is the release build, and the duplication it removes was the
+  # single largest cost in the repository: the same package, for the same
+  # architecture, was built TWICE per release — `Build the artifacts` (20m45s,
+  # real version) and this job (30m52s, 0.0.0-test) — concurrently, and the
+  # matrix that consumes the result then finishes in 20 seconds. Measured on
+  # run 36936909066. Reusing the release build takes the release critical path
+  # from ~31 to ~21 minutes and, as a bonus, tests the exact artifact that
+  # ships rather than a separate build of the same tree.
+  #
+  # Rejected alternative, for the record: carrying a warm SDK build tree
+  # between runs so that both builds get cheap. Measured on 2026-10-09 and it
+  # does not work. The SDK image declares `VOLUME /builder`, so the tree
+  # cannot be baked into an image at all (docker commit and a child
+  # Dockerfile's RUN both discard writes to a VOLUME path); carried in a named
+  # volume instead, the warm pass came in at 22m30s against 25m48s cold, which
+  # is inside the run-to-run noise — two cold passes on the same commit
+  # differed by 42% (18m13s vs 25m48s). The reason is visible in the log:
+  # entrypoint.sh runs `./scripts/feeds update -a` unconditionally, the fresh
+  # feed checkouts give every package Makefile a new mtime, and `make` then
+  # clean-builds the toolchain and all 45 dependencies regardless.
   build-packages:
     name: Build packages
     runs-on: ubuntu-latest
+    if: ${{ inputs.package_artifact == '' }}
     steps:
       - uses: actions/checkout@v6
 
@@ -68,6 +100,15 @@ jobs:
             find bin/ -type f -name "*.apk" || true
             exit 1
           fi
+          # Version-free aliases, matching the ones the release build already
+          # creates. Every consumer below addresses the packages through these,
+          # so the same job works whether the artifact was built here with a
+          # 0.0.0-test version or handed over from a release build with a real
+          # one. The names used to be hardcoded per consumer, which is what
+          # made reuse impossible.
+          ln -f dist/luci-app-trafficctl_0.0.0-test-1_all.ipk dist/luci-app-trafficctl.ipk
+          ln -f dist/luci-app-trafficctl_0.0.0-test_noarch.apk dist/luci-app-trafficctl.apk
+          ls -l dist/
 
       - uses: actions/upload-artifact@v5
         with:
@@ -78,6 +119,11 @@ jobs:
     name: ${{ matrix.version }} / ${{ matrix.arch }}
     runs-on: ubuntu-latest
     needs: build-packages
+    # build-packages is SKIPPED in the reuse case, and a job with an unmet
+    # `needs` is skipped too — which would silently turn the whole matrix
+    # green-by-absence on every release. The result is therefore tested
+    # explicitly: run unless it actually failed.
+    if: ${{ !cancelled() && needs.build-packages.result != 'failure' }}
     strategy:
       fail-fast: false
       # x86-64 only, on purpose. luci-app-trafficctl is Architecture: all
@@ -104,7 +150,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/download-artifact@v5
         with:
-          name: packages
+          name: ${{ inputs.package_artifact || 'packages' }}
           path: dist/
 
       - name: Determine package format
@@ -131,11 +177,13 @@ jobs:
             echo "::error::Could not pull $IMAGE after 3 attempts"
             exit 1
           fi
+          # Addressed through the version-free aliases both builders create,
+          # so this works whether the packages came from this workflow's own
+          # build or from the caller's release build.
           if [ "${{ steps.fmt.outputs.format }}" = "apk" ]; then
-            PKG=$(ls dist/luci-app-trafficctl*noarch.apk 2>/dev/null | head -1)
-            PKG="/dist/$(basename "$PKG")"
+            PKG="/dist/luci-app-trafficctl.apk"
           else
-            PKG="/dist/luci-app-trafficctl_0.0.0-test-1_all.ipk"
+            PKG="/dist/luci-app-trafficctl.ipk"
           fi
           set +e
           docker run --rm \
@@ -209,6 +257,11 @@ jobs:
     name: Upgrade ${{ matrix.version }}
     runs-on: ubuntu-latest
     needs: build-packages
+    # build-packages is SKIPPED in the reuse case, and a job with an unmet
+    # `needs` is skipped too — which would silently turn the whole matrix
+    # green-by-absence on every release. The result is therefore tested
+    # explicitly: run unless it actually failed.
+    if: ${{ !cancelled() && needs.build-packages.result != 'failure' }}
     strategy:
       fail-fast: false
       matrix:
@@ -224,7 +277,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/download-artifact@v5
         with:
-          name: packages
+          name: ${{ inputs.package_artifact || 'packages' }}
           path: dist/
 
       - name: Download previous release
@@ -248,7 +301,7 @@ jobs:
       - name: Run upgrade test
         run: |
           OLD_PKG=$(ls dist-old/luci-app-trafficctl*.${{ matrix.format }} 2>/dev/null | head -1)
-          NEW_PKG="dist/luci-app-trafficctl_0.0.0-test-1_all.ipk"
+          NEW_PKG="dist/luci-app-trafficctl.ipk"
           if [ -z "$OLD_PKG" ]; then
             echo "::warning::No previous package downloaded, skipping upgrade test"
             exit 0
@@ -269,7 +322,7 @@ jobs:
             -v "$PWD/dist:/dist" \
             -v "$PWD/tests:/tests" \
             "$IMAGE" \
-            /tests/test_upgrade.sh "/dist/${OLD_BASE}" "/dist/luci-app-trafficctl_0.0.0-test-1_all.ipk"
+            /tests/test_upgrade.sh "/dist/${OLD_BASE}" "/dist/luci-app-trafficctl.ipk"
 
   # ──────────────────────────────────────────────────────────────────────────
   # Dependencies — verify install fails cleanly when deps are missing, and
@@ -279,6 +332,11 @@ jobs:
     name: Dependencies ${{ matrix.version }}
     runs-on: ubuntu-latest
     needs: build-packages
+    # build-packages is SKIPPED in the reuse case, and a job with an unmet
+    # `needs` is skipped too — which would silently turn the whole matrix
+    # green-by-absence on every release. The result is therefore tested
+    # explicitly: run unless it actually failed.
+    if: ${{ !cancelled() && needs.build-packages.result != 'failure' }}
     strategy:
       fail-fast: false
       matrix:
@@ -290,15 +348,15 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/download-artifact@v5
         with:
-          name: packages
+          name: ${{ inputs.package_artifact || 'packages' }}
           path: dist/
 
       - name: Run dependency test
         run: |
           if [ "${{ matrix.format }}" = "apk" ]; then
-            PKG="/dist/$(basename "$(ls dist/luci-app-trafficctl*noarch.apk | head -1)")"
+            PKG="/dist/luci-app-trafficctl.apk"
           else
-            PKG="/dist/luci-app-trafficctl_0.0.0-test-1_all.ipk"
+            PKG="/dist/luci-app-trafficctl.ipk"
           fi
           IMAGE="ghcr.io/openwrt/rootfs:${{ matrix.image }}"
           pulled=0
