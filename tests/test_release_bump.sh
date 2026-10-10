@@ -398,6 +398,27 @@ else
         PASS=$((PASS + 1))
     fi
 
+    # 4b. The upgrade job must not move the previous release's package into
+    #     the directory holding the new one. A release's assets include the
+    #     version-free alias, so `mv` put the OLD package on top of the NEW
+    #     one and the test upgraded a version to itself — green build, zero
+    #     coverage. Caught on PR #91 by the matrix itself; pinned here.
+    upg=$(awk '/^  upgrade:/{f=1;next} f&&/^  [a-z]/{exit} f{print}' "$CWF" \
+        | grep -vE '^[[:space:]]*#')
+    if printf '%s\n' "$upg" | grep -qE 'mv "\$OLD_PKG" "dist/'; then
+        FAIL=$((FAIL + 1))
+        printf "FAIL: the upgrade job moves the previous release into dist/, where its alias collides with the new package\n"
+    else
+        PASS=$((PASS + 1))
+    fi
+    case "$upg" in
+        *'/dist-old:'*) PASS=$((PASS + 1)) ;;
+        *)
+            FAIL=$((FAIL + 1))
+            printf "FAIL: the upgrade job does not mount the previous release in its own directory\n"
+            ;;
+    esac
+
     # 5. Both builders must create the same two aliases, or "address it through
     #    the alias" only works on one of the two paths.
     for alias in 'dist/luci-app-trafficctl.ipk' 'dist/luci-app-trafficctl.apk'; do

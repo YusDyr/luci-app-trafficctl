@@ -300,15 +300,20 @@ jobs:
 
       - name: Run upgrade test
         run: |
+          # The old package stays in its OWN directory and is mounted
+          # separately. It used to be moved into dist/ to make the path
+          # container-relative, and that is a trap now that both builds
+          # publish a version-free alias: a release's assets include
+          # luci-app-trafficctl.ipk, so `mv` landed the OLD package on top of
+          # the new one and the test upgraded 1.21.4 to 1.21.4 — reporting
+          # "version unchanged after upgrade", which is how this was caught.
+          # Two mounts, no renaming, no name that can collide.
           OLD_PKG=$(ls dist-old/luci-app-trafficctl*.${{ matrix.format }} 2>/dev/null | head -1)
-          NEW_PKG="dist/luci-app-trafficctl.ipk"
           if [ -z "$OLD_PKG" ]; then
             echo "::warning::No previous package downloaded, skipping upgrade test"
             exit 0
           fi
-          # Make paths container-relative
           OLD_BASE=$(basename "$OLD_PKG")
-          mv "$OLD_PKG" "dist/${OLD_BASE}"
 
           IMAGE="ghcr.io/openwrt/rootfs:${{ matrix.image }}"
           pulled=0
@@ -320,9 +325,10 @@ jobs:
           docker run --rm \
             --entrypoint /bin/sh \
             -v "$PWD/dist:/dist" \
+            -v "$PWD/dist-old:/dist-old" \
             -v "$PWD/tests:/tests" \
             "$IMAGE" \
-            /tests/test_upgrade.sh "/dist/${OLD_BASE}" "/dist/luci-app-trafficctl.ipk"
+            /tests/test_upgrade.sh "/dist-old/${OLD_BASE}" "/dist/luci-app-trafficctl.ipk"
 
   # ──────────────────────────────────────────────────────────────────────────
   # Dependencies — verify install fails cleanly when deps are missing, and
