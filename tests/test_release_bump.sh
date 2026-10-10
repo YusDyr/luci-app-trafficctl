@@ -311,5 +311,139 @@ for dep in ci compat prepare build; do
     esac
 done
 
+# ──────────────────────────────────────────────────────────────────────────────
+# The release build is handed to the compatibility matrix instead of the matrix
+# making its own copy. Every assertion below guards a way for that to go wrong
+# SILENTLY — a release that publishes an untested package while every job in
+# the run is green.
+# ──────────────────────────────────────────────────────────────────────────────
+CWF="$(dirname "$WF")/compat.yml"
+
+# Comment lines are STRIPPED before matching. Without that, the assertions
+# below are satisfied by the prose explaining the guard rather than by the
+# guard — verified by mutation: deleting the real `if: ${{ !cancelled() }}`
+# left a comment containing the same literal and the test stayed green.
+compat_call=$(awk '/^  compat:/{f=1;next} f&&/^  [a-z]/{exit} f{print}' "$WF" \
+    | grep -vE '^[[:space:]]*#')
+
+# 1. The matrix must still run when there is nothing to release. A plain
+#    dependency on `build` would skip it on every docs:/chore: push — those
+#    land on main unverified, and a chore: commit touching tools/ or the
+#    Makefile can absolutely break the package build.
+case "$compat_call" in
+    *'!cancelled()'*) PASS=$((PASS + 1)) ;;
+    *)
+        FAIL=$((FAIL + 1))
+        printf "FAIL: compat is gated on build without !cancelled() — a push with no release skips the whole matrix\n"
+        ;;
+esac
+
+# 2. It must only reuse a build that actually produced the APK. Without the
+#    have_apk check, a fork with no signing secrets gets a matrix addressing
+#    an APK alias that was never created.
+for needle in 'needs: [prepare, build]' "needs.build.result == 'success'" 'needs.build.outputs.have_apk'; do
+    case "$compat_call" in
+        *"$needle"*) PASS=$((PASS + 1)) ;;
+        *)
+            FAIL=$((FAIL + 1))
+            printf "FAIL: the compat call is missing '%s'\n" "$needle"
+            ;;
+    esac
+done
+
+case "$(awk '/^  build:/{f=1;next} f&&/^  [a-z]/{exit} f{print}' "$WF" | grep -vE '^[[:space:]]*#')" in
+    *'have_apk: ${{ steps.apk_secrets.outputs.have }}'*) PASS=$((PASS + 1)) ;;
+    *)
+        FAIL=$((FAIL + 1))
+        printf "FAIL: the build job does not expose have_apk, so compat cannot tell a signed build from the unsigned fallback\n"
+        ;;
+esac
+
+if [ ! -f "$CWF" ]; then
+    FAIL=$((FAIL + 1))
+    printf "FAIL: cannot find compat.yml next to auto-release.yml\n"
+else
+    # 3. THE DANGEROUS ONE. build-packages is skipped in the reuse case, and a
+    #    job whose `needs` was skipped is skipped too. Without an explicit
+    #    guard every consumer silently disappears and the matrix reports green
+    #    by absence — the release would be gated on nothing at all.
+    for job in compat upgrade dependencies; do
+        blk=$(awk -v j="^  $job:" '$0 ~ j {f=1;next} f&&/^  [a-z]/{exit} f{print}' "$CWF" \
+            | grep -vE '^[[:space:]]*#')
+        case "$blk" in
+            *"needs.build-packages.result != 'failure'"*) PASS=$((PASS + 1)) ;;
+            *)
+                FAIL=$((FAIL + 1))
+                printf "FAIL: compat.yml job '%s' depends on build-packages without guarding against it being SKIPPED — the matrix would go green by absence on every release\n" "$job"
+                ;;
+        esac
+        # And each must read whichever artifact is in play, not the hardcoded one.
+        case "$blk" in
+            *"inputs.package_artifact || 'packages'"*) PASS=$((PASS + 1)) ;;
+            *)
+                FAIL=$((FAIL + 1))
+                printf "FAIL: compat.yml job '%s' downloads a fixed artifact name, so it cannot consume the release build\n" "$job"
+                ;;
+        esac
+    done
+
+    # 4. No consumer may address a version-bearing filename. The release build
+    #    has a real version and this workflow's own build has 0.0.0-test, so a
+    #    hardcoded name is either a missing file or, worse, the wrong one.
+    stray=$(grep -nE '/dist/luci-app-trafficctl_[0-9]' "$CWF" || true)
+    if [ -n "$stray" ]; then
+        FAIL=$((FAIL + 1))
+        printf "FAIL: compat.yml still addresses a versioned package path:\n%s\n" "$stray"
+    else
+        PASS=$((PASS + 1))
+    fi
+
+    # 4b. The upgrade job must not move the previous release's package into
+    #     the directory holding the new one. A release's assets include the
+    #     version-free alias, so `mv` put the OLD package on top of the NEW
+    #     one and the test upgraded a version to itself — green build, zero
+    #     coverage. Caught on PR #91 by the matrix itself; pinned here.
+    upg=$(awk '/^  upgrade:/{f=1;next} f&&/^  [a-z]/{exit} f{print}' "$CWF" \
+        | grep -vE '^[[:space:]]*#')
+    if printf '%s\n' "$upg" | grep -qE 'mv "\$OLD_PKG" "dist/'; then
+        FAIL=$((FAIL + 1))
+        printf "FAIL: the upgrade job moves the previous release into dist/, where its alias collides with the new package\n"
+    else
+        PASS=$((PASS + 1))
+    fi
+    case "$upg" in
+        *'/dist-old:'*) PASS=$((PASS + 1)) ;;
+        *)
+            FAIL=$((FAIL + 1))
+            printf "FAIL: the upgrade job does not mount the previous release in its own directory\n"
+            ;;
+    esac
+
+    # 5. Both builders must create the same two aliases, or "address it through
+    #    the alias" only works on one of the two paths.
+    for alias in 'dist/luci-app-trafficctl.ipk' 'dist/luci-app-trafficctl.apk'; do
+        for f in "$WF" "$CWF"; do
+            if grep -q "ln -f .*$alias" "$f"; then
+                PASS=$((PASS + 1))
+            else
+                FAIL=$((FAIL + 1))
+                printf "FAIL: %s never creates the alias %s\n" "$(basename "$f")" "$alias"
+            fi
+        done
+    done
+
+    # 6. build-packages must be skipped ONLY on reuse. Any other condition
+    #    there would stop a pull request from building its packages at all.
+    bp=$(awk '/^  build-packages:/{f=1;next} f&&/^  [a-z]/{exit} f{print}' "$CWF" \
+        | grep -vE '^[[:space:]]*#')
+    case "$bp" in
+        *"if: \${{ inputs.package_artifact == '' }}"*) PASS=$((PASS + 1)) ;;
+        *)
+            FAIL=$((FAIL + 1))
+            printf "FAIL: compat.yml build-packages is not gated exactly on an empty package_artifact\n"
+            ;;
+    esac
+fi
+
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
