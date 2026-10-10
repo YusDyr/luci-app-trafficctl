@@ -4,6 +4,20 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.21.5] - 2026-10-10
+
+### Other
+- test the release build in the compatibility matrix instead of rebuilding it ([#91](https://github.com/YusDyr/luci-app-trafficctl/issues/91)) ([4cdf5bf](https://github.com/YusDyr/luci-app-trafficctl/commit/4cdf5bf86d46267563dc7517dd9ece07138ebe10))
+  The same package, for the same architecture, was built TWICE per release,
+  concurrently: 'Build the artifacts' (20m45s, real version) and
+  'Compatibility checks / Build packages' (30m52s, 0.0.0-test). The matrix
+  that consumes the result then finishes in 20 seconds, so the second build
+  WAS the critical path. Measured on run 36936909066.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.21.4...v1.21.5
+
+---
+
 ## [1.21.4] - 2026-10-01
 
 ### Other
