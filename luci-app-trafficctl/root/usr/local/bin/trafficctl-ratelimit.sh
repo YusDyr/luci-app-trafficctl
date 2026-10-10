@@ -96,11 +96,21 @@ else
     tctl_persist_enabled && tctl_persist_save "ratelimit" "$IP" "$RATE" "$MODE" \
         "$([ "$RATE_UP" != "$RATE" ] && echo "$RATE_UP")"
     tctl_log "ratelimit_set" "$IP" "$(rate_text)" "${TCTL_VIA:-cli}" "${TCTL_SRC:-local}"
+    # An already-accelerated flow is not re-evaluated against a rule that
+    # appeared afterwards, exactly as with flow offload — so the NSS flow
+    # table gets the same treatment the conntrack table does.
+    tctl_nss_defunct
+    # On a Qualcomm NSS router the rules above are installed and inert: the
+    # packets never reach the Linux stack. Reporting an unqualified success
+    # there is the defect in #81, so every message below carries the verdict
+    # and the result carries the status as a field.
+    NSSNOTE="$(tctl_nss_note)"
+    NSS="$(tctl_nss_status)"
     if [ "$TCTL_RL_DOWNLOAD_FAILED" = "1" ]; then
-        echo "{\"ok\":true,\"ipv6_upload\":$([ "$TCTL_RL_UPLOAD6_OK" = "1" ] && echo true || echo false),\"msg\":\"rate limit ${RATE_UP} kbit/s applied to $IP UPLOAD ONLY — WAN device not resolvable$V6NOTE\"}"
+        echo "{\"ok\":true,\"ipv6_upload\":$([ "$TCTL_RL_UPLOAD6_OK" = "1" ] && echo true || echo false),\"nss\":\"$NSS\",\"msg\":\"rate limit ${RATE_UP} kbit/s applied to $IP UPLOAD ONLY — WAN device not resolvable$V6NOTE$NSSNOTE\"}"
     elif [ "$TCTL_RL_UPLOAD_FAILED" = "1" ]; then
-        echo "{\"ok\":true,\"ipv6_upload\":false,\"msg\":\"rate limit ${RATE} kbit/s applied to $IP DOWNLOAD ONLY — no LAN ingress device [IPv4 only]\"}"
+        echo "{\"ok\":true,\"ipv6_upload\":false,\"nss\":\"$NSS\",\"msg\":\"rate limit ${RATE} kbit/s applied to $IP DOWNLOAD ONLY — no LAN ingress device [IPv4 only]$NSSNOTE\"}"
     else
-        echo "{\"ok\":true,\"ipv6_upload\":$([ "$TCTL_RL_UPLOAD6_OK" = "1" ] && echo true || echo false),\"msg\":\"rate limit $(rate_text) for $IP (both directions, $MODE)$V6NOTE\"}"
+        echo "{\"ok\":true,\"ipv6_upload\":$([ "$TCTL_RL_UPLOAD6_OK" = "1" ] && echo true || echo false),\"nss\":\"$NSS\",\"msg\":\"rate limit $(rate_text) for $IP (both directions, $MODE)$V6NOTE$NSSNOTE\"}"
     fi
 fi

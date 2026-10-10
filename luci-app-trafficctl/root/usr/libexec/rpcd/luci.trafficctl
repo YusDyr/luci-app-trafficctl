@@ -302,10 +302,11 @@ call)
 		hw=$(uci -q get firewall.@defaults[0].flow_offloading_hw)
 		poll=$(uci -q get trafficctl.main.poll_interval)
 		window=$(uci -q get trafficctl.main.avg_window)
-		printf '{"enabled":%s,"default_mode":"%s","offload_mode":"%s","sw":%s,"hw":%s,"poll_interval":%d,"avg_window":%d}' \
+		printf '{"enabled":%s,"default_mode":"%s","offload_mode":"%s","nss":"%s","sw":%s,"hw":%s,"poll_interval":%d,"avg_window":%d}' \
 			"$([ "$enabled" = "1" ] && echo true || echo false)" \
 			"${mode:-limiter}" \
 			"$offload" \
+			"$(tctl_nss_status)" \
 			"$([ "$sw" = "1" ] && echo true || echo false)" \
 			"$([ "$hw" = "1" ] && echo true || echo false)" \
 			"${poll:-2}" \
