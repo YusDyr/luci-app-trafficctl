@@ -303,14 +303,21 @@ do_add() {
     save_shape "$IP" "$RATE" "$classid" "$RATE_UP"
     local rates="${RATE} kbit/s"
     [ "$RATE_UP" != "$RATE" ] && rates="${RATE} kbit/s down, ${RATE_UP} kbit/s up"
+    # Linux HTB never gets to queue a flow the NSS firmware is forwarding, so
+    # a shape on such a router is installed and inert (#81). NSS builds ship
+    # their own qdiscs (nsshtb/nsstbl) which this does not yet use; until it
+    # does, say so instead of reporting success.
+    tctl_nss_defunct
+    NSSNOTE="$(tctl_nss_note)"
+    NSS="$(tctl_nss_status)"
     if [ "$ul_ok" = "1" ]; then
-        echo "{\"ok\":true,\"msg\":\"shape $rates applied to $IP both directions (class $classid)\"}"
+        echo "{\"ok\":true,\"nss\":\"$NSS\",\"msg\":\"shape $rates applied to $IP both directions (class $classid)$NSSNOTE\"}"
     elif [ "$RATE_UP" != "$RATE" ]; then
         # Saying "applied" here would be a lie about the half the operator
         # explicitly asked to differ.
-        echo "{\"ok\":true,\"msg\":\"shape ${RATE} kbit/s applied to $IP for download only — the ${RATE_UP} kbit/s upload ceiling was NOT applied, it needs kmod-ifb: opkg/apk install kmod-ifb kmod-sched\"}"
+        echo "{\"ok\":true,\"nss\":\"$NSS\",\"msg\":\"shape ${RATE} kbit/s applied to $IP for download only — the ${RATE_UP} kbit/s upload ceiling was NOT applied, it needs kmod-ifb: opkg/apk install kmod-ifb kmod-sched$NSSNOTE\"}"
     else
-        echo "{\"ok\":true,\"msg\":\"shape ${RATE} kbit/s applied to $IP (download only — upload needs kmod-ifb: opkg/apk install kmod-ifb kmod-sched)\"}"
+        echo "{\"ok\":true,\"nss\":\"$NSS\",\"msg\":\"shape ${RATE} kbit/s applied to $IP (download only — upload needs kmod-ifb: opkg/apk install kmod-ifb kmod-sched)$NSSNOTE\"}"
     fi
 }
 

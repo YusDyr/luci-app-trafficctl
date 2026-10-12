@@ -1149,3 +1149,81 @@ tctl_get_offload_mode() {
         echo "none"
     fi
 }
+
+# ── Qualcomm NSS / ECM Detection ───────────────────────────────────────────
+#
+# On Qualcomm NSS builds (ipq807x/ipq60xx with qca-nss-ecm, qca-nss-drv and
+# qca-nss-clients) the Enhanced Connection Manager installs flow rules into
+# the NSS firmware cores, and an accelerated flow NEVER TRAVERSES THE LINUX
+# NETWORK STACK. Both of this package's enforcement paths are therefore inert
+# on such a router: the nftables netdev policer never sees the packets, and
+# Linux HTB/IFB never gets to queue them. Reported in issue #81, where a user
+# applied WiFi client limits and nothing was limited.
+#
+# Nothing here attempts to fix that — an NSS backend would mean nsshtb/nsstbl
+# and act_nssmirred in place of htb and ifb, which needs hardware to develop
+# against. What these helpers do is let the callers STOP REPORTING SUCCESS for
+# a rule that cannot be enforced, which is the part that can be made correct
+# without hardware and is the actual complaint.
+#
+# Named by absolute path, as it must be on the router; the tests sed this line
+# into their scratch directory (same approach as TCTL_LEASES_FILE above).
+TCTL_ECM_DEBUGFS="/sys/kernel/debug/ecm"
+
+# absent  — no ECM on this system; every rule this package installs applies
+#           normally and nothing needs qualifying.
+# stopped — ECM is present but its front end has been stopped, so flows are
+#           back on the Linux path and our rules DO apply.
+# active  — ECM is accelerating. Our rules are installed but not enforced for
+#           any accelerated flow.
+#
+# The distinction between "stopped" and "active" is deliberate and is read
+# from the kernel rather than inferred from the packages installed: somebody
+# who has turned acceleration off to get working QoS must not be told their
+# limits do not work.
+tctl_nss_status() {
+    [ -d "$TCTL_ECM_DEBUGFS" ] || { printf 'absent\n'; return 0; }
+    local v4 v6
+    v4=$(cat "$TCTL_ECM_DEBUGFS/front_end_ipv4_stop" 2>/dev/null)
+    v6=$(cat "$TCTL_ECM_DEBUGFS/front_end_ipv6_stop" 2>/dev/null)
+    # Both stopped is the only state in which the Linux datapath is whole. A
+    # missing knob is NOT read as stopped: an ECM build whose debugfs layout we
+    # do not recognise is still accelerating, and guessing "stopped" there
+    # would restore exactly the false success this exists to remove.
+    if [ "$v4" = "1" ] && [ "$v6" = "1" ]; then
+        printf 'stopped\n'
+    else
+        printf 'active\n'
+    fi
+}
+
+tctl_nss_active() { [ "$(tctl_nss_status)" = "active" ]; }
+
+# The suffix every caller appends to its own message. One wording in one place,
+# so the limiter, the shaper and the block path cannot drift into describing
+# the same condition three different ways.
+tctl_nss_note() {
+    tctl_nss_active || return 0
+    printf ' [NOT ENFORCED: Qualcomm NSS acceleration is active — accelerated flows bypass the Linux network stack entirely, so this rule is installed but has no effect. Stop acceleration (echo 1 > %s/front_end_ipv4_stop, same for ipv6) or set acceleration_engine in /etc/config/ecm, then re-apply]' \
+        "$TCTL_ECM_DEBUGFS"
+}
+
+# Defunct the flows ECM has already accelerated.
+#
+# This is the NSS counterpart of the `conntrack -D` every rule change already
+# does, and it is needed for the same reason: a flow that is ALREADY offloaded
+# is not re-evaluated against a rule that appeared afterwards, so without this
+# a new block or limit would only affect connections started later — which
+# presents as "it works sometimes".
+#
+# Best effort by design: absent on every non-NSS router, and a write failure
+# must never fail the operation the caller is performing. UNVERIFIED ON
+# HARDWARE — there is no IPQ device here to test it against, so it is wired in
+# as an addition to the existing flush rather than as something any result
+# depends on.
+tctl_nss_defunct() {
+    local f="$TCTL_ECM_DEBUGFS/ecm_db/defunct_all"
+    [ -w "$f" ] || return 0
+    echo 1 > "$f" 2>/dev/null || true
+    return 0
+}

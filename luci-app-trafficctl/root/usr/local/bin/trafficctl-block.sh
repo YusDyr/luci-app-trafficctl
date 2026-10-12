@@ -43,6 +43,9 @@ if tctl_block_add "$IP" "$COMMENT"; then
     # flow offload those are never re-evaluated against the new rule — the
     # device would stay online over v6 indefinitely while the UI reads blocked.
     MAC=$(tctl_target_mac "$IP" 2>/dev/null) && tctl_conntrack_flush_v6 "$MAC"
+    # Same problem one layer further out: a flow already accelerated by the
+    # NSS firmware is not re-evaluated against this rule either.
+    tctl_nss_defunct
 
     tctl_persist_enabled && tctl_persist_save "block" "$IP" "$LABEL"
     tctl_log "block" "$IP" "$LABEL" "${TCTL_VIA:-cli}" "${TCTL_SRC:-local}"
@@ -58,10 +61,12 @@ if tctl_block_add "$IP" "$COMMENT"; then
     else
         NOTE=" — IPv4 only: no MAC known for $IP (no DHCP lease, no neighbour entry), so IPv6 is not covered"
     fi
+    NOTE="$NOTE$(tctl_nss_note)"
+    NSS="$(tctl_nss_status)"
     if [ "$SELF_BLOCK" = "true" ]; then
-        echo "{\"ok\":true,\"ipv6\":$([ "$TCTL_BLOCK_IPV6" = "1" ] && echo true || echo false),\"msg\":\"internet blocked for $IP (your device — LuCI access preserved)$NOTE\"}"
+        echo "{\"ok\":true,\"ipv6\":$([ "$TCTL_BLOCK_IPV6" = "1" ] && echo true || echo false),\"nss\":\"$NSS\",\"msg\":\"internet blocked for $IP (your device — LuCI access preserved)$NOTE\"}"
     else
-        echo "{\"ok\":true,\"ipv6\":$([ "$TCTL_BLOCK_IPV6" = "1" ] && echo true || echo false),\"msg\":\"internet blocked for $IP$NOTE\"}"
+        echo "{\"ok\":true,\"ipv6\":$([ "$TCTL_BLOCK_IPV6" = "1" ] && echo true || echo false),\"nss\":\"$NSS\",\"msg\":\"internet blocked for $IP$NOTE\"}"
     fi
 else
     echo "{\"ok\":false,\"msg\":\"failed to block $IP\"}"

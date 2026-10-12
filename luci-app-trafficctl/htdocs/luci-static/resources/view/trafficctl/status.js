@@ -4212,6 +4212,24 @@ return view.extend({
 					_('Offloads routing to the hardware engine (PPE/NPU). Requires software offload. ' +
 					  '⚠ On many platforms (e.g. Mediatek Filogic) the driver does not report byte counters back to the kernel — real-time speed monitoring will show zero.'));
 
+				// Qualcomm NSS acceleration (#81). This is NOT one of the
+				// flow-offload modes above and is not controlled by the two
+				// toggles below it: ECM pushes flow rules into the NSS
+				// firmware cores, so an accelerated flow never reaches the
+				// Linux stack at all and neither the nftables policer nor
+				// Linux HTB can act on it. The apply result says so on every
+				// attempt; this is here because the Flow Offload panel is
+				// where somebody asking "why is my limit doing nothing" looks.
+				if (cfg.nss === 'active') {
+					container.appendChild(E('div', {
+						'style': 'margin-bottom:10px;padding:8px;border-left:3px solid var(--tc-warn);font-size:12px'
+					}, [
+						E('b', {'style':'color:var(--tc-warn)'}, '⚠ ' + _('Qualcomm NSS acceleration is active')),
+						E('div', {'style':'margin-top:4px;color:var(--tc-muted)'},
+							_('Rate limits and traffic shaping cannot be enforced while it is: accelerated flows bypass the Linux network stack, so rules are installed but have no effect. The toggles below do not control this — stop the ECM front end (front_end_ipv4_stop / front_end_ipv6_stop under /sys/kernel/debug/ecm) or set acceleration_engine in /etc/config/ecm, then re-apply the limit.'))
+					]));
+				}
+
 				container.appendChild(modeBadge);
 				container.appendChild(E('div', {'class':'tc-offload-row'}, [swToggleEl, saveStatus]));
 				container.appendChild(swDesc);
