@@ -51,9 +51,17 @@ jobs:
   # architecture, was built TWICE per release — `Build the artifacts` (20m45s,
   # real version) and this job (30m52s, 0.0.0-test) — concurrently, and the
   # matrix that consumes the result then finishes in 20 seconds. Measured on
-  # run 36936909066. Reusing the release build takes the release critical path
-  # from ~31 to ~21 minutes and, as a bonus, tests the exact artifact that
-  # ships rather than a separate build of the same tree.
+  # run 36936909066. Reusing the release build also means the matrix exercises
+  # the exact artifact that ships rather than a separate build of the same
+  # tree.
+  #
+  # The honest figure: the release goes from ~32 minutes to ~24, not to ~21.
+  # Gating this workflow on the build in order to reuse its packages also
+  # gated the feed-install check, which depends on nothing and had always run
+  # alongside the build — that alone would have made the release LONGER (~46
+  # minutes), so feed-install now lives in its own ungated workflow. With it
+  # parallel again the pole is the feed check at ~24 minutes, not this build.
+  # Measured on run 38086343117.
   #
   # Rejected alternative, for the record: carrying a warm SDK build tree
   # between runs so that both builds get cheap. Measured on 2026-10-09 and it
@@ -209,45 +217,6 @@ jobs:
             exit 1
           fi
           exit $rc
-
-  # ──────────────────────────────────────────────────────────────────────────
-  # Feed install — reproduce the user-facing `./scripts/feeds update` workflow
-  # inside an OpenWrt SDK container. This is the path most users actually
-  # follow (and the one currently broken — see issue #7).
-  # ──────────────────────────────────────────────────────────────────────────
-  feed-install:
-    name: Feed install (SDK ${{ matrix.version }})
-    runs-on: ubuntu-latest
-    # The earlier lua.h SDK-environment problem is worked around in
-    # test_feed_install.sh (it disables the liblucihttp-lua/ucode deps), so this
-    # job now passes on every supported SDK and is a BLOCKING check again —
-    # a feed-install regression (e.g. issue #7 recurring) must fail CI.
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { version: "23.05.6",  sdk_image: "openwrt/sdk:x86_64-23.05.6" }
-          - { version: "24.10.6",  sdk_image: "openwrt/sdk:x86_64-24.10.6" }
-          - { version: "25.12.4",  sdk_image: "openwrt/sdk:x86_64-25.12.4" }
-    steps:
-      - uses: actions/checkout@v6
-      - name: Run feed install test in ${{ matrix.sdk_image }}
-        run: |
-          pulled=0
-          for attempt in 1 2 3; do
-            if docker pull "${{ matrix.sdk_image }}"; then pulled=1; break; fi
-            echo "docker pull attempt $attempt failed; retrying..." >&2
-            sleep $((attempt * 5))
-          done
-          if [ "$pulled" != "1" ]; then
-            echo "::warning::SDK image ${{ matrix.sdk_image }} not pullable, skipping"
-            exit 0
-          fi
-          docker run --rm \
-            -v "$PWD:/src:ro" \
-            --entrypoint /bin/sh \
-            "${{ matrix.sdk_image }}" \
-            /src/tests/test_feed_install.sh /src
 
   # ──────────────────────────────────────────────────────────────────────────
   # Upgrade — install previous GitHub release, then install current build.
