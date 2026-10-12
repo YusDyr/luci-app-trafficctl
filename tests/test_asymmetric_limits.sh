@@ -552,5 +552,30 @@ assert_contains "the rewritten record has the new rate" '"ip":"192.168.1.1","par
 assert_not_contains "and dropped the upload rate it no longer has" '"param_up"' "$rules"
 assert_contains "the .10 neighbour is untouched" '"ip":"192.168.1.10","param":"4000"' "$rules"
 
+# ── and the REMOVAL side of the same comparison (#79) ──────────────────────
+#
+# tctl_persist_remove selects the record to drop with the same index() test
+# tctl_persist_save uses to select the one to replace, but until now only the
+# save side was pinned. The removal side is where a mis-selection is worse:
+# saving the wrong record leaves a visibly wrong rate, while removing the
+# wrong one silently deletes a limit that the next reboot then does not
+# restore — the damage surfaces long after the cause.
+#
+# Rate 0 is the removal path (trafficctl-ratelimit.sh:47).
+run "$TMP/ratelimit.sh" 192.168.1.1 0 rl_test >/dev/null
+rules=$(cat "$RULES")
+assert_eq "removing one target leaves its two neighbours" "2" \
+    "$(printf '%s' "$rules" | grep -o '"type":"ratelimit"' | wc -l | tr -d ' ')"
+assert_not_contains "the removed record is gone" '"ip":"192.168.1.1","' "$rules"
+assert_contains "the .10 neighbour survived the removal" '"ip":"192.168.1.10","param":"4000"' "$rules"
+assert_contains "the .100 neighbour survived too" '"ip":"192.168.1.100","param":"5000"' "$rules"
+
+# The longest-prefix direction as well: removing .10 must not take .100.
+run "$TMP/ratelimit.sh" 192.168.1.10 0 rl_test >/dev/null
+rules=$(cat "$RULES")
+assert_eq "removing the shorter of two prefixed addresses leaves the longer" "1" \
+    "$(printf '%s' "$rules" | grep -o '"type":"ratelimit"' | wc -l | tr -d ' ')"
+assert_contains "and the one left is the longer address" '"ip":"192.168.1.100","param":"5000"' "$rules"
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
