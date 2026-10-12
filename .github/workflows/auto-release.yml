@@ -452,18 +452,48 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Refuse to publish if main moved since the version was decided
+      # Two different situations, and only one of them is a problem.
+      #
+      # BENIGN — main moved FORWARD past the commit this run measured, because
+      # something else was merged while this release was building. The notes
+      # and version computed here no longer describe the tip, so this run must
+      # not tag; but the newer commit has its own release run, whose `prepare`
+      # syncs to the tip and whose range therefore covers this one's commits
+      # too (that is the structural fix from #86). Nothing is lost and there
+      # is nothing to do, so this exits GREEN with a notice.
+      #
+      # Failing red here was teaching the maintainer that a failed release run
+      # is normal, which is the opposite of what a release gate should do.
+      # Observed on run 38275308881: #94's release refused to publish because
+      # #93 and #95 had been merged behind it, while the run for the newer
+      # commit released all three.
+      #
+      # ALARMING — main is no longer a descendant of what we measured, i.e.
+      # history was rewritten or the branch was reset under us. Nothing
+      # guarantees any future run covers this range, so that still fails.
+      - name: Stand down if main moved since the version was decided
+        id: tip
         run: |
           want="${{ needs.prepare.outputs.sha }}"
           have="$(git rev-parse HEAD)"
-          if [ "$want" != "$have" ]; then
-            echo "::error::main moved from $want to $have while this release was building."
-            echo "The notes and the version were computed for $want, so they would not describe"
-            echo "what the tag covers. Re-run after the newer commit has had its own release."
-            exit 1
+          if [ "$want" = "$have" ]; then
+            echo "proceed=1" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          echo "proceed=0" >> "$GITHUB_OUTPUT"
+          if git merge-base --is-ancestor "$want" "$have"; then
+            echo "::notice::Superseded: main moved from $want to $have while this release was"
+            echo "building, and $want is an ancestor of it. The release run for $have covers this"
+            echo "range as well, so this run stands down instead of tagging a stale tree."
+            exit 0
+          fi
+          echo "::error::main is no longer a descendant of $want (now $have): history was"
+          echo "rewritten or the branch was reset while this release was building. No future"
+          echo "run is guaranteed to cover this range, so this needs a human."
+          exit 1
 
       - name: Update Makefile version and tag
+        if: steps.tip.outputs.proceed == '1'
         env:
           NEW_VERSION: ${{ needs.prepare.outputs.new_version }}
           NOTES_BODY: ${{ needs.prepare.outputs.body }}
@@ -516,11 +546,13 @@ jobs:
           git push origin main "${{ needs.prepare.outputs.new_tag }}"
 
       - uses: actions/download-artifact@v5
+        if: steps.tip.outputs.proceed == '1'
         with:
           name: release-artifacts
           path: dist/
 
       - name: Create GitHub Release
+        if: steps.tip.outputs.proceed == '1'
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.prepare.outputs.new_tag }}

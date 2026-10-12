@@ -511,5 +511,143 @@ else
     PASS=$((PASS + 1))
 fi
 
+# ──────────────────────────────────────────────────────────────────────────────
+# A superseded release must stand down GREEN; a rewritten history must not.
+#
+# The guard is EXTRACTED AND EXECUTED against a real repository rather than
+# pattern-matched, the same way the bump decision above is, because the
+# distinction it draws is a git question and a test that only greps for
+# "merge-base" would pass on an inverted condition.
+#
+# Why green matters: a run superseded by a later merge is not a problem — the
+# newer commit's own run syncs to the tip and its range covers this one's
+# commits too (#86). Failing red there taught the maintainer that a failed
+# release run is normal. Observed on run 38275308881.
+# ──────────────────────────────────────────────────────────────────────────────
+# This file counts PASS/FAIL inline and has no assert helpers; the block below
+# needs them. Defined here rather than at the top so the existing assertions
+# stay exactly as they were. NB: the first version of this block called
+# helpers that did not exist — every call printed "command not found", not one
+# assertion ran, and the suite still reported "68 passed, 0 failed". Hence the
+# self-check immediately after.
+assert_contains() {
+    if printf '%s' "$3" | grep -qF -- "$2"; then
+        PASS=$((PASS + 1))
+    else
+        FAIL=$((FAIL + 1))
+        printf "FAIL: %s\n  expected to find: '%s'\n  in: %s\n" "$1" "$2" "$3"
+    fi
+}
+assert_not_contains() {
+    if printf '%s' "$3" | grep -qF -- "$2"; then
+        FAIL=$((FAIL + 1))
+        printf "FAIL: %s\n  should NOT contain: '%s'\n  in: %s\n" "$1" "$2" "$3"
+    else
+        PASS=$((PASS + 1))
+    fi
+}
+assert_eq() {
+    if [ "$2" = "$3" ]; then
+        PASS=$((PASS + 1))
+    else
+        FAIL=$((FAIL + 1))
+        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$1" "$2" "$3"
+    fi
+}
+# The helpers must actually be callable and must actually be able to fail.
+_before=$FAIL
+# Output suppressed: this assertion is MEANT to fail, and printing its FAIL
+# line makes a green run look broken in the CI log.
+assert_contains "self-check" "absent" "present" >/dev/null 2>&1
+if [ "$FAIL" -eq $((_before + 1)) ]; then
+    FAIL=$_before
+    PASS=$((PASS + 1))
+else
+    printf "FAIL: the assertion helpers in this block are not wired up\n"
+    FAIL=$((_before + 1))
+fi
+
+GUARD=$(awk '/^      - name: Stand down if main moved/{f=1;next}
+             f && /^        run: \|$/{g=1;next}
+             g && /^      - /{exit}
+             g{sub(/^          /,""); print}' "$WF")
+
+if [ -z "$GUARD" ] || ! printf '%s\n' "$GUARD" | grep -q 'merge-base'; then
+    FAIL=$((FAIL + 1))
+    printf "FAIL: could not extract the stand-down guard from %s\n" "$WF"
+else
+    PASS=$((PASS + 1))
+    GTMP=$(mktemp -d)
+    (
+        cd "$GTMP" || exit 1
+        git init -q .
+        git config user.email t@t; git config user.name t
+        echo a > f; git add f; git commit -qm a       # A
+        A=$(git rev-parse HEAD)
+        echo b > f; git commit -qam b                 # B, child of A
+        B=$(git rev-parse HEAD)
+        git checkout -q --orphan other
+        git rm -q -rf .; echo c > g; git add g; git commit -qm c   # unrelated
+        C=$(git rev-parse HEAD)
+        git checkout -q main 2>/dev/null || git checkout -q master
+        printf '%s %s %s\n' "$A" "$B" "$C" > shas
+    ) || { FAIL=$((FAIL + 1)); printf "FAIL: could not build the guard fixture\n"; }
+    read -r A B C < "$GTMP/shas"
+
+    # The workflow expression is the only thing the harness has to supply.
+    run_guard() {
+        local want="$1" head_sha="$2" out rc
+        printf '%s\n' "$GUARD" \
+            | sed "s|\${{ needs.prepare.outputs.sha }}|$want|" > "$GTMP/guard.sh"
+        out=$( cd "$GTMP" && git checkout -q "$head_sha" && \
+               GITHUB_OUTPUT="$GTMP/out" sh "$GTMP/guard.sh" 2>&1 )
+        rc=$?
+        printf '%s\n--rc=%s\n--out=%s\n' "$out" "$rc" "$(cat "$GTMP/out" 2>/dev/null)"
+        : > "$GTMP/out"
+    }
+
+    # 1. unchanged tip: publish
+    r=$(run_guard "$B" "$B")
+    assert_contains "an unmoved tip proceeds to publish" "proceed=1" "$r"
+    assert_contains "and exits zero" "--rc=0" "$r"
+
+    # 2. superseded by a descendant: stand down, but GREEN
+    r=$(run_guard "$A" "$B")
+    assert_contains "being overtaken by a later merge does not publish" "proceed=0" "$r"
+    assert_contains "and is not a failure" "--rc=0" "$r"
+    assert_contains "and says it was superseded" "Superseded" "$r"
+    assert_not_contains "and is not reported as an error" "::error::" "$r"
+
+    # 3. history rewritten: that still fails, because nothing guarantees any
+    #    later run covers this range.
+    r=$(run_guard "$C" "$B")
+    assert_contains "a tip that is not a descendant fails" "--rc=1" "$r"
+    assert_contains "and is reported as an error" "::error::" "$r"
+    assert_not_contains "and does not claim it was merely superseded" "Superseded" "$r"
+
+    rm -rf "$GTMP"
+fi
+
+# Every step after the guard MUST be gated on its verdict. Without this a
+# superseded run would tag and publish a stale tree, which is far worse than
+# the red build this change removes.
+ungated=$(python3 - "$WF" <<'PYEOF'
+import sys, yaml
+d = yaml.safe_load(open(sys.argv[1]))
+steps = d["jobs"]["publish"]["steps"]
+bad = []
+seen_guard = False
+for st in steps:
+    if not seen_guard:
+        if str(st.get("name", "")).startswith("Stand down"):
+            seen_guard = True
+        continue
+    if "steps.tip.outputs.proceed" not in str(st.get("if", "")):
+        bad.append(st.get("name") or st.get("uses"))
+print(", ".join(bad))
+PYEOF
+)
+assert_eq "every publish step after the guard is gated on its verdict" "" "$ungated"
+
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
