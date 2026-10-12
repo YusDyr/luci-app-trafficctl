@@ -4,6 +4,24 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.21.6] - 2026-10-12
+
+### Bug Fixes
+- keep the feed-install check off the release critical path ([#94](https://github.com/YusDyr/luci-app-trafficctl/issues/94)) ([668e873](https://github.com/YusDyr/luci-app-trafficctl/commit/668e873831c6212779b5a503ff5b1c3a9ace8831))
+  Regression from #91, measured on the release run that merge produced
+  (38086343117): 45m21s, against the ~32 minutes it was meant to improve on.
+- stop reporting success for limits NSS acceleration cannot enforce ([#93](https://github.com/YusDyr/luci-app-trafficctl/issues/93)) ([a87d40a](https://github.com/YusDyr/luci-app-trafficctl/commit/a87d40a9443f1899fa6ba18cdaad20e50ebf3f7d))
+  Refs #81. On Qualcomm NSS builds (ipq807x/ipq60xx with qca-nss-ecm) the
+  Enhanced Connection Manager installs flow rules into the NSS firmware
+  cores, and an accelerated flow never traverses the Linux network stack.
+  Both enforcement paths in this package are therefore inert there: the
+  nftables netdev policer never sees the packets and Linux HTB never queues
+  them. The reporter limited WiFi clients, nothing was limited, and the UI
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.21.5...v1.21.6
+
+---
+
 ## [1.21.5] - 2026-10-10
 
 ### Other
