@@ -1,0 +1,66 @@
+name: OpenWrt Feed Install
+
+# Split out of compat.yml, and for a measured regression rather than tidiness.
+# This check reproduces the user-facing `./scripts/feeds update` workflow
+# inside an SDK container (issue #7) and consumes NOTHING any other job
+# builds — no artifact, no `needs`. While it lived in compat.yml it inherited
+# that workflow's gating, so once compat started waiting for the release build
+# in order to reuse its packages, this got dragged behind the build with it:
+# 22 minutes of building and then 24 minutes of feed installing, serialised,
+# where they had always overlapped.
+#
+# Measured: release run 38086343117 started feed-install at 21:28:58, one
+# second after the build finished, against run 36936909066 where it started at
+# 21:04:01 alongside the build. Net effect of the reuse change alone would
+# have been ~46 minutes against the ~32 it replaced.
+#
+# Its own workflow makes the independence structural: there is no gate here to
+# inherit.
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  feed-install:
+    name: Feed install (SDK ${{ matrix.version }})
+    runs-on: ubuntu-latest
+    # The earlier lua.h SDK-environment problem is worked around in
+    # test_feed_install.sh (it disables the liblucihttp-lua/ucode deps), so this
+    # job now passes on every supported SDK and is a BLOCKING check again —
+    # a feed-install regression (e.g. issue #7 recurring) must fail CI.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { version: "23.05.6",  sdk_image: "openwrt/sdk:x86_64-23.05.6" }
+          - { version: "24.10.6",  sdk_image: "openwrt/sdk:x86_64-24.10.6" }
+          - { version: "25.12.4",  sdk_image: "openwrt/sdk:x86_64-25.12.4" }
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run feed install test in ${{ matrix.sdk_image }}
+        run: |
+          pulled=0
+          for attempt in 1 2 3; do
+            if docker pull "${{ matrix.sdk_image }}"; then pulled=1; break; fi
+            echo "docker pull attempt $attempt failed; retrying..." >&2
+            sleep $((attempt * 5))
+          done
+          if [ "$pulled" != "1" ]; then
+            echo "::warning::SDK image ${{ matrix.sdk_image }} not pullable, skipping"
+            exit 0
+          fi
+          docker run --rm \
+            -v "$PWD:/src:ro" \
+            --entrypoint /bin/sh \
+            "${{ matrix.sdk_image }}" \
+            /src/tests/test_feed_install.sh /src
+

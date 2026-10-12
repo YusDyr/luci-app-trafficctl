@@ -21,6 +21,15 @@ jobs:
     name: CI checks
     uses: ./.github/workflows/ci.yml
 
+  # Ungated and parallel to everything, which is the whole point: this check
+  # consumes nothing any other job builds, so gating it would only make the
+  # release longer. It lived inside compat.yml until that workflow started
+  # waiting for `build`, which dragged this behind the build with it — 46
+  # minutes of serialised work in place of 32 of overlapping work.
+  feeds:
+    name: Feed install
+    uses: ./.github/workflows/feed-install.yml
+
   compat:
     name: Compatibility checks
     # Waits for `build` so it can test the packages that build produced
@@ -434,7 +443,7 @@ jobs:
   publish:
     name: Tag and release
     runs-on: ubuntu-latest
-    needs: [ci, compat, prepare, build]
+    needs: [ci, compat, feeds, prepare, build]
     if: needs.prepare.outputs.bump != 'none'
     steps:
       - uses: actions/checkout@v6

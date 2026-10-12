@@ -301,7 +301,7 @@ fi
 
 # publish must wait for the checks, not just for the build.
 pub_needs=$(awk '/^  publish:/{f=1;next} f&&/^ *needs:/{print;exit}' "$WF")
-for dep in ci compat prepare build; do
+for dep in ci compat feeds prepare build; do
     case "$pub_needs" in
         *"$dep"*) PASS=$((PASS + 1)) ;;
         *)
@@ -443,6 +443,72 @@ else
             printf "FAIL: compat.yml build-packages is not gated exactly on an empty package_artifact\n"
             ;;
     esac
+fi
+
+# ──────────────────────────────────────────────────────────────────────────────
+# The feed-install check must stay OFF the critical path.
+#
+# It consumes nothing any other job builds — no artifact, no needs — and it had
+# always run alongside the package build. It lived inside compat.yml, so when
+# compat started waiting for `build` in order to reuse its packages, this got
+# dragged behind the build too and the release went from ~32 minutes of
+# overlapping work to ~46 of serialised work. Measured on run 38086343117.
+# These assertions exist so that regression cannot be reintroduced by moving
+# the job back or by gating the workflow that holds it.
+# ──────────────────────────────────────────────────────────────────────────────
+FWF="$(dirname "$WF")/feed-install.yml"
+
+if [ ! -f "$FWF" ]; then
+    FAIL=$((FAIL + 1))
+    printf "FAIL: feed-install.yml is missing — if it moved back into compat.yml it is gated on the build again\n"
+else
+    PASS=$((PASS + 1))
+
+    # Nothing in it may wait for anything.
+    if grep -qE '^[[:space:]]+needs:' "$FWF"; then
+        FAIL=$((FAIL + 1))
+        printf "FAIL: feed-install.yml has a needs: — it must not wait for any other job\n"
+    else
+        PASS=$((PASS + 1))
+    fi
+    # And it must not have acquired a dependency on built packages, which is
+    # what would justify gating it in the first place.
+    if grep -qE 'download-artifact|package_artifact' "$FWF"; then
+        FAIL=$((FAIL + 1))
+        printf "FAIL: feed-install.yml now consumes a built artifact; the independence claim no longer holds\n"
+    else
+        PASS=$((PASS + 1))
+    fi
+
+    # The call site must be ungated too: a `needs:` on the reusable-workflow
+    # call is exactly how the serialisation happened the first time.
+    feeds_call=$(awk '/^  feeds:/{f=1;next} f&&/^  [a-z]/{exit} f{print}' "$WF" \
+        | grep -vE '^[[:space:]]*#')
+    case "$feeds_call" in
+        *needs:*)
+            FAIL=$((FAIL + 1))
+            printf "FAIL: the feeds job in auto-release.yml is gated; it must run parallel to the build\n"
+            ;;
+        *) PASS=$((PASS + 1)) ;;
+    esac
+    case "$feeds_call" in
+        *feed-install.yml*) PASS=$((PASS + 1)) ;;
+        *)
+            FAIL=$((FAIL + 1))
+            printf "FAIL: the feeds job does not call feed-install.yml\n"
+            ;;
+    esac
+fi
+
+# Matched as a JOB KEY, not as the string: the comment in compat.yml explaining
+# why the job was moved out mentions it by name, and a bare grep fired on that
+# prose. Third time this session an assertion was satisfied by the words
+# describing the guard rather than by the guard.
+if [ -f "$CWF" ] && grep -qE '^  feed-install:' "$CWF"; then
+    FAIL=$((FAIL + 1))
+    printf "FAIL: compat.yml holds feed-install again, so it inherits compat's gate on the build\n"
+else
+    PASS=$((PASS + 1))
 fi
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
