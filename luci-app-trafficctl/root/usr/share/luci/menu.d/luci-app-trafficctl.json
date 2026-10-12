@@ -23,9 +23,21 @@
 		}
 	},
 
+	"admin/status/trafficctl/history": {
+		"title": "History",
+		"order": 2,
+		"action": {
+			"type": "view",
+			"path": "trafficctl/history"
+		},
+		"depends": {
+			"acl": [ "luci-app-trafficctl" ]
+		}
+	},
+
 	"admin/status/trafficctl/portfw": {
 		"title": "Port Forwards",
-		"order": 2,
+		"order": 3,
 		"action": {
 			"type": "view",
 			"path": "trafficctl/portfw"

@@ -72,6 +72,31 @@ config cut 'cut'
 	# thing standing between the operator and a permanent lockout.
 	option default_duration '0'
 
+config history 'history'
+	# Durable per-device traffic history (#89, #90). OFF by default: every
+	# other persistent store in this app was deliberately kept off the write
+	# path, and this one writes to flash on a schedule.
+	option enabled '0'
+	# Where the period files live. One file per accounting period, replaced
+	# atomically through a temp file in this same directory — so a network
+	# mount works, but see the note on `interval` before reaching for one.
+	option dir '/etc/trafficctl/history'
+	# day | week | month. The period IS the reset: a new period is a new file.
+	option period 'month'
+	# Seconds between flushes to durable storage. Floored at 300. Hourly is
+	# roughly 24 writes a day of a few KB, which is not a wear problem — this
+	# is the setting to raise if flash wear is the worry, in preference to
+	# pointing `dir` at a share that can hang when the NAS sleeps.
+	option interval '3600'
+	# Seconds between samples of the live accumulator. tmpfs only, no flash.
+	# Separate from `interval` on purpose and much shorter: with a conntrack
+	# byte source, a flow that starts and ends between two samples is
+	# invisible to both, so an hourly sample would miss most short traffic.
+	option sample_interval '60'
+	# How many FINISHED periods to retain. The current one is never a
+	# retention candidate.
+	option keep '12'
+
 config logging 'logging'
 	option enabled '1'
 	option log_file '/tmp/trafficctl/activity.log'
