@@ -4390,7 +4390,32 @@ return view.extend({
 						  'a router with modern OpenWrt and fw4 support will have this working out of the box.')),
 					docLinks,
 				]);
-			} else {
+			} else if (mode === 'software-counter') {
+				// Split out from plain 'software' (#77). Both end up with
+				// accurate graphs, which is why this was cosmetic rather than
+				// misleading — but it is a different mechanism, and the
+				// counter flag is exactly the detail someone opens this banner
+				// to understand. Saying "measured via nftables counters" here
+				// describes a path that is NOT producing the numbers on this
+				// router: with the flag set, the flowtable syncs offloaded
+				// byte counts back to conntrack and tctl_pick_byte_source
+				// stays on conntrack.
+				bg     = 'rgba(243,156,18,0.10)';
+				border = '#f39c12';
+				icon   = 'ℹ️';
+				body   = E('div', {}, [
+					para(bold(_('Software flow offloading is active, with counter sync.'))),
+					para(_('The kernel fast-paths established connections through a flowtable for ' +
+						  'higher throughput.')),
+					para([_('The flowtable carries the '),
+						E('code', {}, 'counter'),
+						_(' flag (Linux 5.7+, set automatically by fw4), so offloaded byte counts are ' +
+						  'synced back to conntrack. Speed and totals come from conntrack as usual and ' +
+						  'are accurate — the nftables counter fallback is not needed on this router.')]),
+					para(_('Traffic shaping and blocking are not affected.')),
+					docLinks,
+				]);
+			} else if (mode === 'software') {
 				bg     = 'rgba(243,156,18,0.10)';
 				border = '#f39c12';
 				icon   = 'ℹ️';
@@ -4401,6 +4426,24 @@ return view.extend({
 					para(_('Speed is measured via nftables counters installed at a higher priority ' +
 						  '(before the flowtable), so graphs are accurate.')),
 					para(_('Traffic shaping and blocking are not affected.')),
+					docLinks,
+				]);
+			} else {
+				// A mode tctl_get_offload_mode learned and this panel has not.
+				// Deliberately vague rather than inheriting whichever branch
+				// happened to be last: #77 was exactly that, software-counter
+				// falling into the plain-software text and describing a
+				// mechanism the router was not using. test_offload_ui.sh fails
+				// when a backend mode has no branch here, so reaching this is
+				// a bug rather than a state to word carefully for.
+				bg     = 'rgba(243,156,18,0.10)';
+				border = '#f39c12';
+				icon   = 'ℹ️';
+				body   = E('div', {}, [
+					para(bold(_('Flow offloading is active.'))),
+					para(_('This build of trafficctl does not have a description for the mode the ' +
+						  'router reported, so how it affects monitoring is not stated here rather ' +
+						  'than guessed at.')),
 					docLinks,
 				]);
 			}
