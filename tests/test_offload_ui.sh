@@ -53,6 +53,82 @@ assert_eq "backend emits at least the five known offload modes" \
     "$(tr '\n' ' ' < "$TMP/modes" | sed 's/ $//')"
 
 missing=$(awk 'NR == FNR { have[$0] = 1; next } !($0 in have)' "$TMP/labels" "$TMP/modes" | tr '\n' ' ' | sed 's/ $//')
+
+# ── and every mode must get its own BANNER copy, not inherit someone else's ──
+#
+# This is the same defect one layer down (#77). mkOffloadBanner branched on
+# hardware-counter and hardware and let everything else fall into the
+# software-offload text, so when tctl_get_offload_mode learned
+# software-counter the banner told the operator their speeds came from
+# nftables counters installed before the flowtable — a path that is NOT
+# producing the numbers when the counter flag is set, because the flowtable
+# syncs byte counts back to conntrack and the conntrack source is used.
+#
+# The badge assertion above would not have caught it: the badge had a label.
+# Only the prose was wrong, so the prose is checked too.
+awk '/var mkOffloadBanner = function/ { inf = 1 }
+     inf && /^\t\t\};$/ { exit }
+     inf' "$JS" \
+    | grep -oE "mode === '[a-z-]+'" | sed "s/mode === '//; s/'//" | sort -u > "$TMP/banner"
+
+# 'none' is handled by an early return rather than a branch, so it is excluded
+# from the comparison on purpose.
+grep -vx 'none' "$TMP/modes" > "$TMP/modes_banner"
+
+missing_banner=$(awk 'NR == FNR { have[$0] = 1; next } !($0 in have)' \
+    "$TMP/banner" "$TMP/modes_banner" | tr '\n' ' ' | sed 's/ $//')
+assert_eq "every offload mode has its own banner text" "" "$missing_banner"
+
+# The early return must stay, or 'none' would render a "flow offloading is
+# active" banner on a router that has none.
+banner_src=$(awk '/var mkOffloadBanner = function/ { inf = 1 }
+                  inf && /^\t\t\};$/ { exit }
+                  inf' "$JS")
+case "$banner_src" in
+    *"mode === 'none'"*) PASS=$((PASS + 1)) ;;
+    *)
+        FAIL=$((FAIL + 1))
+        printf "FAIL: mkOffloadBanner no longer short-circuits on 'none'\n"
+        ;;
+esac
+
+# And the two software modes must not share wording: that identity IS the bug.
+# Matched on a phrase that is contiguous in the source — the sentence about the
+# counter flag is split across two _() calls with an E('code') between them, so
+# a pattern spanning that boundary silently never matches (it did not, first
+# time round).
+# Checked PER BRANCH, not across the whole function: asserting that both
+# phrases appear somewhere passes just as well when one branch holds both and
+# the other holds neither, which is the copy-paste version of this same bug.
+branch_of() {
+    printf '%s\n' "$banner_src" \
+        | awk -v m="mode === '$1'" '$0 ~ m { inb = 1; next } inb && /} else/ { exit } inb'
+}
+sc_branch=$(branch_of 'software-counter')
+sw_branch=$(branch_of 'software')
+
+case "$sc_branch" in
+    *'synced back to conntrack'*) PASS=$((PASS + 1)) ;;
+    *) FAIL=$((FAIL + 1)); printf "FAIL: the software-counter branch does not say counts are synced back to conntrack\n" ;;
+esac
+case "$sc_branch" in
+    *'bypassing conntrack byte updates'*)
+        FAIL=$((FAIL + 1))
+        printf "FAIL: the software-counter branch claims conntrack updates are bypassed — that is the plain-software mechanism\n"
+        ;;
+    *) PASS=$((PASS + 1)) ;;
+esac
+case "$sw_branch" in
+    *'nftables counters installed at a higher priority'*) PASS=$((PASS + 1)) ;;
+    *) FAIL=$((FAIL + 1)); printf "FAIL: the plain-software branch no longer describes the nftables counter path\n" ;;
+esac
+case "$sw_branch" in
+    *'synced back to conntrack'*)
+        FAIL=$((FAIL + 1))
+        printf "FAIL: the plain-software branch claims counter sync, which is what distinguishes the other mode\n"
+        ;;
+    *) PASS=$((PASS + 1)) ;;
+esac
 assert_eq "every offload mode has a badge label in status.js" "" "$missing"
 
 # --- the Telegram keyboard preset buttons must not render NaN -------------
