@@ -427,7 +427,8 @@ hist_flush() {
             ltx = num(line, "bytes_out_total"); if (ltx < 0) ltx = 0
             ltc = num(line, "bytes_tcp_total")
             lud = num(line, "bytes_udp_total")
-            deg = (index(line, "\"degraded\":true") > 0) ? "true" : "false"
+            deg = "false"
+            if (index(line, "\"degraded\":true") > 0) deg = "true"
 
             # Two addresses can map to ONE key within a flush (a device that
             # changed lease while the cursor still remembers both), so the
@@ -445,14 +446,22 @@ hist_flush() {
 
         for (k in touched) {
             lrx = arx[k] + 0; ltx = atx[k] + 0
-            ltc = (k in ktc) ? atc[k] + 0 : -1
-            lud = (k in kud) ? aud[k] + 0 : -1
+            ltc = -1
+            if (k in ktc) ltc = atc[k] + 0
+            lud = -1
+            if (k in kud) lud = aud[k] + 0
 
             # Growth only. A live value below the cursor means the accumulator
             # restarted; rebaseline and add nothing, because the bytes it is
             # now below by were already folded in.
-            drx = (seen_cursor[k] && lrx >= crx[k]) ? lrx - crx[k] : (seen_cursor[k] ? 0 : lrx)
-            dtx = (seen_cursor[k] && ltx >= ctx[k]) ? ltx - ctx[k] : (seen_cursor[k] ? 0 : ltx)
+            drx = lrx
+            dtx = ltx
+            if (seen_cursor[k]) {
+                drx = 0
+                dtx = 0
+                if (lrx >= crx[k]) drx = lrx - crx[k]
+                if (ltx >= ctx[k]) dtx = ltx - ctx[k]
+            }
             dtc = -1; dud = -1
             if (ltc >= 0) {
                 if (!seen_cursor[k] || ctc[k] < 0) dtc = ltc
@@ -584,8 +593,10 @@ hist_read() {
         printf "["
         for (i = 1; i <= n; i++) {
             k = order[i]
-            nm = (k in name) ? name[k] : ""
-            kind = (k ~ /^mac:/) ? "mac" : "ip"
+            nm = ""
+            if (k in name) nm = name[k]
+            kind = "ip"
+            if (k ~ /^mac:/) kind = "mac"
             if (i > 1) printf ","
             printf "{\"key\":\"%s\",\"key_kind\":\"%s\",\"mac\":\"%s\",\"ip\":\"%s\",\"name\":\"%s\",\"bytes_in\":%.0f,\"bytes_out\":%.0f,\"bytes_tcp\":%.0f,\"bytes_udp\":%.0f,\"first_seen\":%d,\"last_seen\":%d,\"degraded\":%s,\"periods\":[%s]}", \
                 k, kind, (mac[k] == "" ? "-" : mac[k]), ip[k], nm, \
