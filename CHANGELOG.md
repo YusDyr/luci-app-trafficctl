@@ -4,6 +4,32 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.22.0] - 2026-10-16
+
+### Features
+- durable per-period traffic history with a History tab ([#92](https://github.com/YusDyr/luci-app-trafficctl/issues/92)) ([31a8d90](https://github.com/YusDyr/luci-app-trafficctl/commit/31a8d901ea4b68b1714570c5d14ae667cfebfe91))
+  Refs #89, #90. Keeps per-device totals across reboots and across devices
+  going offline, in one file per accounting period.
+
+### Bug Fixes
+- a superseded release run should stand down, not fail ([#97](https://github.com/YusDyr/luci-app-trafficctl/issues/97)) ([65a610f](https://github.com/YusDyr/luci-app-trafficctl/commit/65a610f6676fc77c60e89b8299560dec7ed98bdd))
+  Observed on release run 38275308881: #94's release refused to publish with
+  "main moved from 668e873 to c2c352a while this release was building",
+  because #93 and #95 were merged behind it. The guard was right to refuse --
+  the notes and version it computed no longer described the tip -- but red
+  was the wrong colour for it.
+- give software-counter offload its own banner text ([#96](https://github.com/YusDyr/luci-app-trafficctl/issues/96)) ([564862a](https://github.com/YusDyr/luci-app-trafficctl/commit/564862a5be875d0ba2452d898de7bb34f7878d01))
+  Closes #77.
+- stop the called workflows from sharing one concurrency group ([#98](https://github.com/YusDyr/luci-app-trafficctl/issues/98)) ([7cb7c07](https://github.com/YusDyr/luci-app-trafficctl/commit/7cb7c0781a60cb5378cfe6c1fceecad4de2ac172))
+  #92 was merged on 2026-10-12 and never released. Release run 38299207220
+  concluded "cancelled" with every check green except CI, which was cancelled
+  without running; publish needs ci, so it was skipped and no tag was cut.
+  The newest release is still v1.21.6 while main carries the history feature.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.21.6...v1.22.0
+
+---
+
 ## [1.21.6] - 2026-10-12
 
 ### Bug Fixes
