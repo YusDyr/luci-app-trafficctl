@@ -39,7 +39,21 @@ permissions:
 # against the hosted limit, and runs stretched to 34-55 minutes against a 24-27
 # minute uncontended baseline.
 concurrency:
-  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number || github.run_id }}
+  # A LITERAL name, not ${{ github.workflow }}. Inside a workflow_call that
+  # expression resolves to the CALLER's workflow name, so ci.yml, compat.yml and
+  # feed-install.yml all computed the same group when the release called them —
+  # 'Auto Release-pr-<run_id>' — and GitHub serialised the three against each
+  # other. With cancel-in-progress false a group holds one running and one
+  # pending run, so whichever of the three was queued got CANCELLED when the
+  # third arrived.
+  #
+  # Measured on release run 38299207220: feeds took the slot at 19:54:25, ci sat
+  # queued for twenty minutes, and the moment compat became eligible (20:14:57,
+  # one second after the build finished) ci was cancelled. publish needs ci, so
+  # it was skipped and #92 was merged without ever being released. The same
+  # serialisation is visible in the runs that did succeed: compat's matrix
+  # started in the same second feeds finished.
+  group: compat-pr-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
   # gh release download in the upgrade job needs read access to releases
   # (covered by the default GITHUB_TOKEN's contents: read above)
