@@ -1,7 +1,81 @@
 msgid ""
 msgstr "Content-Type: text/plain; charset=UTF-8"
 
+msgid "\"all\" for every device, or a CIDR such as 10.0.20.0/24"
+msgstr ""
+
+msgid "%d not applied"
+msgstr ""
+
+msgid "%d packets dropped (%s)"
+msgstr ""
+
+msgid "%d pkts, %s dropped"
+msgstr ""
+
+msgid "%s total"
+msgstr ""
+
+msgid "1 Mbit/s"
+msgstr ""
+
+msgid "1 hour"
+msgstr ""
+
+msgid "10 Mbit/s"
+msgstr ""
+
+msgid "100 Mbit/s"
+msgstr ""
+
+msgid "15 min"
+msgstr ""
+
+msgid "2 Mbit/s"
+msgstr ""
+
+msgid "25 Mbit/s"
+msgstr ""
+
+msgid "4 hours"
+msgstr ""
+
+msgid "5 Mbit/s"
+msgstr ""
+
+msgid "50 Mbit/s"
+msgstr ""
+
+msgid ""
+"Accelerates routing in the kernel via nftables flowtable. Speed monitoring and t"
+"raffic shaping work normally."
+msgstr ""
+
+msgid "Accumulated on the router"
+msgstr ""
+
+msgid "Accumulated since %s"
+msgstr ""
+
+msgid "Action"
+msgstr ""
+
+msgid "Active connections in conntrack"
+msgstr ""
+
 msgid "Active devices"
+msgstr ""
+
+msgid "Active inbound connections"
+msgstr ""
+
+msgid "Active subnet limits"
+msgstr ""
+
+msgid "Active:"
+msgstr ""
+
+msgid "Activity"
 msgstr ""
 
 msgid "Adding to"
@@ -13,67 +87,345 @@ msgstr ""
 msgid "All active devices"
 msgstr ""
 
+msgid "All devices"
+msgstr ""
+
+msgid "All of"
+msgstr ""
+
+msgid "App"
+msgstr ""
+
+msgid ""
+"Applied once, the first time a device appears on the network. A device that alre"
+"ady has a limit is left alone."
+msgstr ""
+
+msgid "Applied — firewall reloading"
+msgstr ""
+
 msgid "Apply"
+msgstr ""
+
+msgid "Applying…"
+msgstr ""
+
+msgid "Auto-refresh interval for summary table"
 msgstr ""
 
 msgid "Avg"
 msgstr ""
 
-msgid "Block"
-msgstr ""
-
 msgid "BLOCKED"
 msgstr ""
 
-msgid "Blocked"
+msgid "Behind a downstream router (routed subnet)"
 msgstr ""
 
-msgid "Blocking"
+msgid "Block Internet"
+msgstr ""
+
+msgid "Block WiFi"
+msgstr ""
+
+msgid "Blocked from WiFi (MAC deny list)"
+msgstr ""
+
+msgid "Blocked:"
+msgstr ""
+
+msgid "Blocking, rate limiting, and traffic shaping continue to work regardless."
+msgstr ""
+
+msgid "Blocks"
+msgstr ""
+
+msgid "Bot commands:"
+msgstr ""
+
+msgid "Bot is running"
+msgstr ""
+
+msgid "Bot is stopped"
+msgstr ""
+
+msgid "Bridge port — these bytes are also counted in its bridge"
+msgstr ""
+
+msgid ""
+"Bridge ports, switch conduits and ifb mirrors. Their bytes are already counted i"
+"n the bridge or uplink above."
+msgstr ""
+
+msgid "Byte totals unavailable on this router."
 msgstr ""
 
 msgid "Bytes"
 msgstr ""
 
+msgid "Bytes dropped"
+msgstr ""
+
 msgid "Bytes queued in tc"
+msgstr ""
+
+msgid "Bytes queued in traffic shaper"
+msgstr ""
+
+msgid "Bytes received from remote clients"
+msgstr ""
+
+msgid "Bytes sent back to remote clients"
+msgstr ""
+
+msgid "CPU load (1 min)"
 msgstr ""
 
 msgid "Calculating…"
 msgstr ""
 
+msgid "Cancel"
+msgstr ""
+
+msgid "Carries the default route"
+msgstr ""
+
+msgid "Chat ID"
+msgstr ""
+
+msgid "Chat ID:"
+msgstr ""
+
 msgid "Click a row to inspect that device. Download speed updates every 2 seconds."
+msgstr ""
+
+msgid "Click again to confirm"
 msgstr ""
 
 msgid "Click header to sort."
 msgstr ""
 
-msgid "Click to inspect"
+msgid "Click to inspect %s"
+msgstr ""
+
+msgid "Click to toggle column visibility"
+msgstr ""
+
+msgid "Clients"
+msgstr ""
+
+msgid "Collecting interface counters…"
+msgstr ""
+
+msgid "Config"
+msgstr ""
+
+msgid "Connection interface (WiFi band, LAN port or routed)"
 msgstr ""
 
 msgid "Connections"
 msgstr ""
 
+msgid "Connections: <b>%d</b>"
+msgstr ""
+
 msgid "Conns"
+msgstr ""
+
+msgid "Control"
+msgstr ""
+
+msgid "Current download speed (bytes/sec from router to device)"
+msgstr ""
+
+msgid "Current mode:"
+msgstr ""
+
+msgid "Current upload speed (bytes/sec from device to router)"
+msgstr ""
+
+msgid "Currently tracked connections hold %s"
+msgstr ""
+
+msgid "Custom"
+msgstr ""
+
+msgid "Customize message"
 msgstr ""
 
 msgid "Custom…"
 msgstr ""
 
+msgid "Cut all internet access"
+msgstr ""
+
+msgid "Cut internet"
+msgstr ""
+
+msgid "Cutting…"
+msgstr ""
+
 msgid "DL Speed"
+msgstr ""
+
+msgid "Destination"
 msgstr ""
 
 msgid "Device"
 msgstr ""
 
-msgid "Dropped"
+msgid "Device hostname from DHCP lease"
+msgstr ""
+
+msgid "Device name"
+msgstr ""
+
+msgid "Devices already known:"
+msgstr ""
+
+msgid ""
+"Devices keep talking to each other and to the router — only the way out is close"
+"d. Traffic is stopped on the way in, so a transparent proxy on the router (podko"
+"p, passwall) cannot carry it out either. Remote access that reaches the router t"
+"hrough a LAN host (Tailscale, a tunnel, a jump host) stops working while this is"
+" on."
+msgstr ""
+
+msgid ""
+"Devices on the WiFi deny list that are still connected — those blocks are not in"
+" effect on the running radio."
+msgstr ""
+
+msgid "Disable hardware offload (keeps software offload):"
+msgstr ""
+
+msgid "Dismiss"
+msgstr ""
+
+msgid "Display"
+msgstr ""
+
+msgid "Distinct remote clients"
+msgstr ""
+
+msgid "Done"
+msgstr ""
+
+msgid "Download · %s"
+msgstr ""
+
+msgid "Drop"
+msgstr ""
+
+msgid "Drop ratio"
+msgstr ""
+
+msgid "Dropped:"
+msgstr ""
+
+msgid "Dropped: <b style=\"color:var(--tc-err)\">🚫 %d pkts / %s</b>"
+msgstr ""
+
+msgid "Drops"
+msgstr ""
+
+msgid "Drops excess packets (instant enforcement, low overhead)"
 msgstr ""
 
 msgid "Dst IP"
 msgstr ""
 
+msgid "ECN marks"
+msgstr ""
+
+msgid "EWMA"
+msgstr ""
+
+msgid "Enabled"
+msgstr ""
+
+msgid "Enter a custom speed value"
+msgstr ""
+
+msgid "Every device in"
+msgstr ""
+
+msgid "Every device this router forwards for"
+msgstr ""
+
+msgid "Ext. port"
+msgstr ""
+
+msgid "Extended"
+msgstr ""
+
+msgid "Extended Statistics"
+msgstr ""
+
+msgid "Extended Statistics (all devices)"
+msgstr ""
+
+msgid "External (WAN) port"
+msgstr ""
+
+msgid "Filter connections by protocol"
+msgstr ""
+
+msgid "Flow Offload"
+msgstr ""
+
+msgid ""
+"Flow offload is active and the kernel does not support the nftables counter maps"
+" trafficctl uses in that mode, so byte counters stop updating for offloaded conn"
+"ections. Speeds and totals would be far too low, so they are not shown. Disablin"
+"g hardware offload in Settings → Flow Offload restores them."
+msgstr ""
+
+msgid "Flow: /devices → select device → inline keyboard with enabled actions above"
+msgstr ""
+
+msgid "Flows"
+msgstr ""
+
+msgid ""
+"Forwarded traffic only — this kernel cannot install the prerouting rule, so traf"
+"fic handled by a transparent proxy on the router would not be caught."
+msgstr ""
+
+msgid "Full control"
+msgstr ""
+
+msgid "Gbit/s"
+msgstr ""
+
+msgid "Global internet cut needs nftables (fw4). This router is running iptables."
+msgstr ""
+
+msgid "Graph"
+msgstr ""
+
 msgid "Group"
 msgstr ""
 
-msgid "Group by"
+msgid "Group connections table rows"
+msgstr ""
+
+msgid "HTML:"
+msgstr ""
+
+msgid "Hardware MAC address"
+msgstr ""
+
+msgid "Hardware flow offload"
+msgstr ""
+
+msgid "Hardware flow offloading active — real-time speed monitoring unavailable."
+msgstr ""
+
+msgid "Hardware flow offloading is active."
+msgstr ""
+
+msgid "Hardware offload"
 msgstr ""
 
 msgid "Hostname"
@@ -82,46 +434,302 @@ msgstr ""
 msgid "Hostname / Dst IP"
 msgstr ""
 
+msgid ""
+"How often live data is polled: speeds, graphs, drop/backlog counters, and the co"
+"nnection table in device view"
+msgstr ""
+
+msgid "How to get full functionality without disabling offload:"
+msgstr ""
+
+msgid "IP address"
+msgstr ""
+
+msgid ""
+"If your current firmware uses fw3 (iptables) or ships a kernel older than 5.7, a"
+" router with modern OpenWrt and fw4 support will have this working out of the bo"
+"x."
+msgstr ""
+
+msgid "Iface"
+msgstr ""
+
+msgid "In"
+msgstr ""
+
+msgid ""
+"In this mode the kernel's conntrack, firewall, and tc are bypassed for offloaded"
+" flows:"
+msgstr ""
+
+msgid "Inbound rate limit (drops packets above the rate)"
+msgstr ""
+
+msgid ""
+"Inbound traffic control for DNAT port forwards and router-local open ports confi"
+"gured in the firewall. Pause drops all inbound traffic on the port instantly (wi"
+"thout touching the firewall config); Limit polices the inbound rate."
+msgstr ""
+
 msgid "Inet"
 msgstr ""
 
-msgid "Limited"
+msgid "Inline keyboard preview:"
 msgstr ""
 
-msgid "Limiter (drop)"
+msgid "Interfaces"
+msgstr ""
+
+msgid "Internet access status (paused = traffic blocked)"
+msgstr ""
+
+msgid "Internet is cut for all devices"
+msgstr ""
+
+msgid "Kbit/s"
+msgstr ""
+
+msgid "Keep after reboot"
+msgstr ""
+
+msgid "Kept after reboot — undoing it needs LAN or physical access."
+msgstr ""
+
+msgid "Known devices"
+msgstr ""
+
+msgid "LAN keeps working"
+msgstr ""
+
+msgid "Last seen: %s, %s ago"
+msgstr ""
+
+msgid "Lended / Borrowed"
+msgstr ""
+
+msgid "Limit"
+msgstr ""
+
+msgid "Limit inbound to %s"
+msgstr ""
+
+msgid "Limit new devices"
+msgstr ""
+
+msgid "Limit: %s"
+msgstr ""
+
+msgid "Limited devices"
+msgstr ""
+
+msgid "Limited subnets"
+msgstr ""
+
+msgid "Limited:"
+msgstr ""
+
+msgid "Limiter"
 msgstr ""
 
 msgid "Limiter (nft drop)"
 msgstr ""
 
-msgid "Limiting"
+msgid "Limiting %s → %s (%s)…"
+msgstr ""
+
+msgid "Limiting → %s…"
+msgstr ""
+
+msgid "Link"
+msgstr ""
+
+msgid "Linux kernel: nf_flowtable ↗"
+msgstr ""
+
+msgid "Loading…"
+msgstr ""
+
+msgid "Local IP address"
+msgstr ""
+
+msgid "Log categories"
+msgstr ""
+
+msgid "Logging"
+msgstr ""
+
+msgid "Logging & Persistence"
+msgstr ""
+
+msgid "MAC address"
+msgstr ""
+
+msgid "MAC:"
 msgstr ""
 
 msgid "Max"
 msgstr ""
 
-msgid "Mode"
+msgid "Mbit/s"
+msgstr ""
+
+msgid "Method"
+msgstr ""
+
+msgid "Name"
+msgstr ""
+
+msgid "New Device Defaults"
+msgstr ""
+
+msgid "New devices"
+msgstr ""
+
+msgid "No action buttons enabled"
 msgstr ""
 
 msgid "No active connections."
 msgstr ""
 
-msgid "No active devices."
+msgid "No active devices"
+msgstr ""
+
+msgid "No activity recorded yet."
+msgstr ""
+
+msgid ""
+"No baseline recorded yet. It is taken from the current leases when you switch th"
+"is on."
+msgstr ""
+
+msgid "No devices match filter."
+msgstr ""
+
+msgid "No extended stats available for this device."
+msgstr ""
+
+msgid "No extended stats available."
+msgstr ""
+
+msgid "No offload"
+msgstr ""
+
+msgid "No port forwards or WAN-open ports are configured in the firewall."
 msgstr ""
 
 msgid "None (per-flow)"
 msgstr ""
 
+msgid ""
+"Not counted: flow offload is active and this router cannot provide the nftables "
+"counters trafficctl uses in that mode, so the kernel byte counters stop updating"
+" for offloaded connections. Any total here would be far too low. See Settings → "
+"Flow Offload."
+msgstr ""
+
+msgid "Not enough data yet"
+msgstr ""
+
+msgid ""
+"Not measurable while flow offload is active: in that mode the router counts byte"
+"s per address only, so traffic cannot be split by protocol. See Settings → Flow "
+"Offload."
+msgstr ""
+
+msgid "Note: speed is measured before shaper — bursts above limit are normal"
+msgstr ""
+
+msgid "Notifications"
+msgstr ""
+
+msgid "Notifications only"
+msgstr ""
+
 msgid "Off"
+msgstr ""
+
+msgid ""
+"Offloads routing to the hardware engine (PPE/NPU). Requires software offload. ⚠ "
+"On many platforms (e.g. Mediatek Filogic) the driver does not report byte counte"
+"rs back to the kernel — real-time speed monitoring will show zero."
+msgstr ""
+
+msgid "On %s"
+msgstr ""
+
+msgid ""
+"On the WiFi deny list but still connected — the block is NOT in effect on the ru"
+"nning radio. Install hostapd-utils so blocks apply immediately, or restart WiFi "
+"(disconnects every client)."
+msgstr ""
+
+msgid "One bucket for the whole subnet"
+msgstr ""
+
+msgid "One bucket per device inside the subnet"
 msgstr ""
 
 msgid "Open DHCP/DNS bindings"
 msgstr ""
 
-msgid "Passed"
+msgid "OpenWrt: Flow offloading ↗"
+msgstr ""
+
+msgid "Operation failed"
+msgstr ""
+
+msgid "Or disable all flow offload in LuCI → Network → Firewall → General Settings."
+msgstr ""
+
+msgid "Other interfaces"
+msgstr ""
+
+msgid "Out"
+msgstr ""
+
+msgid "Overlimits"
+msgstr ""
+
+msgid "Overrides the DHCP lease or DNS name. Leave empty to clear the custom name."
+msgstr ""
+
+msgid "Overview"
+msgstr ""
+
+msgid "Packets dropped"
+msgstr ""
+
+msgid "Packets dropped by rate limiter"
+msgstr ""
+
+msgid "Passed: <b>%s</b>"
+msgstr ""
+
+msgid "Paste bot token"
+msgstr ""
+
+msgid "Pause"
+msgstr ""
+
+msgid "Persist rules"
+msgstr ""
+
+msgid "Pick a rate to apply it to this target, or Off to remove its limit."
+msgstr ""
+
+msgid "Poll"
+msgstr ""
+
+msgid "Polling is off — set the Poll interval to see throughput."
 msgstr ""
 
 msgid "Port"
+msgstr ""
+
+msgid "Port Forwards & Open Ports"
+msgstr ""
+
+msgid "Preview:"
 msgstr ""
 
 msgid "Proto"
@@ -130,52 +738,174 @@ msgstr ""
 msgid "Protocol"
 msgstr ""
 
-msgid "Queued"
+msgid "Queue"
+msgstr ""
+
+msgid "Queue memory"
+msgstr ""
+
+msgid "Queued: <b style=\\\"color:var(--tc-speed)\\\">%s</b>"
+msgstr ""
+
+msgid "Queues excess traffic (smoother streaming, lower jitter)"
+msgstr ""
+
+msgid "Rate"
+msgstr ""
+
+msgid "Rate limiting — applies only to new connections"
+msgstr ""
+
+msgid "Ratelimits"
+msgstr ""
+
+msgid "Received by this interface"
+msgstr ""
+
+msgid "Recent"
 msgstr ""
 
 msgid "Refresh"
 msgstr ""
 
+msgid "Remove"
+msgstr ""
+
+msgid "Remove limit"
+msgstr ""
+
 msgid "Removing from"
 msgstr ""
 
-msgid "Removing throttle for"
+msgid "Removing limit on %s…"
 msgstr ""
 
-msgid "Reverse DNS"
+msgid "Removing throttle…"
 msgstr ""
 
-msgid "Run"
+msgid "Rename device"
+msgstr ""
+
+msgid "Rename failed"
+msgstr ""
+
+msgid "Resets when the router reboots."
+msgstr ""
+
+msgid "Restore internet"
+msgstr ""
+
+msgid "Restores by itself in"
+msgstr ""
+
+msgid "Restoring…"
+msgstr ""
+
+msgid "Resume"
+msgstr ""
+
+msgid "Routed via %s"
 msgstr ""
 
 msgid "Running…"
 msgstr ""
 
+msgid "Save"
+msgstr ""
+
+msgid "Save as router default"
+msgstr ""
+
+msgid "Saving…"
+msgstr ""
+
 msgid "Scanning all devices…"
+msgstr ""
+
+msgid "Search device (name, IP, MAC)…"
+msgstr ""
+
+msgid "Sending…"
+msgstr ""
+
+msgid "Sent by this interface"
 msgstr ""
 
 msgid "Service"
 msgstr ""
 
-msgid "Shaped"
+msgid "Set a rate above 0 — with no rate this does nothing."
 msgstr ""
 
-msgid "Shaper (queue)"
+msgid "Settings"
+msgstr ""
+
+msgid "Shaped devices"
+msgstr ""
+
+msgid "Shaped devices are usually not offloaded (kernel detects the HTB qdisc)."
+msgstr ""
+
+msgid "Shaped:"
+msgstr ""
+
+msgid "Shaped: <b style=\\\"color:var(--tc-speed)\\\">🌊 %s</b>"
+msgstr ""
+
+msgid "Shaper"
 msgstr ""
 
 msgid "Shaper (tc/HTB queue)"
 msgstr ""
 
-msgid "Shaping"
+msgid "Shapes"
 msgstr ""
 
-msgid "Show"
+msgid "Shaping → %s…"
+msgstr ""
+
+msgid "Share:"
+msgstr ""
+
+msgid "Show/hide token"
+msgstr ""
+
+msgid "Simple"
+msgstr ""
+
+msgid "Simple = arithmetic mean, EWMA = exponential weighted moving average"
+msgstr ""
+
+msgid "Software flow offload"
+msgstr ""
+
+msgid "Software flow offloading is active."
+msgstr ""
+
+msgid "Software offload"
+msgstr ""
+
+msgid "Software offload (counter)"
 msgstr ""
 
 msgid "Speed Limit"
 msgstr ""
 
-msgid "Speed limit"
+msgid "Speed graph. Window = avg time. Orange dashed line = speed limit"
+msgstr ""
+
+msgid ""
+"Speed is measured via nftables counters installed at a higher priority (before t"
+"he flowtable), so graphs are accurate."
+msgstr ""
+
+msgid "Speed limit: <b style=\\\"color:var(--tc-warn)\\\">⚡ %s</b>"
+msgstr ""
+
+msgid "Speed limit: shaper (queue) or limiter (drop)"
+msgstr ""
+
+msgid "Speed monitoring — conntrack byte counters are not updated"
 msgstr ""
 
 msgid "State"
@@ -184,154 +914,91 @@ msgstr ""
 msgid "Stats"
 msgstr ""
 
-msgid "Throttle"
+msgid "Stays off until you switch it back."
+msgstr ""
+
+msgid ""
+"Store the current Poll and Window as this router's defaults, for browsers that h"
+"ave not set their own"
+msgstr ""
+
+msgid "Switch it off"
+msgstr ""
+
+msgid "Syslog"
+msgstr ""
+
+msgid ""
+"TCP bytes transferred, accumulated on the router. Not measurable while flow offl"
+"oad is active"
+msgstr ""
+
+msgid "TCP: <b>%d</b>"
+msgstr ""
+
+msgid "Table & Speed"
+msgstr ""
+
+msgid "Target:"
+msgstr ""
+
+msgid "Telegram"
+msgstr ""
+
+msgid "Telegram Bot"
+msgstr ""
+
+msgid "Test"
+msgstr ""
+
+msgid ""
+"The auto-revert helper is not running; this page re-checks the deadline while it"
+" is open."
+msgstr ""
+
+msgid "The flowtable"
+msgstr ""
+
+msgid "The internet cut is switched on, but its firewall rule is missing."
+msgstr ""
+
+msgid ""
+"The kernel fast-paths established connections through a flowtable, bypassing con"
+"ntrack byte updates for higher throughput."
+msgstr ""
+
+msgid ""
+"The router offloads established connections from the CPU to the hardware (NIC/So"
+"C), achieving 2–3× higher throughput and lower CPU usage."
 msgstr ""
 
 msgid "Throttle removed"
 msgstr ""
 
-msgid "Traffic Control"
+msgid "Time window for speed averaging"
 msgstr ""
 
-msgid "Unblock"
+msgid "To restore speed monitoring:"
 msgstr ""
 
-msgid "Unblocking"
+msgid "Token:"
 msgstr ""
 
-msgid "Unknown error"
+msgid "Top application by traffic"
 msgstr ""
 
-msgid "WiFi"
+msgid "Top application by traffic (needs the netifyd DPI agent)"
 msgstr ""
 
-msgid "WiFi Block"
+msgid "Top talkers"
 msgstr ""
 
-msgid "WiFi Unblock"
+msgid ""
+"Total bytes transferred (download + upload), accumulated on the router. Resets o"
+"n reboot; hover a cell for the start time"
 msgstr ""
 
-msgid "WiFi blocked"
-msgstr ""
-
-msgid "WiFi deny list"
-msgstr ""
-
-msgid "blocked"
-msgstr ""
-
-msgid "connections"
-msgstr ""
-
-msgid "dropped"
-msgstr ""
-
-msgid "groups from"
-msgstr ""
-
-msgid "ok"
-msgstr ""
-
-msgid "resolving…"
-msgstr ""
-
-msgid "value"
-msgstr ""
-
-msgid "Extended stats"
-msgstr ""
-
-msgid "Extended Statistics"
-msgstr ""
-
-msgid "Poll"
-msgstr ""
-
-msgid "Avg window"
-msgstr ""
-
-msgid "Method"
-msgstr ""
-
-msgid "Simple"
-msgstr ""
-
-msgid "EWMA"
-msgstr ""
-
-msgid "Drops"
-msgstr ""
-
-msgid "Overlimits"
-msgstr ""
-
-msgid "ECN marks"
-msgstr ""
-
-msgid "Flows"
-msgstr ""
-
-msgid "new"
-msgstr ""
-
-msgid "old"
-msgstr ""
-
-msgid "Queue memory"
-msgstr ""
-
-msgid "Lended"
-msgstr ""
-
-msgid "Borrowed"
-msgstr ""
-
-msgid "Utilization"
-msgstr ""
-
-msgid "Packets dropped"
-msgstr ""
-
-msgid "Bytes dropped"
-msgstr ""
-
-msgid "Drop ratio"
-msgstr ""
-
-msgid "No extended stats available for this device."
-msgstr ""
-
-msgid "What do these stats mean?"
-msgstr ""
-
-msgid "packets dropped by queue overflow"
-msgstr ""
-
-msgid "rate exceeded events"
-msgstr ""
-
-msgid "congestion signals without drop"
-msgstr ""
-
-msgid "active concurrent connections in queue"
-msgstr ""
-
-msgid "bytes allocated by the queue discipline"
-msgstr ""
-
-msgid "own-rate vs parent-rate packets"
-msgstr ""
-
-msgid "current speed as percentage of rate limit"
-msgstr ""
-
-msgid "traffic discarded by nft policer"
-msgstr ""
-
-msgid "percentage of total traffic that was dropped"
-msgstr ""
-
-msgid "Shaped devices"
+msgid "Total dropped"
 msgstr ""
 
 msgid "Total drops"
@@ -340,17 +1007,331 @@ msgstr ""
 msgid "Total queue memory"
 msgstr ""
 
-msgid "Limited devices"
+msgid "Total since boot (RX / TX)"
 msgstr ""
 
-msgid "Total dropped"
+msgid "Traffic Control"
+msgstr ""
+
+msgid ""
+"Traffic is flowing right now. It is normally re-asserted within seconds — if thi"
+"s persists, switch it off and on again."
+msgstr ""
+
+msgid "Traffic shaping (tc/HTB) — bypassed for offloaded flows"
+msgstr ""
+
+msgid "Traffic shaping and blocking are not affected."
+msgstr ""
+
+msgid ""
+"UDP bytes transferred, accumulated on the router. Not measurable while flow offl"
+"oad is active"
+msgstr ""
+
+msgid "UDP: <b>%d</b>"
+msgstr ""
+
+msgid "UL Speed"
+msgstr ""
+
+msgid "Unblock Internet"
+msgstr ""
+
+msgid "Unblock WiFi"
+msgstr ""
+
+msgid "Unknown error"
+msgstr ""
+
+msgid "Unknown — device unreachable"
+msgstr ""
+
+msgid "Until I switch it back"
+msgstr ""
+
+msgid "Upload · %s"
+msgstr ""
+
+msgid "Utilization"
+msgstr ""
+
+msgid "Variables"
+msgstr ""
+
+msgid "Visible columns"
+msgstr ""
+
+msgid "WAN IP"
+msgstr ""
+
+msgid "Waiting for a second sample…"
+msgstr ""
+
+msgid "Waiting for the first byte sample."
+msgstr ""
+
+msgid "Whole network"
+msgstr ""
+
+msgid "WiFi SSID"
+msgstr ""
+
+msgid "WiFi band (2.4/5GHz)"
+msgstr ""
+
+msgid "WiFi block NOT in effect"
+msgstr ""
+
+msgid "WiFi blocked"
+msgstr ""
+
+msgid "WiFi blocking and internet blocking of new connections still work."
+msgstr ""
+
+msgid "WiFi deny list"
+msgstr ""
+
+msgid "WiFi signal (dBm)"
+msgstr ""
+
+msgid "WiFi:"
+msgstr ""
+
+msgid "Window"
+msgstr ""
+
+msgid "You will need LAN or physical access to undo this — a reboot will not clear it."
+msgstr ""
+
+msgid "active concurrent connections in queue"
+msgstr ""
+
+msgid "all active blocks, limits, and shapes"
+msgstr ""
+
+msgid "between them — one bucket for the whole subnet."
+msgstr ""
+
+msgid "bit/s"
+msgstr ""
+
+msgid "blocked"
+msgstr ""
+
+msgid "bytes allocated by the queue discipline"
+msgstr ""
+
+msgid "clear filter"
+msgstr ""
+
+msgid "command list and bot mode"
+msgstr ""
+
+msgid "congestion signals without drop"
+msgstr ""
+
+msgid "connection type (5G, LAN)"
+msgstr ""
+
+msgid "connections"
+msgstr ""
+
+msgid "current speed as percentage of rate limit"
+msgstr ""
+
+msgid "date (2026-05-26)"
+msgstr ""
+
+msgid "date + time"
+msgstr ""
+
+msgid "device connections"
+msgstr ""
+
+msgid "device hostname"
+msgstr ""
+
+msgid "device list → tap device → action buttons"
+msgstr ""
+
+msgid "disabled"
+msgstr ""
+
+msgid "down"
+msgstr ""
+
+msgid "dropped"
+msgstr ""
+
+msgid "each"
+msgstr ""
+
+msgid "every device"
+msgstr ""
+
+msgid "failed"
+msgstr ""
+
+msgid ""
+"flag (Linux 5.7+, set automatically by fw4/nftables) periodically syncs hardware"
+" byte counts back to conntrack — trafficctl detects this and all features work n"
+"ormally."
+msgstr ""
+
+msgid ""
+"flag should sync hardware byte counts back to conntrack, but on many platforms ("
+"e.g. Mediatek Filogic) the driver does not implement the stats callback, so conn"
+"track counters remain frozen for active flows."
+msgstr ""
+
+msgid "groups from"
+msgstr ""
+
+msgid "h"
+msgstr ""
+
+msgid ""
+"is not one of the subnets this router monitors, so a limit on it would be accept"
+"ed but never enforced. A firewall zone other than \"lan\" with masq=1 (the usual g"
+"uest-VLAN setup) is excluded. Check with: uci show firewall | grep -E \"name=|mas"
+"q=\""
+msgstr ""
+
+msgid "kbit/s"
+msgstr ""
+
+msgid "line break"
+msgstr ""
+
+msgid "may use"
+msgstr ""
+
+msgid "min"
+msgstr ""
+
+msgid "network interface"
+msgstr ""
+
+msgid "new"
+msgstr ""
+
+msgid "nftables: Flowtables ↗"
+msgstr ""
+
+msgid "nothing dropped yet"
+msgstr ""
+
+msgid "of its own."
+msgstr ""
+
+msgid "old"
+msgstr ""
+
+msgid "on the deny list but still connected; install hostapd-utils or restart WiFi"
+msgstr ""
+
+msgid "open port"
+msgstr ""
+
+msgid "own-rate vs parent-rate packets"
+msgstr ""
+
+msgid "packets dropped by queue overflow"
+msgstr ""
+
+msgid "paused"
+msgstr ""
+
+msgid "per device"
+msgstr ""
+
+msgid "percentage of total traffic that was dropped"
 msgstr ""
 
 msgid "pkts"
 msgstr ""
 
-msgid "No extended stats available."
+msgid "port"
 msgstr ""
 
-msgid "all devices"
+msgid "port forward"
+msgstr ""
+
+msgid "rDNS"
+msgstr ""
+
+msgid "rate exceeded events"
+msgstr ""
+
+msgid "resolving…"
+msgstr ""
+
+msgid "routed"
+msgstr ""
+
+msgid "router"
+msgstr ""
+
+msgid "router hostname"
+msgstr ""
+
+msgid "router uptime"
+msgstr ""
+
+msgid "s"
+msgstr ""
+
+msgid "saved"
+msgstr ""
+
+msgid "sending or receiving now"
+msgstr ""
+
+msgid "share"
+msgstr ""
+
+msgid "shared"
+msgstr ""
+
+msgid "shared between them"
+msgstr ""
+
+msgid "these are never limited by this setting."
+msgstr ""
+
+msgid "time (14:32)"
+msgstr ""
+
+msgid "total connected clients"
+msgstr ""
+
+msgid "traffic discarded by nft policer"
+msgstr ""
+
+msgid "under a minute"
+msgstr ""
+
+msgid "value"
+msgstr ""
+
+msgid "↑ UL"
+msgstr ""
+
+msgid ""
+"↓ / ↑ are relative to the interface: on the WAN ↓ is your download, on a LAN bri"
+"dge ↓ is what the LAN sent upstream."
+msgstr ""
+
+msgid "↓ DL"
+msgstr ""
+
+msgid ""
+"🆕 <b>New device</b>\n"
+"{{ name }} ({{ ip }})\n"
+"MAC: <code>{{ mac }}</code>\n"
+"Link: {{ link }}\n"
+msgstr ""
+
+msgid "🆕 New device\\n{{ name }} ({{ ip }})\\nMAC: {{ mac }}\\nLink: {{ link }}"
 msgstr ""
