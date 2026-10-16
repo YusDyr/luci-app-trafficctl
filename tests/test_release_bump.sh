@@ -649,5 +649,48 @@ PYEOF
 )
 assert_eq "every publish step after the guard is gated on its verdict" "" "$ungated"
 
+# ──────────────────────────────────────────────────────────────────────────────
+# The workflows the release CALLS must not share a concurrency group.
+#
+# Inside a workflow_call, ${{ github.workflow }} resolves to the CALLER's
+# workflow name, so every called workflow that built its group from it
+# computed the same string and GitHub serialised them against each other. A
+# group with cancel-in-progress false holds one running and one pending run,
+# so whichever was queued got CANCELLED when the third arrived -- and publish
+# needs all three, so the release was silently skipped.
+#
+# Measured on run 38299207220: #92 was merged and never released.
+# ──────────────────────────────────────────────────────────────────────────────
+WFDIR="$(dirname "$WF")"
+called=$(grep -oE 'uses: \./\.github/workflows/[a-z-]+\.yml' "$WF" | sed 's|.*/||' | sort -u)
+assert_contains "the release calls the workflows this check knows about" "ci.yml" "$called"
+
+groups=""
+for cw in $called; do
+    f="$WFDIR/$cw"
+    [ -f "$f" ] || continue
+    g=$(awk '/^concurrency:/{c=1;next} c&&/^ *group:/{sub(/^ *group: */,"");print;exit}' "$f")
+    if [ -z "$g" ]; then
+        FAIL=$((FAIL + 1))
+        printf "FAIL: %s has no concurrency group\n" "$cw"
+        continue
+    fi
+    # The expression itself must not be derived from github.workflow.
+    case "$g" in
+        *'github.workflow'*)
+            FAIL=$((FAIL + 1))
+            printf "FAIL: %s builds its concurrency group from github.workflow, which is the CALLER's name under workflow_call — it will collide with every other called workflow\n" "$cw"
+            ;;
+        *) PASS=$((PASS + 1)) ;;
+    esac
+    groups="$groups
+$g"
+done
+
+uniq_groups=$(printf '%s' "$groups" | grep -v '^$' | sort -u | wc -l | tr -d ' ')
+all_groups=$(printf '%s' "$groups" | grep -v '^$' | wc -l | tr -d ' ')
+assert_eq "every workflow the release calls has a distinct concurrency group" \
+    "$all_groups" "$uniq_groups"
+
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
