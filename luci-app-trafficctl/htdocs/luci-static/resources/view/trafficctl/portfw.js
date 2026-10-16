@@ -45,9 +45,9 @@ function fmtRate(kbit) {
 	kbit = kbit || 0;
 	if (kbit >= 1000) {
 		var m = kbit / 1000;
-		return (m === Math.floor(m) ? m : m.toFixed(1)) + ' Mbit/s';
+		return (m === Math.floor(m) ? m : m.toFixed(1)) + ' ' + _('Mbit/s');
 	}
-	return kbit + ' kbit/s';
+	return kbit + ' ' + _('kbit/s');
 }
 
 function scopeOf(row) {
@@ -122,7 +122,7 @@ return view.extend({
 				'class': 'cbi-button cbi-button-remove',
 				'style': 'font-size:11px;padding:1px 6px;margin-left:6px',
 				'title': _('Remove limit')
-			}, '✕');
+			}, _('✕'));
 			rmBtn.addEventListener('click', function() {
 				rmBtn.disabled = true;
 				self.doCtl('limit', row, 0);
@@ -136,7 +136,7 @@ return view.extend({
 				var b = E('button', {
 					'class': 'cbi-button',
 					'style': 'font-size:10px;padding:0 5px;margin-right:2px',
-					'title': _('Limit inbound to') + ' ' + fmtRate(p.kbit)
+					'title': _('Limit inbound to %s').format(fmtRate(p.kbit))
 				}, p.label);
 				b.addEventListener('click', function() {
 					b.disabled = true;

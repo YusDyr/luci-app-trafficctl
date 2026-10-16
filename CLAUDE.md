@@ -57,12 +57,6 @@ luci-app-trafficctl/
     iface/99-trafficctl-shapes              — Restore shapes+blocks+ratelimits on boot (ifup lan)
     dhcp/99-trafficctl-newdevice            — New device detection via DHCP events
   po/templates/                             — i18n templates
-  po/<lang>/*.po                            — translations; each becomes its own package
-
-tools/
-  po2lmo.py                                 — .po → LuCI .lmo compiler (bit-exact reimplementation of luci-base's C tool)
-  i18n.sh                                   — translation packaging shared by build-ipk.sh and build-apk.sh
-  luci-languages.tsv                        — language code / display name table mirrored from luci.mk
 
 docs/
   capture.js                                — Playwright screenshot/GIF automation (masks MACs & hostname)
@@ -109,8 +103,6 @@ chore: bump ESLint config
 **Flow:** merge to main → CI passes → auto-release creates tag + release + IPK. No manual steps.
 
 **Manual trigger:** `auto-release.yml` also supports `workflow_dispatch` to re-run.
-
-**Translations ship as separate packages.** Adding `po/<lang>/luci-app-trafficctl.po` is all it takes: the feed build (`luci.mk`) and both standalone builders emit `luci-i18n-trafficctl-<code>` — arch `all`, depending on the main package, carrying `/usr/lib/lua/luci/i18n/<po basename>.<code>.lmo` plus a `/etc/uci-defaults/` snippet that registers the language. The language code is LuCI's own (`zh_Hans` → `zh-cn`), so a new language must be present in `tools/luci-languages.tsv` or the build stops rather than emitting a package with a blank language name. LuCI reads `.lmo`, not `.mo` — GNU `msgfmt` cannot produce it.
 
 ## Deployment
 
@@ -174,6 +166,15 @@ Elements hidden with an **inline style** (`style="display:none"` in the `E()` ca
 - Command palette style search (filter by name/IP/MAC)
 - Interactive graph popup on sparkline hover (crosshair, DL+UL, gradient fill, limit line)
 - `fmtSpeed()`: no ".0" for whole numbers, SI units (×1000)
+
+## i18n / lmo Rules
+
+- `_()` msgids must not contain leading or trailing whitespace. The build-time tool `po2lmo` hashes the raw msgid with `sfh_hash()`, while the runtime `lmo` loader canonicalises the lookup key with `lmo_canon_hash()` (trimming trailing whitespace and collapsing whitespace runs). This asymmetry means a msgid with leading or trailing whitespace can never match its own `.lmo` entry.
+  - Bad: ` _('Active: ')` or ` _(' flag should...')`
+  - Good: ` _('Active:') + ' '` and `' ' + _('flag should...')`
+- `.lmo` files must be generated with OpenWrt's `po2lmo`, not GNU `msgfmt`. `msgfmt` produces standard `.mo` files; LuCI expects the custom `lmo` format.
+- PO files should include a standard gettext header (`Content-Type`, `Language`, `Project-Id-Version`, etc.).
+- After deploying i18n changes, browser cache must be cleared and LuCI re-logged in because `rpcd` restarts and invalidates the session.
 
 ## Capture Script (docs/capture.js)
 
