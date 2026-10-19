@@ -692,5 +692,53 @@ all_groups=$(printf '%s' "$groups" | grep -v '^$' | wc -l | tr -d ' ')
 assert_eq "every workflow the release calls has a distinct concurrency group" \
     "$all_groups" "$uniq_groups"
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Translation packages must be published under the release version.
+#
+# The SDK names the i18n subpackage apks from its own APK_VERSION, a
+# date-and-commit string: v1.23.0 shipped
+# luci-i18n-trafficctl-zh-cn-26.292.76667.b3d3317.apk next to
+# luci-app-trafficctl_1.23.0-r1_noarch.apk. Copying them verbatim makes the
+# asset name change shape between releases for no reason.
+#
+# The sed that strips the SDK suffix is EXTRACTED AND RUN against fixtures
+# rather than eyeballed: a hyphenated language code (pt-br) is the case a
+# greedy pattern silently mangles, and the result is an asset name, which
+# nothing else in the suite would notice.
+# ──────────────────────────────────────────────────────────────────────────────
+collect=$(awk '/^      - name: Collect APK/{f=1;next} f&&/^      - /{exit} f{print}' "$WF")
+
+case "$collect" in
+    *'-exec cp {} dist/'*)
+        FAIL=$((FAIL + 1))
+        printf "FAIL: the release copies i18n apks verbatim, so they keep the SDK version string\n"
+        ;;
+    *) PASS=$((PASS + 1)) ;;
+esac
+case "$collect" in
+    *'needs.prepare.outputs.new_version'*) PASS=$((PASS + 1)) ;;
+    *)
+        FAIL=$((FAIL + 1))
+        printf "FAIL: the i18n apk assets are not named from the release version\n"
+        ;;
+esac
+
+strip=$(printf '%s\n' "$collect" | grep -oE "sed -E 's/[^']*'" | head -1 | sed "s/^sed -E '//; s/'$//")
+if [ -z "$strip" ]; then
+    FAIL=$((FAIL + 1))
+    printf "FAIL: could not extract the SDK-suffix strip expression from the Collect APK step\n"
+else
+    PASS=$((PASS + 1))
+    while IFS='|' read -r input want; do
+        [ -n "$input" ] || continue
+        got=$(printf '%s' "$input" | sed -E "$strip")
+        assert_eq "asset name from $input" "$want" "$got"
+    done <<'FIXTURES'
+luci-i18n-trafficctl-zh-cn-26.292.76667.b3d3317.apk|luci-i18n-trafficctl-zh-cn
+luci-i18n-trafficctl-pt-br-26.292.76667.abc1234.apk|luci-i18n-trafficctl-pt-br
+luci-i18n-trafficctl-zh-cn.apk|luci-i18n-trafficctl-zh-cn
+FIXTURES
+fi
+
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
