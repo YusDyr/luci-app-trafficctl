@@ -4,6 +4,18 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.23.0] - 2026-10-19
+
+### Features
+- add Simplified Chinese i18n ([#99](https://github.com/YusDyr/luci-app-trafficctl/issues/99)) ([b3d3317](https://github.com/YusDyr/luci-app-trafficctl/commit/b3d33173f309c47a58d1ab0bb98725b1af2fb860))
+  Simplified Chinese translation (389 translated entries), a refreshed
+  message template, and the i18n rules that make both correct, from
+  @ntbowen in #73.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.22.0...v1.23.0
+
+---
+
 ## [1.22.0] - 2026-10-16
 
 ### Features
