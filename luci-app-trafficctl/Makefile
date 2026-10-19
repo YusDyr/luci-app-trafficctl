@@ -57,5 +57,6 @@ fi
 exit 0
 endef
 
-# call BuildPackage - OpenWrt buildroot will pick up the standard LuCI layout
-$(eval $(call BuildPackage,$(PKG_NAME)))
+# No explicit $(eval $(call BuildPackage,...)) here: luci.mk already calls it
+# for the main package, so the explicit call was a duplicate. Spotted by
+# @ntbowen in #73.
