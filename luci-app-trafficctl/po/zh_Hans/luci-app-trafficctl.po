@@ -758,8 +758,8 @@ msgstr "队列"
 msgid "Queue memory"
 msgstr "队列内存"
 
-msgid "Queued: <b style=\\\"color:var(--tc-speed)\\\">%s</b>"
-msgstr "队列中：<b style=\\\"color:var(--tc-speed)\\\">%s</b>"
+msgid "Queued: <b style=\"color:var(--tc-speed)\">%s</b>"
+msgstr "队列中：<b style=\"color:var(--tc-speed)\">%s</b>"
 
 msgid "Queues excess traffic (smoother streaming, lower jitter)"
 msgstr "对超额流量排队（更流畅流媒体、更低抖动）"
@@ -863,8 +863,8 @@ msgstr "已整形设备通常不会被卸载（内核会检测到 HTB qdisc）�
 msgid "Shaped:"
 msgstr "已整形："
 
-msgid "Shaped: <b style=\\\"color:var(--tc-speed)\\\">🌊 %s</b>"
-msgstr "已整形：<b style=\\\"color:var(--tc-speed)\\\">🌊 %s</b>"
+msgid "Shaped: <b style=\"color:var(--tc-speed)\">🌊 %s</b>"
+msgstr "已整形：<b style=\"color:var(--tc-speed)\">🌊 %s</b>"
 
 msgid "Shaper"
 msgstr "整形器"
@@ -913,8 +913,8 @@ msgid ""
 "he flowtable), so graphs are accurate."
 msgstr "速度通过安装在更高优先级（flowtable 之前）的 nftables 计数器测量，因此图表准确。"
 
-msgid "Speed limit: <b style=\\\"color:var(--tc-warn)\\\">⚡ %s</b>"
-msgstr "速度限制：<b style=\\\"color:var(--tc-warn)\\\">⚡ %s</b>"
+msgid "Speed limit: <b style=\"color:var(--tc-warn)\">⚡ %s</b>"
+msgstr "速度限制：<b style=\"color:var(--tc-warn)\">⚡ %s</b>"
 
 msgid "Speed limit: shaper (queue) or limiter (drop)"
 msgstr "速度限制：整形器（队列）或限速器（丢包）"
