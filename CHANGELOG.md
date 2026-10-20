@@ -4,6 +4,16 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.23.1] - 2026-10-20
+
+### Bug Fixes
+- publish translation apks under the release version ([#101](https://github.com/YusDyr/luci-app-trafficctl/issues/101)) ([f1d1a5a](https://github.com/YusDyr/luci-app-trafficctl/commit/f1d1a5aee7ddcbf408f8ab94fbbea26974d25957))
+  v1.23.0 shipped these two assets side by side:
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.23.0...v1.23.1
+
+---
+
 ## [1.23.0] - 2026-10-19
 
 ### Features
