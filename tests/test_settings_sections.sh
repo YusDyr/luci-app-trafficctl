@@ -50,6 +50,34 @@ Table & Speed
 Telegram Bot
 EOF
 
+# And WHICH file each lives in, now that they are split (#90). Asserted
+# separately from existence, because "still exists somewhere" would be
+# satisfied by a section that drifted back onto the Devices page — which is
+# the thing the move was for.
+cat > "$TMP/want_devices" <<'EOF'
+Display
+Table & Speed
+EOF
+cat > "$TMP/want_settings" <<'EOF'
+Flow Offload
+Logging & Persistence
+New Device Defaults
+Telegram Bot
+EOF
+
+for pair in "status.js:want_devices" "settings.js:want_settings"; do
+    file=${pair%%:*}; wantf=${pair##*:}
+    if [ ! -f "$VIEWS/$file" ]; then
+        FAIL=$((FAIL + 1))
+        printf "FAIL: %s does not exist\n" "$file"
+        continue
+    fi
+    grep -oE "mkCollapsible\(_\('[^']+'\)" "$VIEWS/$file" \
+        | sed "s/mkCollapsible(_('//; s/')$//" | sort -u > "$TMP/in_$file"
+    diff_out=$(diff "$TMP/$wantf" "$TMP/in_$file" || true)
+    assert_eq "$file holds exactly the sections it should" "" "$diff_out"
+done
+
 missing=$(comm -23 "$TMP/want" "$TMP/have" | tr '\n' ' ' | sed 's/ $//')
 assert_eq "every known settings section still exists" "" "$missing"
 
