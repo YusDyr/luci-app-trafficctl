@@ -407,7 +407,20 @@ jobs:
           # dist/, so a glob anchored on the main package name drops them.
           cp /tmp/luci-*trafficctl*.ipk dist/ 2>/dev/null || true
           # The SDK builds the translation subpackages alongside the main one.
-          find bin/ -name "luci-i18n-trafficctl-*.apk" -exec cp {} dist/ \; 2>/dev/null || true
+          # Renamed to the release version rather than copied verbatim: the SDK
+          # names them from its own APK_VERSION, which is a date-and-commit
+          # string (v1.23.0 shipped
+          # luci-i18n-trafficctl-zh-cn-26.292.76667.b3d3317.apk next to
+          # luci-app-trafficctl_1.23.0-r1_noarch.apk). That is not wrong, but it
+          # is inconsistent with every other asset and it changes shape between
+          # releases, so anything pinning an asset URL breaks for no reason.
+          for _apk in $(find bin/ -name "luci-i18n-trafficctl-*.apk" 2>/dev/null); do
+            _base=$(basename "$_apk")
+            # Strip the SDK's version suffix back to the package name, which is
+            # everything up to the first "-" followed by a digit.
+            _name=$(printf '%s' "$_base" | sed -E 's/-[0-9][^-]*\..*$//; s/\.apk$//')
+            cp "$_apk" "dist/${_name}_${{ needs.prepare.outputs.new_version }}-r1_noarch.apk"
+          done
           APK=$(find bin/ -name "luci-app-trafficctl*.apk" 2>/dev/null | head -1)
           if [ -n "$APK" ]; then
             cp "$APK" "dist/luci-app-trafficctl_${{ needs.prepare.outputs.new_version }}-r1_noarch.apk"
