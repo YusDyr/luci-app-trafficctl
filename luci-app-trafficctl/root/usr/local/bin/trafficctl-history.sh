@@ -93,6 +93,7 @@ ERRFILE="/tmp/trafficctl_history.err"
 STAMP="/tmp/trafficctl_history.stamp"
 LOCKD="/tmp/trafficctl_history.lock.d"
 TOTALS_STATE="/tmp/trafficctl_totals.state"
+IFCURSOR="/tmp/trafficctl_history.ifcursor"
 
 # Row layout, tab-separated:
 #   key  mac  ip  name  rx  tx  tcp  udp  first_seen  last_seen  degraded
@@ -210,6 +211,23 @@ hist_period_id() {
 }
 
 hist_file() { printf '%s/%s.tsv\n' "$(hist_dir)" "$1"; }
+
+# Interface totals live in their OWN file per period, not as an extra record
+# type in the device file (#102).
+#
+# The issue proposed a type column. A separate file is better for the reason
+# that matters here: hist_read emits every row it finds as a device, so an
+# interface row sharing the file would be reported AS a device by any reader
+# that predates the change — including the History tab as shipped in v1.22.0.
+# A file the old reader never opens cannot be misread.
+hist_iffile() { printf '%s/%s.if.tsv\n' "$(hist_dir)" "$1"; }
+
+# Per-interface accumulation can be turned off on its own: on a single-WAN
+# router it is a handful of rows nobody reads, and the point of the feature is
+# multi-WAN.
+hist_ifaces_enabled() {
+    [ "$(uci -q get trafficctl.history.interfaces 2>/dev/null)" != "0" ]
+}
 
 hist_err_set() {
     printf '%s\t%s\n' "$(date +%s)" "$1" > "$ERRFILE" 2>/dev/null
@@ -546,8 +564,218 @@ hist_flush() {
     printf '%s\n' "$now" > "$STAMP" 2>/dev/null
     hist_err_clear
 
+    # Only after the device file is safely in place. A failure here is not a
+    # failure of the flush: the interface series is additive, and losing one
+    # interval of it must not make the caller think the device totals did not
+    # land.
+    hist_if_flush || hist_err_set "interface totals could not be written"
+
+
     printf '{"ok":true,"period":"%s","devices":%s,"at":%s}\n' \
         "$pid" "$(grep -vc '^#' "$file" 2>/dev/null || echo 0)" "$now"
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Interface totals (#102)
+#
+# A SECOND SERIES, not a breakdown of the device one, and the distinction is
+# not pedantry:
+#
+#   * these bytes are the kernel's own interface counters, read by
+#     trafficctl-ifaces.sh out of /proc/net/dev. They include the router's own
+#     traffic, broadcast, and everything per-device accounting cannot
+#     attribute, so they legitimately DISAGREE with the sum over devices.
+#   * under flow offloading they are the MORE trustworthy of the two, because
+#     they come from the driver rather than from conntrack — exactly inverted
+#     from the device series, where offload is what degrades accuracy. Hence
+#     hist_if_accuracy below, which must not inherit the device verdict.
+#   * they answer a question the device series cannot: how much went out of
+#     wan1 versus wan2 this month. A device's bytes carry no egress interface.
+#
+# rx/tx are relative to the INTERFACE, not to a client: rx on the WAN device
+# is download, rx on br-lan is what the LAN sent upstream. Stored as read,
+# with the role, so a consumer can label them rather than guess.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Interfaces whose bytes are already counted somewhere else, and would
+# double-count if recorded:
+#   enslaved — a bridge port; its traffic is in the bridge's own counters
+#   lo       — loopback
+#   the IFB  — a mirror of LAN ingress that the shaper creates, so every byte
+#              on it is a byte already counted on the device it mirrors
+hist_if_skip() {
+    local dev="$1" enslaved="$2" ifb
+    [ "$dev" = "lo" ] && return 0
+    [ "$enslaved" = "true" ] && return 0
+    ifb=$(uci -q get trafficctl.main.shape_ifb 2>/dev/null)
+    [ -n "$ifb" ] && [ "$dev" = "$ifb" ] && return 0
+    return 1
+}
+
+# What the interface series is worth. NOT the device verdict: an interface
+# counter comes from the driver, so uncountered offload — the thing that makes
+# the device totals a lower bound — does not touch it. Reporting "degraded"
+# here would be its own kind of wrong.
+hist_if_accuracy() {
+    printf 'exact\n'
+}
+
+# Fold the interface counters into the current period, exactly as the device
+# flush does: growth against a tmpfs cursor, and a live value below the cursor
+# means the counter restarted rather than that traffic went backwards.
+#
+# An interface counter restarting is NOT an edge case here. It happens every
+# time the link goes down, which on the multi-WAN box this feature is for is
+# routine — so a flap costs one sampling interval instead of corrupting the
+# month.
+hist_if_flush() {
+    local dir pid file tmp now sample rc=0
+    hist_ifaces_enabled || return 0
+    dir=$(hist_dir)
+    pid=$(hist_period_id)
+    file=$(hist_iffile "$pid")
+    now=$(date +%s)
+    sample="/tmp/.trafficctl_history.ifsample.$$"
+    tmp="$dir/.history-if.$pid.$$"
+    # shellcheck disable=SC2064
+    trap "rm -f '$sample' '$tmp'" EXIT INT TERM
+
+    /usr/local/bin/trafficctl-ifaces.sh 2>/dev/null \
+        | sed 's/},{/}\n{/g' > "$sample"
+    [ -s "$sample" ] || return 0
+
+    awk -v sample="$sample" -v cursor="$IFCURSOR" -v out="$tmp" -v store="$file" \
+        -v now="$now" -v ifb="$(uci -q get trafficctl.main.shape_ifb 2>/dev/null)" '
+    function num(line, key,   re, seg) {
+        re = "\"" key "\"[ \t]*:[ \t]*"
+        if (!match(line, re)) return -1
+        seg = substr(line, RSTART + RLENGTH)
+        if (!match(seg, /^[0-9]+/)) return -1
+        return substr(seg, RSTART, RLENGTH) + 0
+    }
+    function str(line, key,   re, seg) {
+        re = "\"" key "\"[ \t]*:[ \t]*\""
+        if (!match(line, re)) return ""
+        seg = substr(line, RSTART + RLENGTH)
+        if (!match(seg, /"/)) return ""
+        return substr(seg, 1, RSTART - 1)
+    }
+    BEGIN {
+        FS = "\t"
+        cf = cursor ".new"
+        printf "" > cf
+        while ((getline l < cursor) > 0) {
+            n = split(l, f, "\t")
+            if (n < 3) continue
+            crx[f[1]] = f[2] + 0; ctx[f[1]] = f[3] + 0
+            seen[f[1]] = 1
+        }
+        close(cursor)
+        while ((getline l < store) > 0) {
+            if (l ~ /^#/) continue
+            n = split(l, f, "\t")
+            if (n < 7) continue
+            d = f[1]
+            order[++norder] = d
+            role[d] = f[2]; label[d] = f[3]
+            rrx[d] = f[4] + 0; rtx[d] = f[5] + 0
+            first[d] = f[6] + 0; last[d] = f[7] + 0
+            have[d] = 1
+        }
+        close(store)
+
+        while ((getline line < sample) > 0) {
+            if (line !~ /"dev":"/) continue
+            d = str(line, "dev")
+            if (d == "") continue
+            if (d == "lo") continue
+            if (index(line, "\"enslaved\":true") > 0) continue
+            if (ifb != "" && d == ifb) continue
+            lrx = num(line, "rx_bytes"); if (lrx < 0) continue
+            ltx = num(line, "tx_bytes"); if (ltx < 0) continue
+
+            drx = lrx; dtx = ltx
+            if (seen[d]) {
+                drx = 0; dtx = 0
+                if (lrx >= crx[d]) drx = lrx - crx[d]
+                if (ltx >= ctx[d]) dtx = ltx - ctx[d]
+            }
+            if (!(d in have)) {
+                order[++norder] = d
+                have[d] = 1
+                first[d] = now
+                rrx[d] = 0; rtx[d] = 0
+            }
+            rrx[d] += drx; rtx[d] += dtx
+            r = str(line, "role"); if (r != "") role[d] = r
+            lb = str(line, "label"); if (lb != "") label[d] = lb
+            if (drx > 0 || dtx > 0) last[d] = now
+            else if (last[d] == 0) last[d] = now
+            ncrx[d] = lrx; nctx[d] = ltx
+            written[d] = 1
+        }
+        close(sample)
+
+        printf "# trafficctl-history-if 1\n" > out
+        for (i = 1; i <= norder; i++) {
+            d = order[i]
+            if (!(d in have) || emitted[d]) continue
+            emitted[d] = 1
+            rl = role[d]; if (rl == "") rl = "?"
+            lb = label[d]; if (lb == "") lb = "-"
+            printf "%s\t%s\t%s\t%.0f\t%.0f\t%d\t%d\n", \
+                d, rl, lb, rrx[d], rtx[d], first[d], last[d] > out
+        }
+        close(out)
+
+        for (d in seen) if (!(d in written))
+            printf "%s\t%.0f\t%.0f\n", d, crx[d], ctx[d] > cf
+        for (d in written)
+            printf "%s\t%.0f\t%.0f\n", d, ncrx[d], nctx[d] > cf
+        close(cf)
+    }' </dev/null || rc=1
+
+    [ "$rc" = 0 ] && [ -f "$tmp" ] || return 1
+    hist_guard mv "$tmp" "$file" 2>/dev/null || return 1
+    mv "$IFCURSOR.new" "$IFCURSOR" 2>/dev/null || true
+    return 0
+}
+
+hist_if_read() {
+    local dir from to files f p
+    dir=$(hist_dir)
+    from="$1"; to="$2"
+    [ -z "$from" ] && from=$(hist_period_id)
+    [ -z "$to" ] && to="$from"
+    files=""
+    for f in "$dir"/*.if.tsv; do
+        [ -f "$f" ] || continue
+        p=$(basename "$f" .if.tsv)
+        [ "$p" \< "$from" ] && continue
+        [ "$to" \< "$p" ] && continue
+        files="$files $f"
+    done
+    # shellcheck disable=SC2086 # deliberate splitting over the file list
+    awk -F'\t' '
+    /^#/ { next }
+    NF >= 7 {
+        d = $1
+        if (!(d in seen)) { order[++n] = d; seen[d] = 1; first[d] = $6 }
+        role[d] = $2; label[d] = $3
+        rx[d] += $4; tx[d] += $5
+        if ($6 + 0 < first[d] + 0) first[d] = $6
+        if ($7 + 0 > last[d] + 0) last[d] = $7
+    }
+    END {
+        printf "["
+        for (i = 1; i <= n; i++) {
+            d = order[i]
+            if (i > 1) printf ","
+            printf "{\"dev\":\"%s\",\"role\":\"%s\",\"label\":\"%s\",\"bytes_in\":%.0f,\"bytes_out\":%.0f,\"first_seen\":%d,\"last_seen\":%d}", \
+                d, role[d], label[d], rx[d], tx[d], first[d], last[d]
+        }
+        printf "]\n"
+    }' $files </dev/null 2>/dev/null || printf '[]\n'
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -563,6 +791,9 @@ hist_read() {
     files=""
     for f in "$dir"/*.tsv; do
         [ -f "$f" ] || continue
+        # The interface totals are a separate series in their own file; reading
+        # them here would report an interface as a device.
+        case "$f" in *.if.tsv) continue ;; esac
         p=$(basename "$f" .tsv)
         # String comparison is the right one here: every period id this script
         # writes is fixed-width and zero-padded, so lexical order IS
@@ -614,6 +845,9 @@ hist_periods() {
     n=0
     for f in "$dir"/*.tsv; do
         [ -f "$f" ] || continue
+        # Skip the interface companion: a period is listed once, by its device
+        # file, or "2026-10" and "2026-10.if" would both appear as periods.
+        case "$f" in *.if.tsv) continue ;; esac
         p=$(basename "$f" .tsv)
         [ "$n" -gt 0 ] && printf ','
         printf '{"period":"%s","devices":%s,"bytes":%s}' \
@@ -633,13 +867,20 @@ hist_prune() {
     # The current period is never a retention candidate — it is still being
     # written to, and "keep 1" must not mean "delete the data you are
     # collecting right now".
+    # A PERIOD is the unit of retention, and a period is now two files: the
+    # device totals and the interface totals (#102). Listing *.tsv and
+    # stripping .tsv would turn "2026-10.if.tsv" into a period called
+    # "2026-10.if" — never equal to the current period id, so it would be
+    # pruned as if it were ancient history while its device file survived.
+    # Enumerate periods from the device files only, then drop both.
     # shellcheck disable=SC2046 # deliberate splitting: one word per period id
     set -- $(find "$dir" -name '*.tsv' -type f 2>/dev/null \
-        | sed 's|.*/||; s|\.tsv$||' | grep -vxF "$pid" | sort)
+        | sed 's|.*/||' | grep -v '\.if\.tsv$' | sed 's|\.tsv$||' \
+        | grep -vxF "$pid" | sort)
     total=$#
     while [ "$total" -gt "$keep" ] && [ "$#" -gt 0 ]; do
-        f="$dir/$1.tsv"
-        rm -f "$f" 2>/dev/null && dropped=$((dropped + 1))
+        rm -f "$dir/$1.tsv" 2>/dev/null && dropped=$((dropped + 1))
+        rm -f "$dir/$1.if.tsv" 2>/dev/null
         total=$((total - 1))
         shift
     done
@@ -686,10 +927,11 @@ hist_status() {
     fi
     w=false
     [ -d "$dir" ] && [ -w "$dir" ] && w=true
-    printf '{"enabled":%s,"dir":"%s","writable":%s,"period":"%s","period_kind":"%s","interval":%s,"sample_interval":%s,"keep":%s,"format":%s,"last_flush":%s,"accuracy":"%s","offload":"%s","error":"%s","error_at":%s}\n' \
+    printf '{"enabled":%s,"dir":"%s","writable":%s,"period":"%s","period_kind":"%s","interval":%s,"sample_interval":%s,"keep":%s,"format":%s,"last_flush":%s,"accuracy":"%s","offload":"%s","interfaces":%s,"iface_accuracy":"%s","error":"%s","error_at":%s}\n' \
         "$en" "$dir" "$w" "$pid" "$(hist_period_kind)" \
         "$(hist_interval)" "$(hist_sample_interval)" "$(hist_keep)" "$FORMAT" "$last" \
         "$(hist_accuracy)" "$(tctl_get_offload_mode 2>/dev/null)" \
+        "$(hist_ifaces_enabled && echo true || echo false)" "$(hist_if_accuracy)" \
         "$(printf '%s' "$err" | tr -d '\042\134')" "$errat"
 }
 
@@ -743,11 +985,12 @@ case "$1" in
     # than a second copy of the rule that can drift away from it.
     validate-dir) hist_validate_dir "${2%/}" ;;
     read)    hist_read "$2" "$3" ;;
+    read-ifaces) hist_if_read "$2" "$3" ;;
     periods) hist_periods ;;
     prune)   hist_prune ;;
     status)  hist_status ;;
     *)
-        printf 'Usage: %s {sample|flush|keeper|validate-dir <path>|read [period [to]]|periods|prune|status}\n' "$0" >&2
+        printf 'Usage: %s {sample|flush|keeper|validate-dir <path>|read [period [to]]|read-ifaces [period [to]]|periods|prune|status}\n' "$0" >&2
         exit 1
         ;;
 esac

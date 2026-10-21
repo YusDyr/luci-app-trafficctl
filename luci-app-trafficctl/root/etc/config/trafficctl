@@ -96,6 +96,15 @@ config history 'history'
 	# How many FINISHED periods to retain. The current one is never a
 	# retention candidate.
 	option keep '12'
+	# Also accumulate per-INTERFACE totals (#102), in their own file per
+	# period. A second series rather than a breakdown of the device one: these
+	# are the kernel's interface counters, so they include the router's own
+	# traffic and broadcast, they legitimately disagree with the sum over
+	# devices, and under flow offloading they are the MORE accurate of the two
+	# because they come from the driver rather than from conntrack. They also
+	# answer what the device series cannot: how much went out of wan1 versus
+	# wan2. Off is reasonable on a single-WAN router.
+	option interfaces '1'
 
 config logging 'logging'
 	option enabled '1'

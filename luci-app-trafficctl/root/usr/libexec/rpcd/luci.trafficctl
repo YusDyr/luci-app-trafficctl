@@ -73,9 +73,10 @@ list)
 	printf '"activity_log":{"lines":"int"},'
 	printf '"history_status":{},'
 	printf '"history_read":{"period":"str","to":"str"},'
+	printf '"history_read_ifaces":{"period":"str","to":"str"},'
 	printf '"history_periods":{},'
 	printf '"history_config_get":{},'
-	printf '"history_config_set":{"enabled":"bool","dir":"str","period":"str","interval":"int","sample_interval":"int","keep":"int"},'
+	printf '"history_config_set":{"enabled":"bool","dir":"str","period":"str","interval":"int","sample_interval":"int","keep":"int","interfaces":"bool"},'
 	printf '"history_flush":{},'
 	printf '"version":{}'
 	printf '}'
@@ -633,6 +634,26 @@ call)
 		$SCRIPTS/trafficctl-history.sh read "$hp" "$ht"
 		printf '}'
 		;;
+	history_read_ifaces)
+		read -r input
+		# Same shape check as history_read: these ids never reach a path, but
+		# they come from the network, so a malformed one is rejected rather
+		# than passed through to match nothing.
+		hp=$(echo "$input" | jsonfilter -e '@.period' 2>/dev/null)
+		ht=$(echo "$input" | jsonfilter -e '@.to' 2>/dev/null)
+		for v in "$hp" "$ht"; do
+			[ -z "$v" ] && continue
+			case "$v" in
+				[0-9][0-9][0-9][0-9]-[0-9][0-9]) ;;
+				[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
+				[0-9][0-9][0-9][0-9]-W[0-9][0-9]) ;;
+				*) echo '{"result":[]}'; exit 0 ;;
+			esac
+		done
+		printf '{"result":'
+		$SCRIPTS/trafficctl-history.sh read-ifaces "$hp" "$ht"
+		printf '}'
+		;;
 	history_config_get)
 		printf '{"result":'
 		$SCRIPTS/trafficctl-history.sh status
@@ -672,6 +693,10 @@ call)
 		val=$(echo "$input" | jsonfilter -e '@.enabled' 2>/dev/null)
 		if [ -n "$val" ]; then
 			uci set "trafficctl.history.enabled=$([ "$val" = "true" ] && echo 1 || echo 0)"
+		fi
+		val=$(echo "$input" | jsonfilter -e '@.interfaces' 2>/dev/null)
+		if [ -n "$val" ]; then
+			uci set "trafficctl.history.interfaces=$([ "$val" = "true" ] && echo 1 || echo 0)"
 		fi
 		tctl_commit
 		# The keeper re-reads the intervals and the directory on every tick,

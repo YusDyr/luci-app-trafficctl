@@ -11,7 +11,7 @@
 					"shape_status",
 					"config_get", "telegram_config_get",
 					"logging_config_get", "newdevice_config_get",
-					"history_status", "history_read", "history_periods",
+					"history_status", "history_read", "history_read_ifaces", "history_periods",
 					"history_config_get"
 				],
 				"file": [ "read" ]
