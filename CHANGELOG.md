@@ -4,6 +4,19 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.24.0] - 2026-10-21
+
+### Features
+- move settings to their own tab ([#103](https://github.com/YusDyr/luci-app-trafficctl/issues/103)) ([80435a8](https://github.com/YusDyr/luci-app-trafficctl/commit/80435a8b1a3f1b3cacf769afa85731e4ee75aa4a))
+  Safety net for #90, committed before the move it protects. The failure it
+  guards against is losing a section in the shuffle, which nothing else would
+  catch: the page still renders, the suite still passes, and the only symptom
+  is that one group of settings is no longer reachable from anywhere.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.23.1...v1.24.0
+
+---
+
 ## [1.23.1] - 2026-10-20
 
 ### Bug Fixes
