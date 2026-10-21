@@ -18,6 +18,11 @@ FAIL=0
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 JS="$REPO_ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js"
+# The Flow Offload PANEL (and with it the mode badge) moved to the Settings
+# view in #90; the BANNER stayed on Devices. Both are asserted, from their
+# own files, so a future move has to update this rather than quietly
+# skipping half the checks.
+SETTINGS_JS="$REPO_ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/settings.js"
 FW="$REPO_ROOT/luci-app-trafficctl/root/usr/local/bin/trafficctl-fw.sh"
 
 TMP=$(mktemp -d)
@@ -45,7 +50,7 @@ awk '/^tctl_get_offload_mode\(\)/ { inf = 1 }
 
 awk '/var modeLabels = \{/ { inl = 1; next }
      inl && /^[[:space:]]*\};/ { exit }
-     inl' "$JS" \
+     inl' "$SETTINGS_JS" \
     | grep -oE "^[[:space:]]*'[a-z-]+'" | sed "s/^[[:space:]]*'//; s/'\$//" | sort -u > "$TMP/labels"
 
 assert_eq "backend emits at least the five known offload modes" \
@@ -136,14 +141,14 @@ assert_eq "every offload mode has a badge label in status.js" "" "$missing"
 # RATE_PRESETS is sliced out whole; the expression under test is the one the
 # preview builds its limit buttons from.
 
-sed -n '/^var RATE_PRESETS = \[/,/^\];/p' "$JS" > "$TMP/presets.js"
+sed -n '/^var RATE_PRESETS = \[/,/^\];/p' "$SETTINGS_JS" > "$TMP/presets.js"
 [ -s "$TMP/presets.js" ] || { echo "FAIL: could not slice RATE_PRESETS out of status.js"; exit 1; }
 
 cat > "$TMP/run.js" <<'NODE'
 function _(s) { return s; }
 NODE
 cat "$TMP/presets.js" >> "$TMP/run.js"
-grep -n "limitBtns.push" "$JS" | head -1 | sed 's/^[0-9]*://' \
+grep -n "limitBtns.push" "$SETTINGS_JS" | head -1 | sed 's/^[0-9]*://' \
     | sed "s/.*E('span', {'class':'tg-kbd-btn'},//; s/));[[:space:]]*$//" > "$TMP/expr.txt"
 {
     printf 'var out = RATE_PRESETS.filter(function (p) {\n'
@@ -159,7 +164,7 @@ assert_eq "limit preset buttons render their rate, not NaN" \
     "1M,2M,5M,10M,25M,50M,100M" "$labels"
 
 # The shaper row builds its labels the same way, from the same presets.
-shape=$(grep -c "shapeBtns.push(E('span', {'class':'tg-kbd-btn'}, '🔧 ' + p.l" "$JS")
+shape=$(grep -c "shapeBtns.push(E('span', {'class':'tg-kbd-btn'}, '🔧 ' + p.l" "$SETTINGS_JS")
 assert_eq "shaper preset buttons concatenate rather than coerce" "1" "$shape"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"

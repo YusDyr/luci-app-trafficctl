@@ -174,7 +174,9 @@ done
 # The apply result already says it on every attempt, but the Flow Offload
 # panel is where somebody asking "why is my limit doing nothing" goes, and NSS
 # is NOT one of the flow-offload modes that panel's toggles control.
-SJS="$REPO_ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js"
+# The Flow Offload panel — and the NSS warning inside it — moved to the
+# Settings view in #90.
+SJS="$REPO_ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/settings.js"
 assert_contains "the dashboard reacts to an active NSS state" \
     "cfg.nss === 'active'" "$(cat "$SJS")"
 assert_contains "and says the toggles beside it do not control NSS" \

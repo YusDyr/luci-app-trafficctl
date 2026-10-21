@@ -703,6 +703,9 @@ msgstr ""
 msgid "Overview"
 msgstr ""
 
+msgid "Package-wide settings. Controls that only affect what the Devices page shows — visible columns, poll interval, averaging window — stay on that page."
+msgstr ""
+
 msgid "Packets dropped"
 msgstr ""
 
@@ -991,6 +994,9 @@ msgstr ""
 msgid "Telegram Bot"
 msgstr ""
 
+msgid "Telegram, logging, new-device defaults and flow offload moved to the Settings tab."
+msgstr ""
+
 msgid "Test"
 msgstr ""
 
@@ -1064,6 +1070,9 @@ msgid "Total since boot (RX / TX)"
 msgstr ""
 
 msgid "Traffic Control"
+msgstr ""
+
+msgid "Traffic Control Settings"
 msgstr ""
 
 msgid "Traffic History"

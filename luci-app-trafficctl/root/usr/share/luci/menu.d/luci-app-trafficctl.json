@@ -45,5 +45,16 @@
 		"depends": {
 			"acl": [ "luci-app-trafficctl" ]
 		}
+	},
+	"admin/status/trafficctl/settings": {
+		"title": "Settings",
+		"order": 4,
+		"action": {
+			"type": "view",
+			"path": "trafficctl/settings"
+		},
+		"depends": {
+			"acl": [ "luci-app-trafficctl" ]
+		}
 	}
 }
