@@ -4,6 +4,16 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.25.0] - 2026-10-23
+
+### Features
+- per-interface totals per period (backend) ([#104](https://github.com/YusDyr/luci-app-trafficctl/issues/104)) ([5f73c9b](https://github.com/YusDyr/luci-app-trafficctl/commit/5f73c9b40e5944802397132c23ff61af80af69c3))
+  Refs #102, asked for by @the-e3n in #90 for multi-WAN setups.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.24.0...v1.25.0
+
+---
+
 ## [1.24.0] - 2026-10-21
 
 ### Features
