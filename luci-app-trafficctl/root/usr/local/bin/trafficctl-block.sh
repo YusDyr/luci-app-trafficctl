@@ -61,12 +61,13 @@ if tctl_block_add "$IP" "$COMMENT"; then
     else
         NOTE=" — IPv4 only: no MAC known for $IP (no DHCP lease, no neighbour entry), so IPv6 is not covered"
     fi
-    NOTE="$NOTE$(tctl_nss_note)"
+    NOTE="$NOTE$(tctl_nss_note)$(tctl_persist_note)"
     NSS="$(tctl_nss_status)"
+    PERSIST=$(tctl_persist_enabled && echo true || echo false)
     if [ "$SELF_BLOCK" = "true" ]; then
-        echo "{\"ok\":true,\"ipv6\":$([ "$TCTL_BLOCK_IPV6" = "1" ] && echo true || echo false),\"nss\":\"$NSS\",\"msg\":\"internet blocked for $IP (your device — LuCI access preserved)$NOTE\"}"
+        echo "{\"ok\":true,\"ipv6\":$([ "$TCTL_BLOCK_IPV6" = "1" ] && echo true || echo false),\"nss\":\"$NSS\",\"persist\":$PERSIST,\"msg\":\"internet blocked for $IP (your device — LuCI access preserved)$NOTE\"}"
     else
-        echo "{\"ok\":true,\"ipv6\":$([ "$TCTL_BLOCK_IPV6" = "1" ] && echo true || echo false),\"nss\":\"$NSS\",\"msg\":\"internet blocked for $IP$NOTE\"}"
+        echo "{\"ok\":true,\"ipv6\":$([ "$TCTL_BLOCK_IPV6" = "1" ] && echo true || echo false),\"nss\":\"$NSS\",\"persist\":$PERSIST,\"msg\":\"internet blocked for $IP$NOTE\"}"
     fi
 else
     echo "{\"ok\":false,\"msg\":\"failed to block $IP\"}"

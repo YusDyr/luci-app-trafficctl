@@ -104,13 +104,14 @@ else
     # packets never reach the Linux stack. Reporting an unqualified success
     # there is the defect in #81, so every message below carries the verdict
     # and the result carries the status as a field.
-    NSSNOTE="$(tctl_nss_note)"
+    NSSNOTE="$(tctl_nss_note)$(tctl_persist_note)"
     NSS="$(tctl_nss_status)"
+    PERSIST=$(tctl_persist_enabled && echo true || echo false)
     if [ "$TCTL_RL_DOWNLOAD_FAILED" = "1" ]; then
-        echo "{\"ok\":true,\"ipv6_upload\":$([ "$TCTL_RL_UPLOAD6_OK" = "1" ] && echo true || echo false),\"nss\":\"$NSS\",\"msg\":\"rate limit ${RATE_UP} kbit/s applied to $IP UPLOAD ONLY — WAN device not resolvable$V6NOTE$NSSNOTE\"}"
+        echo "{\"ok\":true,\"ipv6_upload\":$([ "$TCTL_RL_UPLOAD6_OK" = "1" ] && echo true || echo false),\"nss\":\"$NSS\",\"persist\":$PERSIST,\"msg\":\"rate limit ${RATE_UP} kbit/s applied to $IP UPLOAD ONLY — WAN device not resolvable$V6NOTE$NSSNOTE\"}"
     elif [ "$TCTL_RL_UPLOAD_FAILED" = "1" ]; then
-        echo "{\"ok\":true,\"ipv6_upload\":false,\"nss\":\"$NSS\",\"msg\":\"rate limit ${RATE} kbit/s applied to $IP DOWNLOAD ONLY — no LAN ingress device [IPv4 only]$NSSNOTE\"}"
+        echo "{\"ok\":true,\"ipv6_upload\":false,\"nss\":\"$NSS\",\"persist\":$PERSIST,\"msg\":\"rate limit ${RATE} kbit/s applied to $IP DOWNLOAD ONLY — no LAN ingress device [IPv4 only]$NSSNOTE\"}"
     else
-        echo "{\"ok\":true,\"ipv6_upload\":$([ "$TCTL_RL_UPLOAD6_OK" = "1" ] && echo true || echo false),\"nss\":\"$NSS\",\"msg\":\"rate limit $(rate_text) for $IP (both directions, $MODE)$V6NOTE$NSSNOTE\"}"
+        echo "{\"ok\":true,\"ipv6_upload\":$([ "$TCTL_RL_UPLOAD6_OK" = "1" ] && echo true || echo false),\"nss\":\"$NSS\",\"persist\":$PERSIST,\"msg\":\"rate limit $(rate_text) for $IP (both directions, $MODE)$V6NOTE$NSSNOTE\"}"
     fi
 fi
