@@ -82,6 +82,8 @@ sed -e "s|TCTL_LEASES_FILE=\"/tmp/dhcp.leases\"|TCTL_LEASES_FILE=\"$LEASES\"|" \
 
 sed -e "s|/usr/local/bin/trafficctl-fw.sh|$TMPDIR/fw.sh|g" \
     -e "s|/usr/local/bin/trafficctl-totals.sh|$MOCKBIN/totals|g" \
+    -e "s|/usr/local/bin/trafficctl-ifaces.sh|$MOCKBIN/ifaces|g" \
+    -e "s|IFCURSOR=\"/tmp/trafficctl_history.ifcursor\"|IFCURSOR=\"$TMPDIR/history.ifcursor\"|" \
     -e "s|CURSOR=\"/tmp/trafficctl_history.cursor\"|CURSOR=\"$CURSOR\"|" \
     -e "s|ERRFILE=\"/tmp/trafficctl_history.err\"|ERRFILE=\"$TMPDIR/history.err\"|" \
     -e "s|STAMP=\"/tmp/trafficctl_history.stamp\"|STAMP=\"$TMPDIR/history.stamp\"|" \
@@ -93,7 +95,8 @@ chmod +x "$TMPDIR/history.sh"
 # sed exits 0 when nothing matched, so a renamed variable would leave the
 # script pointing at the real /tmp state — and the suite would pass while
 # reading and WRITING files this test does not own.
-for must in "$TMPDIR/fw.sh" "$MOCKBIN/totals" "$CURSOR" "$TMPDIR/history.err" \
+for must in "$TMPDIR/fw.sh" "$MOCKBIN/totals" "$MOCKBIN/ifaces" "$CURSOR" \
+            "$TMPDIR/history.err" "$TMPDIR/history.ifcursor" \
             "$TMPDIR/history.stamp" "$TMPDIR/history.lock.d" "$TMPDIR/totals.state"; do
     assert_contains "redirected into the script under test: $must" \
         "$must" "$(cat "$TMPDIR/history.sh")"
@@ -110,6 +113,13 @@ assert_eq "no production path survives the rewrite" "" \
 cat > "$MOCKBIN/totals" <<MOCK
 #!/bin/sh
 cat "$SAMPLE"
+MOCK
+
+IFSAMPLE="$TMPDIR/ifsample.json"
+: > "$IFSAMPLE"
+cat > "$MOCKBIN/ifaces" <<MOCK
+#!/bin/sh
+cat "$IFSAMPLE"
 MOCK
 
 # A one-line-per-key store so a test can set a value and the script reads it
@@ -389,6 +399,107 @@ uciset trafficctl.history.enabled 0
 assert_contains "sample is a no-op while history is disabled" \
     '"reason":"disabled"' "$(run sample)"
 uciset trafficctl.history.enabled 1
+
+# ══════════════════════════════════════════════════════════════════════════
+# Interface totals (#102) — a SECOND series, not a breakdown of the first.
+#
+# The bytes are the kernel's own interface counters, so they include the
+# router's own traffic and broadcast and legitimately disagree with the sum
+# over devices. The reason they exist is the question the device series cannot
+# answer: how much left via wan1 versus wan2.
+# ══════════════════════════════════════════════════════════════════════════
+IFFILE="$STORE/$PERIOD.if.tsv"
+ifrow() { grep "^$1" "$IFFILE" 2>/dev/null; }
+iffield() { ifrow "$1" | cut -f"$2"; }
+
+ifdev() {
+    printf '{"dev":"%s","label":"%s","role":"%s","tunnel":false,"primary":true,"defroute":true,"enslaved":%s,"up":true,"rx_bytes":%s,"tx_bytes":%s}' \
+        "$1" "$2" "$3" "${6:-false}" "$4" "$5"
+}
+ifsample() { printf '[%s]\n' "$(printf '%s' "$*")" > "$IFSAMPLE"; }
+
+: > "$CURSOR"; : > "$TMPDIR/history.ifcursor"; rm -f "$STORE"/*.tsv
+sample "$(dev 192.168.0.50 100 10 0)"
+ifsample "$(ifdev eth1 wan wan 5000 500),$(ifdev br-lan lan lan 700 7000)"
+run flush >/dev/null
+
+assert_eq "the interface series lands in its own file" "1" \
+    "$(test -f "$IFFILE" && echo 1 || echo 0)"
+assert_eq "the WAN interface is recorded with its role" "wan" "$(iffield eth1 2)"
+assert_eq "its download is the interface rx counter" "5000" "$(iffield eth1 4)"
+assert_eq "its upload is the interface tx counter" "500" "$(iffield eth1 5)"
+assert_eq "the LAN bridge is recorded too" "lan" "$(iffield br-lan 2)"
+
+# The device file must not have learned about interfaces, and the device
+# reader must not report them: that conflation is why this is a separate file.
+assert_not_contains "no interface leaks into the device file" "eth1" "$(cat "$FILE")"
+assert_not_contains "and the device reader does not report interfaces" \
+    '"ip":"eth1"' "$(run read)"
+assert_contains "the interface reader does report them" '"dev":"eth1"' "$(run read-ifaces)"
+
+# Growth is a delta here too.
+ifsample "$(ifdev eth1 wan wan 6500 800),$(ifdev br-lan lan lan 700 7000)"
+run flush >/dev/null
+assert_eq "interface growth is added as a delta" "6500" "$(iffield eth1 4)"
+assert_eq "an idle interface gains nothing" "700" "$(iffield br-lan 4)"
+
+# A link that flaps resets its counters. On the multi-WAN box this feature is
+# for that is routine, not an edge case, so it must rebaseline rather than
+# subtract — and the NEXT growth must be measured from the restarted value.
+ifsample "$(ifdev eth1 wan wan 120 12),$(ifdev br-lan lan lan 700 7000)"
+run flush >/dev/null
+assert_eq "a restarted interface counter does not reduce the stored total" \
+    "6500" "$(iffield eth1 4)"
+ifsample "$(ifdev eth1 wan wan 320 30),$(ifdev br-lan lan lan 700 7000)"
+run flush >/dev/null
+assert_eq "and growth after the flap is measured from the new baseline" \
+    "6700" "$(iffield eth1 4)"
+
+# Interfaces whose bytes are already counted elsewhere must not be recorded,
+# or the month is double-counted.
+uciset trafficctl.main.shape_ifb tctl-ifb0
+ifsample "$(ifdev eth1 wan wan 320 30),$(ifdev eth0.1 lan lan 999 999 true),$(ifdev lo lo lo 42 42),$(ifdev tctl-ifb0 ifb lan 888 888)"
+run flush >/dev/null
+assert_eq "a bridge PORT is skipped — the bridge already counts its bytes" "" "$(iffield eth0.1 1)"
+assert_eq "loopback is skipped" "" "$(iffield lo 1)"
+assert_eq "the shaper's IFB mirror is skipped" "" "$(iffield tctl-ifb0 1)"
+
+# Accuracy is NOT inherited from the device verdict: an interface counter
+# comes from the driver, so uncountered offload does not touch it. Saying
+# "degraded" here would be its own kind of wrong.
+uciset firewall.@defaults[0].flow_offloading 1
+st=$(run status)
+assert_contains "offload degrades the DEVICE verdict" '"accuracy":"degraded"' "$st"
+assert_contains "but not the interface verdict" '"iface_accuracy":"exact"' "$st"
+uciset firewall.@defaults[0].flow_offloading 0
+
+# Retention treats a period as ONE unit of two files. Enumerating *.tsv and
+# stripping .tsv would turn "2026-10.if.tsv" into a period named "2026-10.if",
+# never equal to the current id, so it would be pruned while its device file
+# survived.
+assert_contains "periods lists a period once, not twice" "1" \
+    "$(run periods | grep -o "\"period\":\"$PERIOD\"" | wc -l | tr -d ' ')"
+for p in 2025-01 2025-02 2025-03 2025-04; do
+    printf '# trafficctl-history 1\n' > "$STORE/$p.tsv"
+    printf '# trafficctl-history-if 1\n' > "$STORE/$p.if.tsv"
+done
+uciset trafficctl.history.keep 2
+run prune >/dev/null
+assert_eq "pruning a period drops BOTH its files" "0" \
+    "$(find "$STORE" -name '2025-01*' | wc -l | tr -d ' ')"
+assert_eq "and the current period keeps both of its own" "2" \
+    "$(find "$STORE" -name "$PERIOD*" | wc -l | tr -d ' ')"
+uciset trafficctl.history.keep 3
+
+# Switchable on its own: a single-WAN router has no use for it.
+uciset trafficctl.history.interfaces 0
+rm -f "$IFFILE"
+ifsample "$(ifdev eth1 wan wan 9999 9999)"
+run flush >/dev/null
+assert_eq "with interfaces off, no interface file is written" "0" \
+    "$(test -f "$IFFILE" && echo 1 || echo 0)"
+assert_contains "and status says so" '"interfaces":false' "$(run status)"
+uciset trafficctl.history.interfaces 1
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
