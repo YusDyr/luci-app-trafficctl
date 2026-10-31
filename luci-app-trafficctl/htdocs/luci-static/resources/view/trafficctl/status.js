@@ -1397,6 +1397,14 @@ function setStatus(el, type, msg) {
 	el.innerHTML = type === 'loading' ? '<span class="tc-spinner"></span>'+escHtml(msg) : escHtml(msg);
 }
 
+// setStatus rewrites className wholesale, which drops the tc-hidden the status
+// element starts with — so putting it back has to be explicit.
+function clearStatus(el) {
+	el.className = 'tc-hidden';
+	el.innerHTML = '';
+	el._fromRefresh = false;
+}
+
 function updateUrlParams(opts) {
 	var params = new URLSearchParams();
 	if (opts.lastIp && opts.lastIp !== '__all__') params.set('ip', opts.lastIp);
@@ -2091,6 +2099,31 @@ return view.extend({
 		});
 
 		var statusDiv = E('div', { 'class': 'tc-hidden' });
+
+		// #106: a refresh that runs on a timer must not announce itself with a
+		// banner. What it gets instead is a spinner that cannot disturb the
+		// page: a fixed-size slot that is always in the layout and is only
+		// faded in, never displayed or hidden (tc-hidden is display:none, which
+		// is exactly the reflow being fixed). It also waits before showing, so
+		// on a router that answers quickly it never appears at all — a spinner
+		// that blinks for 80ms every two seconds is still a flash.
+		var pollSpinner = E('span', { 'class': 'tc-poll-spinner' });
+		var _pollBusy = 0, _pollShowTimer = null;
+		function pollStart() {
+			_pollBusy++;
+			if (_pollShowTimer === null) {
+				_pollShowTimer = setTimeout(function() {
+					_pollShowTimer = null;
+					if (_pollBusy > 0) pollSpinner.classList.add('is-busy');
+				}, 250);
+			}
+		}
+		function pollEnd() {
+			if (_pollBusy > 0) _pollBusy--;
+			if (_pollBusy > 0) return;
+			if (_pollShowTimer !== null) { clearTimeout(_pollShowTimer); _pollShowTimer = null; }
+			pollSpinner.classList.remove('is-busy');
+		}
 		var statsDiv  = E('div', { 'style': 'margin:8px 0', 'class': opts.showStats === false ? 'tc-hidden' : '' });
 		var connsDiv  = E('div', { 'class': opts.showConns === false ? 'tc-hidden' : '' });
 
@@ -3043,11 +3076,12 @@ return view.extend({
 			self._queryGen++;
 			var gen = self._queryGen;
 
-			setStatus(statusDiv, 'loading', _('Running…'));
+			pollStart();
 
 			callDevice(ip, proto).then(function(data) {
 				if (!data || data.error) {
 					setStatus(statusDiv, 'error', (data && data.error) || _('Unknown error'));
+					statusDiv._fromRefresh = true;
 					return;
 				}
 
@@ -3188,9 +3222,18 @@ return view.extend({
 						}
 					}
 				}
-				setStatus(statusDiv, 'ok', '✓ ' + _('Done'));
+				// Only a message this refresh put there may be taken away. An
+				// action's result stays: every action handler calls runQuery()
+				// right after setStatus, so clearing unconditionally here is
+				// what used to destroy the not-persistent, NSS and "IPv4 only"
+				// qualifiers one round-trip after they appeared.
+				if (statusDiv._fromRefresh) clearStatus(statusDiv);
 			})
-			.catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); });
+			.catch(function(e) {
+				setStatus(statusDiv, 'error', '✗ '+e.message);
+				statusDiv._fromRefresh = true;
+			})
+			.then(pollEnd, pollEnd);
 		}
 
 		self._tableFilter = null;
@@ -3368,7 +3411,7 @@ return view.extend({
 		}
 
 		function runAll() {
-			setStatus(statusDiv, 'loading', _('Scanning all devices…'));
+			pollStart();
 
 			callTrafficctl().then(function(rows) {
 				if (!Array.isArray(rows)) rows = [];
@@ -3385,10 +3428,14 @@ return view.extend({
 						netifyMap = m;
 					}).catch(function() {});
 				}
-				setStatus(statusDiv, 'ok', '✓ ' + _('Done'));
+				if (statusDiv._fromRefresh) clearStatus(statusDiv);
 				self._startBytesPoll();
 			})
-			.catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); });
+			.catch(function(e) {
+				setStatus(statusDiv, 'error', '✗ '+e.message);
+				statusDiv._fromRefresh = true;
+			})
+			.then(pollEnd, pollEnd);
 		}
 
 		function updateExtendedStats() {
@@ -3405,6 +3452,11 @@ return view.extend({
 
 		function runQuery() {
 			var ip = searchSelect.getValue();
+			// The poll used to wipe the status line on every tick, which also
+			// disposed of a result belonging to the device just left. Now that
+			// it does not, switching devices has to do it — otherwise
+			// "Limiting 192.168.0.50…" lingers over another device's page.
+			if (self._statusIp !== ip) { clearStatus(statusDiv); self._statusIp = ip; }
 			var o = loadOpts(); o.lastIp = ip; saveOpts(o);
 			updateUrlParams(o);
 			updateModeUI();
@@ -4113,7 +4165,7 @@ return view.extend({
 				offloadBanner,
 				cutPanel,
 				E('div', {'style':'margin-bottom:10px'}, [
-						E('div', {'style':'display:flex;align-items:center;gap:10px;flex-wrap:wrap'}, [searchSelect.el, actionRow]),
+						E('div', {'style':'display:flex;align-items:center;gap:10px;flex-wrap:wrap'}, [searchSelect.el, actionRow, pollSpinner]),
 						quickBar
 					]),
 				statusDiv,
