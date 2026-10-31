@@ -751,6 +751,13 @@
     opacity: 0; transition: opacity .25s ease;
 }
 .tc-poll-spinner.is-busy { opacity: 1; }
+/* A refresh that failed is the one thing the poll has to say. Same slot, so
+   saying it still cannot move anything; the message is in the title. */
+.tc-poll-spinner.is-error {
+    opacity: 1; animation: none;
+    border-color: var(--tc-err); background: var(--tc-err);
+    cursor: help;
+}
 
 /* ── Link style ──────────────────────────────────────────────────── */
 .tc-link { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--tc-faint); }

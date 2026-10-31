@@ -1393,12 +1393,6 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 
 function setStatus(el, type, msg) {
 	var cls = {loading: '', ok: 'success', error: 'error', action: 'warning'};
-	// A claim belongs to a message, not to the element. Without this reset a
-	// refresh that failed earlier leaves _fromRefresh set, and the next
-	// successful refresh then clears whatever an ACTION has written in the
-	// meantime — the qualifiers disappear again, with no code claiming them.
-	// The refresh paths set the flag immediately after calling this.
-	el._fromRefresh = false;
 	el.className = 'alert-message ' + (cls[type] || '');
 	el.innerHTML = type === 'loading' ? '<span class="tc-spinner"></span>'+escHtml(msg) : escHtml(msg);
 }
@@ -1408,7 +1402,6 @@ function setStatus(el, type, msg) {
 function clearStatus(el) {
 	el.className = 'tc-hidden';
 	el.innerHTML = '';
-	el._fromRefresh = false;
 }
 
 function updateUrlParams(opts) {
@@ -2106,13 +2099,18 @@ return view.extend({
 
 		var statusDiv = E('div', { 'class': 'tc-hidden' });
 
-		// #106: a refresh that runs on a timer must not announce itself with a
-		// banner. What it gets instead is a spinner that cannot disturb the
+		// #106: a refresh that runs on a timer must not announce itself on the
+		// status line. It gets its own indicator, which cannot disturb the
 		// page: a fixed-size slot that is always in the layout and is only
 		// faded in, never displayed or hidden (tc-hidden is display:none, which
-		// is exactly the reflow being fixed). It also waits before showing, so
-		// on a router that answers quickly it never appears at all — a spinner
-		// that blinks for 80ms every two seconds is still a flash.
+		// is exactly the reflow being fixed). It waits before showing, so on a
+		// router that answers quickly it never appears at all — a spinner that
+		// blinks for 80ms every two seconds is still a flash.
+		//
+		// A refresh reports its own health HERE and nowhere else. The status
+		// line belongs to what the operator did: every other poller in this
+		// view discards its errors outright, and these two were the only ones
+		// writing to a shared element, which is the whole of #106.
 		var pollSpinner = E('span', { 'class': 'tc-poll-spinner' });
 		var _pollBusy = 0, _pollShowTimer = null;
 		function pollStart() {
@@ -2124,11 +2122,14 @@ return view.extend({
 				}, 250);
 			}
 		}
-		function pollEnd() {
+		// err: the message when this refresh failed, nothing when it worked.
+		function pollEnd(err) {
 			if (_pollBusy > 0) _pollBusy--;
 			if (_pollBusy > 0) return;
 			if (_pollShowTimer !== null) { clearTimeout(_pollShowTimer); _pollShowTimer = null; }
 			pollSpinner.classList.remove('is-busy');
+			pollSpinner.classList.toggle('is-error', !!err);
+			pollSpinner.title = err || '';
 		}
 		var statsDiv  = E('div', { 'style': 'margin:8px 0', 'class': opts.showStats === false ? 'tc-hidden' : '' });
 		var connsDiv  = E('div', { 'class': opts.showConns === false ? 'tc-hidden' : '' });
@@ -3086,8 +3087,7 @@ return view.extend({
 
 			callDevice(ip, proto).then(function(data) {
 				if (!data || data.error) {
-					setStatus(statusDiv, 'error', (data && data.error) || _('Unknown error'));
-					statusDiv._fromRefresh = true;
+					pollEnd((data && data.error) || _('Unknown error'));
 					return;
 				}
 
@@ -3228,18 +3228,9 @@ return view.extend({
 						}
 					}
 				}
-				// Only a message this refresh put there may be taken away. An
-				// action's result stays: every action handler calls runQuery()
-				// right after setStatus, so clearing unconditionally here is
-				// what used to destroy the not-persistent, NSS and "IPv4 only"
-				// qualifiers one round-trip after they appeared.
-				if (statusDiv._fromRefresh) clearStatus(statusDiv);
+				pollEnd();
 			})
-			.catch(function(e) {
-				setStatus(statusDiv, 'error', '✗ '+e.message);
-				statusDiv._fromRefresh = true;
-			})
-			.then(pollEnd, pollEnd);
+			.catch(function(e) { pollEnd(e.message); });
 		}
 
 		self._tableFilter = null;
@@ -3434,14 +3425,10 @@ return view.extend({
 						netifyMap = m;
 					}).catch(function() {});
 				}
-				if (statusDiv._fromRefresh) clearStatus(statusDiv);
+				pollEnd();
 				self._startBytesPoll();
 			})
-			.catch(function(e) {
-				setStatus(statusDiv, 'error', '✗ '+e.message);
-				statusDiv._fromRefresh = true;
-			})
-			.then(pollEnd, pollEnd);
+			.catch(function(e) { pollEnd(e.message); });
 		}
 
 		function updateExtendedStats() {
@@ -3526,13 +3513,16 @@ return view.extend({
 				// Reporting it only when res.ipv6 === false discarded the rest
 				// of what the backend qualifies: "NOT PERSISTENT" (#105) and the
 				// NSS note (#81) are appended to msg on a SUCCESSFUL block, so
-				// the one path that mattered to the reporter of #105 — blocking
-				// a device — said nothing at all.
-				// IPv4-only is an error: it is a block that does not block over
-				// v6 (#67). A block that worked gets the attention colour rather
-				// than green, because the device is now cut off.
-				var state = (res && res.ipv6 === false) ? 'error'
-					: ((res && res.ok) ? (action === 'block' ? 'action' : 'ok') : 'error');
+				// blocking a device — the one path that mattered to the reporter
+				// of #105 — said nothing at all.
+				var state;
+				if (!res || !res.ok || res.ipv6 === false) {
+					// A failure, or a block that does not block over v6 (#67).
+					state = 'error';
+				} else {
+					// The device is now cut off, so not green.
+					state = (action === 'block') ? 'action' : 'ok';
+				}
 				setStatus(statusDiv, state, (res && res.msg) || '?');
 				runQuery();
 			}).catch(function(e) {
