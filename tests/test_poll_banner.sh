@@ -131,13 +131,23 @@ done
 # ── 2. a refresh must still report its OWN failure ────────────────────────
 # Otherwise this is "fixed" by making errors invisible, which is worse than
 # the flashing.
+# There are two ways a refresh fails and they are not interchangeable: the
+# backend answered with an error field, or the call never completed. A bare
+# "does it mention setStatus error anywhere" check is satisfied by the second
+# while the first has been deleted — which is how the first version of this
+# test let exactly that mutation through.
+assert_has "runSingle reports an error the backend returned" \
+    "setStatus(statusDiv, 'error', (data && data.error)" "$single"
 for pair in "runSingle:$single" "runAll:$all"; do
     name=${pair%%:*}
     body=${pair#*:}
-    assert_has "$name still shows an error when the refresh fails" \
-        "setStatus(statusDiv, 'error'" "$body"
-    assert_has "$name marks that error as its own, so it can be cleared later" \
-        "statusDiv._fromRefresh = true" "$body"
+    assert_has "$name reports a refresh that never completed" \
+        "setStatus(statusDiv, 'error', '✗ '+e.message)" "$body"
+    # Every failure it reports must be claimed, or the next successful refresh
+    # leaves a stale error on screen forever.
+    errs=$(printf '%s' "$body" | grep -c "setStatus(statusDiv, 'error'")
+    flags=$(printf '%s' "$body" | grep -c 'statusDiv._fromRefresh = true')
+    assert_eq "$name claims every error it reports" "$errs" "$flags"
 done
 
 # ── 3. a refresh may only clear a message it put there itself ─────────────
