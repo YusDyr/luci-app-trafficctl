@@ -1393,6 +1393,12 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 
 function setStatus(el, type, msg) {
 	var cls = {loading: '', ok: 'success', error: 'error', action: 'warning'};
+	// A claim belongs to a message, not to the element. Without this reset a
+	// refresh that failed earlier leaves _fromRefresh set, and the next
+	// successful refresh then clears whatever an ACTION has written in the
+	// meantime — the qualifiers disappear again, with no code claiming them.
+	// The refresh paths set the flag immediately after calling this.
+	el._fromRefresh = false;
 	el.className = 'alert-message ' + (cls[type] || '');
 	el.innerHTML = type === 'loading' ? '<span class="tc-spinner"></span>'+escHtml(msg) : escHtml(msg);
 }
@@ -3516,12 +3522,18 @@ return view.extend({
 			var action = inetBtn._action;
 			var fn = action === 'block' ? callBlock : callUnblock;
 			fn(ip, '').then(function(res) {
-				// A block without a known MAC covers IPv4 only, and the backend
-				// says so in msg. Swallowing it here would put the UI back to
-				// reporting a block that does not block (issue #67).
-				if (res && res.ipv6 === false) {
-					setStatus(statusDiv, 'error', (res && res.msg) || '?');
-				}
+				// The result is shown whatever it says, like every other action.
+				// Reporting it only when res.ipv6 === false discarded the rest
+				// of what the backend qualifies: "NOT PERSISTENT" (#105) and the
+				// NSS note (#81) are appended to msg on a SUCCESSFUL block, so
+				// the one path that mattered to the reporter of #105 — blocking
+				// a device — said nothing at all.
+				// IPv4-only is an error: it is a block that does not block over
+				// v6 (#67). A block that worked gets the attention colour rather
+				// than green, because the device is now cut off.
+				var state = (res && res.ipv6 === false) ? 'error'
+					: ((res && res.ok) ? (action === 'block' ? 'action' : 'ok') : 'error');
+				setStatus(statusDiv, state, (res && res.msg) || '?');
 				runQuery();
 			}).catch(function(e) {
 				setStatus(statusDiv, 'error', e.message);

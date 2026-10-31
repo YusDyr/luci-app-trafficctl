@@ -199,6 +199,43 @@ assert_has "clearStatus empties the message" "el.innerHTML = ''" "$clearfn"
 assert_has "clearStatus releases ownership of the cleared message" \
     "el._fromRefresh = false" "$clearfn"
 
+# ── 5b. writing a message releases the previous claim on the element ─────
+# The flag belongs to a message, not to the element. If setStatus did not
+# reset it, a refresh that failed at any earlier point would leave it set, and
+# the next successful refresh would clear whatever an ACTION had written since
+# — the qualifiers gone again, and no code visibly claiming them.
+setfn=$(python3 - "$JS" <<'PY2'
+import io, sys, re
+src = io.open(sys.argv[1], encoding='utf-8').read()
+m = re.search(r'function setStatus\(el, type, msg\) \{.*?\n\}', src, re.S)
+body = m.group(0) if m else ''
+sys.stdout.write(re.sub(r'//[^\n]*', '', body))
+PY2
+)
+assert_has "setStatus releases any earlier refresh claim on the element" \
+    "el._fromRefresh = false" "$setfn"
+
+# ── 5c. a block must show what the backend qualified ─────────────────────
+# This is the path the reporter of #105 actually uses. trafficctl-block.sh
+# appends the not-persistent note and the NSS note to msg on a SUCCESSFUL
+# block, and the handler used to report msg only when res.ipv6 === false — so
+# a working block said nothing, qualifiers included.
+inet=$(python3 - "$JS" <<'PY2'
+import io, sys, re
+src = io.open(sys.argv[1], encoding='utf-8').read()
+i = src.index("inetBtn.addEventListener('click'")
+j = src.index('});', src.index('runQuery();', i))
+sys.stdout.write(re.sub(r'//[^\n]*', '', src[i:j]))
+PY2
+)
+assert_has "a block reports its result unconditionally, qualifiers included" \
+    "setStatus(statusDiv, state, (res && res.msg)" "$inet"
+assert_lacks "the result is not reported only when IPv6 is uncovered" \
+    "if (res && res.ipv6 === false) {" "$inet"
+# IPv4-only is still an error — it is a block that does not block over v6.
+assert_has "an IPv4-only block still reads as an error" \
+    "res.ipv6 === false) ? 'error'" "$inet"
+
 # ── 6. the spinner must not be able to shift the layout ───────────────────
 # tc-hidden is display:none !important. Toggling the spinner with it would
 # reproduce the exact defect being fixed, one element to the left.
