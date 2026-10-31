@@ -4,6 +4,17 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.25.1] - 2026-10-31
+
+### Bug Fixes
+- make per-device blocks and limits persist by default ([#107](https://github.com/YusDyr/luci-app-trafficctl/issues/107)) ([ff34aa5](https://github.com/YusDyr/luci-app-trafficctl/commit/ff34aa5565aaacc4692bd325c328e2095552b86b))
+  Closes #105. @sjurgis blocks IoT devices with this app, rebooted the
+  router, and found every block gone.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.25.0...v1.25.1
+
+---
+
 ## [1.25.0] - 2026-10-23
 
 ### Features
