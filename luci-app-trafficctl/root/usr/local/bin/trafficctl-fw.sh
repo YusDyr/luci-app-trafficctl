@@ -1208,6 +1208,18 @@ tctl_nss_note() {
         "$TCTL_ECM_DEBUGFS"
 }
 
+# The suffix a caller appends when the rule it just installed will not be
+# written down, and so will not come back after a reboot (#105).
+#
+# Same principle as the IPv6 and NSS qualifiers: this package says what a
+# success does NOT cover rather than letting the operator discover it later.
+# Here "later" meant the next reboot, which is the worst possible moment to
+# find out that a device you blocked is online again.
+tctl_persist_note() {
+    tctl_persist_enabled && return 0
+    printf ' [NOT PERSISTENT: this will be lost on reboot — persistence is off. Enable it with `uci set trafficctl.main.persist_rules=1 && uci commit trafficctl`, or in Settings → Logging & Persistence, then re-apply]'
+}
+
 # Defunct the flows ECM has already accelerated.
 #
 # This is the NSS counterpart of the `conntrack -D` every rule change already

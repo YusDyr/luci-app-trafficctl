@@ -1,7 +1,26 @@
 config trafficctl 'main'
 	option enabled '1'
 	option default_mode 'limiter'
-	option persist_rules '0'
+	# Write per-device blocks and rate limits to /etc/trafficctl/rules.json so
+	# the ifup-lan hook can restore them after a reboot.
+	#
+	# On by default since #105. It used to ship off, which made the same
+	# intention behave two ways: a traffic SHAPE persists unconditionally (the
+	# shaper has to record which HTB class belongs to which device, so
+	# shapes.json is always written and always restored), while a block or a
+	# limit vanished on reboot — and the default mode is the limiter, so the
+	# out-of-the-box path was the one that forgot. That was an unexamined
+	# default sitting next to a deliberate one, not a design.
+	#
+	# The cost is one small write to /etc per rule CHANGE. Not periodic, so
+	# unlike the byte counters — which live in tmpfs precisely because they are
+	# rewritten every poll — this is not a flash-wear concern.
+	#
+	# NOT the same switch as the global cut's "keep after reboot": that one is
+	# its own opt-in because an all-devices cut can lock out whoever
+	# administers the router through a LAN host, so a reboot must be able to
+	# undo it. See the cut section below.
+	option persist_rules '1'
 	# Extra subnets to monitor (space-separated CIDRs), for downstream-router
 	# clients that have no kernel route on this router. Subnets with a
 	# "via" route over a LAN interface are picked up automatically.
