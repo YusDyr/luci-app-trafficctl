@@ -364,10 +364,12 @@ assert_terminated() {
 
 # "meter" is what makes a bucket per-device, so its presence is the mode.
 RESTORED=$(restore '[{"type":"ratelimit","ip":"192.168.20.0/24","param":"20000","mode":"each"}]')
+assert_terminated "restore: the loop ended on its own"
 assert_contains "restore: an each-mode subnet limit comes back per-device" \
     "meter tctl_d_192_168_20_0_24" "$RESTORED"
 
 RESTORED=$(restore '[{"type":"ratelimit","ip":"10.0.0.0/24","param":"20000","mode":"shared"}]')
+assert_terminated "restore: the loop ended on its own"
 assert_contains "restore: a shared cap comes back" \
     "ip daddr 10.0.0.0/24 limit rate over 2500 kbytes/second" "$RESTORED"
 assert_not_contains "restore: a shared cap does NOT come back per-device" \
@@ -377,10 +379,12 @@ assert_not_contains "restore: a shared cap does NOT come back per-device" \
 # CLI would have chosen, not on tctl_ratelimit_add's own "shared" fallback —
 # that turned "5 Mbit each" into "5 Mbit for the whole subnet" on reboot.
 RESTORED=$(restore '[{"type":"ratelimit","ip":"192.168.20.0/24","param":"20000"}]')
+assert_terminated "restore: the loop ended on its own"
 assert_contains "restore: a legacy subnet record defaults to per-device" \
     "meter tctl_d_192_168_20_0_24" "$RESTORED"
 
 RESTORED=$(restore '[{"type":"ratelimit","ip":"192.168.1.50","param":"5000"}]')
+assert_terminated "restore: the loop ended on its own"
 assert_contains "restore: a legacy host record still applies" \
     "ip daddr 192.168.1.50 limit rate over 625 kbytes/second" "$RESTORED"
 assert_not_contains "restore: a host needs no meter" "meter" "$RESTORED"
@@ -409,6 +413,7 @@ PY2
 # what they were guarding against (a cliff at some other constant) is pinned
 # structurally below, which is the stronger pin anyway.
 RESTORED=$(restore "$(many 101)")
+assert_terminated "restore: the loop ended on its own"
 assert_contains "restore: the hundred-and-first rule comes back" \
     "10.9.1.101" "$RESTORED"
 assert_terminated "restore: a hundred-and-one records end the loop on their own"
