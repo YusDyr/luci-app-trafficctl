@@ -316,19 +316,60 @@ sed -e "s|/usr/local/bin/trafficctl-fw.sh|$FW|" \
 assert_not_contains "harness: the hook's rules path was redirected" \
     "/etc/trafficctl/rules.json" "$(cat "$HOOK")"
 
+# What ends the restore loop is a sentinel, not a counted range (#108), so a
+# broken sentinel is an infinite loop and a skipped increment is an infinite
+# loop. Both have to fail here rather than hang the suite, and CI, for hours.
+#
+# Bounded by killing the hook, not by starving it of input: a shim that stops
+# answering jsonfilter cannot stop a loop whose exit condition has been
+# deleted — it just spins on empty answers. Only a deadline works for that.
+# The deadline is generous because it only ever fires on a broken loop: the
+# 101-record fixture below takes about ten seconds of mocked forks as it is.
+HOOK_DEADLINE=60
+
 restore() {
     printf '%s\n' "$1" > "$RULES"
     : > "$NFT_LOG"
-    PATH="$MOCKBIN:$PATH" ACTION=ifup INTERFACE=lan sh "$HOOK" >/dev/null 2>&1
+    PATH="$MOCKBIN:$PATH" ACTION=ifup INTERFACE=lan sh "$HOOK" >/dev/null 2>&1 &
+    _hpid=$!
+    # stdout must be redirected or command substitution around restore() waits
+    # for this subshell's inherited stdout to close, i.e. for the full sleep.
+    ( sleep "$HOOK_DEADLINE"; kill -9 "$_hpid" 2>/dev/null ) >/dev/null 2>&1 &
+    _wpid=$!
+    wait "$_hpid"
+    printf '%s' "$?" > "$TMP/hookrc"
+    kill "$_wpid" 2>/dev/null
     cat "$NFT_LOG"
+}
+
+# A killed hook exits non-zero, so this distinguishes "ended on its own" from
+# "was still going when the deadline hit" — otherwise a runaway reads as a
+# pass, because the nft log it leaves behind still contains earlier rules.
+assert_terminated() {
+    _rc=$(cat "$TMP/hookrc" 2>/dev/null)
+    if [ "$_rc" = "0" ]; then
+        PASS=$((PASS + 1))
+    else
+        FAIL=$((FAIL + 1))
+        printf "FAIL: %s — the hook did not end on its own (exit %s, deadline %ss)\n" \
+            "$1" "$_rc" "$HOOK_DEADLINE"
+        # Stop here. A restore loop that does not terminate makes every later
+        # restore in this file hit the deadline too, which turns one real
+        # failure into ten minutes of waiting, and there is nothing further to
+        # learn from a hook that never finishes.
+        printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
+        exit 1
+    fi
 }
 
 # "meter" is what makes a bucket per-device, so its presence is the mode.
 RESTORED=$(restore '[{"type":"ratelimit","ip":"192.168.20.0/24","param":"20000","mode":"each"}]')
+assert_terminated "restore: the loop ended on its own"
 assert_contains "restore: an each-mode subnet limit comes back per-device" \
     "meter tctl_d_192_168_20_0_24" "$RESTORED"
 
 RESTORED=$(restore '[{"type":"ratelimit","ip":"10.0.0.0/24","param":"20000","mode":"shared"}]')
+assert_terminated "restore: the loop ended on its own"
 assert_contains "restore: a shared cap comes back" \
     "ip daddr 10.0.0.0/24 limit rate over 2500 kbytes/second" "$RESTORED"
 assert_not_contains "restore: a shared cap does NOT come back per-device" \
@@ -338,13 +379,72 @@ assert_not_contains "restore: a shared cap does NOT come back per-device" \
 # CLI would have chosen, not on tctl_ratelimit_add's own "shared" fallback —
 # that turned "5 Mbit each" into "5 Mbit for the whole subnet" on reboot.
 RESTORED=$(restore '[{"type":"ratelimit","ip":"192.168.20.0/24","param":"20000"}]')
+assert_terminated "restore: the loop ended on its own"
 assert_contains "restore: a legacy subnet record defaults to per-device" \
     "meter tctl_d_192_168_20_0_24" "$RESTORED"
 
 RESTORED=$(restore '[{"type":"ratelimit","ip":"192.168.1.50","param":"5000"}]')
+assert_terminated "restore: the loop ended on its own"
 assert_contains "restore: a legacy host record still applies" \
     "ip daddr 192.168.1.50 limit rate over 625 kbytes/second" "$RESTORED"
 assert_not_contains "restore: a host needs no meter" "meter" "$RESTORED"
+
+# ── the restore loop's bounds (#108) ───────────────────────────────────────
+# The loop used to be `for idx in $(seq 0 99)`, so rule 101 onward was never
+# read: the records sat in rules.json, the UI showed them as persisted, and
+# they were simply absent from the kernel after a reboot. A silent, selective
+# failure — the first hundred come back and the rest do not — which is the
+# hardest kind to notice. Pinned at the boundary and well past it, because
+# raising 99 to a bigger number would satisfy a single-point check while
+# leaving the cliff in place.
+many() {
+    python3 - "$1" <<'PY2'
+import json, sys
+n = int(sys.argv[1])
+print(json.dumps([{"type": "block", "ip": "10.9.%d.%d" % (i // 250 + 1, i % 250 + 1),
+                   "param": ""} for i in range(n)], separators=(',', ':')))
+PY2
+}
+
+# 101 records and not also 100: with the old `seq 0 99` a hundred records
+# restore perfectly well, so a 100-record case pins the behaviour that was
+# never broken. 101 is the first one that was. Larger fixtures were dropped
+# again — a healthy 300-record restore costs 32 seconds of mocked forks, and
+# what they were guarding against (a cliff at some other constant) is pinned
+# structurally below, which is the stronger pin anyway.
+RESTORED=$(restore "$(many 101)")
+assert_terminated "restore: the loop ended on its own"
+assert_contains "restore: the hundred-and-first rule comes back" \
+    "10.9.1.101" "$RESTORED"
+assert_terminated "restore: a hundred-and-one records end the loop on their own"
+
+# A fixture cannot prove the absence of a bound: raising the cap to 500 passes
+# every assertion above. So the absence is asserted structurally — the loop
+# header carries no condition, and the only way out is the absent-record
+# sentinel. Comments are stripped first because the hook's own comment quotes
+# `seq 0 99` while explaining why it is gone.
+RULES_LOOP=$(awk '/^# Restore blocks and ratelimits/ { f = 1 } f { print } f && /^fi$/ { exit }' \
+             "$HOTPLUG" | grep -v '^[[:space:]]*#')
+assert_not_contains "restore: the loop bound is not a counted range" "seq " "$RULES_LOOP"
+assert_contains "restore: the loop header carries no bound at all" "while :; do" "$RULES_LOOP"
+assert_contains "restore: and ends only when a record is absent" \
+    '[ -z "$type" ] && break' "$RULES_LOOP"
+# The increment must be the first thing in the body, ahead of the `continue`
+# further down; at the bottom it would be skipped and the loop would spin.
+FIRST_STMT=$(printf '%s' "$RULES_LOOP" | awk '/while :; do/ { getline; print; exit }')
+assert_contains "restore: the index is advanced before anything can skip it" \
+    'idx=$((idx + 1))' "$FIRST_STMT"
+
+# The index is advanced at the TOP of the loop. With the increment at the
+# bottom, the `[ -z "$ip" ] && continue` below it would skip the increment and
+# spin forever on the same record — inside a boot hook, which is worse than
+# the bug above.
+RESTORED=$(restore '[{"type":"block"},{"type":"block","ip":"192.168.1.77","param":""}]')
+assert_terminated "restore: a record with no ip must not spin the loop"
+assert_contains "restore: a record after a malformed one is still restored" \
+    "192.168.1.77" "$RESTORED"
+
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # 4. The shaper declining under SQM says so
