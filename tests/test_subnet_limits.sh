@@ -316,11 +316,44 @@ sed -e "s|/usr/local/bin/trafficctl-fw.sh|$FW|" \
 assert_not_contains "harness: the hook's rules path was redirected" \
     "/etc/trafficctl/rules.json" "$(cat "$HOOK")"
 
+# What ends the restore loop is a sentinel, not a counted range (#108), so a
+# broken sentinel is an infinite loop. Inside restore() jsonfilter is fronted
+# by a counting shim that stops answering past a bound: a runaway loop then
+# ends as a failed assertion instead of hanging the suite, and CI, for hours.
+# The largest fixture below spends well under a thousand calls.
+JF_BOUND=8000
+HOOKBIN="$TMP/hookbin"
+mkdir -p "$HOOKBIN"
+cat > "$HOOKBIN/jsonfilter" <<MOCK
+#!/bin/sh
+n=\$(cat "$TMP/jfcount" 2>/dev/null)
+[ -n "\$n" ] || n=0
+n=\$((n + 1))
+printf '%s' "\$n" > "$TMP/jfcount"
+[ "\$n" -gt $JF_BOUND ] && exit 1
+exec "$MOCKBIN/jsonfilter" "\$@"
+MOCK
+chmod +x "$HOOKBIN/jsonfilter"
+
 restore() {
     printf '%s\n' "$1" > "$RULES"
     : > "$NFT_LOG"
-    PATH="$MOCKBIN:$PATH" ACTION=ifup INTERFACE=lan sh "$HOOK" >/dev/null 2>&1
+    printf 0 > "$TMP/jfcount"
+    PATH="$HOOKBIN:$MOCKBIN:$PATH" ACTION=ifup INTERFACE=lan sh "$HOOK" >/dev/null 2>&1
     cat "$NFT_LOG"
+}
+
+# Every restore() above and below is bounded, so assert the bound was not the
+# thing that ended the loop — otherwise a hang would read as a pass.
+assert_terminated() {
+    _n=$(cat "$TMP/jfcount")
+    if [ "$_n" -lt "$JF_BOUND" ]; then
+        PASS=$((PASS + 1))
+    else
+        FAIL=$((FAIL + 1))
+        printf "FAIL: %s — the restore loop did not end on its own (%s jsonfilter calls, bound %s)\n" \
+            "$1" "$_n" "$JF_BOUND"
+    fi
 }
 
 # "meter" is what makes a bucket per-device, so its presence is the mode.
@@ -394,31 +427,14 @@ assert_contains "restore: the index is advanced before anything can skip it" \
 # The index is advanced at the TOP of the loop. With the increment at the
 # bottom, the `[ -z "$ip" ] && continue` below it would skip the increment and
 # spin forever on the same record — inside a boot hook, which is worse than
-# the bug above. The mock stops answering after 400 calls so that a hang shows
-# up here as a failed assertion instead of hanging CI.
-cp "$MOCKBIN/jsonfilter" "$TMP/jsonfilter.real"
-cat > "$MOCKBIN/jsonfilter" <<MOCK
-#!/bin/sh
-n=\$(cat "$TMP/jfcount" 2>/dev/null)
-[ -n "\$n" ] || n=0
-n=\$((n + 1))
-printf '%s' "\$n" > "$TMP/jfcount"
-[ "\$n" -gt 400 ] && exit 1
-exec "$TMP/jsonfilter.real" "\$@"
-MOCK
-chmod +x "$MOCKBIN/jsonfilter"
-printf 0 > "$TMP/jfcount"
+# the bug above.
 RESTORED=$(restore '[{"type":"block"},{"type":"block","ip":"192.168.1.77","param":""}]')
-CALLS=$(cat "$TMP/jfcount")
-if [ "$CALLS" -lt 400 ]; then
-    PASS=$((PASS + 1))
-else
-    FAIL=$((FAIL + 1))
-    printf "FAIL: restore: a record with no ip spun the loop (%s jsonfilter calls, bound 400)\n" "$CALLS"
-fi
+assert_terminated "restore: a record with no ip must not spin the loop"
 assert_contains "restore: a record after a malformed one is still restored" \
     "192.168.1.77" "$RESTORED"
-cp "$TMP/jsonfilter.real" "$MOCKBIN/jsonfilter"
+
+RESTORED=$(restore "$(many 300)")
+assert_terminated "restore: three hundred records end the loop on their own"
 
 # ════════════════════════════════════════════════════════════════════════════
 # 4. The shaper declining under SQM says so
