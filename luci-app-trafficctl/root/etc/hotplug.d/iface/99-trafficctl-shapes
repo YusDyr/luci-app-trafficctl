@@ -41,9 +41,23 @@ fi
 
 # Restore blocks and ratelimits (if persist enabled)
 if [ -f "$RULES_FILE" ] && tctl_persist_enabled; then
-    jsonfilter -i "$RULES_FILE" -e '@[*]' 2>/dev/null | while read -r _; do true; done
-
-    for idx in $(seq 0 99); do
+    # How many records there are comes from the file, not from a constant.
+    # `seq 0 99` stopped at the hundredth, so every rule past it was silently
+    # not restored: present in rules.json, shown by the UI as persisted, and
+    # absent from the kernel after a reboot (#108). Raising 99 to a bigger
+    # number would only move the cliff. The absent-record sentinel below is
+    # what ends the loop, exactly as it did before.
+    #
+    # (The line that used to sit here piped '@[*]' into a loop whose body was
+    # `true` — an abandoned attempt at this same iteration that did nothing.)
+    # Advanced at the TOP, so there is exactly one increment and `continue`
+    # below cannot skip it. With the increment at the bottom, a record that
+    # has a type but no ip — a truncated or hand-edited file — would spin the
+    # loop forever on the same index, inside a boot hook. That is a worse
+    # failure than the one being fixed here.
+    idx=-1
+    while :; do
+        idx=$((idx + 1))
         type=$(jsonfilter -i "$RULES_FILE" -e "@[$idx].type" 2>/dev/null)
         [ -z "$type" ] && break
         ip=$(jsonfilter -i "$RULES_FILE" -e "@[$idx].ip" 2>/dev/null)

@@ -346,6 +346,63 @@ assert_contains "restore: a legacy host record still applies" \
     "ip daddr 192.168.1.50 limit rate over 625 kbytes/second" "$RESTORED"
 assert_not_contains "restore: a host needs no meter" "meter" "$RESTORED"
 
+# ── the restore loop's bounds (#108) ───────────────────────────────────────
+# The loop used to be `for idx in $(seq 0 99)`, so rule 101 onward was never
+# read: the records sat in rules.json, the UI showed them as persisted, and
+# they were simply absent from the kernel after a reboot. A silent, selective
+# failure — the first hundred come back and the rest do not — which is the
+# hardest kind to notice. Pinned at the boundary and well past it, because
+# raising 99 to a bigger number would satisfy a single-point check while
+# leaving the cliff in place.
+many() {
+    python3 - "$1" <<'PY2'
+import json, sys
+n = int(sys.argv[1])
+print(json.dumps([{"type": "block", "ip": "10.9.%d.%d" % (i // 250 + 1, i % 250 + 1),
+                   "param": ""} for i in range(n)], separators=(',', ':')))
+PY2
+}
+
+RESTORED=$(restore "$(many 100)")
+assert_contains "restore: the hundredth rule comes back" "10.9.1.100" "$RESTORED"
+
+RESTORED=$(restore "$(many 101)")
+assert_contains "restore: so does the hundred-and-first, which used to be dropped" \
+    "10.9.1.101" "$RESTORED"
+
+RESTORED=$(restore "$(many 300)")
+assert_contains "restore: and the three-hundredth, so no new cliff was introduced" \
+    "10.9.2.50" "$RESTORED"
+
+# The index is advanced at the TOP of the loop. With the increment at the
+# bottom, the `[ -z "$ip" ] && continue` below it would skip the increment and
+# spin forever on the same record — inside a boot hook, which is worse than
+# the bug above. The mock stops answering after 400 calls so that a hang shows
+# up here as a failed assertion instead of hanging CI.
+cp "$MOCKBIN/jsonfilter" "$TMP/jsonfilter.real"
+cat > "$MOCKBIN/jsonfilter" <<MOCK
+#!/bin/sh
+n=\$(cat "$TMP/jfcount" 2>/dev/null)
+[ -n "\$n" ] || n=0
+n=\$((n + 1))
+printf '%s' "\$n" > "$TMP/jfcount"
+[ "\$n" -gt 400 ] && exit 1
+exec "$TMP/jsonfilter.real" "\$@"
+MOCK
+chmod +x "$MOCKBIN/jsonfilter"
+printf 0 > "$TMP/jfcount"
+RESTORED=$(restore '[{"type":"block"},{"type":"block","ip":"192.168.1.77","param":""}]')
+CALLS=$(cat "$TMP/jfcount")
+if [ "$CALLS" -lt 400 ]; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    printf "FAIL: restore: a record with no ip spun the loop (%s jsonfilter calls, bound 400)\n" "$CALLS"
+fi
+assert_contains "restore: a record after a malformed one is still restored" \
+    "192.168.1.77" "$RESTORED"
+cp "$TMP/jsonfilter.real" "$MOCKBIN/jsonfilter"
+
 # ════════════════════════════════════════════════════════════════════════════
 # 4. The shaper declining under SQM says so
 # ════════════════════════════════════════════════════════════════════════════
