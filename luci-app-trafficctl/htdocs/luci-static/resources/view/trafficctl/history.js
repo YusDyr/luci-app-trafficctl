@@ -32,6 +32,13 @@ var callHistoryRead = rpc.declare({
 	expect: { result: [] }
 });
 
+var callHistoryReadIfaces = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'history_read_ifaces',
+	params: ['period', 'to'],
+	expect: { result: [] }
+});
+
 var callHistoryFlush = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'history_flush',
@@ -86,6 +93,35 @@ var ACCURACY = {
 	}
 };
 
+// Deliberately separate from ACCURACY. The interface series is not a view of
+// the device series and its accuracy does not follow it: these bytes come from
+// the kernel's own interface counters via /proc/net/dev, so flow offloading
+// does not hide them. Under offload this table is the MORE trustworthy of the
+// two, which is the inverse of the device table's verdict — inheriting it
+// would be wrong in the direction that matters.
+var IF_ACCURACY = {
+	'exact': {
+		cls: 'tc-c-ok',
+		icon: '●',
+		text: _('Exact. These are the router\'s own interface counters, so flow offloading does not undercount them — with offloading on, this table is more trustworthy than the device table above. A link that goes down restarts its counter: the traffic it carried between the last sample and the restart is lost.')
+	}
+};
+
+function ifAccuracyOf(verdict) {
+	return IF_ACCURACY[verdict] || {
+		cls: 'tc-c-warn',
+		icon: '⚠',
+		text: _('The accuracy of these interface figures could not be determined.')
+	};
+}
+
+// '-' and '?' are the store's placeholders for an absent label and an unknown
+// role (the file is tab-separated, so an empty field could not be empty).
+function ifText(v) {
+	if (!v || v === '-' || v === '?') return '';
+	return v;
+}
+
 function accuracyOf(verdict) {
 	return ACCURACY[verdict] || {
 		cls: 'tc-c-warn',
@@ -102,6 +138,10 @@ return view.extend({
 	selTo: '',
 	sortKey: 'total',
 	tbody: null,
+	ifRows: [],
+	ifBody: null,
+	ifNoteEl: null,
+	ifWrapEl: null,
 	statusEl: null,
 	bannerEl: null,
 
@@ -227,16 +267,100 @@ return view.extend({
 		]));
 	},
 
+	// Fixed order rather than a sortable header: there are a handful of rows
+	// and the useful reading is "which WAN carried what", so WAN first.
+	ifSorted: function() {
+		var rank = { wan: 0, vpn: 1, lan: 2, other: 3 };
+		return this.ifRows.slice().sort(function(a, b) {
+			var ra = rank[a.role], rb = rank[b.role];
+			if (ra === undefined) ra = 4;
+			if (rb === undefined) rb = 4;
+			if (ra !== rb) return ra - rb;
+			return ((b.bytes_in || 0) + (b.bytes_out || 0)) -
+			       ((a.bytes_in || 0) + (a.bytes_out || 0));
+		});
+	},
+
+	renderIfRow: function(r) {
+		var label = ifText(r.label) || r.dev;
+		var role = ifText(r.role);
+		var name = [E('span', { 'class': 'tc-fw-bold' }, label)];
+		// The device name is what appears in logs and in `ip link`, so it is
+		// worth showing even when a friendlier label exists.
+		if (label !== r.dev) {
+			name.push(E('span', { 'class': 'tc-mono tc-sm tc-c-faint',
+				'style': 'margin-left:6px' }, r.dev));
+		}
+		if (role) {
+			name.push(E('span', { 'class': 'tc-c-muted tc-sm',
+				'style': 'margin-left:6px' }, role));
+		}
+		var tot = (r.bytes_in || 0) + (r.bytes_out || 0);
+		return E('tr', { 'class': 'tr' }, [
+			E('td', { 'class': 'td' }, name),
+			E('td', { 'class': 'td tc-right tc-mono tc-sm' }, fmtBytes(r.bytes_in || 0)),
+			E('td', { 'class': 'td tc-right tc-mono tc-sm' }, fmtBytes(r.bytes_out || 0)),
+			E('td', { 'class': 'td tc-right tc-mono tc-fw-bold' }, fmtBytes(tot)),
+			E('td', { 'class': 'td tc-center tc-sm tc-c-muted' }, fmtAgo(r.last_seen))
+		]);
+	},
+
+	// No total row, unlike the device table. These rows overlap by design: a
+	// VPN tunnel's bytes also travelled over its WAN, and the LAN bridge sees
+	// the same traffic from the other side. A sum would be a number with no
+	// meaning, presented as if it were the period's total.
+	renderIfTable: function() {
+		var self = this;
+		while (this.ifBody.firstChild) this.ifBody.removeChild(this.ifBody.firstChild);
+		if (!this.ifRows.length) {
+			this.ifBody.appendChild(E('tr', { 'class': 'tr' }, [
+				E('td', { 'class': 'td tc-c-faint', 'colspan': 5 },
+					_('No interface traffic recorded for this period yet.'))
+			]));
+			return;
+		}
+		this.ifSorted().forEach(function(r) {
+			self.ifBody.appendChild(self.renderIfRow(r));
+		});
+	},
+
+	// Hidden entirely when the series is off or history is: an empty table
+	// with a note about accuracy would be worse than no table.
+	renderIfSection: function() {
+		if (!this.ifWrapEl) return;
+		var on = !!this.st.enabled && this.st.interfaces !== false;
+		this.ifWrapEl.classList.toggle('tc-hidden', !on);
+		if (!on) return;
+		var a = ifAccuracyOf(this.st.iface_accuracy);
+		while (this.ifNoteEl.firstChild) this.ifNoteEl.removeChild(this.ifNoteEl.firstChild);
+		this.ifNoteEl.appendChild(E('div', { 'class': a.cls }, [
+			E('span', { 'class': 'tc-fw-bold' }, a.icon + ' '),
+			document.createTextNode(a.text)
+		]));
+	},
+
 	loadPeriod: function() {
 		var self = this;
 		self.statusEl.textContent = _('Loading…');
-		return callHistoryRead(self.sel || '', self.selTo || '').then(function(rows) {
-			self.rows = rows || [];
+		// Each series catches its own failure: one of them being unreadable
+		// must not blank the other, since they come from different files.
+		var wantIf = self.st.interfaces !== false;
+		return Promise.all([
+			callHistoryRead(self.sel || '', self.selTo || '')
+				.then(function(rows) { self.rows = rows || []; })
+				.catch(function(e) {
+					self.rows = [];
+					ui.addNotification(null, E('p', e.message), 'error');
+				}),
+			wantIf ? callHistoryReadIfaces(self.sel || '', self.selTo || '')
+				.then(function(rows) { self.ifRows = rows || []; })
+				.catch(function() { self.ifRows = []; })
+				: Promise.resolve()
+		]).then(function() {
 			self.statusEl.textContent = '';
 			self.renderTable();
-		}).catch(function(e) {
-			self.statusEl.textContent = '';
-			ui.addNotification(null, E('p', e.message), 'error');
+			self.renderIfTable();
+			self.renderIfSection();
 		});
 	},
 
@@ -247,6 +371,7 @@ return view.extend({
 			self.st = res[0] || {};
 			self.periods = res[1] || [];
 			self.renderBanner();
+			self.renderIfSection();
 		}).catch(function() {});
 	},
 
@@ -405,8 +530,36 @@ return view.extend({
 
 		var table = E('table', { 'class': 'table tc-table' }, [thead, this.tbody]);
 
+		// ── interfaces: a second series, below the first ────────────────────
+		this.ifBody = E('tbody', {});
+		this.ifNoteEl = E('div', { 'style': 'margin-bottom:6px' });
+		this.ifWrapEl = E('div', { 'class': 'tc-hidden', 'style': 'margin-top:18px' }, [
+			E('h3', {}, _('Per-interface totals')),
+			E('div', { 'class': 'cbi-map-descr' },
+				_('Which link carried the traffic — the question the device table cannot answer. This is a separate series, not a breakdown of it: the rows include the router\'s own traffic and broadcast, and they overlap each other (a VPN tunnel\'s bytes also travelled over its WAN), so the two tables are not meant to add up. Received and Sent are relative to the interface, so on the LAN bridge Received is what your devices sent.')),
+			this.ifNoteEl,
+			E('table', { 'class': 'table tc-table' }, [
+				E('thead', {}, [
+					E('tr', { 'class': 'tr cbi-section-table-titles' }, [
+						E('th', { 'class': 'th' }, _('Interface')),
+						E('th', { 'class': 'th tc-right',
+							'title': _('Bytes the interface received. On a WAN that is download; on the LAN bridge it is what your devices uploaded.') },
+							_('Received')),
+						E('th', { 'class': 'th tc-right',
+							'title': _('Bytes the interface sent. On a WAN that is upload; on the LAN bridge it is what your devices downloaded.') },
+							_('Sent')),
+						E('th', { 'class': 'th tc-right' }, _('Total')),
+						E('th', { 'class': 'th tc-center' }, _('Last active'))
+					])
+				]),
+				this.ifBody
+			])
+		]);
+
 		this.renderBanner();
 		this.renderTable();
+		this.renderIfTable();
+		this.renderIfSection();
 		if (this.st.enabled) this.loadPeriod();
 
 		// ── controls ────────────────────────────────────────────────────────
@@ -425,7 +578,10 @@ return view.extend({
 					enableBtn.textContent = self.st.enabled ? _('Switch off') : _('Switch on');
 					if (self.st.enabled) return self.loadPeriod();
 					self.rows = [];
+					self.ifRows = [];
 					self.renderTable();
+					self.renderIfTable();
+					self.renderIfSection();
 				});
 			}).catch(function(e) {
 				enableBtn.disabled = false;
@@ -468,7 +624,8 @@ return view.extend({
 			this.bannerEl,
 			E('div', { 'style': 'margin-bottom:8px' }, [enableBtn, flushBtn, csvBtn]),
 			picker,
-			table
+			table,
+			this.ifWrapEl
 		]);
 	}
 });
