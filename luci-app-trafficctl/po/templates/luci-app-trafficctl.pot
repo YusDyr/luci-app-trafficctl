@@ -304,9 +304,6 @@ msgstr ""
 msgid "Distinct remote clients"
 msgstr ""
 
-msgid "Done"
-msgstr ""
-
 msgid "Download"
 msgstr ""
 
@@ -835,9 +832,6 @@ msgstr ""
 msgid "Routed via %s"
 msgstr ""
 
-msgid "Running…"
-msgstr ""
-
 msgid "Sampled. Byte counts come from conntrack, which only reports flows that are alive when it is read — a connection that both starts and finishes between two samples is not counted. Shorten the sampling interval to narrow that gap."
 msgstr ""
 
@@ -848,9 +842,6 @@ msgid "Save as router default"
 msgstr ""
 
 msgid "Saving…"
-msgstr ""
-
-msgid "Scanning all devices…"
 msgstr ""
 
 msgid "Search device (name, IP, MAC)…"

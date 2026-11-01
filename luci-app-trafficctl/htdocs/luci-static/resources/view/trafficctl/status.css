@@ -738,6 +738,27 @@
     vertical-align: middle; margin-right: 6px;
 }
 
+/* The poll indicator (#106). It must never take part in layout: a fixed-size
+   slot that is always present, faded in rather than shown, because the banner
+   it replaces reflowed the page every couple of seconds — which is what made
+   the rate chips below it hard to hit. */
+.tc-poll-spinner {
+    display: inline-block; flex: 0 0 12px; width: 12px; height: 12px;
+    border: 2px solid var(--tc-border);
+    border-top-color: var(--tc-faint);
+    border-radius: 50%;
+    animation: tc-spin .7s linear infinite;
+    opacity: 0; transition: opacity .25s ease;
+}
+.tc-poll-spinner.is-busy { opacity: 1; }
+/* A refresh that failed is the one thing the poll has to say. Same slot, so
+   saying it still cannot move anything; the message is in the title. */
+.tc-poll-spinner.is-error {
+    opacity: 1; animation: none;
+    border-color: var(--tc-err); background: var(--tc-err);
+    cursor: help;
+}
+
 /* ── Link style ──────────────────────────────────────────────────── */
 .tc-link { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--tc-faint); }
 .tc-link:hover { border-bottom-style: solid; }

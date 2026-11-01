@@ -1397,6 +1397,13 @@ function setStatus(el, type, msg) {
 	el.innerHTML = type === 'loading' ? '<span class="tc-spinner"></span>'+escHtml(msg) : escHtml(msg);
 }
 
+// setStatus rewrites className wholesale, which drops the tc-hidden the status
+// element starts with — so putting it back has to be explicit.
+function clearStatus(el) {
+	el.className = 'tc-hidden';
+	el.innerHTML = '';
+}
+
 function updateUrlParams(opts) {
 	var params = new URLSearchParams();
 	if (opts.lastIp && opts.lastIp !== '__all__') params.set('ip', opts.lastIp);
@@ -2091,6 +2098,39 @@ return view.extend({
 		});
 
 		var statusDiv = E('div', { 'class': 'tc-hidden' });
+
+		// #106: a refresh that runs on a timer must not announce itself on the
+		// status line. It gets its own indicator, which cannot disturb the
+		// page: a fixed-size slot that is always in the layout and is only
+		// faded in, never displayed or hidden (tc-hidden is display:none, which
+		// is exactly the reflow being fixed). It waits before showing, so on a
+		// router that answers quickly it never appears at all — a spinner that
+		// blinks for 80ms every two seconds is still a flash.
+		//
+		// A refresh reports its own health HERE and nowhere else. The status
+		// line belongs to what the operator did: every other poller in this
+		// view discards its errors outright, and these two were the only ones
+		// writing to a shared element, which is the whole of #106.
+		var pollSpinner = E('span', { 'class': 'tc-poll-spinner' });
+		var _pollBusy = 0, _pollShowTimer = null;
+		function pollStart() {
+			_pollBusy++;
+			if (_pollShowTimer === null) {
+				_pollShowTimer = setTimeout(function() {
+					_pollShowTimer = null;
+					if (_pollBusy > 0) pollSpinner.classList.add('is-busy');
+				}, 250);
+			}
+		}
+		// err: the message when this refresh failed, nothing when it worked.
+		function pollEnd(err) {
+			if (_pollBusy > 0) _pollBusy--;
+			if (_pollBusy > 0) return;
+			if (_pollShowTimer !== null) { clearTimeout(_pollShowTimer); _pollShowTimer = null; }
+			pollSpinner.classList.remove('is-busy');
+			pollSpinner.classList.toggle('is-error', !!err);
+			pollSpinner.title = err || '';
+		}
 		var statsDiv  = E('div', { 'style': 'margin:8px 0', 'class': opts.showStats === false ? 'tc-hidden' : '' });
 		var connsDiv  = E('div', { 'class': opts.showConns === false ? 'tc-hidden' : '' });
 
@@ -3043,11 +3083,11 @@ return view.extend({
 			self._queryGen++;
 			var gen = self._queryGen;
 
-			setStatus(statusDiv, 'loading', _('Running…'));
+			pollStart();
 
 			callDevice(ip, proto).then(function(data) {
 				if (!data || data.error) {
-					setStatus(statusDiv, 'error', (data && data.error) || _('Unknown error'));
+					pollEnd((data && data.error) || _('Unknown error'));
 					return;
 				}
 
@@ -3188,9 +3228,9 @@ return view.extend({
 						}
 					}
 				}
-				setStatus(statusDiv, 'ok', '✓ ' + _('Done'));
+				pollEnd();
 			})
-			.catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); });
+			.catch(function(e) { pollEnd(e.message); });
 		}
 
 		self._tableFilter = null;
@@ -3368,7 +3408,7 @@ return view.extend({
 		}
 
 		function runAll() {
-			setStatus(statusDiv, 'loading', _('Scanning all devices…'));
+			pollStart();
 
 			callTrafficctl().then(function(rows) {
 				if (!Array.isArray(rows)) rows = [];
@@ -3385,10 +3425,10 @@ return view.extend({
 						netifyMap = m;
 					}).catch(function() {});
 				}
-				setStatus(statusDiv, 'ok', '✓ ' + _('Done'));
+				pollEnd();
 				self._startBytesPoll();
 			})
-			.catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); });
+			.catch(function(e) { pollEnd(e.message); });
 		}
 
 		function updateExtendedStats() {
@@ -3405,6 +3445,11 @@ return view.extend({
 
 		function runQuery() {
 			var ip = searchSelect.getValue();
+			// The poll used to wipe the status line on every tick, which also
+			// disposed of a result belonging to the device just left. Now that
+			// it does not, switching devices has to do it — otherwise
+			// "Limiting 192.168.0.50…" lingers over another device's page.
+			if (self._statusIp !== ip) { clearStatus(statusDiv); self._statusIp = ip; }
 			var o = loadOpts(); o.lastIp = ip; saveOpts(o);
 			updateUrlParams(o);
 			updateModeUI();
@@ -3464,12 +3509,21 @@ return view.extend({
 			var action = inetBtn._action;
 			var fn = action === 'block' ? callBlock : callUnblock;
 			fn(ip, '').then(function(res) {
-				// A block without a known MAC covers IPv4 only, and the backend
-				// says so in msg. Swallowing it here would put the UI back to
-				// reporting a block that does not block (issue #67).
-				if (res && res.ipv6 === false) {
-					setStatus(statusDiv, 'error', (res && res.msg) || '?');
+				// The result is shown whatever it says, like every other action.
+				// Reporting it only when res.ipv6 === false discarded the rest
+				// of what the backend qualifies: "NOT PERSISTENT" (#105) and the
+				// NSS note (#81) are appended to msg on a SUCCESSFUL block, so
+				// blocking a device — the one path that mattered to the reporter
+				// of #105 — said nothing at all.
+				var state;
+				if (!res || !res.ok || res.ipv6 === false) {
+					// A failure, or a block that does not block over v6 (#67).
+					state = 'error';
+				} else {
+					// The device is now cut off, so not green.
+					state = (action === 'block') ? 'action' : 'ok';
 				}
+				setStatus(statusDiv, state, (res && res.msg) || '?');
 				runQuery();
 			}).catch(function(e) {
 				setStatus(statusDiv, 'error', e.message);
@@ -4113,7 +4167,7 @@ return view.extend({
 				offloadBanner,
 				cutPanel,
 				E('div', {'style':'margin-bottom:10px'}, [
-						E('div', {'style':'display:flex;align-items:center;gap:10px;flex-wrap:wrap'}, [searchSelect.el, actionRow]),
+						E('div', {'style':'display:flex;align-items:center;gap:10px;flex-wrap:wrap'}, [searchSelect.el, actionRow, pollSpinner]),
 						quickBar
 					]),
 				statusDiv,
