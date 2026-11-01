@@ -181,6 +181,12 @@ msgstr ""
 msgid "Bytes sent back to remote clients"
 msgstr ""
 
+msgid "Bytes the interface received. On a WAN that is download; on the LAN bridge it is what your devices uploaded."
+msgstr ""
+
+msgid "Bytes the interface sent. On a WAN that is upload; on the LAN bridge it is what your devices downloaded."
+msgstr ""
+
 msgid "CPU load (1 min)"
 msgstr ""
 
@@ -352,6 +358,9 @@ msgstr ""
 msgid "Exact. Byte counts come from cumulative nftables counters, so they do not depend on how often the sampler runs. The TCP/UDP split is unavailable from this source."
 msgstr ""
 
+msgid "Exact. These are the router's own interface counters, so flow offloading does not undercount them — with offloading on, this table is more trustworthy than the device table above. A link that goes down restarts its counter: the traffic it carried between the last sample and the restart is lost."
+msgstr ""
+
 msgid "Export CSV"
 msgstr ""
 
@@ -484,6 +493,9 @@ msgstr ""
 msgid "Inline keyboard preview:"
 msgstr ""
 
+msgid "Interface"
+msgstr ""
+
 msgid "Interfaces"
 msgstr ""
 
@@ -506,6 +518,9 @@ msgid "Known devices"
 msgstr ""
 
 msgid "LAN keeps working"
+msgstr ""
+
+msgid "Last active"
 msgstr ""
 
 msgid "Last seen"
@@ -622,6 +637,9 @@ msgstr ""
 msgid "No extended stats available."
 msgstr ""
 
+msgid "No interface traffic recorded for this period yet."
+msgstr ""
+
 msgid "No offload"
 msgstr ""
 
@@ -721,6 +739,9 @@ msgstr ""
 msgid "Per-device totals accumulated per accounting period, including devices that are not connected now. Figures survive reboots; the live view on the Devices tab does not."
 msgstr ""
 
+msgid "Per-interface totals"
+msgstr ""
+
 msgid "Period"
 msgstr ""
 
@@ -779,6 +800,9 @@ msgid "Rate limits and traffic shaping cannot be enforced while it is: accelerat
 msgstr ""
 
 msgid "Ratelimits"
+msgstr ""
+
+msgid "Received"
 msgstr ""
 
 msgid "Received by this interface"
@@ -848,6 +872,9 @@ msgid "Search device (name, IP, MAC)…"
 msgstr ""
 
 msgid "Sending…"
+msgstr ""
+
+msgid "Sent"
 msgstr ""
 
 msgid "Sent by this interface"
@@ -994,6 +1021,9 @@ msgstr ""
 msgid "The accuracy of these figures could not be determined."
 msgstr ""
 
+msgid "The accuracy of these interface figures could not be determined."
+msgstr ""
+
 msgid "The auto-revert helper is not running; this page re-checks the deadline while it is open."
 msgstr ""
 
@@ -1130,6 +1160,9 @@ msgid "Waiting for the first byte sample."
 msgstr ""
 
 msgid "When this device last moved any traffic, not when it was last connected"
+msgstr ""
+
+msgid "Which link carried the traffic — the question the device table cannot answer. This is a separate series, not a breakdown of it: the rows include the router's own traffic and broadcast, and they overlap each other (a VPN tunnel's bytes also travelled over its WAN), so the two tables are not meant to add up. Received and Sent are relative to the interface, so on the LAN bridge Received is what your devices sent."
 msgstr ""
 
 msgid "While this total was being accumulated, flow offloading froze the counters it is built from. The figure is a floor, not a measurement."
