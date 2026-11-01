@@ -374,6 +374,23 @@ RESTORED=$(restore "$(many 300)")
 assert_contains "restore: and the three-hundredth, so no new cliff was introduced" \
     "10.9.2.50" "$RESTORED"
 
+# A fixture cannot prove the absence of a bound: raising the cap to 500 passes
+# every assertion above. So the absence is asserted structurally — the loop
+# header carries no condition, and the only way out is the absent-record
+# sentinel. Comments are stripped first because the hook's own comment quotes
+# `seq 0 99` while explaining why it is gone.
+RULES_LOOP=$(awk '/^# Restore blocks and ratelimits/ { f = 1 } f { print } f && /^fi$/ { exit }' \
+             "$HOTPLUG" | grep -v '^[[:space:]]*#')
+assert_not_contains "restore: the loop bound is not a counted range" "seq " "$RULES_LOOP"
+assert_contains "restore: the loop header carries no bound at all" "while :; do" "$RULES_LOOP"
+assert_contains "restore: and ends only when a record is absent" \
+    '[ -z "$type" ] && break' "$RULES_LOOP"
+# The increment must be the first thing in the body, ahead of the `continue`
+# further down; at the bottom it would be skipped and the loop would spin.
+FIRST_STMT=$(printf '%s' "$RULES_LOOP" | awk '/while :; do/ { getline; print; exit }')
+assert_contains "restore: the index is advanced before anything can skip it" \
+    'idx=$((idx + 1))' "$FIRST_STMT"
+
 # The index is advanced at the TOP of the loop. With the increment at the
 # bottom, the `[ -z "$ip" ] && continue` below it would skip the increment and
 # spin forever on the same record — inside a boot hook, which is worse than
