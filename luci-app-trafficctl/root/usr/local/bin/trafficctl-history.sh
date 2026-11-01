@@ -94,6 +94,10 @@ STAMP="/tmp/trafficctl_history.stamp"
 LOCKD="/tmp/trafficctl_history.lock.d"
 TOTALS_STATE="/tmp/trafficctl_totals.state"
 IFCURSOR="/tmp/trafficctl_history.ifcursor"
+# Per-period, and suffixed with the period id so a period roll starts a fresh
+# one instead of needing to be cleared. tmpfs: it is rebuilt from the durable
+# file whenever it is missing, which is every boot.
+IFACC="/tmp/trafficctl_history.ifacc"
 
 # Row layout, tab-separated:
 #   key  mac  ip  name  rx  tx  tcp  udp  first_seen  last_seen  degraded
@@ -628,15 +632,27 @@ hist_if_accuracy() {
 # time the link goes down, which on the multi-WAN box this feature is for is
 # routine — so a flap costs one sampling interval instead of corrupting the
 # month.
-hist_if_flush() {
-    local dir pid file tmp now sample rc=0
+# Fold the growth since the last tick into the tmpfs accumulator and advance
+# the cursor. Called on every sample tick, because a cursor that only moved at
+# flush time lost up to a whole flush interval of a link's traffic whenever its
+# counter restarted — an hour by default, on exactly the multi-WAN box with a
+# flapping link this series exists for (#111). The accumulator is in tmpfs, so
+# touching it every 60s costs no flash.
+#
+# The durable file is written by hist_if_flush alone. The accumulator is seeded
+# from it when absent (every boot, and on a period roll), which is what makes
+# the eventual copy-over safe rather than double-counting.
+hist_if_accumulate() {
+    local dir pid file tmp now sample acc rc=0
     hist_ifaces_enabled || return 0
     dir=$(hist_dir)
     pid=$(hist_period_id)
     file=$(hist_iffile "$pid")
+    acc="$IFACC.$pid"
     now=$(date +%s)
     sample="/tmp/.trafficctl_history.ifsample.$$"
-    tmp="$dir/.history-if.$pid.$$"
+    tmp="$acc.$$"
+    [ -f "$acc" ] && file="$acc"
     # shellcheck disable=SC2064
     trap "rm -f '$sample' '$tmp'" EXIT INT TERM
 
@@ -694,12 +710,24 @@ hist_if_flush() {
             lrx = num(line, "rx_bytes"); if (lrx < 0) continue
             ltx = num(line, "tx_bytes"); if (ltx < 0) continue
 
+            # A live counter BELOW the cursor has restarted: the link went
+            # down and came back, or the driver reset it. The bytes carried
+            # since then have never been counted by anything, because a
+            # /proc/net/dev counter is monotonic for the lifetime of the
+            # interface, so they are the delta.
+            #
+            # Adding nothing here is right for the DEVICE series, where the
+            # live value is a conntrack sum that collapses when flows expire
+            # and those bytes were already accumulated while the flows lived.
+            # That premise does not transfer to an interface counter, and the
+            # zero came across with the code (#111). It also made this branch
+            # disagree with the unseen-interface case, which always took the
+            # full counter: the same situation, a counter starting from zero,
+            # handled two ways depending on whether the cursor happened to
+            # remember the interface.
             drx = lrx; dtx = ltx
-            if (seen[d]) {
-                drx = 0; dtx = 0
-                if (lrx >= crx[d]) drx = lrx - crx[d]
-                if (ltx >= ctx[d]) dtx = ltx - ctx[d]
-            }
+            if (lrx >= crx[d]) drx = lrx - crx[d]
+            if (ltx >= ctx[d]) dtx = ltx - ctx[d]
             if (!(d in have)) {
                 order[++norder] = d
                 have[d] = 1
@@ -736,8 +764,29 @@ hist_if_flush() {
     }' </dev/null || rc=1
 
     [ "$rc" = 0 ] && [ -f "$tmp" ] || return 1
-    hist_guard mv "$tmp" "$file" 2>/dev/null || return 1
+    mv "$tmp" "$acc" 2>/dev/null || return 1
+    # Only after the accumulator is in place, for the same reason the device
+    # cursor waits for its period file: advancing first and then failing would
+    # discard the growth for good, where this way it is folded in next tick.
     mv "$IFCURSOR.new" "$IFCURSOR" 2>/dev/null || true
+    return 0
+}
+
+# Publish the accumulator to the durable per-period file. Picks up the final
+# interval first, so no traffic is stranded in tmpfs at flush time.
+hist_if_flush() {
+    local pid acc file tmp
+    hist_ifaces_enabled || return 0
+    hist_if_accumulate || return 1
+    pid=$(hist_period_id)
+    acc="$IFACC.$pid"
+    [ -f "$acc" ] || return 0
+    file=$(hist_iffile "$pid")
+    tmp="$(hist_dir)/.history-if.$pid.$$"
+    # shellcheck disable=SC2064
+    trap "rm -f '$tmp'" EXIT INT TERM
+    hist_guard cp "$acc" "$tmp" 2>/dev/null || return 1
+    hist_guard mv "$tmp" "$file" 2>/dev/null || return 1
     return 0
 }
 
@@ -955,6 +1004,9 @@ hist_keeper() {
     while :; do
         if hist_enabled; then
             /usr/local/bin/trafficctl-totals.sh --all >/dev/null 2>&1
+            # Both series advance their tmpfs cursor on every tick. Only the
+            # durable store waits for the flush interval below.
+            hist_if_accumulate >/dev/null 2>&1
             now=$(date +%s)
             interval=$(hist_interval)
             # A clock that jumped backwards (NTP settling after boot, which is
@@ -977,6 +1029,10 @@ case "$1" in
         # and the thing that makes an hourly flush mean anything.
         hist_enabled || { printf '{"ok":false,"reason":"disabled"}\n'; exit 0; }
         /usr/local/bin/trafficctl-totals.sh --all >/dev/null 2>&1
+        # The interface series advances its own tmpfs cursor on the same tick.
+        # Leaving it to the flush meant a counter that restarted in between
+        # lost everything since the last flush, not since the last tick (#111).
+        hist_if_accumulate >/dev/null 2>&1
         printf '{"ok":true,"at":%s}\n' "$(date +%s)"
         ;;
     flush)   hist_flush ;;

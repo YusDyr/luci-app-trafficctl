@@ -84,6 +84,7 @@ sed -e "s|/usr/local/bin/trafficctl-fw.sh|$TMPDIR/fw.sh|g" \
     -e "s|/usr/local/bin/trafficctl-totals.sh|$MOCKBIN/totals|g" \
     -e "s|/usr/local/bin/trafficctl-ifaces.sh|$MOCKBIN/ifaces|g" \
     -e "s|IFCURSOR=\"/tmp/trafficctl_history.ifcursor\"|IFCURSOR=\"$TMPDIR/history.ifcursor\"|" \
+    -e "s|IFACC=\"/tmp/trafficctl_history.ifacc\"|IFACC=\"$TMPDIR/history.ifacc\"|" \
     -e "s|CURSOR=\"/tmp/trafficctl_history.cursor\"|CURSOR=\"$CURSOR\"|" \
     -e "s|ERRFILE=\"/tmp/trafficctl_history.err\"|ERRFILE=\"$TMPDIR/history.err\"|" \
     -e "s|STAMP=\"/tmp/trafficctl_history.stamp\"|STAMP=\"$TMPDIR/history.stamp\"|" \
@@ -444,16 +445,67 @@ assert_eq "interface growth is added as a delta" "6500" "$(iffield eth1 4)"
 assert_eq "an idle interface gains nothing" "700" "$(iffield br-lan 4)"
 
 # A link that flaps resets its counters. On the multi-WAN box this feature is
-# for that is routine, not an edge case, so it must rebaseline rather than
-# subtract — and the NEXT growth must be measured from the restarted value.
+# for, that is routine rather than an edge case, so the store must rebaseline
+# instead of subtracting — and it must KEEP what the interface has carried
+# since the restart. Those bytes have never been counted by anything: a
+# /proc/net/dev counter is monotonic for the lifetime of the interface.
+#
+# This asserted 6500 until #111, i.e. the 120 bytes carried since the restart
+# were dropped. The zero came from the device series, where it is correct for
+# a different reason — a live conntrack sum collapses when flows expire and
+# those bytes were already accumulated — and the premise did not transfer.
+#
+# Arithmetic, stated so the expectation is not just "what the code prints":
+#   5000  first reading, no cursor yet, so the whole counter
+#  +1500  6500 - 5000
+#   +120  counter restarted at some point and now reads 120
+#   +200  320 - 120, measured from the restarted value
 ifsample "$(ifdev eth1 wan wan 120 12),$(ifdev br-lan lan lan 700 7000)"
 run flush >/dev/null
-assert_eq "a restarted interface counter does not reduce the stored total" \
-    "6500" "$(iffield eth1 4)"
+assert_eq "a flap keeps what the interface carried since the restart" \
+    "6620" "$(iffield eth1 4)"
 ifsample "$(ifdev eth1 wan wan 320 30),$(ifdev br-lan lan lan 700 7000)"
 run flush >/dev/null
 assert_eq "and growth after the flap is measured from the new baseline" \
-    "6700" "$(iffield eth1 4)"
+    "6820" "$(iffield eth1 4)"
+
+# What a flap DOES cost is whatever the link carried between the last cursor
+# advance and the restart, which is unknowable. That window is the reason the
+# cursor advances on every sample tick rather than only at flush time: an
+# interval of 60s instead of 3600s. #90 and #102 claimed the window was
+# already one sampling interval; it was not, and this is what makes it true.
+#
+# The accumulator is tmpfs, the period file is not, so a tick must advance the
+# one without writing the other.
+BEFORE=$(iffield eth1 4)
+ifsample "$(ifdev eth1 wan wan 1320 130),$(ifdev br-lan lan lan 700 7000)"
+run sample >/dev/null
+assert_eq "a sample tick does not write the durable period file" \
+    "$BEFORE" "$(iffield eth1 4)"
+
+# Now the counter restarts. The 1000 bytes of growth the tick saw are already
+# in tmpfs; before #111 the cursor was still at 320 and they were lost.
+ifsample "$(ifdev eth1 wan wan 7 1),$(ifdev br-lan lan lan 700 7000)"
+run flush >/dev/null
+assert_eq "growth folded in by a tick survives a flap before the next flush" \
+    "$((BEFORE + 1000 + 7))" "$(iffield eth1 4)"
+
+# Both tick paths must do it — the keeper inlines its tick rather than calling
+# the sample subcommand, so the two can drift apart. Comments stripped: the
+# prose above and in the script names the function being looked for.
+KEEPER=$(awk '/^hist_keeper\(\)/ { f = 1 } f { print } f && /^}$/ { exit }' \
+          "$TMPDIR/history.sh" | grep -v '^[[:space:]]*#')
+assert_contains "the keeper advances the interface cursor every tick" \
+    "hist_if_accumulate" "$KEEPER"
+SAMPLECASE=$(awk '/^    sample\)/ { f = 1 } f { print } f && /^        ;;$/ { exit }' \
+              "$TMPDIR/history.sh" | grep -v '^[[:space:]]*#')
+assert_contains "and so does the sample subcommand" \
+    "hist_if_accumulate" "$SAMPLECASE"
+# Nothing may be left stranded in tmpfs when the durable file is written.
+IFFLUSH=$(awk '/^hist_if_flush\(\)/ { f = 1 } f { print } f && /^}$/ { exit }' \
+           "$TMPDIR/history.sh" | grep -v '^[[:space:]]*#')
+assert_contains "a flush folds in the final interval before publishing" \
+    "hist_if_accumulate" "$IFFLUSH"
 
 # Interfaces whose bytes are already counted elsewhere must not be recorded,
 # or the month is double-counted.
