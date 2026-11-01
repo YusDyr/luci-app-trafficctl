@@ -4,6 +4,21 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.25.2] - 2026-11-01
+
+### Bug Fixes
+- stop the device poll from flashing a banner every tick ([#109](https://github.com/YusDyr/luci-app-trafficctl/issues/109)) ([7ba2de0](https://github.com/YusDyr/luci-app-trafficctl/commit/7ba2de0a5b7adb4f5ba1ee2f4227e774b19268fd))
+  A refresh that runs on a timer announced itself on the status line:
+  runSingle() and runAll() each called setStatus(..., 'loading') and then
+  setStatus(..., 'ok', '✓ Done'). setStatus rewrites className wholesale, so
+  it also dropped the tc-hidden that statusDiv starts with — a block-level
+  alert box joined the layout and from then on changed colour and text every
+  couple of seconds, directly above the rate chips. Hence both halves of
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.25.1...v1.25.2
+
+---
+
 ## [1.25.1] - 2026-10-31
 
 ### Bug Fixes
