@@ -4,6 +4,17 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.25.4] - 2026-11-01
+
+### Bug Fixes
+- keep interface traffic across a counter reset, and advance its cursor per tick ([#112](https://github.com/YusDyr/luci-app-trafficctl/issues/112)) ([581534a](https://github.com/YusDyr/luci-app-trafficctl/commit/581534a17b555522f4e568af631b20189b992412))
+  Two defects in the interface series, one of which made a claim I published
+  in #90 and in the description of #102 untrue.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.25.3...v1.25.4
+
+---
+
 ## [1.25.3] - 2026-11-01
 
 ### Bug Fixes
