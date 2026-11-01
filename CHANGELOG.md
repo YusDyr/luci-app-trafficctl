@@ -4,6 +4,21 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.25.3] - 2026-11-01
+
+### Bug Fixes
+- restore every persisted rule, not just the first hundred ([#110](https://github.com/YusDyr/luci-app-trafficctl/issues/110)) ([347c0e0](https://github.com/YusDyr/luci-app-trafficctl/commit/347c0e07c0da67dcf6f61fcc1e6caf282d270a72))
+  The restore hook read persisted blocks, rate limits and port-forward rules
+  with `for idx in $(seq 0 99)`, and the only exit before index 99 was an
+  absent record. A store with more than a hundred entries was therefore
+  truncated at boot: the rules stayed in rules.json, the UI kept showing them
+  as persisted, and they were simply not in the kernel after a reboot. A
+  silent, selective failure — the first hundred come back and the rest do
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.25.2...v1.25.3
+
+---
+
 ## [1.25.2] - 2026-11-01
 
 ### Bug Fixes
