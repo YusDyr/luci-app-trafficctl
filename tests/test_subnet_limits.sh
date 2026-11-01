@@ -317,47 +317,48 @@ assert_not_contains "harness: the hook's rules path was redirected" \
     "/etc/trafficctl/rules.json" "$(cat "$HOOK")"
 
 # What ends the restore loop is a sentinel, not a counted range (#108), so a
-# broken sentinel is an infinite loop. Inside restore() jsonfilter is fronted
-# by a counting shim that stops answering past a bound, so a runaway ends as a
-# failed assertion instead of hanging the suite, and CI, for hours.
+# broken sentinel is an infinite loop and a skipped increment is an infinite
+# loop. Both have to fail here rather than hang the suite, and CI, for hours.
 #
-# The count is cumulative over the whole file on purpose. Resetting it per
-# restore would let a broken loop burn the full bound on every one of them,
-# which is slow enough to look like a hang even though it is not; spent once,
-# it makes every later restore return immediately. Every restore below
-# together costs about 1100 calls, the 300-record fixture being 901 of them.
-JF_BOUND=3000
-HOOKBIN="$TMP/hookbin"
-mkdir -p "$HOOKBIN"
-cat > "$HOOKBIN/jsonfilter" <<MOCK
-#!/bin/sh
-n=\$(cat "$TMP/jfcount" 2>/dev/null)
-[ -n "\$n" ] || n=0
-n=\$((n + 1))
-printf '%s' "\$n" > "$TMP/jfcount"
-[ "\$n" -gt $JF_BOUND ] && exit 1
-exec "$MOCKBIN/jsonfilter" "\$@"
-MOCK
-chmod +x "$HOOKBIN/jsonfilter"
-printf 0 > "$TMP/jfcount"
+# Bounded by killing the hook, not by starving it of input: a shim that stops
+# answering jsonfilter cannot stop a loop whose exit condition has been
+# deleted — it just spins on empty answers. Only a deadline works for that.
+# The deadline is generous because it only ever fires on a broken loop: the
+# 101-record fixture below takes about ten seconds of mocked forks as it is.
+HOOK_DEADLINE=60
 
 restore() {
     printf '%s\n' "$1" > "$RULES"
     : > "$NFT_LOG"
-    PATH="$HOOKBIN:$MOCKBIN:$PATH" ACTION=ifup INTERFACE=lan sh "$HOOK" >/dev/null 2>&1
+    PATH="$MOCKBIN:$PATH" ACTION=ifup INTERFACE=lan sh "$HOOK" >/dev/null 2>&1 &
+    _hpid=$!
+    # stdout must be redirected or command substitution around restore() waits
+    # for this subshell's inherited stdout to close, i.e. for the full sleep.
+    ( sleep "$HOOK_DEADLINE"; kill -9 "$_hpid" 2>/dev/null ) >/dev/null 2>&1 &
+    _wpid=$!
+    wait "$_hpid"
+    printf '%s' "$?" > "$TMP/hookrc"
+    kill "$_wpid" 2>/dev/null
     cat "$NFT_LOG"
 }
 
-# Every restore() is bounded, so assert the bound was not the thing that ended
-# the loop — otherwise a runaway would read as a pass.
+# A killed hook exits non-zero, so this distinguishes "ended on its own" from
+# "was still going when the deadline hit" — otherwise a runaway reads as a
+# pass, because the nft log it leaves behind still contains earlier rules.
 assert_terminated() {
-    _n=$(cat "$TMP/jfcount")
-    if [ "$_n" -lt "$JF_BOUND" ]; then
+    _rc=$(cat "$TMP/hookrc" 2>/dev/null)
+    if [ "$_rc" = "0" ]; then
         PASS=$((PASS + 1))
     else
         FAIL=$((FAIL + 1))
-        printf "FAIL: %s — the restore loop did not end on its own (%s cumulative jsonfilter calls, bound %s)\n" \
-            "$1" "$_n" "$JF_BOUND"
+        printf "FAIL: %s — the hook did not end on its own (exit %s, deadline %ss)\n" \
+            "$1" "$_rc" "$HOOK_DEADLINE"
+        # Stop here. A restore loop that does not terminate makes every later
+        # restore in this file hit the deadline too, which turns one real
+        # failure into ten minutes of waiting, and there is nothing further to
+        # learn from a hook that never finishes.
+        printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
+        exit 1
     fi
 }
 
@@ -401,16 +402,16 @@ print(json.dumps([{"type": "block", "ip": "10.9.%d.%d" % (i // 250 + 1, i % 250 
 PY2
 }
 
-RESTORED=$(restore "$(many 100)")
-assert_contains "restore: the hundredth rule comes back" "10.9.1.100" "$RESTORED"
-
+# 101 records and not also 100: with the old `seq 0 99` a hundred records
+# restore perfectly well, so a 100-record case pins the behaviour that was
+# never broken. 101 is the first one that was. Larger fixtures were dropped
+# again — a healthy 300-record restore costs 32 seconds of mocked forks, and
+# what they were guarding against (a cliff at some other constant) is pinned
+# structurally below, which is the stronger pin anyway.
 RESTORED=$(restore "$(many 101)")
-assert_contains "restore: so does the hundred-and-first, which used to be dropped" \
+assert_contains "restore: the hundred-and-first rule comes back" \
     "10.9.1.101" "$RESTORED"
-
-RESTORED=$(restore "$(many 300)")
-assert_contains "restore: and the three-hundredth, so no new cliff was introduced" \
-    "10.9.2.50" "$RESTORED"
+assert_terminated "restore: a hundred-and-one records end the loop on their own"
 
 # A fixture cannot prove the absence of a bound: raising the cap to 500 passes
 # every assertion above. So the absence is asserted structurally — the loop
@@ -438,8 +439,7 @@ assert_terminated "restore: a record with no ip must not spin the loop"
 assert_contains "restore: a record after a malformed one is still restored" \
     "192.168.1.77" "$RESTORED"
 
-RESTORED=$(restore "$(many 300)")
-assert_terminated "restore: three hundred records end the loop on their own"
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # 4. The shaper declining under SQM says so
