@@ -318,10 +318,15 @@ assert_not_contains "harness: the hook's rules path was redirected" \
 
 # What ends the restore loop is a sentinel, not a counted range (#108), so a
 # broken sentinel is an infinite loop. Inside restore() jsonfilter is fronted
-# by a counting shim that stops answering past a bound: a runaway loop then
-# ends as a failed assertion instead of hanging the suite, and CI, for hours.
-# The largest fixture below spends well under a thousand calls.
-JF_BOUND=8000
+# by a counting shim that stops answering past a bound, so a runaway ends as a
+# failed assertion instead of hanging the suite, and CI, for hours.
+#
+# The count is cumulative over the whole file on purpose. Resetting it per
+# restore would let a broken loop burn the full bound on every one of them,
+# which is slow enough to look like a hang even though it is not; spent once,
+# it makes every later restore return immediately. Every restore below
+# together costs about 1100 calls, the 300-record fixture being 901 of them.
+JF_BOUND=3000
 HOOKBIN="$TMP/hookbin"
 mkdir -p "$HOOKBIN"
 cat > "$HOOKBIN/jsonfilter" <<MOCK
@@ -334,24 +339,24 @@ printf '%s' "\$n" > "$TMP/jfcount"
 exec "$MOCKBIN/jsonfilter" "\$@"
 MOCK
 chmod +x "$HOOKBIN/jsonfilter"
+printf 0 > "$TMP/jfcount"
 
 restore() {
     printf '%s\n' "$1" > "$RULES"
     : > "$NFT_LOG"
-    printf 0 > "$TMP/jfcount"
     PATH="$HOOKBIN:$MOCKBIN:$PATH" ACTION=ifup INTERFACE=lan sh "$HOOK" >/dev/null 2>&1
     cat "$NFT_LOG"
 }
 
-# Every restore() above and below is bounded, so assert the bound was not the
-# thing that ended the loop — otherwise a hang would read as a pass.
+# Every restore() is bounded, so assert the bound was not the thing that ended
+# the loop — otherwise a runaway would read as a pass.
 assert_terminated() {
     _n=$(cat "$TMP/jfcount")
     if [ "$_n" -lt "$JF_BOUND" ]; then
         PASS=$((PASS + 1))
     else
         FAIL=$((FAIL + 1))
-        printf "FAIL: %s — the restore loop did not end on its own (%s jsonfilter calls, bound %s)\n" \
+        printf "FAIL: %s — the restore loop did not end on its own (%s cumulative jsonfilter calls, bound %s)\n" \
             "$1" "$_n" "$JF_BOUND"
     fi
 }
