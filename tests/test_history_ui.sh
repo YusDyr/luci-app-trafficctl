@@ -114,6 +114,121 @@ for needle in '.degraded' '.some(' 'tc-c-warn'; do
     esac
 done
 
+# ── the interface series has its OWN verdict (#102, #111) ──────────────────
+# It must not inherit the device verdict, and the reason is not stylistic: the
+# device figures come from conntrack and go DEGRADED under flow offloading,
+# while interface figures come from /proc/net/dev and are unaffected. Under
+# offload this table is the more trustworthy of the two, so inheriting would be
+# wrong in the direction that matters — it would mark exact numbers as a floor,
+# and a reader who learned to distrust the mark would distrust the right ones.
+awk '/^hist_if_accuracy\(\)/ { inf = 1 }
+     inf && /^}/ { exit }
+     inf { print }' "$SH" \
+    | grep -oE "printf '[a-z]+" | sed "s/printf '//" | sort -u > "$TMP/ifverdicts"
+awk "/^var IF_ACCURACY = \{/ { inl = 1; next }
+     inl && /^\};/ { exit }
+     inl" "$JS" \
+    | grep -oE "^\s*'[a-z]+'" | sed "s/^[[:space:]]*'//; s/'\$//" | sort -u > "$TMP/ifknown"
+
+assert_eq "the backend emits exactly one interface verdict" "exact" \
+    "$(tr '\n' ' ' < "$TMP/ifverdicts" | sed 's/ $//')"
+ifmissing=$(awk 'NR == FNR { have[$0] = 1; next } !($0 in have)' "$TMP/ifknown" "$TMP/ifverdicts" \
+    | tr '\n' ' ' | sed 's/ $//')
+assert_eq "it has an entry in the view's own IF_ACCURACY table" "" "$ifmissing"
+
+# Same fallback rule as the device table: an unknown verdict warns.
+ifaccfn=$(awk '/^function ifAccuracyOf\(/ { inf = 1 }
+               inf { print }
+               inf && /^}/ { exit }' "$JS")
+case "$ifaccfn" in
+    *"tc-c-warn"*) PASS=$((PASS + 1)) ;;
+    *) FAIL=$((FAIL + 1)); printf "FAIL: ifAccuracyOf()'s fallback is not a warning\n" ;;
+esac
+case "$ifaccfn" in
+    *"tc-c-ok"*)
+        FAIL=$((FAIL + 1))
+        printf "FAIL: ifAccuracyOf()'s fallback treats an unrecognised verdict as exact\n"
+        ;;
+    *) PASS=$((PASS + 1)) ;;
+esac
+
+# The section must read iface_accuracy and not the device verdict.
+ifsec=$(awk '/^\trenderIfSection: function/ { inf = 1; next }
+             inf && /^\t},/ { exit }
+             inf { print }' "$JS")
+case "$ifsec" in
+    *"st.iface_accuracy"*) PASS=$((PASS + 1)) ;;
+    *) FAIL=$((FAIL + 1)); printf "FAIL: the interface section does not read iface_accuracy\n" ;;
+esac
+case "$ifsec" in
+    *"st.accuracy"*|*"accuracyOf("*)
+        FAIL=$((FAIL + 1))
+        printf "FAIL: the interface section reads the DEVICE accuracy verdict\n"
+        ;;
+    *) PASS=$((PASS + 1)) ;;
+esac
+
+# Nor may the interface rows carry the device table's marks. 'degraded' is not
+# even a field of this series, so a mention could only be copied code.
+ifrender=$(awk '/^\trenderIfRow: function/ { inf = 1 }
+                inf { print }
+                inf && /^\trenderIfSection/ { exit }' "$JS")
+for bad in 'degraded' 'undercounted' 'ACCURACY['; do
+    case "$ifrender" in
+        *"$bad"*)
+            FAIL=$((FAIL + 1))
+            printf "FAIL: the interface renderers carry the device series' '%s'\n" "$bad"
+            ;;
+        *) PASS=$((PASS + 1)) ;;
+    esac
+done
+
+# No total row. These rows overlap on purpose — a VPN tunnel's bytes also
+# travelled over its WAN, and the LAN bridge sees the same traffic from the
+# other side — so a sum would be a meaningless number presented as a period
+# total. The device table's total is computed with .some(); this one must not.
+ift=$(awk '/^\trenderIfTable: function/ { inf = 1; next }
+           inf && /^\t},/ { exit }
+           inf { print }' "$JS")
+case "$ift" in
+    *"_('Total')"*)
+        FAIL=$((FAIL + 1))
+        printf "FAIL: the interface table renders a total row over overlapping rows\n"
+        ;;
+    *) PASS=$((PASS + 1)) ;;
+esac
+
+# Direction is relative to the INTERFACE, so Download/Upload would be wrong on
+# the LAN bridge, where received bytes are what the devices sent.
+assert_contains "the interface columns are named from the interface's side" \
+    "_('Received')" "$JS"
+for bad in "_('Download')" "_('Upload')"; do
+    n=$(grep -cF -- "$bad" "$JS")
+    # The device table legitimately uses both; the interface header must not
+    # add more. Counted so adding one to the interface table trips this.
+    assert_eq "no extra $bad column appeared" "1" "$n"
+done
+
+# Every field the view reads must be one the backend actually prints.
+# Backslashes stripped: the keys live inside a double-quoted awk printf, so
+# the literal text in the script is \"dev\" rather than "dev".
+ifread=$(awk '/^hist_if_read\(\)/ { inf = 1 }
+              inf { print }
+              inf && /^}/ { exit }' "$SH" | tr -d '\\')
+for fld in dev role label bytes_in bytes_out last_seen; do
+    case "$ifread" in
+        *"\"$fld\""*) PASS=$((PASS + 1)) ;;
+        *)
+            FAIL=$((FAIL + 1))
+            printf "FAIL: the view reads '%s' but hist_if_read does not emit it\n" "$fld"
+            ;;
+    esac
+done
+
+# The store's placeholders must not reach the screen: the file is
+# tab-separated, so an absent label is '-' and an unknown role is '?'.
+assert_contains "the view translates the store's placeholders" "function ifText" "$JS"
+
 # ── an IP-keyed row must say so ─────────────────────────────────────────────
 # History keyed on an address rather than a MAC is only as stable as the lease.
 # The backend marks it; the view has to surface it or the distinction is lost.
@@ -141,7 +256,7 @@ while read -r m; do
 done < "$TMP/called"
 
 assert_eq "the view calls the expected history methods" \
-    "history_config_set history_flush history_periods history_read history_status" \
+    "history_config_set history_flush history_periods history_read history_read_ifaces history_status" \
     "$(tr '\n' ' ' < "$TMP/called" | sed 's/ $//')"
 
 # The two that write must be in the WRITE list, not merely present somewhere.
