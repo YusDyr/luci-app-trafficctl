@@ -4,6 +4,23 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.26.2] - 2026-11-03
+
+### Bug Fixes
+- read a device's rate limit by exact address, in every nft unit ([#119](https://github.com/YusDyr/luci-app-trafficctl/issues/119)) ([db06085](https://github.com/YusDyr/luci-app-trafficctl/commit/db060858110d69c0297a1b370aa95fab817dca6c))
+  Three readers of the limiter's ruleset got the number wrong.
+
+### Other
+- cap the SDK apk build at 60 minutes ([#120](https://github.com/YusDyr/luci-app-trafficctl/issues/120)) ([91f43f2](https://github.com/YusDyr/luci-app-trafficctl/commit/91f43f2db05af3363ff838f509913473b86cd88e))
+  The step has no timeout, so a stalled SDK download holds the job for
+  GitHub's 6 h default. Across the last 22 successful runs of each
+  workflow it took 17-36 minutes; 60 fails a stall instead of waiting it
+  out. A failed release is re-run through workflow_dispatch.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.26.1...v1.26.2
+
+---
+
 ## [1.26.1] - 2026-11-03
 
 ### Bug Fixes
