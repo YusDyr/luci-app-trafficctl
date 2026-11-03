@@ -4,6 +4,25 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.26.1] - 2026-11-03
+
+### Bug Fixes
+- name a connection's egress interface the way the router does ([#10](https://github.com/YusDyr/luci-app-trafficctl/issues/10)) ([#115](https://github.com/YusDyr/luci-app-trafficctl/issues/115)) ([4d52c82](https://github.com/YusDyr/luci-app-trafficctl/commit/4d52c82aa7ddff21aa8b8602c1d895c43a1e2661))
+  The Iface column showed the kernel device a policy-routed flow resolved
+  to: mwan3 sends it out of "awg3", and the user had named that network
+  "Finland". The column answers "which uplink carried this", and the device
+  name is the one answer the user did not write down anywhere.
+- find a device's shape class by lookup in the summary and shape stats ([#118](https://github.com/YusDyr/luci-app-trafficctl/issues/118)) ([2b4516b](https://github.com/YusDyr/luci-app-trafficctl/commit/2b4516be1859bbec6bed7745f4547dd42134f4e4))
+  Two readers of shapes.json had not caught up with allocated minors.
+- police IPv6 download too, over an address set the client's own frames fill ([#67](https://github.com/YusDyr/luci-app-trafficctl/issues/67)) ([#117](https://github.com/YusDyr/luci-app-trafficctl/issues/117)) ([9cbc593](https://github.com/YusDyr/luci-app-trafficctl/commit/9cbc5930ec5271d7a1b2689c215ea1e2dcabe254))
+  The limiter covered IPv6 upload (keyed on the client's MAC at LAN ingress)
+  but not download, and #67 is still waiting on that half: a dual-stack
+  device under a 10 Mbit/s cap still downloaded at line rate over v6.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.26.0...v1.26.1
+
+---
+
 ## [1.26.0] - 2026-11-03
 
 ### Features
