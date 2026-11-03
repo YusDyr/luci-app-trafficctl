@@ -65,6 +65,8 @@ jobs:
       # the classid allocator and two devices end up sharing an HTB class.
       - name: Asymmetric rate limit tests
         run: bash tests/test_asymmetric_limits.sh
+      - name: Shape classid lookup tests (summary, shape-stats)
+        run: bash tests/test_shape_lookup.sh
       # Slices the CIDR helpers out of status.js and runs them under node —
       # the only frontend logic with a wrong answer an operator cannot see.
       - name: Subnet target warning (frontend slices)
