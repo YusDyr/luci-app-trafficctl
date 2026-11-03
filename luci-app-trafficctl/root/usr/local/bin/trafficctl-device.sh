@@ -279,11 +279,29 @@ if command -v ip >/dev/null 2>&1; then
     done
 fi
 
-CONNS_OUT=$(echo "$CONNTRACK_DATA" | awk -v ip="$IP" -v pf="$PROTO_FILTER" -v oifmap="$OIF_MAP" '
+# The kernel device is not what the user named the interface: mwan3 egress is
+# "awg3", the network is "Finland" (#10). The uci name comes from the role map
+# trafficctl-ifaces.sh already memoizes in tmpfs — the overview polls it, so it
+# is normally warm. Built here only when it is missing and there is something
+# to label, never per connection.
+IFROLE_CACHE="${TCTL_IFROLE_CACHE:-/tmp/trafficctl_ifroles}"
+if [ -s "$OIF_MAP" ] && [ ! -s "$IFROLE_CACHE" ]; then
+    /usr/local/bin/trafficctl-ifaces.sh >/dev/null 2>&1
+fi
+
+CONNS_OUT=$(echo "$CONNTRACK_DATA" | awk -v ip="$IP" -v pf="$PROTO_FILTER" -v oifmap="$OIF_MAP" -v ifroles="$IFROLE_CACHE" '
 BEGIN {
     n=0
     while ((getline line < oifmap) > 0) { split(line, p, " "); oifdev[p[1]] = p[2] }
     close(oifmap)
+    # "dev role tunnel primary defroute enslaved label", label "-" when the
+    # device has no uci interface. Header lines start with "#".
+    while ((getline line < ifroles) > 0) {
+        if (substr(line, 1, 1) == "#") continue
+        if (split(line, f, " ") < 7 || f[7] == "-") continue
+        oiflbl[f[1]] = f[7]
+    }
+    close(ifroles)
 }
 {
     proto=""
@@ -325,10 +343,11 @@ BEGIN {
     else if (dport == "993") svc="imaps"
     else if (dport == "8080") svc="http-alt"
 
-    oif = ""
-    if (dst in oifdev) oif = oifdev[dst]
+    odev = ""; oif = ""
+    if (dst in oifdev) { odev = oifdev[dst]; oif = odev }
+    if (odev in oiflbl) oif = oiflbl[odev]
     if (n > 0) printf ","
-    printf "{\"proto\":\"%s\",\"dst\":\"%s\",\"host\":\"\",\"port\":%s,\"service\":\"%s\",\"bytes\":%.0f,\"state\":\"%s\",\"oif\":\"%s\"}", proto, dst, dport, svc, bytes, state, oif
+    printf "{\"proto\":\"%s\",\"dst\":\"%s\",\"host\":\"\",\"port\":%s,\"service\":\"%s\",\"bytes\":%.0f,\"state\":\"%s\",\"oif\":\"%s\",\"oif_dev\":\"%s\"}", proto, dst, dport, svc, bytes, state, oif, odev
     n++
 }
 ')

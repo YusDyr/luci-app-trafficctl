@@ -1113,6 +1113,18 @@ function buildGroupedTable(groups, sortCol, sortDir) {
 	return E('div', { 'class': 'table tc-table' }, [titleRow].concat(rows));
 }
 
+// 'oif' is the uci interface name when the router has one, 'oif_dev' the
+// kernel device it resolved to. Same layout as the overview rows: the device
+// is only worth showing when it differs from the name (#10).
+function oifCell(r) {
+	if (!r.oif) return E('div', { 'class': 'td tc-mono' }, E('span', { 'class': 'tc-c-faint' }, '—'));
+	var cell = E('div', { 'class': 'td tc-mono' }, escHtml(r.oif));
+	if (r.oif_dev && r.oif_dev !== r.oif) {
+		cell.appendChild(E('span', { 'class': 'tc-c-faint tc-ov-ifdev' }, ' ' + escHtml(r.oif_dev)));
+	}
+	return cell;
+}
+
 function buildTable(conns, sortCol, sortDir, rdnsMode, hiddenCols) {
 	var allCols = [
 		{ key:'proto',   label: _('Proto'),    num:false },
@@ -1166,7 +1178,7 @@ function buildTable(conns, sortCol, sortDir, rdnsMode, hiddenCols) {
 			service: E('div', { 'class': 'td tc-c-speed' }, escHtml(r.service || (SERVICE_PORTS[r.port]||''))),
 			bytes:   E('div', { 'class': 'td tc-right tc-mono tc-fw-bold' }, fmtBytes(r.bytes)),
 			state:   E('div', { 'class': 'td tc-fw-bold' + scCls }, state),
-			oif:     E('div', { 'class': 'td tc-mono' }, r.oif ? escHtml(r.oif) : E('span', { 'class': 'tc-c-faint' }, '—'))
+			oif:     oifCell(r)
 		};
 		var cells = cols.map(function(c) { return cellMap[c.key]; });
 		return E('div', { 'class': 'tr' }, cells);

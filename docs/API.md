@@ -234,7 +234,8 @@ Returns detailed connection information for a single device.
       "service": "https",
       "bytes": 17261,
       "state": "ESTABLISHED",
-      "oif": "wan2"
+      "oif": "wan2",
+      "oif_dev": "eth2"
     }
   ],
   "rate_limit_kbit": 0,
@@ -249,6 +250,12 @@ mwan3, which restores the routing mark). For connections with mark `0` (plain
 single-WAN, or policy-routing that doesn't restore the connmark such as podkop)
 `oif` is empty. The LuCI connections table exposes it as an optional, hidden-by-default
 "Iface" column.
+
+`oif` is the **uci interface name** (`wan2`, `Finland`) — what the user called the
+network — and `oif_dev` is the kernel device the route resolved to (`eth2`, `awg3`).
+The name comes from the role map `trafficctl-ifaces.sh` memoizes in
+`/tmp/trafficctl_ifroles`; a device with no uci interface gets its device name in
+both fields. The table shows the device next to the name only when they differ.
 
 ---
 
