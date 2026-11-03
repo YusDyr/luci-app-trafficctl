@@ -75,6 +75,8 @@ jobs:
         run: bash tests/test_offload_ui.sh
       - name: Per-interface counter tests (global overview)
         run: bash tests/test_ifaces.sh
+      - name: Egress interface naming tests
+        run: bash tests/test_oif_label.sh
       - name: Postinst parity tests
         run: bash tests/test_postinst_parity.sh
       # po2lmo.py reimplements a C tool whose output is consumed by a hash
