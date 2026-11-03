@@ -70,17 +70,24 @@ else
     TCTL_RL_DOWNLOAD_FAILED=0
     TCTL_RL_UPLOAD_FAILED=0
     TCTL_RL_UPLOAD6_OK=0
+    TCTL_RL_DOWNLOAD6_OK=0
     tctl_ratelimit_add "$IP" "$RATE" "$COMMENT" "$MODE" "$RATE_UP"
 
-    # IPv6 coverage is partial by construction and the operator has to know
-    # which part: upload is policed on the MAC, download is not policed at all
-    # over v6 (see tctl_ratelimit_add). Claiming "both directions" without
-    # this note is how issue #67 stayed invisible.
-    if [ "$TCTL_RL_UPLOAD6_OK" = "1" ]; then
+    # IPv6 coverage depends on whether the target has a MAC to key on, and
+    # each half can fail to load on its own. The operator has to know which
+    # part is live: claiming "both directions" without this note is how issue
+    # #67 stayed invisible.
+    if [ "$TCTL_RL_UPLOAD6_OK" = "1" ] && [ "$TCTL_RL_DOWNLOAD6_OK" = "1" ]; then
+        V6NOTE=" [IPv6: both directions]"
+    elif [ "$TCTL_RL_UPLOAD6_OK" = "1" ]; then
         V6NOTE=" [IPv6: upload only]"
+    elif [ "$TCTL_RL_DOWNLOAD6_OK" = "1" ]; then
+        V6NOTE=" [IPv6: download only]"
     else
         V6NOTE=" [IPv4 only]"
     fi
+    V6UP=$([ "$TCTL_RL_UPLOAD6_OK" = "1" ] && echo true || echo false)
+    V6DN=$([ "$TCTL_RL_DOWNLOAD6_OK" = "1" ] && echo true || echo false)
 
     # A half-applied limit is a silent trap: report exactly which direction
     # is live rather than claiming success for both.
@@ -108,10 +115,12 @@ else
     NSS="$(tctl_nss_status)"
     PERSIST=$(tctl_persist_enabled && echo true || echo false)
     if [ "$TCTL_RL_DOWNLOAD_FAILED" = "1" ]; then
-        echo "{\"ok\":true,\"ipv6_upload\":$([ "$TCTL_RL_UPLOAD6_OK" = "1" ] && echo true || echo false),\"nss\":\"$NSS\",\"persist\":$PERSIST,\"msg\":\"rate limit ${RATE_UP} kbit/s applied to $IP UPLOAD ONLY — WAN device not resolvable$V6NOTE$NSSNOTE\"}"
+        echo "{\"ok\":true,\"ipv6_upload\":$V6UP,\"ipv6_download\":$V6DN,\"nss\":\"$NSS\",\"persist\":$PERSIST,\"msg\":\"rate limit ${RATE_UP} kbit/s applied to $IP UPLOAD ONLY — WAN device not resolvable$V6NOTE$NSSNOTE\"}"
     elif [ "$TCTL_RL_UPLOAD_FAILED" = "1" ]; then
-        echo "{\"ok\":true,\"ipv6_upload\":false,\"nss\":\"$NSS\",\"persist\":$PERSIST,\"msg\":\"rate limit ${RATE} kbit/s applied to $IP DOWNLOAD ONLY — no LAN ingress device [IPv4 only]$NSSNOTE\"}"
+        # No ingress device means nothing feeds the v6 download set either, so
+        # tctl_ratelimit_add has already reported that half as not live.
+        echo "{\"ok\":true,\"ipv6_upload\":false,\"ipv6_download\":false,\"nss\":\"$NSS\",\"persist\":$PERSIST,\"msg\":\"rate limit ${RATE} kbit/s applied to $IP DOWNLOAD ONLY — no LAN ingress device [IPv4 only]$NSSNOTE\"}"
     else
-        echo "{\"ok\":true,\"ipv6_upload\":$([ "$TCTL_RL_UPLOAD6_OK" = "1" ] && echo true || echo false),\"nss\":\"$NSS\",\"persist\":$PERSIST,\"msg\":\"rate limit $(rate_text) for $IP (both directions, $MODE)$V6NOTE$NSSNOTE\"}"
+        echo "{\"ok\":true,\"ipv6_upload\":$V6UP,\"ipv6_download\":$V6DN,\"nss\":\"$NSS\",\"persist\":$PERSIST,\"msg\":\"rate limit $(rate_text) for $IP (both directions, $MODE)$V6NOTE$NSSNOTE\"}"
     fi
 fi

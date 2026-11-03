@@ -242,7 +242,7 @@ these controls on a dual-stack network.
 | WiFi block (MAC deny) | ✅ | ✅ | MAC — the client cannot associate at all |
 | Block internet (per device) | ✅ | ✅ | address for v4, **MAC** for v6 |
 | Rate limit — **upload** | ✅ | ✅ | address for v4, **MAC** for v6 |
-| Rate limit — **download** | ✅ | ❌ | address only |
+| Rate limit — **download** | ✅ | ✅ | address for v4; for v6 a set of the device's addresses, fed from its own **MAC**-matched frames |
 | Traffic shaping (tc/HTB), both directions | ✅ | ❌ | address only |
 | Port-forward pause / limit | ✅ | ❌ | address only |
 | Byte counters, speed graphs, totals, Prometheus | ✅ | ❌ | address only |
@@ -255,12 +255,13 @@ rule. The MAC does not rotate, so the rules that *can* be keyed on it are.
 
 **Where a MAC cannot be used, and what happens then:**
 
-- **Download** cannot be. By the time a reply is on its way to the client the
-  destination MAC is the next hop's, and the rule sits on an address-matching
-  hook. Doing this properly needs a named nft set per device, populated from
-  `ip -6 neigh`/DHCPv6 and refreshed as addresses rotate — a data-model change,
-  not a one-line match. A stale set is a silent bypass, so it is being done
-  separately rather than quickly.
+- **Download** is not matched on the MAC directly: by the time a reply is on
+  its way to the client, the L2 header is not built yet. It is matched on a
+  per-device set of the client's IPv6 addresses instead, and that set is filled
+  by the client's own traffic: every IPv6 packet it sends arrives with its MAC,
+  and its source address goes into the set with a one-hour timeout that each
+  packet renews. A new privacy address is covered from its first packet, so the
+  set never needs refreshing from the neighbour table and cannot go stale.
 - **A device with no DHCP lease and no neighbour entry** — a client behind a
   downstream router, reached through `extra_subnets` or a static route — has no
   MAC this router can see. Its IPv4 rules are applied as before and the reply

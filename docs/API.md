@@ -29,7 +29,7 @@ complete statement of it** (issue #67).
 | `macfilter_add` (WiFi) | ✅ | ✅ | MAC, at association |
 | `block` / `unblock` | ✅ | ✅ | `ip saddr` **+** `meta nfproto ipv6 ether saddr <mac>` |
 | `ratelimit` — upload | ✅ | ✅ | `ip saddr` **+** `meta protocol ip6 ether saddr <mac>` |
-| `ratelimit` — download | ✅ | ❌ | `ip daddr` |
+| `ratelimit` — download | ✅ | ✅ | `ip daddr` **+** `meta protocol ip6 ip6 daddr @tctl_v6_<slug>`, a set fed by `ether saddr <mac>` at LAN ingress |
 | `shape_add` (tc/HTB) | ✅ | ❌ | `u32 match ip src`/`dst`; the `mirred` redirect into the IFB is itself `protocol ip` |
 | `portfw` pause/limit | ✅ | ❌ | `ip daddr` |
 | `bytes`, `totals`, `summary`, metrics | ✅ | ❌ | conntrack rows parsed as IPv4 |
@@ -41,12 +41,21 @@ the same bypass as having no rule, reached more slowly. A MAC does not rotate.
 
 **Where a MAC is not usable.**
 
-- **Download.** On the LAN egress hook the outgoing L2 header does not exist
-  yet — the destination MAC a packet carries there is the previous hop's — so
-  `ether daddr` is not the client. Doing this correctly needs a named nft set
-  per device fed from `ip -6 neigh`/DHCPv6 and refreshed as addresses rotate.
-  That is a data-model change, and a stale set is a silent bypass, so it is
-  deliberately **not** attempted here.
+- **Download** is not matched on the MAC directly. On the LAN egress hook the
+  outgoing L2 header does not exist yet — the destination MAC a packet carries
+  there is the previous hop's — so `ether daddr` is not the client. It is
+  matched on the client's addresses, `ip6 daddr @tctl_v6_<slug>`, and the set
+  is filled by the data path rather than from a neighbour-table snapshot: at LAN
+  ingress, where the frame is still the client's own, the `_v6` rule
+  `meta protocol ip6 ether saddr <mac> ip6 saddr != fe80::/10 update
+  @tctl_v6_<slug> { ip6 saddr }` adds each source address with a one-hour
+  timeout (`flags dynamic,timeout`) that every packet renews. A rotated privacy
+  address is in the set from its first packet and the old one ages out, so the
+  set cannot go stale. Not covered: download that no packet from the client ever
+  preceded (unsolicited inbound), which for TCP does not exist. The feed rule
+  sits before the upload policer, so a packet that policer drops still renews
+  its address. If the set cannot be created, neither rule is installed and the
+  reply says so.
 - **A client with no DHCP lease and no neighbour entry** (`extra_subnets`, a
   static route, anything behind a downstream router) has no MAC visible to this
   router. `tctl_lookup_mac` **fails** rather than guessing; the IPv4 rules are
@@ -68,8 +77,10 @@ is required: an unscoped `ether saddr` rule would match a dual-stack client's
 IPv4 as well and police it twice, halving the ceiling it was given.
 
 **Comment suffixes.** The v6 rules carry no address, so their comment is the
-only handle on them: `tctl_block_<slug>_mac` for a block and
-`rl_ratelimit_<slug>_ul6` for an upload limit. Removal matches comments **in
+only handle on them: `tctl_block_<slug>_mac` for a block, and
+`rl_ratelimit_<slug>_ul6` (upload), `_dl6` (download) and `_v6` (the set feed)
+for a limit. The set `tctl_v6_<slug>` is deleted after those rules, since nft
+refuses to delete a set that a rule still references. Removal matches comments **in
 full, closing quote included** — `_ul` is a prefix of `_ul6` and `<slug>` of a
 longer slug, so a substring match would delete another device's rules (this
 already happened once: unblocking `192.168.1.1` removed `192.168.1.10`'s rule).

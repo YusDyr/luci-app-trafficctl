@@ -129,7 +129,7 @@ tctl_ratelimit_add() {
     local rate_kbyte_up=$((rate_kbit_up / 8))
     [ "$rate_kbyte_up" -lt 1 ] && rate_kbyte_up=1
 
-    local slug dl_expr ul_expr ul6_expr mac
+    local slug dl_expr ul_expr ul6_expr dl6_expr feed6_expr v6set mac
     slug=$(tctl_target_slug "$ip")
     # The two directions were already separate rules on separate hooks — they
     # were symmetric only because both took the same number.
@@ -141,12 +141,9 @@ tctl_ratelimit_add() {
         ul_expr="ip saddr $ip limit rate over ${rate_kbyte_up} kbytes/second"
     fi
 
-    # Upload over IPv6, keyed on the MAC. This direction and only this one:
-    # at LAN ingress the frame is still the client's own, so "ether saddr"
-    # identifies it whatever address family it is using. Download over IPv6 is
-    # policed at LAN egress, where the destination MAC is the next hop's — it
-    # needs the device's current v6 address set and is deliberately not
-    # attempted here.
+    # Upload over IPv6, keyed on the MAC: at LAN ingress the frame is still
+    # the client's own, so "ether saddr" identifies it whatever address family
+    # it is using.
     #
     # Scoped to IPv6 on purpose: IPv4 keeps being policed by exactly the rule it
     # always was, so nothing about existing behaviour depends on whether this
@@ -161,13 +158,41 @@ tctl_ratelimit_add() {
     # against nftables 1.1.1 / kernel 6.6). nfproto is what tctl_block_add uses,
     # because that rule lives in inet fw4. Same intent, different family, and
     # the wrong one does not silently under-match — it fails to load.
-    ul6_expr=""
+    #
+    # Download over IPv6 cannot be keyed on the MAC: at LAN egress the L2
+    # header is not built yet. It is matched on the device's v6 ADDRESSES,
+    # which is only sound if the set of them can never go stale — SLAAC
+    # privacy extensions rotate them, and a set that misses the current one
+    # is a silent bypass. So the set is not written from a neighbour-table
+    # snapshot that something would have to keep refreshing; the data path
+    # fills it. Every v6 packet the client sends crosses LAN ingress with its
+    # own MAC, and the feed rule there adds its source address with a timeout
+    # ("update" re-arms it on every packet, so an address in use never
+    # expires). A new temporary address is in the set from its first packet,
+    # one that stopped being used drops out after the timeout. Download that
+    # no packet from the client ever preceded is the only thing that is not
+    # covered, and for TCP there is none. Link-local is left out: it never
+    # crosses the router.
+    #
+    # Verified on kernel 6.12 / nftables 1.0.9 with a client in its own netns
+    # behind a bridge: one ping from a privacy address put that address in the
+    # set, and a 5 Mbit/s limit held an iperf3 download to it at ~6 Mbit/s.
+    ul6_expr=""; dl6_expr=""; feed6_expr=""
+    v6set="tctl_v6_$slug"
     if mac=$(tctl_target_mac "$ip"); then
         ul6_expr="meta protocol ip6 ether saddr $mac limit rate over ${rate_kbyte_up} kbytes/second"
+        feed6_expr="meta protocol ip6 ether saddr $mac ip6 saddr != fe80::/10 update @$v6set { ip6 saddr }"
+        dl6_expr="meta protocol ip6 ip6 daddr @$v6set limit rate over ${rate_kbyte} kbytes/second"
     fi
 
     if [ "$TCTL_FW" = "nft" ]; then
         nft add table netdev tm_ratelimit 2>/dev/null
+        # The set has to exist before any rule that names it. Without it the
+        # v6 download half is skipped and reported as such, never half-built.
+        if [ -n "$dl6_expr" ] && ! nft add set netdev tm_ratelimit "$v6set" \
+                "{ type ipv6_addr; flags dynamic,timeout; timeout ${TCTL_V6SET_TIMEOUT:-1h}; }" 2>/dev/null; then
+            feed6_expr=""; dl6_expr=""
+        fi
 
         # Download is policed at LAN EGRESS, not WAN ingress.
         #
@@ -183,7 +208,7 @@ tctl_ratelimit_add() {
         # the IP stack, and the port-level egress hook never fires for it.
         # Verified on kernel 6.12: br-lan egress counted every packet, the
         # ports counted none.
-        local dev chain dl_ok=0 wan_dev
+        local dev chain dl_ok=0 dl6_ok=0 wan_dev
         for dev in $(tctl_get_lan_devices); do
             chain=$(tctl_egress_chain "$dev")
             nft add chain netdev tm_ratelimit "$chain" \
@@ -191,15 +216,23 @@ tctl_ratelimit_add() {
             nft add rule netdev tm_ratelimit "$chain" \
                 "$dl_expr counter drop comment \"$comment\"" 2>/dev/null \
                 && dl_ok=1
+            [ -n "$dl6_expr" ] || continue
+            nft add rule netdev tm_ratelimit "$chain" \
+                "$dl6_expr counter drop comment \"${comment}_dl6\"" 2>/dev/null \
+                && dl6_ok=1
         done
         # Kernels older than 5.16 have no netdev egress hook; fall back to WAN
         # ingress, which is correct as long as the client isn't masqueraded.
+        # IPv6 is not masqueraded at all, so the v6 rule is correct there too.
         if [ "$dl_ok" = "0" ] && wan_dev=$(tctl_get_wan_device); then
             nft add chain netdev tm_ratelimit dl \
                 "{ type filter hook ingress device $wan_dev priority -200; policy accept; }" 2>/dev/null
             nft add rule netdev tm_ratelimit dl \
                 "$dl_expr counter drop comment \"$comment\"" 2>/dev/null \
                 && dl_ok=1
+            [ -n "$dl6_expr" ] && nft add rule netdev tm_ratelimit dl \
+                "$dl6_expr counter drop comment \"${comment}_dl6\"" 2>/dev/null \
+                && dl6_ok=1
         fi
         # Set for the caller to inspect (see trafficctl-ratelimit.sh).
         # shellcheck disable=SC2034
@@ -208,7 +241,7 @@ tctl_ratelimit_add() {
         # One chain per ingress device: a device that refuses the hook then
         # only loses its own chain instead of taking the whole set with it.
         local dev chain
-        local ul_ok=0 ul6_ok=0
+        local ul_ok=0 ul6_ok=0 feed6_ok=0
         for dev in $(tctl_ingress_devices); do
             chain=$(tctl_ingress_chain "$dev")
             nft add chain netdev tm_ratelimit "$chain" \
@@ -217,6 +250,11 @@ tctl_ratelimit_add() {
                 "$ul_expr counter drop comment \"${comment}_ul\"" 2>/dev/null \
                 && ul_ok=1
             [ -n "$ul6_expr" ] || continue
+            # Feed before police, so a packet the upload limit drops still
+            # keeps its address in the download set.
+            [ -n "$feed6_expr" ] && nft add rule netdev tm_ratelimit "$chain" \
+                "$feed6_expr comment \"${comment}_v6\"" 2>/dev/null \
+                && feed6_ok=1
             nft add rule netdev tm_ratelimit "$chain" \
                 "$ul6_expr counter drop comment \"${comment}_ul6\"" 2>/dev/null \
                 && ul6_ok=1
@@ -226,11 +264,21 @@ tctl_ratelimit_add() {
         # Set for the caller to report: "limited" means v4 only unless this is 1.
         # shellcheck disable=SC2034
         TCTL_RL_UPLOAD6_OK="$ul6_ok"
+        # A download rule over a set nothing feeds matches nothing, so it only
+        # counts when both halves loaded.
+        # shellcheck disable=SC2034
+        if [ "$dl6_ok" = "1" ] && [ "$feed6_ok" = "1" ]; then
+            TCTL_RL_DOWNLOAD6_OK=1
+        else
+            TCTL_RL_DOWNLOAD6_OK=0
+        fi
     else
         # fw3/iptables stays IPv4-only. A half-built ip6tables path would be
         # worse than a stated gap; see docs/COMPATIBILITY.md.
         # shellcheck disable=SC2034
         TCTL_RL_UPLOAD6_OK=0
+        # shellcheck disable=SC2034
+        TCTL_RL_DOWNLOAD6_OK=0
         iptables -t mangle -A FORWARD -d "$ip" -m hashlimit \
             --hashlimit-above "${rate_kbit}kbit/sec" --hashlimit-burst "${rate_kbit}kbit" \
             --hashlimit-mode dstip --hashlimit-name "rl_${comment}" \
@@ -247,9 +295,11 @@ tctl_ratelimit_remove() {
     local chain h
 
     if [ "$TCTL_FW" = "nft" ]; then
-        # Scan the whole table once: rules for this IP live in dl (daddr), in
-        # one ul_<dev> chain per ingress device (saddr), and — for a host with
-        # a known MAC — a second, IPv6-scoped rule in each of those (_ul6).
+        # Scan the whole table once: rules for this IP live in the dl chains
+        # (daddr, plus _dl6 over the v6 address set), in one ul_<dev> chain per
+        # ingress device (saddr), and — for a host with a known MAC — the
+        # IPv6-scoped _ul6 rule and the _v6 rule feeding the set in each of
+        # those.
         #
         # Each comment is matched in FULL, closing quote included. The suffixes
         # are prefixes of one another ("_ul" of "_ul6"), and every comment ends
@@ -258,12 +308,15 @@ tctl_ratelimit_remove() {
         nft -a list table netdev tm_ratelimit 2>/dev/null | awk -v cmt="$comment" '
             /^[ \t]*chain [a-zA-Z0-9_]+ \{/ { chain = $2; next }
             index($0, "\"" cmt "\"") || index($0, "\"" cmt "_ul\"") ||
-            index($0, "\"" cmt "_ul6\"") {
+            index($0, "\"" cmt "_ul6\"") || index($0, "\"" cmt "_dl6\"") ||
+            index($0, "\"" cmt "_v6\"") {
                 for (i = 1; i < NF; i++)
                     if ($i == "handle") { print chain, $(i+1); break }
             }' | while read -r chain h; do
             [ -n "$chain" ] && [ -n "$h" ] && nft delete rule netdev tm_ratelimit "$chain" handle "$h" 2>/dev/null
         done
+        # Only once nothing references it: nft refuses to delete a set in use.
+        nft delete set netdev tm_ratelimit "tctl_v6_$(tctl_target_slug "$ip")" 2>/dev/null
     else
         while iptables -t mangle -D FORWARD -d "$ip" -m comment --comment "$comment" 2>/dev/null; do :; done
         while iptables -t mangle -D FORWARD -s "$ip" -m comment --comment "${comment}_ul" 2>/dev/null; do :; done

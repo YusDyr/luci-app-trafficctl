@@ -6,11 +6,10 @@
 # over IPv6 to the same endpoint — and a "blocked" device kept full, unmetered
 # v6 access while the UI read blocked.
 #
-# What is covered here is the MAC-keyed half: the internet block (both
-# families) and the UPLOAD direction of the rate limiter. Download over IPv6
-# and byte accounting over IPv6 are deliberately still open; there are
-# assertions below pinning that down so the gap cannot close by accident and
-# go undocumented.
+# What is covered here: the internet block (both families, MAC-keyed), the
+# UPLOAD direction of the rate limiter (MAC-keyed) and its DOWNLOAD direction
+# (an address set the client's own upload packets feed). Byte accounting over
+# IPv6 is deliberately still open.
 #
 # The nft mock keeps real state for BOTH rule forms — the address-keyed v4 rule
 # and the MAC-keyed v6 one — with stable handles, because the interesting
@@ -185,6 +184,7 @@ case "$arg" in
         mv "$FW4_STATE.new" "$FW4_STATE"
         ;;
     -a\ list\ table\ netdev\ tm_ratelimit) cat "$RL_DUMP" ;;
+    add\ set\ netdev\ tm_ratelimit*) [ -z "$NFT_FAIL_SET" ] || exit 1 ;;
 esac
 exit 0
 MOCK
@@ -440,7 +440,33 @@ assert_contains "limiter: IPv4 upload rule unchanged" \
 assert_contains "limiter: IPv6 upload is policed on the MAC at LAN ingress" \
     "add rule netdev tm_ratelimit ul_lan1 meta protocol ip6 ether saddr aa:bb:cc:dd:ee:50 limit rate over 625 kbytes/second counter drop comment \"rl_ratelimit_192_168_1_50_ul6\"" \
     "$NFT"
-assert_contains "limiter: says IPv6 upload is covered" "[IPv6: upload only]" "$OUT"
+assert_contains "limiter: says both IPv6 directions are covered" "[IPv6: both directions]" "$OUT"
+assert_contains "limiter: exposes v6 upload as a field" '"ipv6_upload":true' "$OUT"
+assert_contains "limiter: exposes v6 download as a field" '"ipv6_download":true' "$OUT"
+
+# Download over IPv6 is matched on the device's addresses. They rotate, so the
+# set is fed by the data path rather than written from a snapshot: a dynamic
+# set with a timeout, filled from the client's own frames at LAN ingress.
+assert_contains "limiter: the v6 address set is dynamic with a timeout" \
+    "add set netdev tm_ratelimit tctl_v6_192_168_1_50 { type ipv6_addr; flags dynamic,timeout; timeout 1h; }" \
+    "$NFT"
+assert_contains "limiter: the client's v6 frames feed the set at LAN ingress" \
+    "add rule netdev tm_ratelimit ul_lan1 meta protocol ip6 ether saddr aa:bb:cc:dd:ee:50 ip6 saddr != fe80::/10 update @tctl_v6_192_168_1_50 { ip6 saddr } comment \"rl_ratelimit_192_168_1_50_v6\"" \
+    "$NFT"
+assert_contains "limiter: IPv6 download is policed on the set at LAN egress" \
+    "add rule netdev tm_ratelimit dl_br_lan meta protocol ip6 ip6 daddr @tctl_v6_192_168_1_50 limit rate over 625 kbytes/second counter drop comment \"rl_ratelimit_192_168_1_50_dl6\"" \
+    "$NFT"
+
+# The set must exist before a rule names it, and the feed must come before the
+# upload policer, or a packet that policer drops stops refreshing its address.
+LINE_SET=$(printf '%s\n' "$NFT" | grep -n 'add set netdev tm_ratelimit tctl_v6_' | head -1 | cut -d: -f1)
+LINE_DL6=$(printf '%s\n' "$NFT" | grep -n '_dl6"' | head -1 | cut -d: -f1)
+LINE_FEED=$(printf '%s\n' "$NFT" | grep -n '_v6"' | head -1 | cut -d: -f1)
+LINE_UL6=$(printf '%s\n' "$NFT" | grep -n '_ul6"' | head -1 | cut -d: -f1)
+assert_eq "limiter: the set is created before the rules that name it" \
+    "yes" "$([ "$LINE_SET" -lt "$LINE_DL6" ] && [ "$LINE_SET" -lt "$LINE_FEED" ] && echo yes || echo no)"
+assert_eq "limiter: the feed rule precedes the v6 upload policer" \
+    "yes" "$([ "$LINE_FEED" -lt "$LINE_UL6" ] && echo yes || echo no)"
 
 # The limiter's chains are in the NETDEV family, where nft rejects "meta
 # nfproto" outright: "meta nfproto is only useful in the inet family" (verified
@@ -456,14 +482,22 @@ UL_RULES=$(printf '%s\n' "$NFT" | grep "tm_ratelimit ul_")
 assert_not_contains "limiter: no unscoped ether rule (would double-police IPv4)" \
     "ul_lan1 ether saddr" "$UL_RULES"
 
-# The download half is the part that is NOT fixed here: "ether daddr" at LAN
-# egress is the next hop's MAC, and matching on address needs a per-device set
-# fed from ip -6 neigh. Pinning it so the gap cannot close silently.
+# "ether daddr" at LAN egress is the next hop's MAC, not the client's, so the
+# download rules must never be keyed on one.
 DL_RULES=$(printf '%s\n' "$NFT" | grep "tm_ratelimit dl_")
-assert_not_contains "limiter: download is NOT keyed on a MAC (out of scope, see docs)" \
+assert_not_contains "limiter: download is NOT keyed on a MAC" \
     "ether" "$DL_RULES"
 assert_contains "limiter: download still matches the v4 address" \
     "ip daddr 192.168.1.50" "$DL_RULES"
+
+# A set that cannot be created means no download half at all, reported as
+# such — never a rule over a set that does not exist.
+OUT=$(NFT_FAIL_SET=1 run_ratelimit 192.168.1.50 5000)
+NFT=$(cat "$NFT_LOG")
+assert_not_contains "limiter set-fail: no rule names the missing set" "@tctl_v6_" "$NFT"
+assert_contains "limiter set-fail: v6 upload still applies" '_ul6"' "$NFT"
+assert_contains "limiter set-fail: reported as upload only" "[IPv6: upload only]" "$OUT"
+assert_contains "limiter set-fail: download field is false" '"ipv6_download":false' "$OUT"
 
 # A device with no MAC: the v4 limit applies and the report says v4 only.
 OUT=$(run_ratelimit 192.168.1.70 5000)
@@ -473,6 +507,8 @@ assert_contains "limiter no-mac: the IPv4 limit still applies" \
 assert_not_contains "limiter no-mac: no MAC rule is invented" "ether saddr" "$NFT"
 assert_contains "limiter no-mac: reported as IPv4 only" "[IPv4 only]" "$OUT"
 assert_contains "limiter no-mac: exposes it as a field too" '"ipv6_upload":false' "$OUT"
+assert_contains "limiter no-mac: no v6 download either" '"ipv6_download":false' "$OUT"
+assert_not_contains "limiter no-mac: no address set is created" "add set" "$NFT"
 
 # A CIDR target has no single MAC; the per-address meter keeps working.
 OUT=$(run_ratelimit 192.168.1.0/24 5000)
@@ -480,6 +516,7 @@ NFT=$(cat "$NFT_LOG")
 assert_contains "limiter cidr: still accepted" '"ok":true' "$OUT"
 assert_not_contains "limiter cidr: no MAC rule for a whole block" "ether saddr" "$NFT"
 assert_contains "limiter cidr: reported as IPv4 only" "[IPv4 only]" "$OUT"
+assert_not_contains "limiter cidr: no address set for a whole block" "add set" "$NFT"
 
 # A next hop is excluded here for the same reason as blocking: its MAC carries
 # every downstream client's upload, so the whole subnet would be throttled.
@@ -488,6 +525,9 @@ NFT=$(cat "$NFT_LOG")
 assert_not_contains "limiter nexthop: no MAC rule — it would throttle the subnet behind it" \
     "ether saddr" "$NFT"
 assert_contains "limiter nexthop: reported as IPv4 only" "[IPv4 only]" "$OUT"
+# Feeding a set from a router's MAC would collect every downstream client's
+# address, and the download half would then throttle the whole subnet.
+assert_not_contains "limiter nexthop: no address set fed from a router's MAC" "add set" "$NFT"
 
 # ── rate limiter: removal clears the IPv6 rule too ───────────────────────────
 #
@@ -504,8 +544,13 @@ ${TAB}${TAB}meta protocol ip6 ether saddr aa:bb:cc:dd:ee:05 limit rate over 625 
 ${TAB}${TAB}ip saddr 192.168.1.50 limit rate over 625 kbytes/second counter drop comment "rl_ratelimit_192_168_1_50_ul" # handle 13
 ${TAB}${TAB}meta protocol ip6 ether saddr aa:bb:cc:dd:ee:50 limit rate over 625 kbytes/second counter drop comment "rl_ratelimit_192_168_1_50_ul6" # handle 14
 ${TAB}}
+${TAB}${TAB}ether saddr aa:bb:cc:dd:ee:05 ip6 saddr != fe80::/10 update @tctl_v6_192_168_1_5 { ip6 saddr } comment "rl_ratelimit_192_168_1_5_v6" # handle 16
+${TAB}${TAB}ether saddr aa:bb:cc:dd:ee:50 ip6 saddr != fe80::/10 update @tctl_v6_192_168_1_50 { ip6 saddr } comment "rl_ratelimit_192_168_1_50_v6" # handle 17
+${TAB}}
 ${TAB}chain dl_br_lan {
 ${TAB}${TAB}ip daddr 192.168.1.5 limit rate over 625 kbytes/second counter drop comment "rl_ratelimit_192_168_1_5" # handle 15
+${TAB}${TAB}ip6 daddr @tctl_v6_192_168_1_5 limit rate over 625 kbytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_5_dl6" # handle 18
+${TAB}${TAB}ip6 daddr @tctl_v6_192_168_1_50 limit rate over 625 kbytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_50_dl6" # handle 19
 ${TAB}}
 }
 EOF
@@ -523,6 +568,19 @@ assert_not_contains "limiter removal: leaves 192.168.1.50's IPv4 rule alone" \
     "handle 13" "$DELS"
 assert_not_contains "limiter removal: leaves 192.168.1.50's IPv6 rule alone" \
     "handle 14" "$DELS"
+assert_contains "limiter removal: deletes the rule feeding the v6 set" \
+    "delete rule netdev tm_ratelimit ul_lan1 handle 16" "$DELS"
+assert_contains "limiter removal: deletes the IPv6 download rule" \
+    "delete rule netdev tm_ratelimit dl_br_lan handle 18" "$DELS"
+assert_not_contains "limiter removal: leaves 192.168.1.50's v6 feed alone" \
+    "handle 17" "$DELS"
+assert_not_contains "limiter removal: leaves 192.168.1.50's v6 download rule alone" \
+    "handle 19" "$DELS"
+# nft refuses to delete a set that a rule still references, so the set goes
+# last, and only the target's own.
+LAST=$(grep '^delete' "$NFT_LOG" | tail -1)
+assert_eq "limiter removal: the v6 set is deleted after its rules" \
+    "delete set netdev tm_ratelimit tctl_v6_192_168_1_5" "$LAST"
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
