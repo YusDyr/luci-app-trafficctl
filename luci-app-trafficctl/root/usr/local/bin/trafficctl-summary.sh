@@ -242,6 +242,9 @@ if command -v tc >/dev/null 2>&1; then
     }')
 fi
 
+# address → classid, from shapes.json (see tctl_shape_classmap).
+SHAPE_MAP=$(tctl_shape_classmap)
+
 # Wifi ACL state, split by policy, because "listed" means opposite things in the
 # two modes: on a deny (blacklist) radio a listed MAC is blocked, on an allow
 # (whitelist) radio a listed MAC is the only kind permitted. Collected once here
@@ -355,14 +358,14 @@ lookup_rate_limit() {
     echo "${r:-0}"
 }
 
+# The classid is looked up, never derived from the address: minors are
+# allocated, so deriving put the first shaped device's rate on 192.168.x.2 and
+# showed 0 for the device actually shaped — and the Telegram bot built its
+# "Shape — Remove" button from this field.
 lookup_shape_kbit() {
-    local ip="$1" o3 o4 dec hex classid r
-    o3=$(echo "$ip" | cut -d. -f3)
-    o4=$(echo "$ip" | cut -d. -f4)
-    dec=$((o3 * 256 + o4))
-    hex=$(printf "%x" "$dec")
-    case "$hex" in 1|fffe) echo 0; return ;; esac
-    classid="1:$hex"
+    local ip="$1" classid r
+    classid=$(echo "$SHAPE_MAP" | awk -v ip="$ip" '$1==ip{print $2; exit}')
+    [ -n "$classid" ] || { echo 0; return; }
     r=$(echo "$TC_MAP" | awk -v c="$classid" '$1==c{print $2; exit}')
     echo "${r:-0}"
 }

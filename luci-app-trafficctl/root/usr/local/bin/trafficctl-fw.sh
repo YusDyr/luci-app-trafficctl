@@ -931,6 +931,33 @@ TCTL_SEEN_MAX=1000
 # TCTL_LEASES_FILE is set once at the top of this file (overridable for tests).
 TCTL_SHAPES_FILE="/etc/trafficctl/shapes.json"
 
+# "<ip> <classid>" for every shape in shapes.json — the only way from an
+# address to its HTB class, because minors are ALLOCATED (see
+# trafficctl-shape.sh), not derived from the address. Readers that derived
+# them anyway showed one device's rate on another.
+#
+# Same record pattern as shapes_entries in trafficctl-shape.sh, optional
+# rate_kbit_up included: a pattern that misses a record form makes that shape
+# vanish from every reader. A record from before allocation carries no
+# classid, and its class is still the one the old derivation gave it
+# (legacy_classid there), so that is what it maps to.
+tctl_shape_classmap() {
+    grep -oE '\{"ip":"[^"]+","rate_kbit":[0-9]+(,"classid":"1:[0-9a-f]+")?(,"rate_kbit_up":[0-9]+)?\}' \
+        "$TCTL_SHAPES_FILE" 2>/dev/null | awk '
+    {
+        if (!match($0, /"ip":"[^"]+"/)) next
+        ip = substr($0, RSTART + 6, RLENGTH - 7)
+        if (match($0, /"classid":"1:[0-9a-f]+"/)) {
+            print ip, substr($0, RSTART + 11, RLENGTH - 12)
+            next
+        }
+        if (split(ip, o, ".") != 4) next
+        dec = o[3] * 256 + o[4]
+        if (dec < 2 || dec > 65533) next
+        printf "%s 1:%x\n", ip, dec
+    }'
+}
+
 tctl_seen_normalize() {
     printf '%s' "$1" | tr 'A-Z' 'a-z'
 }

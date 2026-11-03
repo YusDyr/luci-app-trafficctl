@@ -21,9 +21,14 @@ fi
 # Map classid → real IP from persisted shapes. Minors are allocated, not derived
 # from the address, so this map is the only way back to an IP; classes missing
 # from it belong to another tc user and are skipped rather than mislabelled.
-CLASSMAP=$(grep -oE '\{"ip":"[^"]+","rate_kbit":[0-9]+,"classid":"1:[0-9a-f]+"\}' \
-    /etc/trafficctl/shapes.json 2>/dev/null | \
-    sed -n 's/{"ip":"\([^"]*\)","rate_kbit":[0-9]*,"classid":"\(1:[0-9a-f]*\)"}/\2 \1/p')
+# The pattern used to require the record to end at the classid, so every shape
+# with its own upload ceiling ("rate_kbit_up") was dropped from this output,
+# and with it from tctl_has_limit.
+#
+# Flattened to ONE "classid ip classid ip …" line: a multi-line value passed
+# through `awk -v` is rejected by some awks ("newline in string"), which left
+# this output empty. Neither field can contain a space.
+CLASSMAP=$(tctl_shape_classmap | awk '{ printf "%s %s ", $2, $1 }')
 
 # Collect class stats into a temp file so we can merge with qdisc stats
 CLASS_DATA=$(tc -s class show dev "$LAN_DEV" 2>/dev/null)
@@ -32,11 +37,9 @@ QDISC_DATA=$(tc -s qdisc show dev "$LAN_DEV" 2>/dev/null)
 # Parse class stats: emit lines "classid ip rate bytes pkts backlog drops overlimits requeues lended borrowed"
 CLASS_PARSED=$(echo "$CLASS_DATA" | awk -v classmap="$CLASSMAP" '
 BEGIN {
-    n = split(classmap, cml, "\n")
-    for (ci = 1; ci <= n; ci++) {
-        split(cml[ci], cmf, " ")
-        if (cmf[1] != "" && cmf[2] != "") ipmap[cmf[1]] = cmf[2]
-    }
+    n = split(classmap, cmf, " ")
+    for (ci = 1; ci + 1 <= n; ci += 2)
+        if (cmf[ci] != "" && cmf[ci + 1] != "") ipmap[cmf[ci]] = cmf[ci + 1]
 }
 
 /class fq_codel/ { skip = 1; next }
