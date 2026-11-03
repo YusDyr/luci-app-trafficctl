@@ -323,6 +323,42 @@ tctl_ratelimit_remove() {
     fi
 }
 
+# Download ceiling in kbit/s of the limit on one address, read from an
+# "nft list table netdev tm_ratelimit" dump on stdin; nothing when it has none.
+#
+# The address is compared as a whole FIELD. A grep for "daddr <ip>" also
+# matched every address it is a prefix of, so 192.168.1.5 reported
+# 192.168.1.50's limit, and the dots matched any character besides. Only the
+# first rule counts: the download rule is installed on every LAN device's
+# egress chain, so a router with several bridges holds several copies, and
+# printing all of them handed printf a multi-line "number".
+#
+# nft prints the rate in the largest unit that keeps it whole, and its units
+# step by 1024, not 1000: 1024 bytes/second lists as "1 kbytes/second" and
+# 1024 kbytes/second as "1 mbytes/second" (verified with nftables 1.0.9).
+# The readers that only knew "kbytes" turned the latter into 0 — or, in the
+# stats, into 8 kbit/s. The rule was written as rate_kbit / 8 kbytes, so
+# kbytes * 8 is the exact way back, and every other unit is scaled to kbytes
+# by nft's own factor.
+tctl_rl_rate_kbit() {
+    awk -v ip="$1" '
+    function kbit(n, u) {
+        if (u ~ /^bytes/)  return n * 8 / 1024
+        if (u ~ /^kbytes/) return n * 8
+        if (u ~ /^mbytes/) return n * 8 * 1024
+        if (u ~ /^gbytes/) return n * 8 * 1024 * 1024
+        return 0
+    }
+    /limit rate over/ {
+        hit = 0
+        for (i = 1; i < NF; i++)
+            if ($i == "daddr" && ($(i+1) == ip || $(i+1) == ip "/32")) { hit = 1; break }
+        if (!hit) next
+        for (j = i; j < NF - 1; j++)
+            if ($j == "over") { printf "%.0f\n", kbit($(j+1), $(j+2)); exit }
+    }'
+}
+
 tctl_ratelimit_list() {
     if [ "$TCTL_FW" = "nft" ]; then
         nft list table netdev tm_ratelimit 2>/dev/null

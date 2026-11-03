@@ -67,6 +67,8 @@ jobs:
         run: bash tests/test_asymmetric_limits.sh
       - name: Shape classid lookup tests (summary, shape-stats)
         run: bash tests/test_shape_lookup.sh
+      - name: Rate limit lookup tests (summary, device, stats)
+        run: bash tests/test_rl_lookup.sh
       # Slices the CIDR helpers out of status.js and runs them under node —
       # the only frontend logic with a wrong answer an operator cannot see.
       - name: Subnet target warning (frontend slices)

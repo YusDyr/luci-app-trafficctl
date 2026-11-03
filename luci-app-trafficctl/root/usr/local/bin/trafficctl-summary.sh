@@ -351,9 +351,12 @@ lookup_block_bytes() {
 lookup_rate_limit() {
     local ip="$1" r
     if [ "$TCTL_FW" = "nft" ]; then
-        r=$(echo "$RL_DUMP" | grep "daddr $ip" | grep -oE '[0-9]+ kbytes' | awk '{print $1 * 8}')
+        r=$(echo "$RL_DUMP" | tctl_rl_rate_kbit "$ip")
     else
-        r=$(echo "$RL_DUMP" | grep "rl_ratelimit" | grep "$ip" | grep -oE '[0-9]+kbit' | head -1 | sed 's/kbit//')
+        # The address as a whole field, not a substring (see tctl_rl_rate_kbit).
+        r=$(echo "$RL_DUMP" | grep "rl_ratelimit" \
+            | awk -v ip="$ip" '{ for (i = 1; i <= NF; i++) if ($i == ip || $i == ip "/32") { print; next } }' \
+            | grep -oE '[0-9]+kbit' | head -1 | sed 's/kbit//')
     fi
     echo "${r:-0}"
 }
