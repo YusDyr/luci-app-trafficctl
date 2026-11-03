@@ -170,7 +170,7 @@ sequenceDiagram
     SH->>TC: tc class add ... rate 10000kbit
     SH->>TC: tc qdisc add ... fq_codel
     SH->>TC: tc filter add ... match ip dst
-    SH->>FS: write {ip, rate_kbit} to shapes.json
+    SH->>FS: write {ip, rate_kbit, classid, rate_kbit_up} to shapes.json
     SH-->>B: {"ok":true, "msg":"..."}
 
     Note over TC,FS: On reboot...
@@ -253,25 +253,27 @@ graph TD
     FILTER_B -.->|"classify"| DEV_B
 ```
 
-### Class ID Encoding
+### Class ID Allocation
 
-Each device gets a unique class ID derived from its IP address:
+A device's class ID is **allocated, not derived from its address**, and stored
+in `shapes.json` next to the rate:
 
-```
-classid = 1:<hex(third_octet * 256 + fourth_octet)>
-
-Example: 192.168.1.100
-  third_octet  = 1
-  fourth_octet = 100
-  decimal      = 1 * 256 + 100 = 356
-  hex          = 0x164
-  classid      = 1:164
+```json
+{"ip":"192.168.1.100","rate_kbit":10000,"classid":"1:2","rate_kbit_up":2000}
 ```
 
-This means:
-- No collision between devices on the same subnet.
-- Supports up to 65534 devices (the full /16 range minus reserved IDs).
-- Class ID `1:1` is the root class, `1:fffe` is the default (unshaped) class.
+- `alloc_classid` hands out the lowest free minor in `2..65533`, checking both
+  `shapes.json` and the live `tc class show` on the LAN and IFB devices.
+- `lookup_classid` reads the recorded minor, so a device keeps its class for as
+  long as it is shaped, and `trafficctl-shape-stats.sh` maps class to IP from
+  `shapes.json` alone.
+- `1:1` (root) and `1:fffe` (default, unshaped) are reserved and never allocated.
+
+The original derivation, `1:<hex(third_octet * 256 + fourth_octet)>`, put
+`192.168.0.1` on the root class `1:1` (shaping it tore down every other
+device's shape), put `x.x.255.254` on the default class, and collided across
+subnets: `192.168.1.50` and `10.0.1.50` both mapped to `1:132`. It survives
+only as `legacy_classid`, used to remove shapes persisted before the change.
 
 ### Filter Matching
 
