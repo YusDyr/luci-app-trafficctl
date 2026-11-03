@@ -98,7 +98,7 @@ table inet tctl_pfw {
 	chain pfw_forward {
 		type filter hook forward priority -190; policy accept;
 		ip daddr 192.168.0.10 tcp dport 80 counter packets 5 bytes 500 drop comment "tctl_pfw_pause_tcp_192.168.0.10_80"
-		ip daddr 192.168.0.20 udp dport 27015 limit rate over 625 kbytes/second counter drop comment "tctl_pfw_limit_udp_192.168.0.20_27015"
+		ip daddr 192.168.0.20 udp dport 27015 limit rate over 625000 bytes/second counter drop comment "tctl_pfw_limit_udp_192.168.0.20_27015"
 	}
 	chain pfw_input {
 		type filter hook input priority -190; policy accept;
@@ -192,8 +192,8 @@ assert_contains "resume: ok" '"ok":true' "$OUT"
 OUT=$(run_portfw limit forward tcp 192.168.0.10 80 8000)
 assert_contains "limit: ok" '"ok":true' "$OUT"
 NFT_CALLS=$(cat "$NFT_LOG")
-assert_contains "limit: rate-over drop rule (8000 kbit = 1000 kbytes)" \
-    'limit rate over 1000 kbytes/second counter drop' "$NFT_CALLS"
+assert_contains "limit: rate-over drop rule (8000 kbit = 1000000 bytes)" \
+    'limit rate over 1000000 bytes/second counter drop' "$NFT_CALLS"
 
 OUT=$(run_portfw limit forward tcp 192.168.0.10 80 0)
 assert_contains "limit 0: removes" '"ok":true' "$OUT"

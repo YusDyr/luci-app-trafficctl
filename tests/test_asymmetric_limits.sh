@@ -319,11 +319,11 @@ assert_not_contains "an explicitly equal upload rate still writes no field" \
 : > "$NFT_LOG"
 out=$(run "$TMP/ratelimit.sh" 192.168.1.70 8000 rl_test each 800)
 
-# 8000 kbit is 1000 kbytes/s; 800 kbit is 100.
+# 8000 kbit is 1000000 bytes/s (SI: kbit * 125); 800 kbit is 100000.
 assert_contains "download rule takes the download rate" \
     "ip daddr 192.168.1.70 meter tctl_d_" "$(cat "$NFT_LOG")"
-assert_contains "download rate reaches nft as kbytes" "1000 kbytes/second" "$(cat "$NFT_LOG")"
-assert_contains "upload rate reaches nft as kbytes" "100 kbytes/second" "$(cat "$NFT_LOG")"
+assert_contains "download rate reaches nft as bytes" "1000000 bytes/second" "$(cat "$NFT_LOG")"
+assert_contains "upload rate reaches nft as bytes" "100000 bytes/second" "$(cat "$NFT_LOG")"
 assert_contains "limiter reports both figures" "8000 kbit/s down, 800 kbit/s up" "$out"
 
 # ── absence means symmetric, and never zero ────────────────────────────────
@@ -331,10 +331,10 @@ assert_contains "limiter reports both figures" "8000 kbit/s down, 800 kbit/s up"
 : > "$NFT_LOG"
 out=$(run "$TMP/ratelimit.sh" 192.168.1.71 8000 rl_test each)
 assert_contains "a limit with no upload argument polices upload at the same rate" \
-    "1000 kbytes/second" "$(cat "$NFT_LOG")"
-# 1 kbyte/s is what rate 0 would floor to — the total-block signature.
+    "1000000 bytes/second" "$(cat "$NFT_LOG")"
+# 1 byte/s is what rate 0 would floor to — the total-block signature.
 assert_not_contains "an omitted upload rate is NOT read as zero" \
-    "over 1 kbytes/second" "$(cat "$NFT_LOG")"
+    "over 1 bytes/second" "$(cat "$NFT_LOG")"
 assert_contains "and it reports a single figure" "8000 kbit/s for" "$out"
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -357,16 +357,16 @@ assert_contains "and still records mode and rate as before" '"mode":"each"' "$(c
 printf '[{"type":"ratelimit","ip":"192.168.1.90","param":"8000","mode":"each","param_up":"800"}]' > "$RULES"
 printf '[]' > "$SHAPES"
 INTERFACE=lan ACTION=ifup run "$TMP/hotplug" >/dev/null 2>&1
-assert_contains "restore re-applies the download rate" "1000 kbytes/second" "$(cat "$NFT_LOG")"
-assert_contains "restore re-applies the upload rate" "100 kbytes/second" "$(cat "$NFT_LOG")"
+assert_contains "restore re-applies the download rate" "1000000 bytes/second" "$(cat "$NFT_LOG")"
+assert_contains "restore re-applies the upload rate" "100000 bytes/second" "$(cat "$NFT_LOG")"
 
 # A record from before the feature must come back symmetric, not zeroed.
 : > "$NFT_LOG"
 printf '[{"type":"ratelimit","ip":"192.168.1.91","param":"8000","mode":"each"}]' > "$RULES"
 INTERFACE=lan ACTION=ifup run "$TMP/hotplug" >/dev/null 2>&1
-assert_contains "a pre-feature record restores symmetrically" "1000 kbytes/second" "$(cat "$NFT_LOG")"
+assert_contains "a pre-feature record restores symmetrically" "1000000 bytes/second" "$(cat "$NFT_LOG")"
 assert_not_contains "a pre-feature record does not restore as a total upload block" \
-    "over 1 kbytes/second" "$(cat "$NFT_LOG")"
+    "over 1 bytes/second" "$(cat "$NFT_LOG")"
 
 # ── and the shaper's restore path ──────────────────────────────────────────
 
@@ -400,7 +400,7 @@ assert_eq "both handlers normalise a zero upload rate away" "2" \
 # getRateKbitUp is the one place in the UI that decides between "symmetric" and
 # "a second ceiling", and the distinction it has to preserve is empty-vs-zero:
 # an empty string means symmetric, while a 0 would reach the backend as a
-# ceiling and floor to one kbyte/second — a total upload block. It is sliced out
+# ceiling and floor to one byte/second — a total upload block. It is sliced out
 # of status.js rather than restated, so this cannot drift into testing a copy.
 
 JS="$ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js"

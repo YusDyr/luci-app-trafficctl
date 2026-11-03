@@ -91,7 +91,7 @@ BusyBox `nslookup` (always available) is used as a fallback if rpcd-mod-rrdns is
 |---------|---------------|----------------|-------|
 | Internet blocking | Full | Full | |
 | Block packet counters | Yes (nft counter) | Limited | iptables counters reset on rule changes |
-| Rate limiting (policer) | `limit rate over N kbytes/s` | `hashlimit` module | Slightly different semantics |
+| Rate limiting (policer) | `limit rate over N bytes/s` | `hashlimit` module | Slightly different semantics |
 | Rate limit drop counters | Yes (nft counter) | Not easily accessible | |
 | Traffic shaping (tc/HTB) | Full | Full | tc is firewall-independent |
 | WiFi MAC filtering | Full | Full | Uses uci/hostapd, not firewall |
@@ -101,7 +101,7 @@ BusyBox `nslookup` (always available) is used as a fallback if rpcd-mod-rrdns is
 ### Behavioral Differences
 
 **Rate Limiting Semantics:**
-- nftables: Uses `limit rate over X kbytes/second` on the netdev ingress hook. Operates at the packet level before routing.
+- nftables: Uses `limit rate over X bytes/second` (X = kbit × 125) on netdev hooks: LAN egress for download, LAN ingress for upload. Operates at the packet level.
 - iptables: Uses `-m hashlimit --hashlimit-above Xkbit/sec` in the mangle FORWARD chain. Operates post-routing.
 
 In practice, both achieve the same result (excess packets are dropped), but the measurement granularity differs slightly. nftables tends to be more accurate for bursty traffic.
@@ -126,7 +126,7 @@ In practice, both achieve the same result (excess packets are dropped), but the 
 
 4. **Upload shaping needs `kmod-ifb`** -- both directions are shaped. Download is handled by tc/HTB on the LAN bridge's egress; upload is shaped on an IFB device fed from LAN-side ingress, because a `match ip src` filter on the WAN side sees post-NAT addresses and would match nothing. That requires the `kmod-ifb` kernel module: without it the shaper falls back to download-only and says so, rather than reporting success while leaving upload unlimited.
 
-5. **Rate limiter precision** -- nftables rate limiting uses kbytes/second granularity. For rates below 8 kbit/s, the minimum effective limit is 1 kbyte/s (8 kbit/s).
+5. **Rate limiter units** -- a ceiling in kbit/s is SI (1000 bits), as in the UI and in tc, and is written to nft as exact bytes/second (kbit × 125). nft's own `kbytes` is 1024 bytes, so limits set by earlier versions as `rate_kbit / 8 kbytes` police 2.4% above the ceiling (5000 kbit/s → 5120) and are reported at that real rate until re-applied; persisted limits are re-written in the new form on the next boot. nft lists a rate in its largest whole unit, stepping by 1024, and every reader converts it back with that factor.
 
 ### OpenWrt 21.02 Specific
 

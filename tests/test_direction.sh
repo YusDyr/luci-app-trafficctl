@@ -166,7 +166,7 @@ NFT=$(cat "$NFT_LOG")
 assert_contains "limiter: download chain hooked on LAN egress" \
     "add chain netdev tm_ratelimit dl_br_lan { type filter hook egress device br-lan priority 0" "$NFT"
 assert_contains "limiter: download rule matches daddr" \
-    "add rule netdev tm_ratelimit dl_br_lan ip daddr 192.168.1.50 limit rate over 625 kbytes/second" "$NFT"
+    "add rule netdev tm_ratelimit dl_br_lan ip daddr 192.168.1.50 limit rate over 625000 bytes/second" "$NFT"
 
 if printf '%s' "$NFT" | grep -q "hook egress device lan1"; then
     FAIL=$((FAIL + 1))
@@ -180,7 +180,7 @@ assert_contains "limiter: upload chain on first bridge port" \
 assert_contains "limiter: upload chain on second bridge port" \
     "add chain netdev tm_ratelimit ul_lan2 { type filter hook ingress device lan2 priority -200" "$NFT"
 assert_contains "limiter: upload rule matches saddr on port chain" \
-    "add rule netdev tm_ratelimit ul_lan1 ip saddr 192.168.1.50 limit rate over 625 kbytes/second" "$NFT"
+    "add rule netdev tm_ratelimit ul_lan1 ip saddr 192.168.1.50 limit rate over 625000 bytes/second" "$NFT"
 
 # The regression itself: hooking the bridge matches nothing.
 if printf '%s' "$NFT" | grep -q "hook ingress device br-lan"; then
@@ -266,15 +266,15 @@ assert_contains "subnet: defaults to per-device buckets" 'each' "$OUT"
 # A meter keyed by address gives each host its own bucket; a bare limit would
 # make one device able to starve the rest of the subnet.
 assert_contains "subnet: download meter keyed by daddr" \
-    "ip daddr 10.0.20.0/24 meter tctl_d_10_0_20_0_24 { ip daddr limit rate over 625 kbytes/second }" "$NFT"
+    "ip daddr 10.0.20.0/24 meter tctl_d_10_0_20_0_24 { ip daddr limit rate over 625000 bytes/second }" "$NFT"
 assert_contains "subnet: upload meter keyed by saddr" \
-    "ip saddr 10.0.20.0/24 meter tctl_u_10_0_20_0_24 { ip saddr limit rate over 625 kbytes/second }" "$NFT"
+    "ip saddr 10.0.20.0/24 meter tctl_u_10_0_20_0_24 { ip saddr limit rate over 625000 bytes/second }" "$NFT"
 
 : > "$NFT_LOG"
 OUT=$(PATH="$MOCKBIN:$PATH" sh "$RL" 10.0.20.0/24 5000 "" shared 2>&1)
 NFT=$(cat "$NFT_LOG")
 assert_contains "subnet: shared mode is an aggregate bucket" \
-    "ip daddr 10.0.20.0/24 limit rate over 625 kbytes/second" "$NFT"
+    "ip daddr 10.0.20.0/24 limit rate over 625000 bytes/second" "$NFT"
 
 : > "$NFT_LOG"
 OUT=$(PATH="$MOCKBIN:$PATH" sh "$RL" all 2000 2>&1)
@@ -288,7 +288,7 @@ assert_contains "all: expands to 0.0.0.0/0 with per-device buckets" \
 PATH="$MOCKBIN:$PATH" sh "$RL" 10.0.20.122 1000 >/dev/null 2>&1
 NFT=$(cat "$NFT_LOG")
 assert_contains "host: no meter for a single address" \
-    "ip saddr 10.0.20.122 limit rate over 125 kbytes/second" "$NFT"
+    "ip saddr 10.0.20.122 limit rate over 125000 bytes/second" "$NFT"
 
 OUT=$(PATH="$MOCKBIN:$PATH" sh "$RL" '10.0.20.0/99' 1000 2>&1)
 assert_contains "invalid prefix rejected" '"ok":false' "$OUT"
