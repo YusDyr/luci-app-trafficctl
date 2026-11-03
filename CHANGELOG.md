@@ -4,6 +4,18 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.26.0] - 2026-11-03
+
+### Features
+- show per-interface totals on the History tab ([#114](https://github.com/YusDyr/luci-app-trafficctl/issues/114)) ([ff2a910](https://github.com/YusDyr/luci-app-trafficctl/commit/ff2a910cdd2230282887d278e4de00e5db63c533))
+  The backend, the rpc method (history_read_ifaces) and its ACL entry have
+  been in place since #104; what was missing was the view. This adds the
+  second table below the device one.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.25.4...v1.26.0
+
+---
+
 ## [1.25.4] - 2026-11-01
 
 ### Bug Fixes
