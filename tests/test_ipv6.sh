@@ -435,10 +435,10 @@ assert_eq "summary: block bytes are 0 with no rule at all" \
 OUT=$(run_ratelimit 192.168.1.50 5000)
 NFT=$(cat "$NFT_LOG")
 assert_contains "limiter: IPv4 upload rule unchanged" \
-    "add rule netdev tm_ratelimit ul_lan1 ip saddr 192.168.1.50 limit rate over 625 kbytes/second counter drop comment \"rl_ratelimit_192_168_1_50_ul\"" \
+    "add rule netdev tm_ratelimit ul_lan1 ip saddr 192.168.1.50 limit rate over 625000 bytes/second counter drop comment \"rl_ratelimit_192_168_1_50_ul\"" \
     "$NFT"
 assert_contains "limiter: IPv6 upload is policed on the MAC at LAN ingress" \
-    "add rule netdev tm_ratelimit ul_lan1 meta protocol ip6 ether saddr aa:bb:cc:dd:ee:50 limit rate over 625 kbytes/second counter drop comment \"rl_ratelimit_192_168_1_50_ul6\"" \
+    "add rule netdev tm_ratelimit ul_lan1 meta protocol ip6 ether saddr aa:bb:cc:dd:ee:50 limit rate over 625000 bytes/second counter drop comment \"rl_ratelimit_192_168_1_50_ul6\"" \
     "$NFT"
 assert_contains "limiter: says both IPv6 directions are covered" "[IPv6: both directions]" "$OUT"
 assert_contains "limiter: exposes v6 upload as a field" '"ipv6_upload":true' "$OUT"
@@ -454,7 +454,7 @@ assert_contains "limiter: the client's v6 frames feed the set at LAN ingress" \
     "add rule netdev tm_ratelimit ul_lan1 meta protocol ip6 ether saddr aa:bb:cc:dd:ee:50 ip6 saddr != fe80::/10 update @tctl_v6_192_168_1_50 { ip6 saddr } comment \"rl_ratelimit_192_168_1_50_v6\"" \
     "$NFT"
 assert_contains "limiter: IPv6 download is policed on the set at LAN egress" \
-    "add rule netdev tm_ratelimit dl_br_lan meta protocol ip6 ip6 daddr @tctl_v6_192_168_1_50 limit rate over 625 kbytes/second counter drop comment \"rl_ratelimit_192_168_1_50_dl6\"" \
+    "add rule netdev tm_ratelimit dl_br_lan meta protocol ip6 ip6 daddr @tctl_v6_192_168_1_50 limit rate over 625000 bytes/second counter drop comment \"rl_ratelimit_192_168_1_50_dl6\"" \
     "$NFT"
 
 # The set must exist before a rule names it, and the feed must come before the
@@ -539,18 +539,18 @@ TAB=$(printf '\t')
 cat > "$RL_DUMP" <<EOF
 table netdev tm_ratelimit {
 ${TAB}chain ul_lan1 {
-${TAB}${TAB}ip saddr 192.168.1.5 limit rate over 625 kbytes/second counter drop comment "rl_ratelimit_192_168_1_5_ul" # handle 11
-${TAB}${TAB}meta protocol ip6 ether saddr aa:bb:cc:dd:ee:05 limit rate over 625 kbytes/second counter drop comment "rl_ratelimit_192_168_1_5_ul6" # handle 12
-${TAB}${TAB}ip saddr 192.168.1.50 limit rate over 625 kbytes/second counter drop comment "rl_ratelimit_192_168_1_50_ul" # handle 13
-${TAB}${TAB}meta protocol ip6 ether saddr aa:bb:cc:dd:ee:50 limit rate over 625 kbytes/second counter drop comment "rl_ratelimit_192_168_1_50_ul6" # handle 14
+${TAB}${TAB}ip saddr 192.168.1.5 limit rate over 625000 bytes/second counter drop comment "rl_ratelimit_192_168_1_5_ul" # handle 11
+${TAB}${TAB}meta protocol ip6 ether saddr aa:bb:cc:dd:ee:05 limit rate over 625000 bytes/second counter drop comment "rl_ratelimit_192_168_1_5_ul6" # handle 12
+${TAB}${TAB}ip saddr 192.168.1.50 limit rate over 625000 bytes/second counter drop comment "rl_ratelimit_192_168_1_50_ul" # handle 13
+${TAB}${TAB}meta protocol ip6 ether saddr aa:bb:cc:dd:ee:50 limit rate over 625000 bytes/second counter drop comment "rl_ratelimit_192_168_1_50_ul6" # handle 14
 ${TAB}}
 ${TAB}${TAB}ether saddr aa:bb:cc:dd:ee:05 ip6 saddr != fe80::/10 update @tctl_v6_192_168_1_5 { ip6 saddr } comment "rl_ratelimit_192_168_1_5_v6" # handle 16
 ${TAB}${TAB}ether saddr aa:bb:cc:dd:ee:50 ip6 saddr != fe80::/10 update @tctl_v6_192_168_1_50 { ip6 saddr } comment "rl_ratelimit_192_168_1_50_v6" # handle 17
 ${TAB}}
 ${TAB}chain dl_br_lan {
-${TAB}${TAB}ip daddr 192.168.1.5 limit rate over 625 kbytes/second counter drop comment "rl_ratelimit_192_168_1_5" # handle 15
-${TAB}${TAB}ip6 daddr @tctl_v6_192_168_1_5 limit rate over 625 kbytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_5_dl6" # handle 18
-${TAB}${TAB}ip6 daddr @tctl_v6_192_168_1_50 limit rate over 625 kbytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_50_dl6" # handle 19
+${TAB}${TAB}ip daddr 192.168.1.5 limit rate over 625000 bytes/second counter drop comment "rl_ratelimit_192_168_1_5" # handle 15
+${TAB}${TAB}ip6 daddr @tctl_v6_192_168_1_5 limit rate over 625000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_5_dl6" # handle 18
+${TAB}${TAB}ip6 daddr @tctl_v6_192_168_1_50 limit rate over 625000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_50_dl6" # handle 19
 ${TAB}}
 }
 EOF

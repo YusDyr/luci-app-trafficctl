@@ -124,21 +124,21 @@ tctl_ratelimit_add() {
     # directions could differ. Not zero: a zero ceiling policed every packet and
     # would be a silent total block reported as a successful limit.
     [ -z "$rate_kbit_up" ] && rate_kbit_up="$rate_kbit"
-    local rate_kbyte=$((rate_kbit / 8))
-    [ "$rate_kbyte" -lt 1 ] && rate_kbyte=1
-    local rate_kbyte_up=$((rate_kbit_up / 8))
-    [ "$rate_kbyte_up" -lt 1 ] && rate_kbyte_up=1
+    # bytes/second, not kbytes: see tctl_rate_bytes.
+    local rate_b rate_b_up
+    rate_b=$(tctl_rate_bytes "$rate_kbit")
+    rate_b_up=$(tctl_rate_bytes "$rate_kbit_up")
 
     local slug dl_expr ul_expr ul6_expr dl6_expr feed6_expr v6set mac
     slug=$(tctl_target_slug "$ip")
     # The two directions were already separate rules on separate hooks — they
     # were symmetric only because both took the same number.
     if [ "$mode" = "each" ]; then
-        dl_expr="ip daddr $ip meter tctl_d_$slug { ip daddr limit rate over ${rate_kbyte} kbytes/second }"
-        ul_expr="ip saddr $ip meter tctl_u_$slug { ip saddr limit rate over ${rate_kbyte_up} kbytes/second }"
+        dl_expr="ip daddr $ip meter tctl_d_$slug { ip daddr limit rate over ${rate_b} bytes/second }"
+        ul_expr="ip saddr $ip meter tctl_u_$slug { ip saddr limit rate over ${rate_b_up} bytes/second }"
     else
-        dl_expr="ip daddr $ip limit rate over ${rate_kbyte} kbytes/second"
-        ul_expr="ip saddr $ip limit rate over ${rate_kbyte_up} kbytes/second"
+        dl_expr="ip daddr $ip limit rate over ${rate_b} bytes/second"
+        ul_expr="ip saddr $ip limit rate over ${rate_b_up} bytes/second"
     fi
 
     # Upload over IPv6, keyed on the MAC: at LAN ingress the frame is still
@@ -180,9 +180,9 @@ tctl_ratelimit_add() {
     ul6_expr=""; dl6_expr=""; feed6_expr=""
     v6set="tctl_v6_$slug"
     if mac=$(tctl_target_mac "$ip"); then
-        ul6_expr="meta protocol ip6 ether saddr $mac limit rate over ${rate_kbyte_up} kbytes/second"
+        ul6_expr="meta protocol ip6 ether saddr $mac limit rate over ${rate_b_up} bytes/second"
         feed6_expr="meta protocol ip6 ether saddr $mac ip6 saddr != fe80::/10 update @$v6set { ip6 saddr }"
-        dl6_expr="meta protocol ip6 ip6 daddr @$v6set limit rate over ${rate_kbyte} kbytes/second"
+        dl6_expr="meta protocol ip6 ip6 daddr @$v6set limit rate over ${rate_b} bytes/second"
     fi
 
     if [ "$TCTL_FW" = "nft" ]; then
@@ -337,27 +337,48 @@ tctl_ratelimit_remove() {
 # step by 1024, not 1000: 1024 bytes/second lists as "1 kbytes/second" and
 # 1024 kbytes/second as "1 mbytes/second" (verified with nftables 1.0.9).
 # The readers that only knew "kbytes" turned the latter into 0 — or, in the
-# stats, into 8 kbit/s. The rule was written as rate_kbit / 8 kbytes, so
-# kbytes * 8 is the exact way back, and every other unit is scaled to kbytes
-# by nft's own factor.
+# stats, into 8 kbit/s. Every unit goes back to bytes by nft's factor, and
+# bytes to kbit by the package's own, SI (see tctl_rate_bytes).
 tctl_rl_rate_kbit() {
-    awk -v ip="$1" '
-    function kbit(n, u) {
-        if (u ~ /^bytes/)  return n * 8 / 1024
-        if (u ~ /^kbytes/) return n * 8
-        if (u ~ /^mbytes/) return n * 8 * 1024
-        if (u ~ /^gbytes/) return n * 8 * 1024 * 1024
-        return 0
-    }
+    awk -v ip="$1" "$TCTL_NFT_RATE_AWK"'
     /limit rate over/ {
         hit = 0
         for (i = 1; i < NF; i++)
             if ($i == "daddr" && ($(i+1) == ip || $(i+1) == ip "/32")) { hit = 1; break }
         if (!hit) next
         for (j = i; j < NF - 1; j++)
-            if ($j == "over") { printf "%.0f\n", kbit($(j+1), $(j+2)); exit }
+            if ($j == "over") { printf "%.0f\n", tctl_rate_kbit($(j+1), $(j+2)); exit }
     }'
 }
+
+# A kbit/s ceiling as the bytes/second an nft "limit rate" is written in.
+#
+# kbit/s here is SI, 1000 bits, as everywhere else in the package: the UI,
+# tc ("kbit" is 1000 bits to tc as well) and the speed graphs. nft's
+# "kbytes" is 1024 bytes, so writing rate_kbit / 8 kbytes — what the
+# limiter did — policed 2.4% above the ceiling it was given: 5000 kbit/s
+# became 5120. Bytes are exact (kbit * 1000 / 8 = kbit * 125).
+tctl_rate_bytes() {
+    local b=$(( $1 * 125 ))
+    [ "$b" -lt 1 ] && b=1
+    echo "$b"
+}
+
+# awk function shared by every reader of an nft rate: tctl_rate_kbit(n, unit)
+# turns "n <unit>/second" as nft lists it back into SI kbit/s. Prepended to
+# an awk program; a rule written before rates were stored in bytes reads as
+# what it actually polices (625 kbytes/second is 5120 kbit/s).
+TCTL_NFT_RATE_AWK='
+function tctl_rate_kbit(n, u,   b) {
+    if (u ~ /^bytes/)       b = n
+    else if (u ~ /^kbytes/) b = n * 1024
+    else if (u ~ /^mbytes/) b = n * 1024 * 1024
+    else if (u ~ /^gbytes/) b = n * 1024 * 1024 * 1024
+    else return 0
+    # Rounded here, so a reader printing %d agrees with one printing %.0f.
+    return int(b * 8 / 1000 + 0.5)
+}
+'
 
 tctl_ratelimit_list() {
     if [ "$TCTL_FW" = "nft" ]; then

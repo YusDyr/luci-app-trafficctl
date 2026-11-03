@@ -137,20 +137,19 @@ pfw_add_pause() {
 
 pfw_add_limit() {
     local scope="$1" proto="$2" ip="$3" port="$4" kbit="$5"
-    local cmt chain kbyte
-    kbyte=$((kbit / 8))
-    [ "$kbyte" -lt 1 ] && kbyte=1
+    local cmt chain rate_b
+    rate_b=$(tctl_rate_bytes "$kbit")
     cmt=$(pfw_comment "limit" "$proto" "${ip:-local}" "$port")
     if [ "$TCTL_FW" = "nft" ]; then
         ensure_pfw_table
         chain=$(pfw_chain_for_scope "$scope")
         if [ "$scope" = "input" ]; then
             nft add rule inet tctl_pfw "$chain" \
-                "$proto" dport "$port" limit rate over "$kbyte" kbytes/second \
+                "$proto" dport "$port" limit rate over "$rate_b" bytes/second \
                 counter drop comment "\"$cmt\""
         else
             nft add rule inet tctl_pfw "$chain" \
-                ip daddr "$ip" "$proto" dport "$port" limit rate over "$kbyte" kbytes/second \
+                ip daddr "$ip" "$proto" dport "$port" limit rate over "$rate_b" bytes/second \
                 counter drop comment "\"$cmt\""
         fi
     else
@@ -371,7 +370,7 @@ do_list() {
             printf '%s' "$CTL_DUMP" | grep -q "$(pfw_comment pause "$p" "$cmt_ip" "$port")" && paused=true
             if [ "$limit_kbit" = "0" ]; then
                 st=$(printf '%s' "$CTL_DUMP" | grep "$(pfw_comment limit "$p" "$cmt_ip" "$port")" | \
-                     grep -oE '[0-9]+ kbytes' | awk '{print $1 * 8; exit}')
+                     awk "$TCTL_NFT_RATE_AWK"'{ for (i = 1; i < NF - 1; i++) if ($i == "over") { printf "%.0f\n", tctl_rate_kbit($(i+1), $(i+2)); exit } }')
                 [ -z "$st" ] && st=$(printf '%s' "$CTL_DUMP" | grep "$(pfw_comment limit "$p" "$cmt_ip" "$port")" | \
                      grep -oE 'hashlimit-above [0-9]+' | awk '{print $2; exit}')
                 [ -n "$st" ] && limit_kbit="$st"

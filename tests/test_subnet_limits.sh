@@ -212,19 +212,19 @@ cat > "$TMP/nft_table.txt" <<'TABLE'
 table netdev tm_ratelimit {
 	chain dl_br_lan {
 		type filter hook egress device "br-lan" priority filter; policy accept;
-		ip daddr 192.168.20.0/24 meter tctl_d_192_168_20_0_24 { ip daddr limit rate over 2500 kbytes/second } counter packets 12 bytes 3456 drop comment "rl_ratelimit_192_168_20_0_24"
-		ip daddr 10.0.0.0/24 limit rate over 1250 kbytes/second counter packets 40 bytes 5000 drop comment "rl_ratelimit_10_0_0_0_24"
-		ip daddr 192.168.1.50 limit rate over 625 kbytes/second counter packets 7 bytes 900 drop comment "rl_ratelimit_192_168_1_50"
+		ip daddr 192.168.20.0/24 meter tctl_d_192_168_20_0_24 { ip daddr limit rate over 2500000 bytes/second } counter packets 12 bytes 3456 drop comment "rl_ratelimit_192_168_20_0_24"
+		ip daddr 10.0.0.0/24 limit rate over 1250000 bytes/second counter packets 40 bytes 5000 drop comment "rl_ratelimit_10_0_0_0_24"
+		ip daddr 192.168.1.50 limit rate over 625000 bytes/second counter packets 7 bytes 900 drop comment "rl_ratelimit_192_168_1_50"
 	}
 	chain dl_br_guest {
 		type filter hook egress device "br-guest" priority filter; policy accept;
-		ip daddr 192.168.20.0/24 meter tctl_d_192_168_20_0_24 { ip daddr limit rate over 2500 kbytes/second } counter packets 8 bytes 1544 drop comment "rl_ratelimit_192_168_20_0_24"
-		ip daddr 10.0.0.0/24 limit rate over 1250 kbytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_10_0_0_0_24"
-		ip daddr 192.168.1.50 limit rate over 625 kbytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_50"
+		ip daddr 192.168.20.0/24 meter tctl_d_192_168_20_0_24 { ip daddr limit rate over 2500000 bytes/second } counter packets 8 bytes 1544 drop comment "rl_ratelimit_192_168_20_0_24"
+		ip daddr 10.0.0.0/24 limit rate over 1250000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_10_0_0_0_24"
+		ip daddr 192.168.1.50 limit rate over 625000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_50"
 	}
 	chain ul_lan1 {
 		type filter hook ingress device "lan1" priority -200; policy accept;
-		ip saddr 192.168.20.0/24 meter tctl_u_192_168_20_0_24 { ip saddr limit rate over 2500 kbytes/second } counter packets 3 bytes 300 drop comment "rl_ratelimit_192_168_20_0_24_ul"
+		ip saddr 192.168.20.0/24 meter tctl_u_192_168_20_0_24 { ip saddr limit rate over 2500000 bytes/second } counter packets 3 bytes 300 drop comment "rl_ratelimit_192_168_20_0_24_ul"
 	}
 }
 TABLE
@@ -242,7 +242,7 @@ assert_contains "stats: an aggregate subnet limit is labelled shared" \
     '"ip":"10.0.0.0/24","mode":"shared"' "$STATS"
 assert_contains "stats: a single host is labelled shared" \
     '"ip":"192.168.1.50","mode":"shared"' "$STATS"
-assert_contains "stats: rate survives the meter form (2500 kbytes = 20000 kbit)" \
+assert_contains "stats: rate survives the meter form (2500000 bytes = 20000 kbit)" \
     '"192.168.20.0/24","mode":"each","rate_kbit":20000' "$STATS"
 
 # Summed across chains: 12+8 packets, 3456+1544 bytes. Not 12, and not 8.
@@ -371,7 +371,7 @@ assert_contains "restore: an each-mode subnet limit comes back per-device" \
 RESTORED=$(restore '[{"type":"ratelimit","ip":"10.0.0.0/24","param":"20000","mode":"shared"}]')
 assert_terminated "restore: the loop ended on its own"
 assert_contains "restore: a shared cap comes back" \
-    "ip daddr 10.0.0.0/24 limit rate over 2500 kbytes/second" "$RESTORED"
+    "ip daddr 10.0.0.0/24 limit rate over 2500000 bytes/second" "$RESTORED"
 assert_not_contains "restore: a shared cap does NOT come back per-device" \
     "meter" "$RESTORED"
 
@@ -386,7 +386,7 @@ assert_contains "restore: a legacy subnet record defaults to per-device" \
 RESTORED=$(restore '[{"type":"ratelimit","ip":"192.168.1.50","param":"5000"}]')
 assert_terminated "restore: the loop ended on its own"
 assert_contains "restore: a legacy host record still applies" \
-    "ip daddr 192.168.1.50 limit rate over 625 kbytes/second" "$RESTORED"
+    "ip daddr 192.168.1.50 limit rate over 625000 bytes/second" "$RESTORED"
 assert_not_contains "restore: a host needs no meter" "meter" "$RESTORED"
 
 # ── the restore loop's bounds (#108) ───────────────────────────────────────

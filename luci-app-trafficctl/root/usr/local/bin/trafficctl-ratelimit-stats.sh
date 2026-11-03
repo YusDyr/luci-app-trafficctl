@@ -14,7 +14,7 @@
 . /usr/local/bin/trafficctl-fw.sh
 
 if [ "$TCTL_FW" = "nft" ]; then
-    nft list table netdev tm_ratelimit 2>/dev/null | awk '
+    nft list table netdev tm_ratelimit 2>/dev/null | awk "$TCTL_NFT_RATE_AWK"'
     /ip daddr/ && /limit rate/ && /counter/ {
         ip = ""
         rate = 0
@@ -31,15 +31,9 @@ if [ "$TCTL_FW" = "nft" ]; then
             if ($i == "rate" && $(i+1) == "over") {
                 val = $(i+2)
                 gsub(/[^0-9]/, "", val)
-                # Installed as kbytes/second, but nft prints the largest
-                # unit that keeps the number whole, stepping by 1024:
-                # 1024 kbytes/second lists as "1 mbytes/second" (see
-                # tctl_rl_rate_kbit).
-                unit = $(i+3)
-                if (unit ~ /^mbytes/)      rate = val * 8 * 1024
-                else if (unit ~ /^gbytes/) rate = val * 8 * 1024 * 1024
-                else if (unit ~ /^bytes/)  rate = val * 8 / 1024
-                else                       rate = val * 8
+                # nft lists the largest whole unit, stepping by 1024
+                # (see tctl_rl_rate_kbit); back to SI kbit/s.
+                rate = tctl_rate_kbit(val, $(i+3))
             }
             if ($i == "counter") {
                 # format: counter packets N bytes N
