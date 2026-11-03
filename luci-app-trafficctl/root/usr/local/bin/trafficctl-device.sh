@@ -164,11 +164,12 @@ fi
 # Get rate limit
 RATE_LIM=0
 if [ "$TCTL_FW" = "nft" ]; then
-    RATE_LIM=$(nft list table netdev tm_ratelimit 2>/dev/null | grep "daddr $IP" | \
-        grep -oE '[0-9]+ kbytes' | awk '{print $1 * 8}')
+    RATE_LIM=$(nft list table netdev tm_ratelimit 2>/dev/null | tctl_rl_rate_kbit "$IP")
 else
-    RATE_LIM=$(iptables -t mangle -L FORWARD -nv 2>/dev/null | grep "rl_ratelimit" | grep "$IP" | \
-        grep -oE '[0-9]+kbit' | head -1 | sed 's/kbit//')
+    # The address as a whole field, not a substring (see tctl_rl_rate_kbit).
+    RATE_LIM=$(iptables -t mangle -L FORWARD -nv 2>/dev/null | grep "rl_ratelimit" \
+        | awk -v ip="$IP" '{ for (i = 1; i <= NF; i++) if ($i == ip || $i == ip "/32") { print; next } }' \
+        | grep -oE '[0-9]+kbit' | head -1 | sed 's/kbit//')
 fi
 [ -z "$RATE_LIM" ] && RATE_LIM=0
 
