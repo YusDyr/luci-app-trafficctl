@@ -101,6 +101,10 @@ jobs:
           cp dist/*.ipk /tmp/
 
       - name: Build .apk (via OpenWrt SDK, signed)
+        # 17-36 min across the last 22 successful runs of each workflow. With
+        # no limit a stalled SDK download holds the job for GitHub's 6 h
+        # default; 60 min fails it instead, and the check can be re-run.
+        timeout-minutes: 60
         uses: openwrt/gh-action-sdk@7fc2640243284ecc44f4a9c3f749a61746ee02cb # v11
         env:
           ARCH: x86_64-25.12.4
