@@ -1119,8 +1119,9 @@ function buildGroupedTable(groups, sortCol, sortDir) {
 function oifCell(r) {
 	if (!r.oif) return E('div', { 'class': 'td tc-mono' }, E('span', { 'class': 'tc-c-faint' }, '—'));
 	var cell = E('div', { 'class': 'td tc-mono' }, escHtml(r.oif));
-	if (r.oif_dev && r.oif_dev !== r.oif)
+	if (r.oif_dev && r.oif_dev !== r.oif) {
 		cell.appendChild(E('span', { 'class': 'tc-c-faint tc-ov-ifdev' }, ' ' + escHtml(r.oif_dev)));
+	}
 	return cell;
 }
 
