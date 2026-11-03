@@ -4,6 +4,19 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.26.3] - 2026-11-03
+
+### Bug Fixes
+- police the limiter's ceiling in SI bytes, not 2.4% above it ([#121](https://github.com/YusDyr/luci-app-trafficctl/issues/121)) ([4d13b98](https://github.com/YusDyr/luci-app-trafficctl/commit/4d13b98634830d285a47f646113419de5dfbdc08))
+  A ceiling in kbit/s is SI everywhere in the package: the UI, the speed
+  graphs, and tc, where "kbit" is 1000 bits too. The limiter wrote it to
+  nft as rate_kbit / 8 "kbytes", and nft's kbytes is 1024 bytes, so every
+  limit policed 2.4% above what was asked: 5000 kbit/s became 5120.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.26.2...v1.26.3
+
+---
+
 ## [1.26.2] - 2026-11-03
 
 ### Bug Fixes
