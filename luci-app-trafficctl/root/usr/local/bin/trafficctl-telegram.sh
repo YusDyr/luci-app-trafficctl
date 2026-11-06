@@ -450,13 +450,34 @@ build_device_keyboard() {
 	rm -f "$tmpkb"
 }
 
+# A ceiling as "8000 kbit/s", or "8000↓ / 2000↑ kbit/s" when upload has its
+# own (#66). An upload figure of 0 or equal to download is not a split.
+tg_ceiling() {
+	if [ "${2:-0}" -gt 0 ] 2>/dev/null && [ "$2" != "$1" ]; then
+		printf '%s↓ / %s↑ kbit/s' "$1" "$2"
+	else
+		printf '%s kbit/s' "$1"
+	fi
+}
+
+# The same, compact, for the /status flags: "8000k" or "8000/2000k".
+tg_ceiling_short() {
+	if [ "${2:-0}" -gt 0 ] 2>/dev/null && [ "$2" != "$1" ]; then
+		printf '%s/%sk' "$1" "$2"
+	else
+		printf '%sk' "$1"
+	fi
+}
+
 build_action_keyboard() {
 	local ip="$1" devices="$2"
-	local blocked wifi_blocked rl_kbit shape_kbit
+	local blocked wifi_blocked rl_kbit shape_kbit rl_up shape_up
 	blocked=$(get_device_field "$devices" "$ip" "blocked")
 	wifi_blocked=$(get_device_field "$devices" "$ip" "wifi_blocked")
 	rl_kbit=$(get_device_field "$devices" "$ip" "rate_limit_kbit")
 	shape_kbit=$(get_device_field "$devices" "$ip" "shape_kbit")
+	rl_up=$(get_device_field "$devices" "$ip" "rate_limit_kbit_up")
+	shape_up=$(get_device_field "$devices" "$ip" "shape_kbit_up")
 	conn_type=$(get_device_field "$devices" "$ip" "conn_type")
 
 	local kb='{"inline_keyboard":['
@@ -487,7 +508,7 @@ build_action_keyboard() {
 	# limiter
 	if [ "$TG_BTN_LIMIT" = "1" ]; then
 		if [ "${rl_kbit:-0}" -gt 0 ] 2>/dev/null; then
-			rows="${rows}[{\"text\":\"⚡ Limit: ${rl_kbit} kbit/s — Remove\",\"callback_data\":\"act:unlimit:${ip}\"}],"
+			rows="${rows}[{\"text\":\"⚡ Limit: $(tg_ceiling "$rl_kbit" "$rl_up") — Remove\",\"callback_data\":\"act:unlimit:${ip}\"}],"
 		else
 			rows="${rows}[{\"text\":\"⚡ 1M\",\"callback_data\":\"act:limit:${ip}:1000\"},{\"text\":\"⚡ 2M\",\"callback_data\":\"act:limit:${ip}:2000\"},{\"text\":\"⚡ 5M\",\"callback_data\":\"act:limit:${ip}:5000\"}],"
 			rows="${rows}[{\"text\":\"⚡ 10M\",\"callback_data\":\"act:limit:${ip}:10000\"},{\"text\":\"⚡ 25M\",\"callback_data\":\"act:limit:${ip}:25000\"},{\"text\":\"⚡ 50M\",\"callback_data\":\"act:limit:${ip}:50000\"},{\"text\":\"⚡ 100M\",\"callback_data\":\"act:limit:${ip}:100000\"}],"
@@ -497,7 +518,7 @@ build_action_keyboard() {
 	# shaper
 	if [ "$TG_BTN_SHAPE" = "1" ]; then
 		if [ "${shape_kbit:-0}" -gt 0 ] 2>/dev/null; then
-			rows="${rows}[{\"text\":\"🔧 Shape: ${shape_kbit} kbit/s — Remove\",\"callback_data\":\"act:unshape:${ip}\"}],"
+			rows="${rows}[{\"text\":\"🔧 Shape: $(tg_ceiling "$shape_kbit" "$shape_up") — Remove\",\"callback_data\":\"act:unshape:${ip}\"}],"
 		else
 			rows="${rows}[{\"text\":\"🔧 1M\",\"callback_data\":\"act:shape:${ip}:1000\"},{\"text\":\"🔧 2M\",\"callback_data\":\"act:shape:${ip}:2000\"},{\"text\":\"🔧 5M\",\"callback_data\":\"act:shape:${ip}:5000\"}],"
 			rows="${rows}[{\"text\":\"🔧 10M\",\"callback_data\":\"act:shape:${ip}:10000\"},{\"text\":\"🔧 25M\",\"callback_data\":\"act:shape:${ip}:25000\"},{\"text\":\"🔧 50M\",\"callback_data\":\"act:shape:${ip}:50000\"},{\"text\":\"🔧 100M\",\"callback_data\":\"act:shape:${ip}:100000\"}],"
@@ -556,7 +577,7 @@ handle_devices_edit() {
 }
 
 handle_status() {
-	local devices ip name rl_kbit shape_kbit blocked wifi_blocked
+	local devices ip name rl_kbit shape_kbit rl_up shape_up blocked wifi_blocked
 	local result=""
 	devices=$(get_devices)
 	[ -z "$devices" ] || [ "$devices" = "[]" ] && { tg_send "No active devices"; return; }
@@ -566,13 +587,15 @@ handle_status() {
 		wifi_blocked=$(get_device_field "$devices" "$ip" "wifi_blocked")
 		rl_kbit=$(get_device_field "$devices" "$ip" "rate_limit_kbit")
 		shape_kbit=$(get_device_field "$devices" "$ip" "shape_kbit")
+		rl_up=$(get_device_field "$devices" "$ip" "rate_limit_kbit_up")
+		shape_up=$(get_device_field "$devices" "$ip" "shape_kbit_up")
 		name=$(get_device_field "$devices" "$ip" "name")
 
 		local flags=""
 		[ "$blocked" = "true" ] || [ "$blocked" = "1" ] && flags="${flags} 🚫inet"
 		[ "$wifi_blocked" = "true" ] || [ "$wifi_blocked" = "1" ] && flags="${flags} 📵wifi"
-		[ "${rl_kbit:-0}" -gt 0 ] 2>/dev/null && flags="${flags} ⚡${rl_kbit}k"
-		[ "${shape_kbit:-0}" -gt 0 ] 2>/dev/null && flags="${flags} 🔧${shape_kbit}k"
+		[ "${rl_kbit:-0}" -gt 0 ] 2>/dev/null && flags="${flags} ⚡$(tg_ceiling_short "$rl_kbit" "$rl_up")"
+		[ "${shape_kbit:-0}" -gt 0 ] 2>/dev/null && flags="${flags} 🔧$(tg_ceiling_short "$shape_kbit" "$shape_up")"
 
 		[ -n "$flags" ] && result="${result}${name:-?} (${ip}):${flags}\n"
 	done
@@ -616,17 +639,19 @@ handle_callback() {
 		invalidate_cache
 		devices=$(get_devices)
 		name=$(get_device_field "$devices" "$ip" "name")
-		local blocked wifi_blocked rl_kbit shape_kbit
+		local blocked wifi_blocked rl_kbit shape_kbit rl_up shape_up
 		blocked=$(get_device_field "$devices" "$ip" "blocked")
 		wifi_blocked=$(get_device_field "$devices" "$ip" "wifi_blocked")
 		rl_kbit=$(get_device_field "$devices" "$ip" "rate_limit_kbit")
 		shape_kbit=$(get_device_field "$devices" "$ip" "shape_kbit")
+		rl_up=$(get_device_field "$devices" "$ip" "rate_limit_kbit_up")
+		shape_up=$(get_device_field "$devices" "$ip" "shape_kbit_up")
 
 		local status_line=""
 		[ "$blocked" = "true" ] || [ "$blocked" = "1" ] && status_line="${status_line}🚫 Internet blocked\n"
 		[ "$wifi_blocked" = "true" ] || [ "$wifi_blocked" = "1" ] && status_line="${status_line}📵 WiFi blocked\n"
-		[ "${rl_kbit:-0}" -gt 0 ] 2>/dev/null && status_line="${status_line}⚡ Limiter: ${rl_kbit} kbit/s\n"
-		[ "${shape_kbit:-0}" -gt 0 ] 2>/dev/null && status_line="${status_line}🔧 Shaper: ${shape_kbit} kbit/s\n"
+		[ "${rl_kbit:-0}" -gt 0 ] 2>/dev/null && status_line="${status_line}⚡ Limiter: $(tg_ceiling "$rl_kbit" "$rl_up")\n"
+		[ "${shape_kbit:-0}" -gt 0 ] 2>/dev/null && status_line="${status_line}🔧 Shaper: $(tg_ceiling "$shape_kbit" "$shape_up")\n"
 		[ -z "$status_line" ] && status_line="✅ No restrictions\n"
 
 		local text

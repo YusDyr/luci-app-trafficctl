@@ -195,6 +195,17 @@ test_keyboard_structure() {
     bkb=$(run "build_action_keyboard '192.168.0.1' '$blocked_devices'")
     assert_contains "blocked device: unblock button present" "act:unblock:192.168.0.1" "$bkb"
     assert_not_contains "blocked device: block button absent" "act:block:192.168.0.1" "$bkb"
+
+    # A split ceiling names both figures on its Remove button (#66).
+    local split_devices='[{"ip":"192.168.0.1","name":"x","blocked":false,"wifi_blocked":false,"rate_limit_kbit":8000,"rate_limit_kbit_up":2000,"shape_kbit":0,"shape_kbit_up":0,"conn_type":"ethernet"}]'
+    local skb
+    skb=$(run "build_action_keyboard '192.168.0.1' '$split_devices'")
+    assert_contains "split limit: both figures on the Remove button" "Limit: 8000↓ / 2000↑ kbit/s — Remove" "$skb"
+    local sym_devices='[{"ip":"192.168.0.1","name":"x","blocked":false,"wifi_blocked":false,"rate_limit_kbit":8000,"rate_limit_kbit_up":8000,"shape_kbit":0,"shape_kbit_up":0,"conn_type":"ethernet"}]'
+    skb=$(run "build_action_keyboard '192.168.0.1' '$sym_devices'")
+    assert_contains "symmetric limit: one figure" "Limit: 8000 kbit/s — Remove" "$skb"
+    assert_eq "short form, split" "8000/2000k" "$(run "tg_ceiling_short 8000 2000")"
+    assert_eq "short form, no upload figure" "8000k" "$(run "tg_ceiling_short 8000 0")"
 }
 
 # ── control_enabled gating on the REAL handlers ─────────────────────────────

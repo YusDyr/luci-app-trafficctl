@@ -84,7 +84,7 @@ MOCK
 
 cat > "$MOCKBIN/summary" <<'MOCK'
 #!/bin/sh
-printf '[{"ip":"10.0.20.11","name":"Denis-NAS","mac":"aa:bb:cc:dd:ee:ff","conn_type":"routed","app":"google","conns":7,"total":9000,"tcp":7000,"udp":2000,"blocked":true,"block_bytes":4242,"wifi_blocked":false,"rate_limit_kbit":1000,"shape_kbit":0}]\n'
+printf '[{"ip":"10.0.20.11","name":"Denis-NAS","mac":"aa:bb:cc:dd:ee:ff","conn_type":"routed","app":"google","conns":7,"total":9000,"tcp":7000,"udp":2000,"blocked":true,"block_bytes":4242,"wifi_blocked":false,"rate_limit_kbit":1000,"rate_limit_kbit_up":250,"shape_kbit":0,"shape_kbit_up":0}]\n'
 MOCK
 
 cat > "$MOCKBIN/portfw" <<'MOCK'
@@ -141,6 +141,9 @@ assert_contains "connections gauge" 'trafficctl_device_connections{ip="10.0.20.1
 assert_contains "blocked gauge" 'trafficctl_device_blocked{ip="10.0.20.11"} 1' "$OUT"
 assert_contains "limiter gauge" 'trafficctl_device_limit_kbit{ip="10.0.20.11",mode="limiter"} 1000' "$OUT"
 assert_contains "shaper gauge" 'trafficctl_device_limit_kbit{ip="10.0.20.11",mode="shaper"} 0' "$OUT"
+assert_contains "limiter upload gauge (split ceiling)" 'trafficctl_device_limit_up_kbit{ip="10.0.20.11",mode="limiter"} 250' "$OUT"
+assert_contains "shaper upload gauge" 'trafficctl_device_limit_up_kbit{ip="10.0.20.11",mode="shaper"} 0' "$OUT"
+assert_contains "the download gauge did not pick up the upload field" 'trafficctl_device_limit_kbit{ip="10.0.20.11",mode="limiter"} 1000' "$OUT"
 assert_contains "info metric carries device metadata incl. reverse DNS" \
     'trafficctl_device_info{ip="10.0.20.11",name="Denis-NAS",mac="aa:bb:cc:dd:ee:ff",link="routed",app="google",rdns="nas.lan"} 1' "$OUT"
 
