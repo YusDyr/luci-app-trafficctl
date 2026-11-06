@@ -102,7 +102,8 @@ BusyBox `nslookup` (always available) is used as a fallback if rpcd-mod-rrdns is
 
 **Rate Limiting Semantics:**
 - nftables: Uses `limit rate over X bytes/second` (X = kbit × 125) on netdev hooks: LAN egress for download, LAN ingress for upload. Operates at the packet level.
-- iptables: Uses `-m hashlimit --hashlimit-above Xkbit/sec` in the mangle FORWARD chain. Operates post-routing. The `-s` (upload) rule takes the upload ceiling when it differs from the download one; before v1.26.4 it took the download figure, so a split limit was symmetric on fw3.
+- iptables: Uses `-m hashlimit --hashlimit-above Xb/s --hashlimit-burst Yb` (X = kbit × 125, Y = 2X, capped at 4000000000) in the mangle FORWARD chain. Operates post-routing. The `-s` (upload) rule takes the upload ceiling when it differs from the download one. The highest ceiling hashlimit can express this way is about 30 Gbit/s.
+- Until [#123](https://github.com/YusDyr/luci-app-trafficctl/pull/123) the iptables path wrote `--hashlimit-above Xkbit/sec --hashlimit-burst Xkbit`. iptables rejects that burst (checked on 1.8.7, the 21.02 series, and 1.8.10), and the error was discarded, so **no limit was installed on fw3** while the UI reported success. Port forward limits used a plain-number burst, which is accepted, but `Xkbit/sec` is a *packet* rate to hashlimit, so they policed X packets per second instead of X kbit/s. Re-apply port forward limits made on fw3 before that fix: until then the UI shows them as unlimited.
 
 In practice, both achieve the same result (excess packets are dropped), but the measurement granularity differs slightly. nftables tends to be more accurate for bursty traffic.
 
