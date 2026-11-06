@@ -115,6 +115,8 @@ BEGIN {
     print "# TYPE trafficctl_device_blocked gauge"
     print "# HELP trafficctl_device_limit_kbit Applied throttle in kbit/s (0 = none)."
     print "# TYPE trafficctl_device_limit_kbit gauge"
+    print "# HELP trafficctl_device_limit_up_kbit Applied upload throttle in kbit/s (0 = none); equals the download one unless split."
+    print "# TYPE trafficctl_device_limit_up_kbit gauge"
     print "# HELP trafficctl_device_wifi_blocked Whether the device is denied on WiFi."
     print "# TYPE trafficctl_device_wifi_blocked gauge"
     print "# HELP trafficctl_device_conntrack_bytes Bytes currently accounted in conntrack (falls as flows expire)."
@@ -132,6 +134,10 @@ BEGIN {
     printf "trafficctl_device_wifi_blocked{ip=\"%s\"} %d\n", ip, (index($0, "\"wifi_blocked\":true") ? 1 : 0)
     printf "trafficctl_device_limit_kbit{ip=\"%s\",mode=\"limiter\"} %d\n", ip, num($0, "rate_limit_kbit")
     printf "trafficctl_device_limit_kbit{ip=\"%s\",mode=\"shaper\"} %d\n", ip, num($0, "shape_kbit")
+    # Its own metric rather than a direction label on the one above: a new
+    # label would start new series for every existing dashboard and alert.
+    printf "trafficctl_device_limit_up_kbit{ip=\"%s\",mode=\"limiter\"} %d\n", ip, num($0, "rate_limit_kbit_up")
+    printf "trafficctl_device_limit_up_kbit{ip=\"%s\",mode=\"shaper\"} %d\n", ip, num($0, "shape_kbit_up")
     # Conntrack view: current in-flight totals and the protocol split.
     printf "trafficctl_device_conntrack_bytes{ip=\"%s\",proto=\"all\"} %.0f\n", ip, num($0, "total")
     printf "trafficctl_device_conntrack_bytes{ip=\"%s\",proto=\"tcp\"} %.0f\n", ip, num($0, "tcp")
