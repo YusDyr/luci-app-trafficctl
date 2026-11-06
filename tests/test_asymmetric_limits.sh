@@ -577,5 +577,21 @@ assert_eq "removing the shorter of two prefixed addresses leaves the longer" "1"
     "$(printf '%s' "$rules" | grep -o '"type":"ratelimit"' | wc -l | tr -d ' ')"
 assert_contains "and the one left is the longer address" '"ip":"192.168.1.100","param":"5000"' "$rules"
 
+# ── fw3/iptables: the upload hashlimit takes the upload figure ──────────────
+#
+# The nft path got the second number in #83; the iptables one kept passing
+# the download rate to both rules, so on fw3 a split ceiling was symmetric.
+IPT_LOG="$TMP/ipt.log"
+FW3BIN="$TMP/fw3bin"
+mkdir -p "$FW3BIN"
+printf '#!/bin/sh\necho "$*" >> "%s"\nexit 0\n' "$IPT_LOG" > "$FW3BIN/iptables"
+for c in uci ubus nft ip; do printf '#!/bin/sh\nexit 1\n' > "$FW3BIN/$c"; done
+chmod +x "$FW3BIN"/*
+: > "$IPT_LOG"
+PATH="$FW3BIN:$PATH" sh -c ". $BIN/trafficctl-fw.sh >/dev/null 2>&1; TCTL_FW=iptables; tctl_ratelimit_add 192.168.1.20 8000 rl_t shared 2000" >/dev/null 2>&1
+ipt=$(cat "$IPT_LOG")
+assert_contains "fw3: download rule at the download rate" '-d 192.168.1.20 -m hashlimit --hashlimit-above 8000kbit/sec' "$ipt"
+assert_contains "fw3: upload rule at the upload rate" '-s 192.168.1.20 -m hashlimit --hashlimit-above 2000kbit/sec' "$ipt"
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
