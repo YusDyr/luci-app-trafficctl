@@ -172,8 +172,9 @@ else
     # The download rule is listed first; the upload one is the "_ul" name.
     RL_DUMP=$(iptables -t mangle -L FORWARD -nv 2>/dev/null | grep "rl_ratelimit" \
         | awk -v ip="$IP" '{ for (i = 1; i <= NF; i++) if ($i == ip || $i == ip "/32") { print; next } }')
-    RATE_LIM=$(echo "$RL_DUMP" | grep -oE '[0-9]+kbit' | head -1 | sed 's/kbit//')
-    RATE_LIM_UP=$(echo "$RL_DUMP" | grep -E 'rl_ratelimit.*_ul' | grep -oE '[0-9]+kbit' | head -1 | sed 's/kbit//')
+    RATE_LIM=$(echo "$RL_DUMP" | awk "$TCTL_NFT_RATE_AWK"'{ r = tctl_ipt_first_rate(); if (r >= 0) { print r; exit } }')
+    RATE_LIM_UP=$(echo "$RL_DUMP" | grep -E 'rl_ratelimit.*_ul' \
+        | awk "$TCTL_NFT_RATE_AWK"'{ r = tctl_ipt_first_rate(); if (r >= 0) { print r; exit } }')
 fi
 [ -z "$RATE_LIM" ] && RATE_LIM=0
 [ -z "$RATE_LIM_UP" ] && RATE_LIM_UP=0
