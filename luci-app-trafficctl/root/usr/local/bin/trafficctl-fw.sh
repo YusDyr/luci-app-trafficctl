@@ -284,7 +284,7 @@ tctl_ratelimit_add() {
             --hashlimit-mode dstip --hashlimit-name "rl_${comment}" \
             -j DROP -m comment --comment "$comment" 2>/dev/null
         iptables -t mangle -A FORWARD -s "$ip" -m hashlimit \
-            --hashlimit-above "${rate_kbit}kbit/sec" --hashlimit-burst "${rate_kbit}kbit" \
+            --hashlimit-above "${rate_kbit_up}kbit/sec" --hashlimit-burst "${rate_kbit_up}kbit" \
             --hashlimit-mode srcip --hashlimit-name "rl_${comment}_ul" \
             -j DROP -m comment --comment "${comment}_ul" 2>/dev/null
     fi
@@ -339,12 +339,16 @@ tctl_ratelimit_remove() {
 # The readers that only knew "kbytes" turned the latter into 0 — or, in the
 # stats, into 8 kbit/s. Every unit goes back to bytes by nft's factor, and
 # bytes to kbit by the package's own, SI (see tctl_rate_bytes).
+#
+# The second argument picks the direction: "daddr" (the default) is the
+# download rule, "saddr" the IPv4 upload one, which carries its own ceiling
+# since the two directions could differ (#83).
 tctl_rl_rate_kbit() {
-    awk -v ip="$1" "$TCTL_NFT_RATE_AWK"'
+    awk -v ip="$1" -v fld="${2:-daddr}" "$TCTL_NFT_RATE_AWK"'
     /limit rate over/ {
         hit = 0
         for (i = 1; i < NF; i++)
-            if ($i == "daddr" && ($(i+1) == ip || $(i+1) == ip "/32")) { hit = 1; break }
+            if ($i == fld && ($(i+1) == ip || $(i+1) == ip "/32")) { hit = 1; break }
         if (!hit) next
         for (j = i; j < NF - 1; j++)
             if ($j == "over") { printf "%.0f\n", tctl_rate_kbit($(j+1), $(j+2)); exit }
@@ -1065,6 +1069,38 @@ tctl_shape_classmap() {
         dec = o[3] * 256 + o[4]
         if (dec < 2 || dec > 65533) next
         printf "%s 1:%x\n", ip, dec
+    }'
+}
+
+# The IFB device upload shaping runs on (see trafficctl-shape.sh).
+tctl_shape_ifb_dev() {
+    local d
+    d=$(uci -q get trafficctl.main.shape_ifb 2>/dev/null)
+    echo "${d:-tctl-ifb0}"
+}
+
+# "classid rate_kbit" for every per-device HTB class on a device, from one tc
+# call. On the LAN device that is the download ceiling, on the IFB the upload
+# one: a shape uses the same classid on both.
+tctl_tc_class_rates() {
+    command -v tc >/dev/null 2>&1 || return 0
+    tc class show dev "$1" 2>/dev/null | awk '
+    /^class htb 1:/ {
+        classid=$3
+        minor=classid; sub(/^1:/,"",minor)
+        if (minor=="1" || minor=="fffe") next
+        rate=0
+        for (i=1;i<=NF;i++) {
+            if ($i=="rate") {
+                v=$(i+1)
+                if (v ~ /Gbit/)       { sub(/Gbit/,"",v);   rate=(v+0)*1000000 }
+                else if (v ~ /Mbit/)  { sub(/Mbit/,"",v);   rate=(v+0)*1000 }
+                else if (v ~ /[Kk]bit/){ sub(/[Kk]bit/,"",v); rate=v+0 }
+                else                  { rate=(v+0)/1000 }
+                break
+            }
+        }
+        print classid, rate
     }'
 }
 

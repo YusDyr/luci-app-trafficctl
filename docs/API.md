@@ -182,7 +182,9 @@ Returns a summary of all active LAN devices with traffic control status and conn
     "wifi_blocked": false,
     "wifi_block_pending": false,
     "rate_limit_kbit": 0,
-    "shape_kbit": 10000
+    "rate_limit_kbit_up": 0,
+    "shape_kbit": 10000,
+    "shape_kbit_up": 2000
   }
 ]
 ```
@@ -203,8 +205,10 @@ Returns a summary of all active LAN devices with traffic control status and conn
 | `block_bytes` | number | Bytes matched by the block rule (cumulative) |
 | `wifi_blocked` | boolean | Whether MAC is in WiFi deny list |
 | `wifi_block_pending` | boolean | MAC is on a WiFi deny list **and the device is associated on a radio right now**, so the running hostapd ACL does not carry the block. A device in this state is not blocked, however the deny list reads |
-| `rate_limit_kbit` | number | Active policer rate in kbit/s (0 = not limited) |
-| `shape_kbit` | number | Active shaper rate in kbit/s (0 = not shaped) |
+| `rate_limit_kbit` | number | Active policer rate in kbit/s (0 = not limited). The download ceiling |
+| `rate_limit_kbit_up` | number | The policer's upload ceiling in kbit/s, read from its own rule. Equal to `rate_limit_kbit` for a symmetric limit, different for a split one, 0 if there is no upload rule |
+| `shape_kbit` | number | Active shaper rate in kbit/s (0 = not shaped). The download class on the LAN device |
+| `shape_kbit_up` | number | The shaper's upload ceiling in kbit/s: the class with the same classid on the IFB device. 0 with `shape_kbit` set means upload is not shaped (no `kmod-ifb`) |
 
 ---
 
@@ -250,7 +254,9 @@ Returns detailed connection information for a single device.
     }
   ],
   "rate_limit_kbit": 0,
-  "shape_kbit": 10000
+  "rate_limit_kbit_up": 0,
+  "shape_kbit": 10000,
+  "shape_kbit_up": 2000
 }
 ```
 

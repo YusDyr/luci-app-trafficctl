@@ -60,6 +60,12 @@ cat > "$MOCKBIN/tc" <<'MOCK'
 #!/bin/sh
 case "$*" in
     *qdisc\ show*) echo "qdisc htb 1: root refcnt 2 r2q 10 default 0xfffe" ;;
+    *class\ show\ dev\ tctl-ifb0*)
+        # Upload classes: .101 has its own ceiling, .100 is symmetric.
+        for c in "1:1 rate 1Gbit" "1:2 rate 10Mbit" "1:3 rate 1Mbit"; do
+            set -- $c
+            echo "class htb $1 parent 1:1 prio 0 rate $3 ceil $3 burst 1600b cburst 1600b"
+        done ;;
     *class\ show*)
         for c in "1:1 rate 1Gbit" "1:2 rate 10Mbit" "1:3 rate 5Mbit" "1:105 rate 2Mbit" "1:fffe rate 1Gbit"; do
             set -- $c
@@ -90,8 +96,10 @@ sed -n '/^lookup_shape_kbit()/,/^}/p' "$BIN/trafficctl-summary.sh" > "$LOOKUP"
 assert_contains "harness: lookup_shape_kbit extracted" "lookup_shape_kbit()" "$(cat "$LOOKUP")"
 TC_MAP=$(printf '1:2 10000\n1:3 5000\n1:105 2000')
 
+TC_MAP_UP=$(printf '1:2 10000\n1:3 1000')
+
 shape_of() {
-    PATH="$MOCKBIN:$PATH" SHAPE_MAP="$MAP" TC_MAP="$TC_MAP" sh -c ". $LOOKUP; lookup_shape_kbit $1"
+    PATH="$MOCKBIN:$PATH" SHAPE_MAP="$MAP" TC_MAP="$TC_MAP" TC_MAP_UP="$TC_MAP_UP" sh -c ". $LOOKUP; lookup_shape_kbit $1"
 }
 assert_eq "summary: the shaped device shows its own rate" "10000" "$(shape_of 192.168.1.100)"
 assert_eq "summary: an asymmetric shape shows its download rate" "5000" "$(shape_of 192.168.1.101)"
@@ -99,6 +107,26 @@ assert_eq "summary: a pre-allocation shape still reads" "2000" "$(shape_of 192.1
 # The derived minor of 192.168.0.2 is 1:2, which belongs to .100.
 assert_eq "summary: an unshaped device does not borrow another's class" "0" "$(shape_of 192.168.0.2)"
 assert_eq "summary: an unknown device reads 0" "0" "$(shape_of 10.0.0.9)"
+assert_eq "summary up: an asymmetric shape shows its upload rate" "1000" "$(shape_of '192.168.1.101 up')"
+assert_eq "summary up: a symmetric shape reads the same both ways" "10000" "$(shape_of '192.168.1.100 up')"
+assert_eq "summary up: no IFB class (no kmod-ifb) reads 0" "0" "$(shape_of '192.168.1.5 up')"
+
+# ── tctl_tc_class_rates: the maps both readers are built from ────────────────
+
+DL=$(fw 'tctl_tc_class_rates br-lan')
+UL=$(fw 'tctl_tc_class_rates tctl-ifb0')
+assert_contains "class rates: LAN download class" "1:3 5000" "$DL"
+assert_contains "class rates: IFB upload class" "1:3 1000" "$UL"
+assert_eq "class rates: root and default classes left out" "" "$(printf '%s\n' "$DL" | grep -E '^1:(1|fffe) ')"
+assert_eq "class rates: default IFB name" "tctl-ifb0" "$(fw 'tctl_shape_ifb_dev')"
+
+# ── device view: looked up, not derived, both directions ─────────────────────
+
+DEV_SRC=$(cat "$BIN/trafficctl-device.sh")
+assert_eq "device: no classid derived from the address" "" "$(printf '%s\n' "$DEV_SRC" | grep -E 'o3 \* 256')"
+assert_contains "device: classid from shapes.json" "tctl_shape_classmap" "$DEV_SRC"
+assert_contains "device: upload shape from the IFB" 'tctl_tc_class_rates "$(tctl_shape_ifb_dev)"' "$DEV_SRC"
+assert_contains "device: shape_kbit_up in the JSON" '"shape_kbit_up":%d' "$DEV_SRC"
 
 # ── shape-stats: every record form is reported ───────────────────────────────
 

@@ -77,6 +77,9 @@ jobs:
       # table in status.js, and pins the Telegram preset button rendering.
       - name: Offload badge / preset button rendering
         run: bash tests/test_offload_ui.sh
+      # The upload row was built but never attached to the panel (#66).
+      - name: Split up/down control and split ceiling display
+        run: bash tests/test_split_ui.sh
       - name: Per-interface counter tests (global overview)
         run: bash tests/test_ifaces.sh
       - name: Egress interface naming tests

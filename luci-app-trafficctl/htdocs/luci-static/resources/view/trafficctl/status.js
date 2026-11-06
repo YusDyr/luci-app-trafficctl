@@ -316,6 +316,14 @@ function fmtRate(kbit) {
 	return kbit + ' ' + _('kbit/s');
 }
 
+// A ceiling as one figure, or both when upload has its own (#66). An upload
+// figure of 0 means the backend found no upload ceiling to report; the
+// download one is still the limit, so it is shown alone.
+function fmtCeiling(kbit, kbitUp) {
+	if (!kbitUp || kbitUp <= 0 || kbitUp === kbit) return fmtRate(kbit);
+	return '↓ ' + fmtRate(kbit) + ' / ↑ ' + fmtRate(kbitUp);
+}
+
 // Render a "↓ down / ↑ up" speed cell. Both halves come from the same
 // bytes_in/bytes_out sample, so they are always consistent with each other.
 function renderSpeedCell(cell, sd) {
@@ -1240,6 +1248,7 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		r._backlog = sh ? sh.backlog : 0;
 		r._throttle_kbit = (r.shape_kbit || 0) > 0 ? r.shape_kbit : (r.rate_limit_kbit || 0);
 		r._throttle_mode = (r.shape_kbit || 0) > 0 ? 'shaper' : ((r.rate_limit_kbit || 0) > 0 ? 'limiter' : 'none');
+		r._throttle_kbit_up = r._throttle_mode === 'shaper' ? (r.shape_kbit_up || 0) : (r.rate_limit_kbit_up || 0);
 	});
 
 	var sorted = rows.slice().sort(function(a, b) {
@@ -1381,8 +1390,8 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		cellMap.app = E('div', { 'class': 'td tc-center' }, appBadge);
 
 		var throttleBadge;
-		if (r._throttle_mode === 'shaper') { throttleBadge = E('span', { 'class': 'tc-c-speed tc-fw-bold', 'title': _('Shaper (tc/HTB queue)') }, '≈ ' + fmtRate(r._throttle_kbit)); }
-		else if (r._throttle_mode === 'limiter') { throttleBadge = E('span', { 'class': 'tc-c-warn tc-fw-bold', 'title': _('Limiter (nft drop)') }, '⚡ ' + fmtRate(r._throttle_kbit)); }
+		if (r._throttle_mode === 'shaper') { throttleBadge = E('span', { 'class': 'tc-c-speed tc-fw-bold', 'title': _('Shaper (tc/HTB queue)') }, '≈ ' + fmtCeiling(r._throttle_kbit, r._throttle_kbit_up)); }
+		else if (r._throttle_mode === 'limiter') { throttleBadge = E('span', { 'class': 'tc-c-warn tc-fw-bold', 'title': _('Limiter (nft drop)') }, '⚡ ' + fmtCeiling(r._throttle_kbit, r._throttle_kbit_up)); }
 		else { throttleBadge = E('span', { 'class': 'tc-c-faint' }, '—'); }
 		cellMap._throttle_kbit = E('div', { 'class': 'td tc-center' }, throttleBadge);
 
@@ -1868,6 +1877,8 @@ return view.extend({
 			}
 			renderRecentChips();
 			updateModeUI();
+			// The split row describes the device it was opened for.
+			_upPinned = false;
 			runQuery();
 		}
 
@@ -2274,6 +2285,9 @@ return view.extend({
 		// it would close the field (and overwrite what is being typed) a few
 		// seconds after it was opened.
 		var _customPinned = false;
+		// The upload row's counterpart: set while the operator has it open
+		// for editing, so the poll does not refill or close it under them.
+		var _upPinned = false;
 		var _modeSelected = 'shaper';
 
 		var rateChipsRow = E('div', {'class':'tc-chips-row'});
@@ -2379,12 +2393,28 @@ return view.extend({
 		var upToggleBtn = E('span', {'class': 'tc-chip',
 			'data-tip': _('Give upload its own ceiling instead of matching download')
 		}, '⇅ ' + _('Split up/down'));
-		upToggleBtn.addEventListener('click', function() {
-			upRow.classList.toggle('tc-hidden');
-			var on = !upRow.classList.contains('tc-hidden');
+		function showUpRow(on) {
+			upRow.classList.toggle('tc-hidden', !on);
 			upToggleBtn.classList.toggle('tc-chip--active', on);
-			if (on) { upInput.focus(); } else { upInput.value = ''; }
+			if (!on) { upInput.value = ''; }
+		}
+		upToggleBtn.addEventListener('click', function() {
+			var on = upRow.classList.contains('tc-hidden');
+			showUpRow(on);
+			_upPinned = on;
+			if (on) { upInput.focus(); }
 			updateScopeExplain();
+		});
+		// The row has no button of its own: Enter applies the pair, as does
+		// picking a download rate.
+		upInput.addEventListener('keydown', function(ev) {
+			if (ev.key !== 'Enter') { return; }
+			ev.preventDefault();
+			if (getRateKbit() === '0') {
+				setStatus(statusDiv, 'error', _('Pick a download speed as well: the upload one is applied with it.'));
+				return;
+			}
+			applyRate();
 		});
 		rateChipsRow.appendChild(upToggleBtn);
 
@@ -2634,6 +2664,7 @@ return view.extend({
 			scopeRow,
 			rateChipsRow,
 			customRow,
+			upRow,
 			subnetLimitsBox
 		]);
 
@@ -2680,6 +2711,7 @@ return view.extend({
 			var name = '';
 			var kbit = getRateKbit();
 			var kbitUp = getRateKbitUp();
+			_upPinned = false;
 			// A block target has no single tc classid, so the shaper can't
 			// express it — force the limiter rather than silently doing nothing.
 			var mode = all ? 'limiter' : _modeSelected;
@@ -3119,12 +3151,12 @@ return view.extend({
 						}
 					}
 					if ((data.shape_kbit || 0) > 0) {
-						parts.push(_('Shaped: <b style=\"color:var(--tc-speed)\">🌊 %s</b>').format(fmtRate(data.shape_kbit)));
+						parts.push(_('Shaped: <b style=\"color:var(--tc-speed)\">🌊 %s</b>').format(fmtCeiling(data.shape_kbit, data.shape_kbit_up)));
 						var sm = self._shapeMap[data.ip || searchSelect.getValue()] || {};
 						if ((sm.backlog||0) > 0) parts.push(_('Queued: <b style=\"color:var(--tc-speed)\">%s</b>').format(fmtBytes(sm.backlog)));
 						if ((sm.bytes||0) > 0) parts.push(_('Passed: <b>%s</b>').format(fmtBytes(sm.bytes)));
 					} else if ((data.rate_limit_kbit || 0) > 0) {
-						parts.push(_('Speed limit: <b style=\"color:var(--tc-warn)\">⚡ %s</b>').format(fmtRate(data.rate_limit_kbit)));
+						parts.push(_('Speed limit: <b style=\"color:var(--tc-warn)\">⚡ %s</b>').format(fmtCeiling(data.rate_limit_kbit, data.rate_limit_kbit_up)));
 						var dm = self._dropMap[data.ip || searchSelect.getValue()] || {};
 						if ((dm.packets||0) > 0) {
 							parts.push(_('Dropped: <b style="color:var(--tc-err)">🚫 %d pkts / %s</b>').format(Number(dm.packets) || 0, fmtBytes(dm.bytes||0)));
@@ -3173,6 +3205,19 @@ return view.extend({
 				} else {
 					ratePick.setValue('0');
 					customRow.classList.add('tc-hidden');
+				}
+
+				// Show the upload ceiling that is installed, so reopening a
+				// device with a split limit does not look symmetric.
+				var curUp = curShapeRate > 0 ? (data.shape_kbit_up || 0) : (data.rate_limit_kbit_up || 0);
+				if (!_upPinned && document.activeElement !== upInput) {
+					var split = curRate > 0 && curUp > 0 && curUp !== curRate;
+					showUpRow(split);
+					if (split) {
+						_upUnit = curUp % 1000 === 0 ? 'mbit' : 'kbit';
+						upInput.value = _upUnit === 'mbit' ? curUp / 1000 : curUp;
+						updateUpUnitBtns();
+					}
 				}
 
 				while (connsDiv.firstChild) connsDiv.removeChild(connsDiv.firstChild);
