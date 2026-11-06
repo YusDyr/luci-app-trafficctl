@@ -71,6 +71,8 @@ ${TAB}}
 ${TAB}chain ul_lan1 {
 ${TAB}${TAB}type filter hook ingress device "lan1" priority -200; policy accept;
 ${TAB}${TAB}ip saddr 192.168.1.60 limit rate over 125 kbytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_60_ul"
+${TAB}${TAB}ip saddr 192.168.1.5 limit rate over 125000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_5_ul"
+${TAB}${TAB}ip saddr 192.168.1.8 meter tctl_u_192_168_1_8 { ip saddr limit rate over 250000 bytes/second } counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_8_ul"
 ${TAB}}
 }
 DUMP
@@ -107,6 +109,13 @@ assert_eq "helper: bytes scale by 1024 like nft's other units" "4" "$(rate_of 19
 assert_eq "helper: an upload-only rule is not a download ceiling" "" "$(rate_of 192.168.1.60)"
 assert_eq "helper: dots are not wildcards" "" "$(rate_of 192x168x1x5)"
 
+# Upload has its own ceiling since #83, read from the "ip saddr" rule.
+rate_up_of() { PATH="$MOCKBIN:$PATH" sh -c ". $FWLIB >/dev/null 2>&1; tctl_rl_rate_kbit $1 saddr" < "$DUMP" 2>&1; }
+assert_eq "helper up: a split ceiling reads its own upload figure" "1000" "$(rate_up_of 192.168.1.5)"
+assert_eq "helper up: per-device (meter) upload rule" "2000" "$(rate_up_of 192.168.1.8)"
+assert_eq "helper up: an upload-only rule" "1024" "$(rate_up_of 192.168.1.60)"
+assert_eq "helper up: a download-only rule is not an upload ceiling" "" "$(rate_up_of 192.168.1.50)"
+
 # ── summary: lookup_rate_limit ───────────────────────────────────────────────
 
 LOOKUP="$TMPDIR/lookup.sh"
@@ -118,11 +127,18 @@ summary_rate() {
 assert_eq "summary: own limit" "5000" "$(summary_rate 192.168.1.5)"
 assert_eq "summary: a kbytes listing is not read as 0" "8192" "$(summary_rate 192.168.1.7)"
 assert_eq "summary: unlimited device reads 0" "0" "$(summary_rate 192.168.1.51)"
+assert_eq "summary up: own upload ceiling" "1000" "$(summary_rate '192.168.1.5 up')"
+assert_eq "summary up: no upload rule reads 0" "0" "$(summary_rate '192.168.1.50 up')"
+assert_contains "summary: the upload ceiling is in the JSON" '"rate_limit_kbit_up":%.0f' "$(cat "$BIN/trafficctl-summary.sh")"
 
 # ── device view uses the same reader ─────────────────────────────────────────
 
 assert_contains "device: reads its limit through tctl_rl_rate_kbit" \
     'tctl_rl_rate_kbit "$IP"' "$(cat "$BIN/trafficctl-device.sh")"
+assert_contains "device: reads the upload ceiling too" \
+    'tctl_rl_rate_kbit "$IP" saddr' "$(cat "$BIN/trafficctl-device.sh")"
+assert_contains "device: the upload ceiling is in the JSON" \
+    '"rate_limit_kbit_up":%d' "$(cat "$BIN/trafficctl-device.sh")"
 
 # ── stats: units ─────────────────────────────────────────────────────────────
 

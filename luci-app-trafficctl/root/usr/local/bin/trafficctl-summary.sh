@@ -220,27 +220,10 @@ else
     RL_DUMP=$(iptables -t mangle -L FORWARD -nv 2>/dev/null)
 fi
 
-# tc HTB classes → "classid rate_kbit" map (one tc call, parsed once)
-TC_MAP=""
-if command -v tc >/dev/null 2>&1; then
-    TC_MAP=$(tc class show dev "$PRIMARY_LAN_DEV" 2>/dev/null | awk '
-    /^class htb 1:/ {
-        classid=$3
-        minor=classid; sub(/^1:/,"",minor)
-        if (minor=="1" || minor=="fffe") next
-        rate=0
-        for (i=1;i<=NF;i++) {
-            if ($i=="rate") {
-                v=$(i+1)
-                if (v ~ /Gbit/)       { sub(/Gbit/,"",v);   rate=(v+0)*1000000 }
-                else if (v ~ /Mbit/)  { sub(/Mbit/,"",v);   rate=(v+0)*1000 }
-                else if (v ~ /[Kk]bit/){ sub(/[Kk]bit/,"",v); rate=v+0 }
-                break
-            }
-        }
-        print classid, rate
-    }')
-fi
+# tc HTB classes → "classid rate_kbit" maps (one tc call per device, parsed
+# once): download on the LAN device, upload on the IFB.
+TC_MAP=$(tctl_tc_class_rates "$PRIMARY_LAN_DEV")
+TC_MAP_UP=$(tctl_tc_class_rates "$(tctl_shape_ifb_dev)")
 
 # address → classid, from shapes.json (see tctl_shape_classmap).
 SHAPE_MAP=$(tctl_shape_classmap)
@@ -348,13 +331,17 @@ lookup_block_bytes() {
     echo "${b:-0}"
 }
 
+# $2 "up" reads the upload ceiling instead of the download one.
 lookup_rate_limit() {
-    local ip="$1" r
+    local ip="$1" r fld=daddr pat='rl_ratelimit'
+    [ "$2" = "up" ] && { fld=saddr; pat='rl_ratelimit.*_ul'; }
     if [ "$TCTL_FW" = "nft" ]; then
-        r=$(echo "$RL_DUMP" | tctl_rl_rate_kbit "$ip")
+        r=$(echo "$RL_DUMP" | tctl_rl_rate_kbit "$ip" "$fld")
     else
         # The address as a whole field, not a substring (see tctl_rl_rate_kbit).
-        r=$(echo "$RL_DUMP" | grep "rl_ratelimit" \
+        # The download rule is listed first, so it is the first match either
+        # way; the upload one is the only "_ul" name.
+        r=$(echo "$RL_DUMP" | grep -E "$pat" \
             | awk -v ip="$ip" '{ for (i = 1; i <= NF; i++) if ($i == ip || $i == ip "/32") { print; next } }' \
             | grep -oE '[0-9]+kbit' | head -1 | sed 's/kbit//')
     fi
@@ -365,11 +352,15 @@ lookup_rate_limit() {
 # allocated, so deriving put the first shaped device's rate on 192.168.x.2 and
 # showed 0 for the device actually shaped — and the Telegram bot built its
 # "Shape — Remove" button from this field.
+#
+# $2 "up" reads the upload class on the IFB. 0 there with a download shape set
+# means upload is not shaped at all (no kmod-ifb), not that it matches.
 lookup_shape_kbit() {
-    local ip="$1" classid r
+    local ip="$1" classid r map="$TC_MAP"
+    [ "$2" = "up" ] && map="$TC_MAP_UP"
     classid=$(echo "$SHAPE_MAP" | awk -v ip="$ip" '$1==ip{print $2; exit}')
     [ -n "$classid" ] || { echo 0; return; }
-    r=$(echo "$TC_MAP" | awk -v c="$classid" '$1==c{print $2; exit}')
+    r=$(echo "$map" | awk -v c="$classid" '$1==c{print $2; exit}')
     echo "${r:-0}"
 }
 
@@ -402,7 +393,9 @@ for ip in $ACTIVE_IPS; do
     BLOCK_BYTES=$(lookup_block_bytes "$ip")
     WIFI_BLK=$(lookup_wifi_blocked "$MAC")
     RATE_LIM=$(lookup_rate_limit "$ip")
+    RATE_LIM_UP=$(lookup_rate_limit "$ip" up)
     SHAPE=$(lookup_shape_kbit "$ip")
+    SHAPE_UP=$(lookup_shape_kbit "$ip" up)
     APP=$(lookup_app "$ip")
     if [ -z "$NAME" ]; then
         NAME="*"
@@ -462,13 +455,13 @@ for ip in $ACTIVE_IPS; do
     else
         printf ","
     fi
-    printf '{"ip":"%s","name":"%s","mac":"%s","conn_type":"%s","conn_last":"%s","app":"%s","conns":%d,"total":%.0f,"tcp":%.0f,"udp":%.0f,"blocked":%s,"block_bytes":%.0f,"wifi_blocked":%s,"wifi_block_pending":%s,"rate_limit_kbit":%.0f,"shape_kbit":%.0f}' \
+    printf '{"ip":"%s","name":"%s","mac":"%s","conn_type":"%s","conn_last":"%s","app":"%s","conns":%d,"total":%.0f,"tcp":%.0f,"udp":%.0f,"blocked":%s,"block_bytes":%.0f,"wifi_blocked":%s,"wifi_block_pending":%s,"rate_limit_kbit":%.0f,"rate_limit_kbit_up":%.0f,"shape_kbit":%.0f,"shape_kbit_up":%.0f}' \
         "$ip" "$NAME" "$MAC" "$CONN_TYPE" "$CONN_LAST" "$APP" "$CONNS" "$TOTAL" "$TCP" "$UDP" \
         "$([ "$BLOCKED" = "1" ] && echo true || echo false)" \
         "$BLOCK_BYTES" \
         "$([ "$WIFI_BLK" = "1" ] && echo true || echo false)" \
         "$([ "$WIFI_PENDING" = "1" ] && echo true || echo false)" \
-        "$RATE_LIM" "$SHAPE"
+        "$RATE_LIM" "$RATE_LIM_UP" "$SHAPE" "$SHAPE_UP"
 done
 printf "]\n"
 

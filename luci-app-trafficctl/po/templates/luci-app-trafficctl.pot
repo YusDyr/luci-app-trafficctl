@@ -751,6 +751,9 @@ msgstr ""
 msgid "Persist rules"
 msgstr ""
 
+msgid "Pick a download speed as well: the upload one is applied with it."
+msgstr ""
+
 msgid "Pick a rate to apply it to this target, or Off to remove its limit."
 msgstr ""
 

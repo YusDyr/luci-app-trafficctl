@@ -102,7 +102,7 @@ BusyBox `nslookup` (always available) is used as a fallback if rpcd-mod-rrdns is
 
 **Rate Limiting Semantics:**
 - nftables: Uses `limit rate over X bytes/second` (X = kbit × 125) on netdev hooks: LAN egress for download, LAN ingress for upload. Operates at the packet level.
-- iptables: Uses `-m hashlimit --hashlimit-above Xkbit/sec` in the mangle FORWARD chain. Operates post-routing.
+- iptables: Uses `-m hashlimit --hashlimit-above Xkbit/sec` in the mangle FORWARD chain. Operates post-routing. The `-s` (upload) rule takes the upload ceiling when it differs from the download one; before v1.26.4 it took the download figure, so a split limit was symmetric on fw3.
 
 In practice, both achieve the same result (excess packets are dropped), but the measurement granularity differs slightly. nftables tends to be more accurate for bursty traffic.
 
