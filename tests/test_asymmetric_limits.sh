@@ -590,8 +590,8 @@ chmod +x "$FW3BIN"/*
 : > "$IPT_LOG"
 PATH="$FW3BIN:$PATH" sh -c ". $BIN/trafficctl-fw.sh >/dev/null 2>&1; TCTL_FW=iptables; tctl_ratelimit_add 192.168.1.20 8000 rl_t shared 2000" >/dev/null 2>&1
 ipt=$(cat "$IPT_LOG")
-assert_contains "fw3: download rule at the download rate" '-d 192.168.1.20 -m hashlimit --hashlimit-above 8000kbit/sec' "$ipt"
-assert_contains "fw3: upload rule at the upload rate" '-s 192.168.1.20 -m hashlimit --hashlimit-above 2000kbit/sec' "$ipt"
+assert_contains "fw3: download rule at the download rate" '-d 192.168.1.20 -m hashlimit --hashlimit-above 1000000b/s' "$ipt"
+assert_contains "fw3: upload rule at the upload rate" '-s 192.168.1.20 -m hashlimit --hashlimit-above 250000b/s' "$ipt"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

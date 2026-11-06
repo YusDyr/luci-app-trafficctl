@@ -279,12 +279,14 @@ tctl_ratelimit_add() {
         TCTL_RL_UPLOAD6_OK=0
         # shellcheck disable=SC2034
         TCTL_RL_DOWNLOAD6_OK=0
+        # shellcheck disable=SC2046 # deliberate split into the option words
         iptables -t mangle -A FORWARD -d "$ip" -m hashlimit \
-            --hashlimit-above "${rate_kbit}kbit/sec" --hashlimit-burst "${rate_kbit}kbit" \
+            $(tctl_ipt_limit_args "$rate_kbit") \
             --hashlimit-mode dstip --hashlimit-name "rl_${comment}" \
             -j DROP -m comment --comment "$comment" 2>/dev/null
+        # shellcheck disable=SC2046 # deliberate split into the option words
         iptables -t mangle -A FORWARD -s "$ip" -m hashlimit \
-            --hashlimit-above "${rate_kbit_up}kbit/sec" --hashlimit-burst "${rate_kbit_up}kbit" \
+            $(tctl_ipt_limit_args "$rate_kbit_up") \
             --hashlimit-mode srcip --hashlimit-name "rl_${comment}_ul" \
             -j DROP -m comment --comment "${comment}_ul" 2>/dev/null
     fi
@@ -382,7 +384,49 @@ function tctl_rate_kbit(n, u,   b) {
     # Rounded here, so a reader printing %d agrees with one printing %.0f.
     return int(b * 8 / 1000 + 0.5)
 }
+# An iptables hashlimit rate as listed, e.g. "624992b/s" or "1213mb/s".
+# iptables prints bytes in 1024 steps too. A packet rate ("5000/sec") is not a
+# ceiling in kbit/s and reads 0.
+function tctl_ipt_rate_kbit(t,   n, u) {
+    if (!match(t, /^[0-9]+/)) return 0
+    n = substr(t, 1, RLENGTH); u = substr(t, RLENGTH + 1)
+    if (u ~ /^b\//)       return tctl_rate_kbit(n, "bytes")
+    if (u ~ /^kb\//)      return tctl_rate_kbit(n, "kbytes")
+    if (u ~ /^mb\//)      return tctl_rate_kbit(n, "mbytes")
+    if (u ~ /^gb\//)      return tctl_rate_kbit(n, "gbytes")
+    return 0
+}
+# The ceiling of the hashlimit rule on the current line: "above X" in an
+# "iptables -L" listing, "--hashlimit-above X" in "iptables -S". -1 if none.
+function tctl_ipt_first_rate(   i) {
+    for (i = 1; i < NF; i++)
+        if ($i == "above" || $i == "--hashlimit-above") return tctl_ipt_rate_kbit($(i+1))
+    return -1
+}
 '
+
+# hashlimit arguments for a kbit/s ceiling, in BYTES.
+#
+# "${kbit}kbit/sec" is not a byte rate to hashlimit: it reads the number as
+# PACKETS per second (iptables -S lists it back as "5000/sec"), and the
+# "${kbit}kbit" burst written next to it is rejected outright ("bad value for
+# option --hashlimit-burst", iptables 1.8.7 and 1.8.10). The 2>/dev/null after
+# the rule hid that, so on fw3 no limit was ever installed.
+#
+# Bytes per second, SI like the nft side (tctl_rate_bytes). The burst is two
+# seconds of the rate: hashlimit refuses a byte burst below about one second
+# of it ("burst cannot be smaller than 125172064b" at 1 Gbit/s), and it is a
+# 32-bit field, hence the cap, which puts the highest ceiling fw3 can
+# express near 30 Gbit/s (10 Gbit/s is accepted, 40 is not). Verified on iptables-legacy 1.8.7 with iperf3
+# through a forwarding netns: 5, 50 and 1000 Mbit/s held at 4.9-4.97, 49-50.6
+# and 990-1003 Mbit/s.
+tctl_ipt_limit_args() {
+    local b burst
+    b=$(tctl_rate_bytes "$1")
+    burst=$(( b * 2 ))
+    [ "$burst" -gt 4000000000 ] && burst=4000000000
+    echo "--hashlimit-above ${b}b/s --hashlimit-burst ${burst}b"
+}
 
 tctl_ratelimit_list() {
     if [ "$TCTL_FW" = "nft" ]; then

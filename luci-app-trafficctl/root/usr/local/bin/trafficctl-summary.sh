@@ -343,7 +343,7 @@ lookup_rate_limit() {
         # way; the upload one is the only "_ul" name.
         r=$(echo "$RL_DUMP" | grep -E "$pat" \
             | awk -v ip="$ip" '{ for (i = 1; i <= NF; i++) if ($i == ip || $i == ip "/32") { print; next } }' \
-            | grep -oE '[0-9]+kbit' | head -1 | sed 's/kbit//')
+            | awk "$TCTL_NFT_RATE_AWK"'{ r = tctl_ipt_first_rate(); if (r >= 0) { print r; exit } }')
     fi
     echo "${r:-0}"
 }
