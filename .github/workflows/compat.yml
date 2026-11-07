@@ -105,7 +105,10 @@ jobs:
         # no limit a stalled SDK download holds the job for GitHub's 6 h
         # default; 60 min fails it instead, and the check can be re-run.
         timeout-minutes: 60
-        uses: openwrt/gh-action-sdk@7fc2640243284ecc44f4a9c3f749a61746ee02cb # v11
+        # tools/sdk-build.sh runs the SDK image as openwrt/gh-action-sdk v11
+        # does, but without its setup.sh re-download of the SDK the image
+        # already contains (that download is what hit the limit).
+        run: tools/sdk-build.sh
         env:
           ARCH: x86_64-25.12.4
           FEEDNAME: trafficctl
