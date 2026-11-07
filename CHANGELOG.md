@@ -4,6 +4,17 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.27.0] - 2026-11-07
+
+### Features
+- show split upload ceilings in Prometheus and the Telegram bot ([#124](https://github.com/YusDyr/luci-app-trafficctl/issues/124)) ([1542813](https://github.com/YusDyr/luci-app-trafficctl/commit/1542813db50a63539c4f527b394e9a74623d9c05))
+  The summary reports the upload ceiling since #122; the exporter and the
+  bot still named only the download one.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.26.6...v1.27.0
+
+---
+
 ## [1.26.6] - 2026-11-07
 
 ### Bug Fixes
