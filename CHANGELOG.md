@@ -4,6 +4,21 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.26.6] - 2026-11-07
+
+### Bug Fixes
+- write fw3 rate limits in bytes so iptables accepts them ([#123](https://github.com/YusDyr/luci-app-trafficctl/issues/123)) ([4c0eb4a](https://github.com/YusDyr/luci-app-trafficctl/commit/4c0eb4adbf59466a94b84c8cded9884a4045d03d))
+  On fw3 the limiter wrote "--hashlimit-above Xkbit/sec --hashlimit-burst
+  Xkbit". iptables rejects that burst ("bad value for option
+  --hashlimit-burst", 1.8.7 and 1.8.10) and the error went to /dev/null, so
+  no limit was ever installed while the UI reported success. Port forward
+  limits had a plain-number burst and were accepted, but "Xkbit/sec" is a
+  packet rate to hashlimit, so they policed X packets per second.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.26.5...v1.26.6
+
+---
+
 ## [1.26.5] - 2026-11-07
 
 ### Bug Fixes
