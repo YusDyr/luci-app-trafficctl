@@ -4,6 +4,19 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.26.5] - 2026-11-07
+
+### Bug Fixes
+- put the Split up/down row into the panel and show split ceilings ([#122](https://github.com/YusDyr/luci-app-trafficctl/issues/122)) ([a7e1056](https://github.com/YusDyr/luci-app-trafficctl/commit/a7e1056315afa2ee3c88af7682a46f471d055aad))
+  The upload row added in #83 was built and toggled but never attached to
+  the Speed Limit panel, so "Split up/down" lit up and nothing appeared: a
+  separate upload ceiling could not be set from the UI at all (#66). The
+  backend took rate_kbit_up correctly, which is why no test noticed.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.26.4...v1.26.5
+
+---
+
 ## [1.26.4] - 2026-11-07
 
 ### Other
