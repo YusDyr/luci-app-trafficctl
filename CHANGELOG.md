@@ -4,6 +4,20 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.26.4] - 2026-11-07
+
+### Other
+- build the APK with the SDK the image already has ([#125](https://github.com/YusDyr/luci-app-trafficctl/issues/125)) ([7a98504](https://github.com/YusDyr/luci-app-trafficctl/commit/7a985042d902cb9f6c95679b3ab64204d9789463))
+  The release SDK images hold the extracted SDK in /builder but still ship
+  setup.sh, and openwrt/gh-action-sdk's entrypoint runs it whenever it
+  exists. It then downloads the 285 MB SDK again from mirror-03, which the
+  image pins as FILE_HOST. At 55-410 KB/s that ran past the 60 min step
+  limit three times on 2026-11-07.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.26.3...v1.26.4
+
+---
+
 ## [1.26.3] - 2026-11-03
 
 ### Bug Fixes
