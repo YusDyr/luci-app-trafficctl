@@ -4,6 +4,19 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.28.0] - 2026-11-07
+
+### Features
+- publish a signed opkg/apk package feed on GitHub Pages ([#126](https://github.com/YusDyr/luci-app-trafficctl/issues/126)) ([6b2a7c7](https://github.com/YusDyr/luci-app-trafficctl/commit/6b2a7c70c3895bcbdccdaf530266972f1deb2a3a))
+  Installing or upgrading meant finding the release, wget-ing the asset and,
+  on apk, passing --allow-untrusted. With a feed a router adds our key and the
+  feed URL once, and opkg upgrade / apk upgrade pick up every release with the
+  index signature checked on each update.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.27.0...v1.28.0
+
+---
+
 ## [1.27.0] - 2026-11-07
 
 ### Features
