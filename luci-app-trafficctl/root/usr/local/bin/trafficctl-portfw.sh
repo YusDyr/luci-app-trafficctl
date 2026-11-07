@@ -154,13 +154,15 @@ pfw_add_limit() {
         fi
     else
         if [ "$scope" = "input" ]; then
+            # shellcheck disable=SC2046 # deliberate split into the option words
             iptables -I INPUT -p "$proto" --dport "$(iptables_dport "$port")" -m hashlimit \
-                --hashlimit-above "${kbit}kbit/sec" --hashlimit-burst "$kbit" \
+                $(tctl_ipt_limit_args "$kbit") \
                 --hashlimit-mode dstport --hashlimit-name "$(hashlimit_name "$proto" "$port")" \
                 -j DROP -m comment --comment "$cmt" 2>/dev/null
         else
+            # shellcheck disable=SC2046 # deliberate split into the option words
             iptables -I FORWARD -d "$ip" -p "$proto" --dport "$(iptables_dport "$port")" -m hashlimit \
-                --hashlimit-above "${kbit}kbit/sec" --hashlimit-burst "$kbit" \
+                $(tctl_ipt_limit_args "$kbit") \
                 --hashlimit-mode dstip --hashlimit-name "$(hashlimit_name "$proto" "$port")" \
                 -j DROP -m comment --comment "$cmt" 2>/dev/null
         fi
@@ -372,7 +374,7 @@ do_list() {
                 st=$(printf '%s' "$CTL_DUMP" | grep "$(pfw_comment limit "$p" "$cmt_ip" "$port")" | \
                      awk "$TCTL_NFT_RATE_AWK"'{ for (i = 1; i < NF - 1; i++) if ($i == "over") { printf "%.0f\n", tctl_rate_kbit($(i+1), $(i+2)); exit } }')
                 [ -z "$st" ] && st=$(printf '%s' "$CTL_DUMP" | grep "$(pfw_comment limit "$p" "$cmt_ip" "$port")" | \
-                     grep -oE 'hashlimit-above [0-9]+' | awk '{print $2; exit}')
+                     awk "$TCTL_NFT_RATE_AWK"'{ r = tctl_ipt_first_rate(); if (r >= 0) { print r; exit } }')
                 [ -n "$st" ] && limit_kbit="$st"
             fi
         done

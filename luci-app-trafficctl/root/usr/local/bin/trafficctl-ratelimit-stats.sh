@@ -65,7 +65,7 @@ else
     # hashlimit is keyed on dstip whatever mode was asked for, so on this path
     # every bucket is per-address — "each" is the honest answer, not the
     # requested mode. Documented in docs/API.md: shared needs nftables.
-    iptables -t mangle -L FORWARD -nvx 2>/dev/null | grep "rl_ratelimit" | awk '
+    iptables -t mangle -L FORWARD -nvx 2>/dev/null | grep "rl_ratelimit" | awk "$TCTL_NFT_RATE_AWK"'
     {
         packets = $1
         bytes = $2
@@ -77,14 +77,9 @@ else
             }
             if (i == 9) ip = $i
         }
-        # extract rate from hashlimit-above
-        for (i = 1; i <= NF; i++) {
-            if ($i ~ /^[0-9]+kbit/) {
-                gsub(/kbit.*/, "", $i)
-                rate = $i
-                break
-            }
-        }
+        # the "above X" ceiling, in iptables units (see tctl_ipt_rate_kbit)
+        rate = tctl_ipt_first_rate()
+        if (rate < 0) rate = 0
         if (ip != "" && ip != "0.0.0.0/0") {
             if (!(ip in seen)) { seen[ip] = 1; order[++n] = ip }
             rate_of[ip] = rate
