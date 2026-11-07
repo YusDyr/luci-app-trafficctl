@@ -9,7 +9,7 @@
 PASS=0
 FAIL=0
 
-BIN="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/local/bin"
+BIN="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/libexec/trafficctl"
 
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
@@ -199,7 +199,7 @@ assert_contains "limiter: removal scans the whole table" "list table netdev tm_r
 # ── shaper: both directions ──────────────────────────────────────────────────
 : > "$TC_LOG"
 SHAPE="$TMPDIR/shape.sh"
-sed -e "s|/usr/local/bin/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" \
+sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" \
     -e "s|SHAPES_FILE=\"/etc/trafficctl/shapes.json\"|SHAPES_FILE=\"$TMPDIR/shapes.json\"|" \
     -e "s|/sys/class/net/|$TMPDIR/sys/class/net/|g" \
     "$BIN/trafficctl-shape.sh" > "$SHAPE"
@@ -255,7 +255,7 @@ assert_contains "shaper: removes upload filter" \
 # ── subnet / whole-network targets ───────────────────────────────────────────
 
 RL="$TMPDIR/ratelimit.sh"
-sed -e "s|/usr/local/bin/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" \
+sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" \
     "$BIN/trafficctl-ratelimit.sh" > "$RL"
 
 : > "$NFT_LOG"

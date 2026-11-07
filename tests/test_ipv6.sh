@@ -18,7 +18,7 @@
 PASS=0
 FAIL=0
 
-BIN="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/local/bin"
+BIN="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/libexec/trafficctl"
 
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
@@ -85,9 +85,9 @@ assert_eq "harness: no production lease path survived the rewrite" "" \
 BLOCK_SH="$TMPDIR/block.sh"
 UNBLOCK_SH="$TMPDIR/unblock.sh"
 RATELIMIT_SH="$TMPDIR/ratelimit.sh"
-sed "s|/usr/local/bin/trafficctl-fw.sh|$FW|" "$BIN/trafficctl-block.sh" > "$BLOCK_SH"
-sed "s|/usr/local/bin/trafficctl-fw.sh|$FW|" "$BIN/trafficctl-unblock.sh" > "$UNBLOCK_SH"
-sed "s|/usr/local/bin/trafficctl-fw.sh|$FW|" "$BIN/trafficctl-ratelimit.sh" > "$RATELIMIT_SH"
+sed "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FW|" "$BIN/trafficctl-block.sh" > "$BLOCK_SH"
+sed "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FW|" "$BIN/trafficctl-unblock.sh" > "$UNBLOCK_SH"
+sed "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FW|" "$BIN/trafficctl-ratelimit.sh" > "$RATELIMIT_SH"
 
 # ── mocks ────────────────────────────────────────────────────────────────────
 

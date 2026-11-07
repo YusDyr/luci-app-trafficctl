@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=dash
 # Test Telegram bot connection by sending a test message.
 # Usage: trafficctl-telegram-test.sh <token> <chat_id> [message]

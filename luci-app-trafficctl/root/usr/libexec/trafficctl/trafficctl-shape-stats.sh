@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=dash
 # Show traffic shaping statistics for all shaped devices.
 # Output: JSON array with extended stats per IP.
@@ -6,7 +7,7 @@
 #         requeues, lended, borrowed, ecn_mark, new_flows, old_flows,
 #         target_us, memory_used
 
-. /usr/local/bin/trafficctl-fw.sh
+. /usr/libexec/trafficctl/trafficctl-fw.sh
 
 LAN_DEV=$(tctl_get_lan_device)
 

@@ -25,7 +25,7 @@ PASS=0
 FAIL=0
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="$REPO_ROOT/luci-app-trafficctl/root/usr/local/bin"
+BIN="$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/trafficctl"
 
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
@@ -69,11 +69,11 @@ assert_not_contains() {
     fi
 }
 
-sed -e "s|/usr/local/bin/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" \
+sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" \
     -e "s|STATE=\"/tmp/trafficctl_totals.state\"|STATE=\"$STATE\"|" \
     -e "s|LOCKD=\"/tmp/trafficctl_totals.lock.d\"|LOCKD=\"$TMPDIR/lock.d\"|" \
     -e "s|\"/tmp/\.trafficctl_totals\.|\"$TMPDIR/scratch.|" \
-    -e "s|/usr/local/bin/trafficctl-bytes.sh|$MOCKBIN/bytes|" \
+    -e "s|/usr/libexec/trafficctl/trafficctl-bytes.sh|$MOCKBIN/bytes|" \
     "$BIN/trafficctl-totals.sh" > "$TMPDIR/totals.sh"
 
 # Every substitution above must have landed: sed exits 0 on no-match, so a
@@ -284,7 +284,7 @@ assert_contains "bytes-nft.sh reports the split as unavailable, not zero" \
 # the comments there, so a looser check would keep passing after the call was
 # swapped back to the raw sampler.
 assert_contains "metrics.sh consumes the shared accumulator" \
-    '/usr/local/bin/trafficctl-totals.sh --all 2>/dev/null \' \
+    '/usr/libexec/trafficctl/trafficctl-totals.sh --all 2>/dev/null \' \
     "$(cat "$BIN/trafficctl-metrics.sh")"
 assert_eq "metrics.sh keeps no state file of its own" "" \
     "$(grep -n 'trafficctl_metrics.state' "$BIN/trafficctl-metrics.sh")"
@@ -320,7 +320,7 @@ echo "    inet 192.168.1.1/24 brd 192.168.1.255 scope global br-lan"
 MOCK
 chmod +x "$MOCKBIN/ip"
 
-sed -e "s|\. /usr/local/bin/trafficctl-fw.sh|. $TMPDIR/fw-stub.sh|" \
+sed -e "s|\. /usr/libexec/trafficctl/trafficctl-fw.sh|. $TMPDIR/fw-stub.sh|" \
     -e "s|/proc/net/nf_conntrack|$CT|" \
     "$BIN/trafficctl-bytes.sh" > "$TMPDIR/bytes-real.sh"
 assert_contains "the real sampler is pointed at the conntrack fixture" \
@@ -412,12 +412,12 @@ tctl_monitored_subnets() { echo "br-lan 3232235776 256 3232235777"; }
 STUB
 }
 
-sed -e "s|\. /usr/local/bin/trafficctl-fw.sh|. $TMPDIR/fw-offload.sh|" \
+sed -e "s|\. /usr/libexec/trafficctl/trafficctl-fw.sh|. $TMPDIR/fw-offload.sh|" \
     -e "s|/proc/net/nf_conntrack|$CT|" \
-    -e "s|/usr/local/bin/trafficctl-bytes-nft.sh|$DEG/bytes-nft.sh|" \
+    -e "s|/usr/libexec/trafficctl/trafficctl-bytes-nft.sh|$DEG/bytes-nft.sh|" \
     "$BIN/trafficctl-bytes.sh" > "$DEG/bytes.sh"
-sed -e "s|\. /usr/local/bin/trafficctl-fw.sh|. $TMPDIR/fw-offload.sh|" \
-    -e "s|/usr/local/bin/trafficctl-bytes.sh|$DEG/bytes.sh|" \
+sed -e "s|\. /usr/libexec/trafficctl/trafficctl-fw.sh|. $TMPDIR/fw-offload.sh|" \
+    -e "s|/usr/libexec/trafficctl/trafficctl-bytes.sh|$DEG/bytes.sh|" \
     "$BIN/trafficctl-bytes-nft.sh" > "$DEG/bytes-nft.sh"
 chmod +x "$DEG/bytes.sh" "$DEG/bytes-nft.sh"
 assert_contains "the degraded harness wires bytes.sh to the nft fallback" \

@@ -1,9 +1,10 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=dash
 # Traffic shaping (tc/HTB) for per-device bandwidth control.
 # Usage: trafficctl-shape.sh <add|remove|status> <ip> [rate_kbit] [label]
 
-. /usr/local/bin/trafficctl-fw.sh
+. /usr/libexec/trafficctl/trafficctl-fw.sh
 
 SHAPES_FILE="/etc/trafficctl/shapes.json"
 LAN_DEV=$(tctl_get_lan_device)

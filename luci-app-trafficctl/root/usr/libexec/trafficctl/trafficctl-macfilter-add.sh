@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=dash
 # Block device WiFi access by adding its MAC to deny maclist on all interfaces.
 # The uci maclist is the durable half; hostapd is then programmed at runtime so
@@ -6,7 +7,7 @@
 # runtime half actually got — see the enforcement words in trafficctl-fw.sh.
 # Usage: trafficctl-macfilter-add.sh <ip>
 
-. /usr/local/bin/trafficctl-fw.sh
+. /usr/libexec/trafficctl/trafficctl-fw.sh
 
 IP="$1"
 

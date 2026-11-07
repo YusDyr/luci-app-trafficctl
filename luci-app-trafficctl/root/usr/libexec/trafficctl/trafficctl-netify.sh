@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=dash
 # Optional Netify Agent (netifyd) integration — DPI application labels per device.
 #
@@ -22,7 +23,7 @@
 # (detected_application_name/local_ip/total_bytes). Records are parsed by field
 # extraction rather than strict JSON, which tolerates either framing.
 
-. /usr/local/bin/trafficctl-fw.sh
+. /usr/libexec/trafficctl/trafficctl-fw.sh
 
 CACHE="/tmp/trafficctl_netify.json"
 LOCK="/tmp/trafficctl_netify.lock"

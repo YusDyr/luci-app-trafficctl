@@ -1,9 +1,10 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=dash
 # Detailed device info with connections.
 # Usage: trafficctl-device.sh <ip> [--rdns] [--proto tcp|udp|all]
 
-. /usr/local/bin/trafficctl-fw.sh
+. /usr/libexec/trafficctl/trafficctl-fw.sh
 
 LAN_DEV=$(tctl_get_lan_device)
 
@@ -285,7 +286,7 @@ fi
 # to label, never per connection.
 IFROLE_CACHE="${TCTL_IFROLE_CACHE:-/tmp/trafficctl_ifroles}"
 if [ -s "$OIF_MAP" ] && [ ! -s "$IFROLE_CACHE" ]; then
-    /usr/local/bin/trafficctl-ifaces.sh >/dev/null 2>&1
+    /usr/libexec/trafficctl/trafficctl-ifaces.sh >/dev/null 2>&1
 fi
 
 CONNS_OUT=$(echo "$CONNTRACK_DATA" | awk -v ip="$IP" -v pf="$PROTO_FILTER" -v oifmap="$OIF_MAP" -v ifroles="$IFROLE_CACHE" '

@@ -8,7 +8,7 @@
 PASS=0
 FAIL=0
 
-BIN="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/local/bin"
+BIN="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/libexec/trafficctl"
 FWLIB="$BIN/trafficctl-fw.sh"
 
 TMPDIR=$(mktemp -d)
@@ -43,17 +43,17 @@ assert_not_contains() {
 # trafficctl-totals.sh is deliberately NOT mocked: the accumulator moved there
 # and is the whole point of these monotonicity assertions, so the real script
 # runs, with only its own byte source and state path redirected.
-sed -e "s|/usr/local/bin/trafficctl-fw.sh|$FWLIB|" \
-    -e "s|/usr/local/bin/trafficctl-totals.sh|$TMPDIR/totals.sh|" \
-    -e "s|/usr/local/bin/trafficctl-summary.sh|$MOCKBIN/summary|" \
-    -e "s|/usr/local/bin/trafficctl-portfw.sh|$MOCKBIN/portfw|" \
-    -e "s|/usr/local/bin/trafficctl-netify.sh|$MOCKBIN/netify|" \
+sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FWLIB|" \
+    -e "s|/usr/libexec/trafficctl/trafficctl-totals.sh|$TMPDIR/totals.sh|" \
+    -e "s|/usr/libexec/trafficctl/trafficctl-summary.sh|$MOCKBIN/summary|" \
+    -e "s|/usr/libexec/trafficctl/trafficctl-portfw.sh|$MOCKBIN/portfw|" \
+    -e "s|/usr/libexec/trafficctl/trafficctl-netify.sh|$MOCKBIN/netify|" \
     "$BIN/trafficctl-metrics.sh" > "$TMPDIR/metrics.sh"
 
-sed -e "s|/usr/local/bin/trafficctl-fw.sh|$FWLIB|" \
+sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FWLIB|" \
     -e "s|STATE=\"/tmp/trafficctl_totals.state\"|STATE=\"$STATE\"|" \
     -e "s|LOCKD=\"/tmp/trafficctl_totals.lock.d\"|LOCKD=\"$TMPDIR/lock.d\"|" \
-    -e "s|/usr/local/bin/trafficctl-bytes.sh|$MOCKBIN/bytes|" \
+    -e "s|/usr/libexec/trafficctl/trafficctl-bytes.sh|$MOCKBIN/bytes|" \
     "$BIN/trafficctl-totals.sh" > "$TMPDIR/totals.sh"
 chmod +x "$TMPDIR/totals.sh"
 

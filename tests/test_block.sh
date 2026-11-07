@@ -7,7 +7,7 @@
 PASS=0
 FAIL=0
 
-BIN="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/local/bin"
+BIN="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/libexec/trafficctl"
 
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
@@ -46,8 +46,8 @@ assert_not_contains() {
 
 BLOCK_SH="$TMPDIR/block.sh"
 UNBLOCK_SH="$TMPDIR/unblock.sh"
-sed "s|/usr/local/bin/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" "$BIN/trafficctl-block.sh" > "$BLOCK_SH"
-sed "s|/usr/local/bin/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" "$BIN/trafficctl-unblock.sh" > "$UNBLOCK_SH"
+sed "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" "$BIN/trafficctl-block.sh" > "$BLOCK_SH"
+sed "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" "$BIN/trafficctl-unblock.sh" > "$UNBLOCK_SH"
 
 NFT_LOG="$TMPDIR/nft.log"
 CONNTRACK_LOG="$TMPDIR/conntrack.log"

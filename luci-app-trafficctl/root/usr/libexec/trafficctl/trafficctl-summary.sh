@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=dash
 # Summary of all active LAN devices with traffic control status.
 # Output: JSON array with per-device info.
@@ -9,7 +10,7 @@
 # forks (one full conntrack read + two nft chain dumps + a tc call PER device)
 # into a constant handful of calls.
 
-. /usr/local/bin/trafficctl-fw.sh
+. /usr/libexec/trafficctl/trafficctl-fw.sh
 
 CONN_CACHE="/tmp/trafficctl_conn_cache"
 [ -f "$CONN_CACHE" ] || : > "$CONN_CACHE"
@@ -207,7 +208,7 @@ if [ "$(uci -q get trafficctl.main.netify_enabled 2>/dev/null)" != "0" ] && [ -S
     NETIFY_INTERVAL=$(uci -q get trafficctl.main.netify_interval 2>/dev/null)
     [ "$NETIFY_INTERVAL" -gt 0 ] 2>/dev/null || NETIFY_INTERVAL=45
     if [ "$NETIFY_AGE" -ge "$NETIFY_INTERVAL" ]; then
-        /usr/local/bin/trafficctl-netify.sh collect >/dev/null 2>&1 &
+        /usr/libexec/trafficctl/trafficctl-netify.sh collect >/dev/null 2>&1 &
     fi
 fi
 
@@ -471,5 +472,5 @@ if [ -n "$RDNS_PENDING" ]; then
     # shellcheck disable=SC2086 # deliberate word-splitting into arguments
     set -- $RDNS_PENDING
     [ $# -gt 8 ] && shift $(( $# - 8 ))
-    /usr/local/bin/trafficctl-rdns-refresh.sh "$@" >/dev/null 2>&1 &
+    /usr/libexec/trafficctl/trafficctl-rdns-refresh.sh "$@" >/dev/null 2>&1 &
 fi

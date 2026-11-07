@@ -13,7 +13,7 @@
 PASS=0
 FAIL=0
 
-BIN="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/local/bin"
+BIN="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/libexec/trafficctl"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root"
 
 TMPDIR=$(mktemp -d)
@@ -52,8 +52,8 @@ assert_not_contains() {
 }
 
 RPCD="$TMPDIR/rpcd.sh"
-sed -e "s|/usr/local/bin/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" \
-    -e "s|^SCRIPTS=\"/usr/local/bin\"|SCRIPTS=\"$MOCKBIN\"|" \
+sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" \
+    -e "s|^SCRIPTS=\"/usr/libexec/trafficctl\"|SCRIPTS=\"$MOCKBIN\"|" \
     "$ROOT/usr/libexec/rpcd/luci.trafficctl" > "$RPCD"
 
 # ── mocks: uci, jsonfilter, ubus, plus every sub-script the backend calls ──

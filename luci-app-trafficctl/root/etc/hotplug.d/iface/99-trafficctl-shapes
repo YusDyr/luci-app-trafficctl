@@ -1,8 +1,9 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=dash
 # Restore persistent rules after LAN interface comes up
 
-. /usr/local/bin/trafficctl-fw.sh
+. /usr/libexec/trafficctl/trafficctl-fw.sh
 
 # Clean up nft monitor table on lan ifdown to avoid stale counters
 if [ "$ACTION" = "ifdown" ] && [ "$INTERFACE" = "lan" ]; then
@@ -33,7 +34,7 @@ if [ -f "$SHAPES_FILE" ]; then
         # rate is the fifth positional.
         rate_up=$(jsonfilter -i "$SHAPES_FILE" -e "@[@.ip='$ip'].rate_kbit_up" 2>/dev/null)
         if [ -n "$rate" ] && [ "$rate" != "0" ]; then
-            /usr/local/bin/trafficctl-shape.sh add "$ip" "$rate" "shape_$ip" "$rate_up" || \
+            /usr/libexec/trafficctl/trafficctl-shape.sh add "$ip" "$rate" "shape_$ip" "$rate_up" || \
                 logger -t trafficctl "Failed to restore shape for $ip (${rate}kbit)"
         fi
     done
@@ -91,11 +92,11 @@ if [ -f "$RULES_FILE" ] && tctl_persist_enabled; then
                 _pip=${_rest%%/*}; _pport=${_rest#*/}
                 [ "$_pip" = "local" ] && _pip="-"
                 if [ "$type" = "pfw_pause" ]; then
-                    /usr/local/bin/trafficctl-portfw.sh pause "$_scope" "$_proto" "$_pip" "$_pport" >/dev/null 2>&1 || \
+                    /usr/libexec/trafficctl/trafficctl-portfw.sh pause "$_scope" "$_proto" "$_pip" "$_pport" >/dev/null 2>&1 || \
                         logger -t trafficctl "Failed to restore port pause for $_pport"
                 else
                     [ -n "$param" ] && [ "$param" != "0" ] && \
-                        /usr/local/bin/trafficctl-portfw.sh limit "$_scope" "$_proto" "$_pip" "$_pport" "$param" >/dev/null 2>&1 || \
+                        /usr/libexec/trafficctl/trafficctl-portfw.sh limit "$_scope" "$_proto" "$_pip" "$_pport" "$param" >/dev/null 2>&1 || \
                         logger -t trafficctl "Failed to restore port limit for $_pport"
                 fi
                 ;;
@@ -112,11 +113,11 @@ fi
 # leaves a file in /etc, so the file's existence is the consent. The restore
 # path honours the original deadline and refuses to restart the clock.
 if [ -f /etc/trafficctl/cut.state ]; then
-    /usr/local/bin/trafficctl-cut.sh restore >/dev/null 2>&1 || \
+    /usr/libexec/trafficctl/trafficctl-cut.sh restore >/dev/null 2>&1 || \
         logger -t trafficctl "Failed to restore the global internet cut"
 fi
 
 # Pre-create nft monitor table if software offload is active
 if [ "$(tctl_get_offload_mode)" = "software" ]; then
-    /usr/local/bin/trafficctl-bytes-nft.sh >/dev/null 2>&1 &
+    /usr/libexec/trafficctl/trafficctl-bytes-nft.sh >/dev/null 2>&1 &
 fi

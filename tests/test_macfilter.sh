@@ -25,7 +25,7 @@
 PASS=0
 FAIL=0
 
-BIN="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/local/bin"
+BIN="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/libexec/trafficctl"
 
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
@@ -54,8 +54,8 @@ assert_not_contains() {
 
 ADD_SH="$TMPDIR/macfilter-add.sh"
 REMOVE_SH="$TMPDIR/macfilter-remove.sh"
-sed "s|/usr/local/bin/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" "$BIN/trafficctl-macfilter-add.sh" > "$ADD_SH"
-sed "s|/usr/local/bin/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" "$BIN/trafficctl-macfilter-remove.sh" > "$REMOVE_SH"
+sed "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" "$BIN/trafficctl-macfilter-add.sh" > "$ADD_SH"
+sed "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" "$BIN/trafficctl-macfilter-remove.sh" > "$REMOVE_SH"
 
 UCI_LOG="$TMPDIR/uci.log"
 HOSTAPD_LOG="$TMPDIR/hostapd.log"
@@ -470,9 +470,9 @@ assert_contains "row: frontend consumes wifi_block_pending" \
 # A device on the deny list that is still associated is not blocked, and the
 # backend has to say so for the row to be able to.
 assert_contains "summary.sh emits wifi_block_pending" \
-    '"wifi_block_pending":%s' "$(cat "$ROOT/luci-app-trafficctl/root/usr/local/bin/trafficctl-summary.sh")"
+    '"wifi_block_pending":%s' "$(cat "$ROOT/luci-app-trafficctl/root/usr/libexec/trafficctl/trafficctl-summary.sh")"
 assert_contains "device.sh emits wifi_block_pending" \
-    '"wifi_block_pending":%s' "$(cat "$ROOT/luci-app-trafficctl/root/usr/local/bin/trafficctl-device.sh")"
+    '"wifi_block_pending":%s' "$(cat "$ROOT/luci-app-trafficctl/root/usr/libexec/trafficctl/trafficctl-device.sh")"
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=dash
 # Per-device byte counters from conntrack (for speed calculation).
 # Output: JSON array
@@ -20,7 +21,7 @@
 # by protocol, so trafficctl-bytes-nft.sh reports -1 there. -1 rather than 0:
 # "unknown" and "no TCP traffic" must not render as the same number.
 
-. /usr/local/bin/trafficctl-fw.sh
+. /usr/libexec/trafficctl/trafficctl-fw.sh
 
 # Any offload mode (software, hardware, hardware-counter) bypasses conntrack counters
 # for fast-path packets. Use nftables counters at forward priority -200 (before the
@@ -37,7 +38,7 @@ case "$_offload" in
     *)
         _uncountered=1
         [ "$TCTL_FW" = "nft" ] && [ -z "$TCTL_FORCE_CONNTRACK" ] && \
-            exec /usr/local/bin/trafficctl-bytes-nft.sh
+            exec /usr/libexec/trafficctl/trafficctl-bytes-nft.sh
         ;;
 esac
 

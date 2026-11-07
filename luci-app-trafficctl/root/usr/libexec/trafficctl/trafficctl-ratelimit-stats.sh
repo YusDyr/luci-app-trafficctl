@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=dash
 # Show active rate-limit statistics.
 # Output: JSON array
@@ -11,7 +12,7 @@
 # actually lives behind ever matches, but which copy that is cannot be known
 # here — taking any single one at random reported zero drops for most targets.
 
-. /usr/local/bin/trafficctl-fw.sh
+. /usr/libexec/trafficctl/trafficctl-fw.sh
 
 if [ "$TCTL_FW" = "nft" ]; then
     nft list table netdev tm_ratelimit 2>/dev/null | awk "$TCTL_NFT_RATE_AWK"'

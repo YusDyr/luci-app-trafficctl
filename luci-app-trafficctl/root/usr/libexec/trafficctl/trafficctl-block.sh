@@ -1,9 +1,10 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=dash
 # Block internet access for a device.
 # Usage: trafficctl-block.sh <ip> [label]
 
-. /usr/local/bin/trafficctl-fw.sh
+. /usr/libexec/trafficctl/trafficctl-fw.sh
 
 IP="$1"
 LABEL="${2:-block_$IP}"

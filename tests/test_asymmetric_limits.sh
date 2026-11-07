@@ -27,7 +27,7 @@ PASS=0
 FAIL=0
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="$ROOT/luci-app-trafficctl/root/usr/local/bin"
+BIN="$ROOT/luci-app-trafficctl/root/usr/libexec/trafficctl"
 HOTPLUG="$ROOT/luci-app-trafficctl/root/etc/hotplug.d/iface/99-trafficctl-shapes"
 RPCD="$ROOT/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
 
@@ -204,11 +204,11 @@ sed -e "s|TCTL_RULES_FILE=\"/etc/trafficctl/rules.json\"|TCTL_RULES_FILE=\"$RULE
     "$BIN/trafficctl-fw.sh" > "$FW"
 
 patch_script() {
-    sed -e "s|/usr/local/bin/trafficctl-fw.sh|$FW|" \
+    sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FW|" \
         -e "s|SHAPES_FILE=\"/etc/trafficctl/shapes.json\"|SHAPES_FILE=\"$SHAPES\"|" \
         -e "s|SHAPES_FILE=\"/etc/trafficctl/shapes.json\"|SHAPES_FILE=\"$SHAPES\"|" \
         -e "s|RULES_FILE=\"/etc/trafficctl/rules.json\"|RULES_FILE=\"$RULES\"|" \
-        -e "s|/usr/local/bin/trafficctl-shape.sh|$TMP/shape.sh|" \
+        -e "s|/usr/libexec/trafficctl/trafficctl-shape.sh|$TMP/shape.sh|" \
         "$1" > "$2"
     chmod +x "$2"
 }

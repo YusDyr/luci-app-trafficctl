@@ -29,8 +29,8 @@ node --check luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/st
 npm install && npm run lint
 
 # Shell: syntax and static analysis
-for f in luci-app-trafficctl/root/usr/local/bin/trafficctl-*.sh; do sh -n "$f" || echo "FAIL $f"; done
-shellcheck luci-app-trafficctl/root/usr/local/bin/trafficctl-*.sh
+for f in luci-app-trafficctl/root/usr/libexec/trafficctl/trafficctl-*.sh; do sh -n "$f" || echo "FAIL $f"; done
+shellcheck luci-app-trafficctl/root/usr/libexec/trafficctl/trafficctl-*.sh
 
 # Tests — see docs/DEVELOPMENT.md for the full list and what each covers
 bash tests/test_fw.sh
@@ -50,7 +50,7 @@ deleting the production validation entirely left them green — so a test that
 does not fail when you break the code it names is worse than no test.
 
 The pattern to copy is `tests/test_direction.sh`: put a fake `nft`/`tc`/`ip`/
-`uci`/`curl` on `PATH`, redirect the script's `. /usr/local/bin/trafficctl-fw.sh`
+`uci`/`curl` on `PATH`, redirect the script's `. /usr/libexec/trafficctl/trafficctl-fw.sh`
 line and its state-file paths into a temp dir with `sed`, run the real script,
 then assert on the arguments the fakes recorded.
 

@@ -10,7 +10,7 @@
 PASS=0
 FAIL=0
 
-BIN="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/local/bin"
+BIN="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/libexec/trafficctl"
 FWLIB="$BIN/trafficctl-fw.sh"
 
 TMPDIR=$(mktemp -d)
@@ -61,8 +61,8 @@ MOCK
 for c in uci ubus nft iptables iw conntrack; do printf '#!/bin/sh\nexit 1\n' > "$MOCKBIN/$c"; done
 chmod +x "$MOCKBIN"/*
 
-sed -e "s|/usr/local/bin/trafficctl-fw.sh|$FWLIB|" \
-    -e "s|/usr/local/bin/trafficctl-ifaces.sh|$MOCKBIN/ifaces.sh|" \
+sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FWLIB|" \
+    -e "s|/usr/libexec/trafficctl/trafficctl-ifaces.sh|$MOCKBIN/ifaces.sh|" \
     -e "s|/proc/net/nf_conntrack|$CONNTRACK|" \
     -e "s|/tmp/trafficctl_conn_cache|$TMPDIR/conn_cache|" \
     "$BIN/trafficctl-device.sh" > "$TMPDIR/device.sh"

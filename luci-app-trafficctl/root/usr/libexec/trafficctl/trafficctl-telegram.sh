@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=dash
 # Telegram bot daemon for trafficctl.
 # Runs under procd. Uses curl + jsonfilter to talk to Telegram Bot API.
@@ -6,7 +7,7 @@
 
 . /lib/functions.sh
 
-SCRIPTS="/usr/local/bin"
+SCRIPTS="/usr/libexec/trafficctl"
 KNOWN_FILE="/etc/trafficctl/telegram_known.json"
 OFFSET_FILE="/tmp/trafficctl_tg_offset"
 CACHE_FILE="/tmp/trafficctl_tg_devices.json"

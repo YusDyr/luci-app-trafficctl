@@ -89,22 +89,22 @@ esac
 
 # Verify all expected files are present
 for f in \
-  /usr/local/bin/trafficctl-summary.sh \
-  /usr/local/bin/trafficctl-fw.sh \
-  /usr/local/bin/trafficctl-device.sh \
-  /usr/local/bin/trafficctl-telegram.sh \
-  /usr/local/bin/trafficctl-telegram-test.sh \
-  /usr/local/bin/trafficctl-block.sh \
-  /usr/local/bin/trafficctl-unblock.sh \
-  /usr/local/bin/trafficctl-ratelimit.sh \
-  /usr/local/bin/trafficctl-ratelimit-stats.sh \
-  /usr/local/bin/trafficctl-shape.sh \
-  /usr/local/bin/trafficctl-shape-stats.sh \
-  /usr/local/bin/trafficctl-bytes.sh \
-  /usr/local/bin/trafficctl-totals.sh \
-  /usr/local/bin/trafficctl-rdns.sh \
-  /usr/local/bin/trafficctl-macfilter-add.sh \
-  /usr/local/bin/trafficctl-macfilter-remove.sh \
+  /usr/libexec/trafficctl/trafficctl-summary.sh \
+  /usr/libexec/trafficctl/trafficctl-fw.sh \
+  /usr/libexec/trafficctl/trafficctl-device.sh \
+  /usr/libexec/trafficctl/trafficctl-telegram.sh \
+  /usr/libexec/trafficctl/trafficctl-telegram-test.sh \
+  /usr/libexec/trafficctl/trafficctl-block.sh \
+  /usr/libexec/trafficctl/trafficctl-unblock.sh \
+  /usr/libexec/trafficctl/trafficctl-ratelimit.sh \
+  /usr/libexec/trafficctl/trafficctl-ratelimit-stats.sh \
+  /usr/libexec/trafficctl/trafficctl-shape.sh \
+  /usr/libexec/trafficctl/trafficctl-shape-stats.sh \
+  /usr/libexec/trafficctl/trafficctl-bytes.sh \
+  /usr/libexec/trafficctl/trafficctl-totals.sh \
+  /usr/libexec/trafficctl/trafficctl-rdns.sh \
+  /usr/libexec/trafficctl/trafficctl-macfilter-add.sh \
+  /usr/libexec/trafficctl/trafficctl-macfilter-remove.sh \
   /usr/libexec/rpcd/luci.trafficctl \
   /www/luci-static/resources/view/trafficctl/status.js \
   /www/luci-static/resources/view/trafficctl/status.css \
@@ -119,7 +119,7 @@ done
 
 # Verify syntax for all shell scripts
 for s in \
-  /usr/local/bin/trafficctl-*.sh \
+  /usr/libexec/trafficctl/trafficctl-*.sh \
   /usr/libexec/rpcd/luci.trafficctl \
   /etc/hotplug.d/dhcp/99-trafficctl-newdevice \
   /etc/hotplug.d/iface/99-trafficctl-shapes \
@@ -129,7 +129,7 @@ done
 
 # Verify execute bit on files that are called directly (not via sh)
 for s in \
-  /usr/local/bin/trafficctl-*.sh \
+  /usr/libexec/trafficctl/trafficctl-*.sh \
   /usr/libexec/rpcd/luci.trafficctl \
   /etc/init.d/trafficctl-telegram; do
   [ -x "$s" ] || { echo "NOT EXECUTABLE: $s"; exit 1; }
@@ -153,9 +153,9 @@ esac
 
 # Verify primary files are gone (config files in /etc/config may be kept by design)
 for f in \
-  /usr/local/bin/trafficctl-summary.sh \
-  /usr/local/bin/trafficctl-fw.sh \
-  /usr/local/bin/trafficctl-block.sh \
+  /usr/libexec/trafficctl/trafficctl-summary.sh \
+  /usr/libexec/trafficctl/trafficctl-fw.sh \
+  /usr/libexec/trafficctl/trafficctl-block.sh \
   /usr/libexec/rpcd/luci.trafficctl \
   /www/luci-static/resources/view/trafficctl/status.js \
   /www/luci-static/resources/view/trafficctl/status.css \

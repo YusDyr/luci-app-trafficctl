@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=dash
 # Prometheus / OpenMetrics exporter for trafficctl.
 #
@@ -19,7 +20,7 @@
 #
 # Usage: trafficctl-metrics.sh
 
-. /usr/local/bin/trafficctl-fw.sh
+. /usr/libexec/trafficctl/trafficctl-fw.sh
 
 metrics_enabled() {
     [ "$(uci -q get trafficctl.metrics.enabled 2>/dev/null)" = "1" ]
@@ -43,7 +44,7 @@ opt_on() {
 # --all, because a Prometheus series that vanished and came back every time a
 # quiet device's last flow expired would be unusable: the exporter wants every
 # device that still carries a total, not just the ones currently transmitting.
-/usr/local/bin/trafficctl-totals.sh --all 2>/dev/null \
+/usr/libexec/trafficctl/trafficctl-totals.sh --all 2>/dev/null \
     | sed 's/},{/}\n{/g' \
     | awk '
 function num(line, key,   re, seg) {
@@ -84,7 +85,7 @@ BEGIN {
 # Off by default for the leanest possible scrape: this calls the full summary,
 # which dumps nft/tc state and is markedly heavier than the byte pass.
 if opt_on state; then
-    /usr/local/bin/trafficctl-summary.sh 2>/dev/null \
+    /usr/libexec/trafficctl/trafficctl-summary.sh 2>/dev/null \
         | sed 's/},{/}\n{/g' \
         | awk -v rdnsfile=/tmp/trafficctl_rdns_cache '
 function num(line, key,   re, seg) {
@@ -157,7 +158,7 @@ fi
 
 # ── port forwards ───────────────────────────────────────────────────────────
 if opt_on portfw; then
-    /usr/local/bin/trafficctl-portfw.sh list 2>/dev/null \
+    /usr/libexec/trafficctl/trafficctl-portfw.sh list 2>/dev/null \
         | sed 's/},{/}\n{/g' \
         | awk '
 function num(line, key,   re, seg) {
@@ -207,7 +208,7 @@ fi
 # ── DPI application labels ──────────────────────────────────────────────────
 # Off by default: device × application is a cardinality trap on a busy network.
 if [ "$(uci -q get trafficctl.metrics.apps 2>/dev/null)" = "1" ]; then
-    /usr/local/bin/trafficctl-netify.sh list 2>/dev/null \
+    /usr/libexec/trafficctl/trafficctl-netify.sh list 2>/dev/null \
         | sed -e 's/\]},{/]}\n{/g' \
         | awk '
 BEGIN {

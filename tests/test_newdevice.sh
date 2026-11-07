@@ -14,7 +14,7 @@ PASS=0
 FAIL=0
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="$REPO_ROOT/luci-app-trafficctl/root/usr/local/bin"
+BIN="$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/trafficctl"
 HOTPLUG="$REPO_ROOT/luci-app-trafficctl/root/etc/hotplug.d/dhcp/99-trafficctl-newdevice"
 
 TMP=$(mktemp -d)
@@ -92,8 +92,8 @@ sed -e "s|TCTL_SEEN_FILE=\"/etc/trafficctl/seen_macs\"|TCTL_SEEN_FILE=\"$LEDGER\
     -e "s|TCTL_LEASES_FILE=\"/tmp/dhcp.leases\"|TCTL_LEASES_FILE=\"$LEASES\"|" \
     -e "s|TCTL_SHAPES_FILE=\"/etc/trafficctl/shapes.json\"|TCTL_SHAPES_FILE=\"$SHAPES\"|" \
     -e "s|TCTL_RULES_FILE=\"/etc/trafficctl/rules.json\"|TCTL_RULES_FILE=\"$RULES\"|" \
-    -e "s|/usr/local/bin/trafficctl-ratelimit-stats.sh|$MOCKBIN/ratelimit-stats|" \
-    -e "s|/usr/local/bin/trafficctl-shape-stats.sh|$MOCKBIN/shape-stats|" \
+    -e "s|/usr/libexec/trafficctl/trafficctl-ratelimit-stats.sh|$MOCKBIN/ratelimit-stats|" \
+    -e "s|/usr/libexec/trafficctl/trafficctl-shape-stats.sh|$MOCKBIN/shape-stats|" \
     "$BIN/trafficctl-fw.sh" > "$FW"
 
 # Confirm the rewrite actually landed: a silently unpatched copy would write to
@@ -204,9 +204,9 @@ chmod +x "$MOCKBIN/ratelimit-stats"
 APPLIED="$TMP/applied.log"
 HP="$TMP/hotplug"
 
-sed -e "s|\\. /usr/local/bin/trafficctl-fw.sh|. $FW|" \
-    -e "s|/usr/local/bin/trafficctl-ratelimit.sh|$MOCKBIN/ratelimit|" \
-    -e "s|/usr/local/bin/trafficctl-shape.sh|$MOCKBIN/shape|" \
+sed -e "s|\\. /usr/libexec/trafficctl/trafficctl-fw.sh|. $FW|" \
+    -e "s|/usr/libexec/trafficctl/trafficctl-ratelimit.sh|$MOCKBIN/ratelimit|" \
+    -e "s|/usr/libexec/trafficctl/trafficctl-shape.sh|$MOCKBIN/shape|" \
     "$HOTPLUG" > "$HP"
 
 cat > "$MOCKBIN/ratelimit" <<MOCK

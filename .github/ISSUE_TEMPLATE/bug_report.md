@@ -27,8 +27,8 @@ prints JSON, and the message usually names the missing piece (a kernel module, a
 device that could not be resolved). For example:
 
 ```sh
-/usr/local/bin/trafficctl-shape.sh status 192.168.1.50
-/usr/local/bin/trafficctl-summary.sh | head -c 2000
+/usr/libexec/trafficctl/trafficctl-shape.sh status 192.168.1.50
+/usr/libexec/trafficctl/trafficctl-summary.sh | head -c 2000
 logread | grep trafficctl | tail -30
 ```
 

@@ -23,7 +23,7 @@ PASS=0
 FAIL=0
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="$REPO_ROOT/luci-app-trafficctl/root/usr/local/bin"
+BIN="$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/trafficctl"
 
 # Deliberately under /tmp rather than wherever mktemp defaults to. The store
 # directory is validated against a list of allowed roots (it is a mkdir -p AND
@@ -80,9 +80,9 @@ printf '%s\n' "1760000000 aa:bb:cc:dd:ee:01 192.168.0.50 laptop *" > "$LEASES"
 sed -e "s|TCTL_LEASES_FILE=\"/tmp/dhcp.leases\"|TCTL_LEASES_FILE=\"$LEASES\"|" \
     "$BIN/trafficctl-fw.sh" > "$TMPDIR/fw.sh"
 
-sed -e "s|/usr/local/bin/trafficctl-fw.sh|$TMPDIR/fw.sh|g" \
-    -e "s|/usr/local/bin/trafficctl-totals.sh|$MOCKBIN/totals|g" \
-    -e "s|/usr/local/bin/trafficctl-ifaces.sh|$MOCKBIN/ifaces|g" \
+sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$TMPDIR/fw.sh|g" \
+    -e "s|/usr/libexec/trafficctl/trafficctl-totals.sh|$MOCKBIN/totals|g" \
+    -e "s|/usr/libexec/trafficctl/trafficctl-ifaces.sh|$MOCKBIN/ifaces|g" \
     -e "s|IFCURSOR=\"/tmp/trafficctl_history.ifcursor\"|IFCURSOR=\"$TMPDIR/history.ifcursor\"|" \
     -e "s|IFACC=\"/tmp/trafficctl_history.ifacc\"|IFACC=\"$TMPDIR/history.ifacc\"|" \
     -e "s|CURSOR=\"/tmp/trafficctl_history.cursor\"|CURSOR=\"$CURSOR\"|" \
@@ -108,7 +108,7 @@ assert_contains "the leases path was redirected in fw.sh" \
 # mktemp -d hands back /tmp/tmp.XXXX, so a correctly rewritten path lives under
 # /tmp too and a "/tmp" test would fail there while passing on macOS.
 assert_eq "no production path survives the rewrite" "" \
-    "$(grep -nE '"/tmp/trafficctl_(history|totals)|^\. /usr/local/bin' "$TMPDIR/history.sh")"
+    "$(grep -nE '"/tmp/trafficctl_(history|totals)|^\. /usr/libexec/trafficctl' "$TMPDIR/history.sh")"
 
 # ── mocks ────────────────────────────────────────────────────────────────────
 cat > "$MOCKBIN/totals" <<MOCK

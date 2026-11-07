@@ -93,6 +93,17 @@ assert_contains "Makefile postinst starts the telegram service when present" \
 assert_contains "build-ipk.sh postinst starts the telegram service when present" \
     "/etc/init.d/trafficctl-telegram start" "$(cat "$IPK")"
 
+# 5. The history sampler is restarted after an upgrade. It is a loop that
+#    calls the helpers by absolute path, so one started by a release that
+#    installed them under /usr/local/bin would record nothing until a reboot.
+HIST_RESTART="/etc/init.d/trafficctl-history restart"
+assert_contains "Makefile postinst restarts the history sampler" \
+    "$HIST_RESTART" "$MK_POSTINST"
+assert_contains "build-ipk.sh postinst restarts the history sampler" \
+    "$HIST_RESTART" "$(cat "$IPK")"
+assert_contains "build-apk.sh post-upgrade restarts the history sampler" \
+    "$HIST_RESTART" "$(cat "$APK")"
+
 # ── Syntax ────────────────────────────────────────────────────────────────
 # The postinst runs under the router's ash. A syntax error there fails the
 # install on the device, where it is least convenient to debug.

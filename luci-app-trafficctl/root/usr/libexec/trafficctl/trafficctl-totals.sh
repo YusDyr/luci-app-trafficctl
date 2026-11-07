@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=dash
 # Monotonic per-device byte totals — the single accumulator behind both the
 # LuCI "Bytes / TCP / UDP" columns and the trafficctl_device_bytes_total metric.
@@ -52,7 +53,7 @@
 #   re-present the same understated number as trustworthy. Consumers must
 #   refuse to show it as a total, exactly as they refuse to show -1 as 0.
 
-. /usr/local/bin/trafficctl-fw.sh
+. /usr/libexec/trafficctl/trafficctl-fw.sh
 
 STATE="/tmp/trafficctl_totals.state"
 LOCKD="/tmp/trafficctl_totals.lock.d"
@@ -77,7 +78,7 @@ trap "rm -f '$SAMPLE' '$TMPF'" EXIT INT TERM
 # sampler, not for ordinary load. The file is in tmpfs and is streamed into
 # awk, so this costs no more memory than the pipeline it replaces — and keeps
 # the promise that no large value is ever held in a shell variable.
-/usr/local/bin/trafficctl-bytes.sh 2>/dev/null | sed 's/},{/}\n{/g' > "$SAMPLE"
+/usr/libexec/trafficctl/trafficctl-bytes.sh 2>/dev/null | sed 's/},{/}\n{/g' > "$SAMPLE"
 
 # mkdir is atomic, so unlike a test-then-create lock file two samplers cannot
 # both believe they hold it. Without this a LuCI poll and a metrics scrape

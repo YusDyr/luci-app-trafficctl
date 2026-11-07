@@ -23,7 +23,7 @@ JS="$REPO_ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/
 # own files, so a future move has to update this rather than quietly
 # skipping half the checks.
 SETTINGS_JS="$REPO_ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/settings.js"
-FW="$REPO_ROOT/luci-app-trafficctl/root/usr/local/bin/trafficctl-fw.sh"
+FW="$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/trafficctl/trafficctl-fw.sh"
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT

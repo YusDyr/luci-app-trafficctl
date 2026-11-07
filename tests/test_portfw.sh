@@ -7,17 +7,17 @@
 PASS=0
 FAIL=0
 
-SCRIPT="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/local/bin/trafficctl-portfw.sh"
-FWLIB="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/local/bin/trafficctl-fw.sh"
+SCRIPT="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/libexec/trafficctl/trafficctl-portfw.sh"
+FWLIB="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/libexec/trafficctl/trafficctl-fw.sh"
 
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 MOCKBIN="$TMPDIR/bin"
-mkdir -p "$MOCKBIN" "$TMPDIR/usr/local/bin"
+mkdir -p "$MOCKBIN" "$TMPDIR/usr/libexec/trafficctl"
 
-# The script sources /usr/local/bin/trafficctl-fw.sh by absolute path; give the
+# The script sources /usr/libexec/trafficctl/trafficctl-fw.sh by absolute path; give the
 # mocks a copy at a location we control via a wrapper that rewrites the source.
-sed "s|/usr/local/bin/trafficctl-fw.sh|$FWLIB|" "$SCRIPT" > "$TMPDIR/portfw.sh"
+sed "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FWLIB|" "$SCRIPT" > "$TMPDIR/portfw.sh"
 chmod +x "$TMPDIR/portfw.sh"
 
 assert_contains() {

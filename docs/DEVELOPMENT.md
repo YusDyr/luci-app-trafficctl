@@ -17,8 +17,8 @@
 
 ```sh
 # Deploy all backend scripts
-scp luci-app-trafficctl/root/usr/local/bin/trafficctl-*.sh root@192.168.0.1:/usr/local/bin/
-ssh root@192.168.0.1 'chmod +x /usr/local/bin/trafficctl-*.sh'
+scp luci-app-trafficctl/root/usr/libexec/trafficctl/trafficctl-*.sh root@192.168.0.1:/usr/libexec/trafficctl/
+ssh root@192.168.0.1 'chmod +x /usr/libexec/trafficctl/trafficctl-*.sh'
 
 # Deploy rpcd backend
 scp luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl root@192.168.0.1:/usr/libexec/rpcd/
@@ -170,16 +170,16 @@ function name {}         # use name() {} instead
 
 ```sh
 # Summary
-ssh root@192.168.0.1 '/usr/local/bin/trafficctl-summary.sh' | python3 -m json.tool
+ssh root@192.168.0.1 '/usr/libexec/trafficctl/trafficctl-summary.sh' | python3 -m json.tool
 
 # Per-device
-ssh root@192.168.0.1 '/usr/local/bin/trafficctl-device.sh 192.168.0.111 all' | python3 -m json.tool
+ssh root@192.168.0.1 '/usr/libexec/trafficctl/trafficctl-device.sh 192.168.0.111 all' | python3 -m json.tool
 
 # Shaping
-ssh root@192.168.0.1 '/usr/local/bin/trafficctl-shape.sh add 192.168.0.100 5000 test'
-ssh root@192.168.0.1 '/usr/local/bin/trafficctl-shape.sh status 192.168.0.100'
-ssh root@192.168.0.1 '/usr/local/bin/trafficctl-shape-stats.sh' | python3 -m json.tool
-ssh root@192.168.0.1 '/usr/local/bin/trafficctl-shape.sh remove 192.168.0.100'
+ssh root@192.168.0.1 '/usr/libexec/trafficctl/trafficctl-shape.sh add 192.168.0.100 5000 test'
+ssh root@192.168.0.1 '/usr/libexec/trafficctl/trafficctl-shape.sh status 192.168.0.100'
+ssh root@192.168.0.1 '/usr/libexec/trafficctl/trafficctl-shape-stats.sh' | python3 -m json.tool
+ssh root@192.168.0.1 '/usr/libexec/trafficctl/trafficctl-shape.sh remove 192.168.0.100'
 
 # Verify kernel state
 ssh root@192.168.0.1 'tc -s class show dev br-lan'
@@ -190,7 +190,7 @@ ssh root@192.168.0.1 'nft list chain inet fw4 forward'
 
 ```sh
 # Shell (requires shellcheck)
-shellcheck luci-app-trafficctl/root/usr/local/bin/trafficctl-*.sh
+shellcheck luci-app-trafficctl/root/usr/libexec/trafficctl/trafficctl-*.sh
 
 # JavaScript (requires node + eslint)
 npm install   # installs eslint from package.json devDependencies

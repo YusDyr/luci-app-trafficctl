@@ -62,7 +62,7 @@ if [ -z "$SHELL_CMD" ]; then
 fi
 echo "Using POSIX shell for syntax/bashism checks: $SHELL_CMD"
 
-for script in "$REPO_ROOT"/luci-app-trafficctl/root/usr/local/bin/trafficctl-*.sh; do
+for script in "$REPO_ROOT"/luci-app-trafficctl/root/usr/libexec/trafficctl/trafficctl-*.sh; do
     name=$(basename "$script")
     # shellcheck disable=SC2086 # SHELL_CMD may be "busybox ash", intentionally split
     assert_ok "syntax: $name" $SHELL_CMD -n "$script"
@@ -101,7 +101,7 @@ check_bashism() {
     PASS=$((PASS + 1))
 }
 
-for script in "$REPO_ROOT"/luci-app-trafficctl/root/usr/local/bin/trafficctl-*.sh; do
+for script in "$REPO_ROOT"/luci-app-trafficctl/root/usr/libexec/trafficctl/trafficctl-*.sh; do
     check_bashism "$script"
 done
 check_bashism "$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
@@ -121,10 +121,10 @@ if [ -f "$IPK" ]; then
     DATA_FILES=$(tar tzf data.tar.gz)
     for expected in \
         "usr/libexec/rpcd/luci.trafficctl" \
-        "usr/local/bin/trafficctl-summary.sh" \
-        "usr/local/bin/trafficctl-device.sh" \
-        "usr/local/bin/trafficctl-fw.sh" \
-        "usr/local/bin/trafficctl-telegram.sh" \
+        "usr/libexec/trafficctl/trafficctl-summary.sh" \
+        "usr/libexec/trafficctl/trafficctl-device.sh" \
+        "usr/libexec/trafficctl/trafficctl-fw.sh" \
+        "usr/libexec/trafficctl/trafficctl-telegram.sh" \
         "www/luci-static/resources/view/trafficctl/status.js" \
         "usr/share/luci/menu.d/luci-app-trafficctl.json" \
         "usr/share/rpcd/acl.d/luci-app-trafficctl.json" \
@@ -152,7 +152,7 @@ fi
 
 # ── Script permissions ─────────────────────────────────────────────────────
 
-for script in "$REPO_ROOT"/luci-app-trafficctl/root/usr/local/bin/trafficctl-*.sh; do
+for script in "$REPO_ROOT"/luci-app-trafficctl/root/usr/libexec/trafficctl/trafficctl-*.sh; do
     assert_ok "executable: $(basename "$script")" test -x "$script"
 done
 assert_ok "executable: rpcd" test -x "$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"

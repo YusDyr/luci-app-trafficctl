@@ -15,7 +15,7 @@
 PASS=0
 FAIL=0
 
-BIN="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/local/bin"
+BIN="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/libexec/trafficctl"
 
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
@@ -131,7 +131,7 @@ assert_contains "device: shape_kbit_up in the JSON" '"shape_kbit_up":%d' "$DEV_S
 # ── shape-stats: every record form is reported ───────────────────────────────
 
 STATS_SH="$TMPDIR/shape-stats.sh"
-sed "s|/usr/local/bin/trafficctl-fw.sh|$FW|" "$BIN/trafficctl-shape-stats.sh" > "$STATS_SH"
+sed "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FW|" "$BIN/trafficctl-shape-stats.sh" > "$STATS_SH"
 STATS=$(PATH="$MOCKBIN:$PATH" sh "$STATS_SH" 2>/dev/null)
 assert_contains "stats: symmetric shape reported" '"ip":"192.168.1.100"' "$STATS"
 assert_contains "stats: shape with its own upload ceiling reported" '"ip":"192.168.1.101"' "$STATS"

@@ -10,7 +10,7 @@
 PASS=0
 FAIL=0
 
-BIN="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/local/bin"
+BIN="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/libexec/trafficctl"
 
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
@@ -27,9 +27,9 @@ assert_eq() {
     fi
 }
 
-# Point the script's `. /usr/local/bin/trafficctl-fw.sh` at the real fw lib.
+# Point the script's `. /usr/libexec/trafficctl/trafficctl-fw.sh` at the real fw lib.
 SCRIPT="$TMPDIR/bytes-nft.sh"
-sed "s|/usr/local/bin/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" \
+sed "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" \
     "$BIN/trafficctl-bytes-nft.sh" > "$SCRIPT"
 
 BYTES_IN_FILE="$TMPDIR/bytes_in.txt"
@@ -258,15 +258,15 @@ MOCK
 chmod +x "$MOCKBIN/nft"
 
 FALLBACK_MARK="$TMPDIR/fallback_called"
-mkdir -p "$TMPDIR/usr/local/bin"
-cat > "$MOCKBIN/../usr/local/bin/trafficctl-bytes.sh" <<MOCK
+mkdir -p "$TMPDIR/usr/libexec/trafficctl"
+cat > "$MOCKBIN/../usr/libexec/trafficctl/trafficctl-bytes.sh" <<MOCK
 #!/bin/sh
 touch "$FALLBACK_MARK"
 echo '[]'
 MOCK
 # The real script execs the literal absolute path, so redirect it too.
-sed -i.bak "s|/usr/local/bin/trafficctl-bytes.sh|$TMPDIR/usr/local/bin/trafficctl-bytes.sh|" "$SCRIPT"
-chmod +x "$TMPDIR/usr/local/bin/trafficctl-bytes.sh"
+sed -i.bak "s|/usr/libexec/trafficctl/trafficctl-bytes.sh|$TMPDIR/usr/libexec/trafficctl/trafficctl-bytes.sh|" "$SCRIPT"
+chmod +x "$TMPDIR/usr/libexec/trafficctl/trafficctl-bytes.sh"
 
 run_bytes_nft >/dev/null
 assert_eq "unsupported counter maps: falls back to conntrack script" \

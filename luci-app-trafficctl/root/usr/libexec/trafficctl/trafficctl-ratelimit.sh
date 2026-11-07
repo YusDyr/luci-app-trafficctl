@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=dash
 # Rate-limit bandwidth in both directions (policer).
 #
@@ -11,7 +12,7 @@
 #            which is what this did before the directions could differ
 # rate_kbit=0 removes the limit.
 
-. /usr/local/bin/trafficctl-fw.sh
+. /usr/libexec/trafficctl/trafficctl-fw.sh
 
 IP="$1"
 RATE="$2"

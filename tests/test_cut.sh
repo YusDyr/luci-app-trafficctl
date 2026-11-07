@@ -20,7 +20,7 @@ PASS=0
 FAIL=0
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="$REPO_ROOT/luci-app-trafficctl/root/usr/local/bin"
+BIN="$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/trafficctl"
 RPCD="$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
 ACL="$REPO_ROOT/luci-app-trafficctl/root/usr/share/rpcd/acl.d/luci-app-trafficctl.json"
 
@@ -226,7 +226,7 @@ VALS
 # They are rewritten into the scratch directory rather than adding test-only
 # override variables to the shipped code (the approach test_newdevice.sh takes).
 CUT="$TMP/cut.sh"
-sed -e "s|\\. /usr/local/bin/trafficctl-fw.sh|. $BIN/trafficctl-fw.sh|" \
+sed -e "s|\\. /usr/libexec/trafficctl/trafficctl-fw.sh|. $BIN/trafficctl-fw.sh|" \
     -e "s|CUT_RUN_DIR=\"/var/run/trafficctl\"|CUT_RUN_DIR=\"$TMP/run\"|" \
     -e "s|CUT_STATE=\"/var/run/trafficctl/cut.state\"|CUT_STATE=\"$STATE\"|" \
     -e "s|CUT_PERSIST_STATE=\"/etc/trafficctl/cut.state\"|CUT_PERSIST_STATE=\"$PSTATE\"|" \
@@ -679,7 +679,7 @@ assert_eq "orphaned rule: a tick with no state removes it" "no" \
 # ════════════════════════════════════════════════════════════════════════════
 
 RPCD_SH="$TMP/rpcd"
-sed "s|\\. /usr/local/bin/trafficctl-fw.sh|. $BIN/trafficctl-fw.sh|" "$RPCD" > "$RPCD_SH"
+sed "s|\\. /usr/libexec/trafficctl/trafficctl-fw.sh|. $BIN/trafficctl-fw.sh|" "$RPCD" > "$RPCD_SH"
 LIST=$(PATH="$MOCKBIN:$PATH" sh "$RPCD_SH" list 2>/dev/null)
 assert_contains "rpcd: cut_status is advertised by the list case" '"cut_status"' "$LIST"
 assert_contains "rpcd: cut_set is advertised with its parameters" \
@@ -704,8 +704,8 @@ assert_contains "acl: cut_status is a write method, like activity_log" '"cut_sta
 HOTPLUG="$REPO_ROOT/luci-app-trafficctl/root/etc/hotplug.d/iface/99-trafficctl-shapes"
 HP="$TMP/hotplug"
 CUT_CALL_LOG="$TMP/cutcall.log"
-sed -e "s|\\. /usr/local/bin/trafficctl-fw.sh|. $BIN/trafficctl-fw.sh|" \
-    -e "s|/usr/local/bin/trafficctl-cut.sh|$MOCKBIN/cut-stub|" \
+sed -e "s|\\. /usr/libexec/trafficctl/trafficctl-fw.sh|. $BIN/trafficctl-fw.sh|" \
+    -e "s|/usr/libexec/trafficctl/trafficctl-cut.sh|$MOCKBIN/cut-stub|" \
     -e "s|/etc/trafficctl/cut.state|$PSTATE|" \
     "$HOTPLUG" > "$HP"
 

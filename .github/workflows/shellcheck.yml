@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@v6
       # Explicit scan of EVERY shell script (detected by shebang), failing on
       # any warning or error. The previous ludeeus/action-shellcheck step only
-      # scanned root/usr/local/bin: its `additional_files` were passed as full
+      # scanned the helper-script directory: its `additional_files` were passed as full
       # paths but the action treats them as `find -name` basename globs, so the
       # init.d / rpcd / hotplug scripts were silently never checked.
       - name: Run ShellCheck (warnings fail)

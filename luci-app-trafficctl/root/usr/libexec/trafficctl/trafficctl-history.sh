@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=dash
 # Durable per-device traffic history, accumulated per accounting period.
 #
@@ -81,7 +82,7 @@
 #   trafficctl-history.sh keeper           the procd service loop (sample + flush)
 #   trafficctl-history.sh validate-dir <p>  exit 0 if p is an allowed store dir
 
-. /usr/local/bin/trafficctl-fw.sh
+. /usr/libexec/trafficctl/trafficctl-fw.sh
 
 # Named by absolute path, as they must be on the router; the tests sed these
 # lines into their scratch directory rather than have the shipped script carry
@@ -361,7 +362,7 @@ hist_flush() {
     # --all so a device whose last flow expired still reports the total it has
     # accumulated; without it a quiet device's growth would be dropped from
     # every flush it happened to be idle for.
-    /usr/local/bin/trafficctl-totals.sh --all 2>/dev/null \
+    /usr/libexec/trafficctl/trafficctl-totals.sh --all 2>/dev/null \
         | sed 's/},{/}\n{/g' > "$sample"
     if [ ! -s "$sample" ]; then
         hist_err_set "totals produced nothing"
@@ -656,7 +657,7 @@ hist_if_accumulate() {
     # shellcheck disable=SC2064
     trap "rm -f '$sample' '$tmp'" EXIT INT TERM
 
-    /usr/local/bin/trafficctl-ifaces.sh 2>/dev/null \
+    /usr/libexec/trafficctl/trafficctl-ifaces.sh 2>/dev/null \
         | sed 's/},{/}\n{/g' > "$sample"
     [ -s "$sample" ] || return 0
 
@@ -1003,7 +1004,7 @@ hist_keeper() {
 
     while :; do
         if hist_enabled; then
-            /usr/local/bin/trafficctl-totals.sh --all >/dev/null 2>&1
+            /usr/libexec/trafficctl/trafficctl-totals.sh --all >/dev/null 2>&1
             # Both series advance their tmpfs cursor on every tick. Only the
             # durable store waits for the flush interval below.
             hist_if_accumulate >/dev/null 2>&1
@@ -1028,7 +1029,7 @@ case "$1" in
         # Advance the accumulator and throw the JSON away. Cheap, tmpfs only,
         # and the thing that makes an hourly flush mean anything.
         hist_enabled || { printf '{"ok":false,"reason":"disabled"}\n'; exit 0; }
-        /usr/local/bin/trafficctl-totals.sh --all >/dev/null 2>&1
+        /usr/libexec/trafficctl/trafficctl-totals.sh --all >/dev/null 2>&1
         # The interface series advances its own tmpfs cursor on the same tick.
         # Leaving it to the flush meant a counter that restarted in between
         # lost everything since the last flush, not since the last tick (#111).
