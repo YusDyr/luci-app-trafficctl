@@ -466,6 +466,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: [ci, compat, feeds, prepare, build]
     if: needs.prepare.outputs.bump != 'none'
+    # Whether this run actually tagged and released. `pages` must not publish
+    # a feed for a version that never got a release.
+    outputs:
+      proceed: ${{ steps.tip.outputs.proceed }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -582,3 +586,55 @@ jobs:
           files: |
             dist/*.ipk
             dist/*.apk
+
+  # Signed opkg/apk package feed on GitHub Pages, so a router that added the
+  # feed once gets new releases from `opkg upgrade` / `apk upgrade` instead of
+  # wget-ing a release asset by hand (and apk users no longer need
+  # --allow-untrusted). tools/build-feed.sh builds the indexes with the SDK's
+  # own tools and signs them with the same keys as the packages.
+  #
+  # Only after a release was really created, and only with the signing keys:
+  # a fork without them has no signed APK to index and no key to sign
+  # Packages with. A failure here leaves the release itself intact; the feed
+  # just keeps serving the previous version until a re-run.
+  pages:
+    name: Publish the package feed
+    runs-on: ubuntu-latest
+    needs: [prepare, build, publish]
+    if: needs.build.outputs.have_apk == '1' && needs.publish.outputs.proceed == '1'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # tools/build-feed.sh and keys/ as of the commit this release built.
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - uses: actions/download-artifact@v5
+        with:
+          name: release-artifacts
+          path: dist/
+
+      - name: Build the feed
+        # Pulls the SDK image (cached by `build` on another runner, so pulled
+        # again here) and indexes a handful of files: minutes, not the hour
+        # the SDK build is allowed.
+        timeout-minutes: 20
+        env:
+          USIGN_PRIVATE_KEY: ${{ secrets.USIGN_PRIVATE_KEY }}
+          APK_PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
+          FEED_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+        run: tools/build-feed.sh dist feed
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: feed/
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v5

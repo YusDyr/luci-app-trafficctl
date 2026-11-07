@@ -286,6 +286,7 @@ devices) are family-independent and work regardless.
 > - **Recommended**: v1.6.5+ (earlier releases are broken — missing status.css, invalid APK format)
 > - OpenWrt **21.02 — 24.10** → download `.ipk` (opkg)
 > - OpenWrt **25.12+** and snapshot → download `.apk` (apk)
+> - Want upgrades through `opkg upgrade` / `apk upgrade`? Add the [package feed](#package-feed-recommended) instead
 
 Each release includes multiple filenames for the same package:
 
@@ -299,6 +300,47 @@ Each release includes multiple filenames for the same package:
 | `luci-app-trafficctl_X.Y.Z-r1_noarch.apk` | Same file, version-pinned |
 
 The "stable URL" links below always download from the latest release — the filename stays constant across versions.
+
+### Package feed (recommended)
+
+Every release is also published as a signed package feed on GitHub Pages
+([yusdyr.github.io/luci-app-trafficctl](https://yusdyr.github.io/luci-app-trafficctl/)).
+Add the feed and its key once; after that the router's package manager installs
+and upgrades the app like any other package, and checks the feed's signature on
+every update. Needs HTTPS in `wget` (`libustream-*`, present in default images
+since 21.02).
+
+**OpenWrt 21.02 — 24.10 (opkg):**
+
+```sh
+wget -O /tmp/trafficctl.pub https://yusdyr.github.io/luci-app-trafficctl/keys/usign-64513c3027229c14.pub
+opkg-key add /tmp/trafficctl.pub
+echo 'src/gz trafficctl https://yusdyr.github.io/luci-app-trafficctl/opkg' >> /etc/opkg/customfeeds.conf
+opkg update
+opkg install luci-app-trafficctl
+/etc/init.d/rpcd restart
+```
+
+**OpenWrt 25.12+ (apk):**
+
+```sh
+wget -O /etc/apk/keys/trafficctl.pem https://yusdyr.github.io/luci-app-trafficctl/keys/trafficctl.pem
+echo 'https://yusdyr.github.io/luci-app-trafficctl/apk/packages.adb' >> /etc/apk/repositories.d/customfeeds.list
+apk update
+apk add luci-app-trafficctl
+/etc/init.d/rpcd restart
+```
+
+Translations install the same way (`luci-i18n-trafficctl-zh-cn`). To upgrade
+later: `opkg update && opkg upgrade luci-app-trafficctl`, or
+`apk update && apk upgrade luci-app-trafficctl`. No `--allow-untrusted` is
+needed: the apk index is signed with [`keys/apk-signing.pub`](keys/apk-signing.pub)
+(published as `trafficctl.pem`), the opkg index with
+[`keys/usign-64513c3027229c14.pub`](keys/usign-64513c3027229c14.pub). The feed
+holds the latest release only. [`tools/build-feed.sh`](tools/build-feed.sh)
+builds it.
+
+The single-file methods below still work and need no feed.
 
 ### OpenWrt 25.12+ (.apk)
 

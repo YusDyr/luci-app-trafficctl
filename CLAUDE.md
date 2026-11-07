@@ -104,6 +104,8 @@ chore: bump ESLint config
 
 **Manual trigger:** `auto-release.yml` also supports `workflow_dispatch` to re-run.
 
+**Package feed:** after each release, job `pages` in `auto-release.yml` runs `tools/build-feed.sh` (SDK image: `ipkg-make-index.sh` + `usign` for opkg, `apk mkndx --sign` for apk) and deploys a signed feed of that release to GitHub Pages (`https://yusdyr.github.io/luci-app-trafficctl/{opkg,apk,keys}/`). Only with the signing secrets; it needs Pages set to the "GitHub Actions" source.
+
 ## Deployment
 
 scp does NOT work to the router. Deploy files like this:
