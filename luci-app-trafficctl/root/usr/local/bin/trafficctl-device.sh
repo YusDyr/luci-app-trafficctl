@@ -161,38 +161,35 @@ if [ -n "$MAC" ]; then
     done
 fi
 
-# Get rate limit
-RATE_LIM=0
+# Get rate limit, each direction: upload has its own ceiling since #83.
+RATE_LIM=0; RATE_LIM_UP=0
 if [ "$TCTL_FW" = "nft" ]; then
-    RATE_LIM=$(nft list table netdev tm_ratelimit 2>/dev/null | tctl_rl_rate_kbit "$IP")
+    RL_DUMP=$(nft list table netdev tm_ratelimit 2>/dev/null)
+    RATE_LIM=$(echo "$RL_DUMP" | tctl_rl_rate_kbit "$IP")
+    RATE_LIM_UP=$(echo "$RL_DUMP" | tctl_rl_rate_kbit "$IP" saddr)
 else
     # The address as a whole field, not a substring (see tctl_rl_rate_kbit).
-    RATE_LIM=$(iptables -t mangle -L FORWARD -nv 2>/dev/null | grep "rl_ratelimit" \
-        | awk -v ip="$IP" '{ for (i = 1; i <= NF; i++) if ($i == ip || $i == ip "/32") { print; next } }' \
-        | grep -oE '[0-9]+kbit' | head -1 | sed 's/kbit//')
+    # The download rule is listed first; the upload one is the "_ul" name.
+    RL_DUMP=$(iptables -t mangle -L FORWARD -nv 2>/dev/null | grep "rl_ratelimit" \
+        | awk -v ip="$IP" '{ for (i = 1; i <= NF; i++) if ($i == ip || $i == ip "/32") { print; next } }')
+    RATE_LIM=$(echo "$RL_DUMP" | grep -oE '[0-9]+kbit' | head -1 | sed 's/kbit//')
+    RATE_LIM_UP=$(echo "$RL_DUMP" | grep -E 'rl_ratelimit.*_ul' | grep -oE '[0-9]+kbit' | head -1 | sed 's/kbit//')
 fi
 [ -z "$RATE_LIM" ] && RATE_LIM=0
+[ -z "$RATE_LIM_UP" ] && RATE_LIM_UP=0
 
-# Get shape rate
-SHAPE_KBIT=0
-o3=$(echo "$IP" | cut -d. -f3)
-o4=$(echo "$IP" | cut -d. -f4)
-dec=$((o3 * 256 + o4))
-hex=$(printf "%x" "$dec")
-classid="1:$hex"
-# Skip reserved HTB classes (root 1:1 and default 1:fffe)
-shape_info=""
-case "$hex" in 1|fffe) ;; *) shape_info=$(tc class show dev "$LAN_DEV" classid "$classid" 2>/dev/null) ;; esac
-if [ -n "$shape_info" ]; then
-    SHAPE_KBIT=$(echo "$shape_info" | grep -oE 'rate [0-9]+[A-Za-z]+' | head -1 | awk '{
-        rate=$2; num=rate+0
-        if (rate ~ /Gbit/) print num*1000000
-        else if (rate ~ /Mbit/) print num*1000
-        else if (rate ~ /[Kk]bit/) print num
-        else print num
-    }')
+# Get shape rate. The classid is looked up in shapes.json, never derived from
+# the address: minors are allocated (see lookup_shape_kbit in
+# trafficctl-summary.sh). Download is the class on the LAN device, upload the
+# one with the same classid on the IFB.
+SHAPE_KBIT=0; SHAPE_KBIT_UP=0
+classid=$(tctl_shape_classmap | awk -v ip="$IP" '$1==ip{print $2; exit}')
+if [ -n "$classid" ]; then
+    SHAPE_KBIT=$(tctl_tc_class_rates "$LAN_DEV" | awk -v c="$classid" '$1==c{print $2; exit}')
+    SHAPE_KBIT_UP=$(tctl_tc_class_rates "$(tctl_shape_ifb_dev)" | awk -v c="$classid" '$1==c{print $2; exit}')
 fi
 [ -z "$SHAPE_KBIT" ] && SHAPE_KBIT=0
+[ -z "$SHAPE_KBIT_UP" ] && SHAPE_KBIT_UP=0
 
 # Parse conntrack for connections and totals
 TIMESTAMP=$(date +%s)
@@ -404,7 +401,7 @@ tctl_wifi_block_pending "$([ "$WIFI_BLOCKED" = "true" ] && echo 1 || echo 0)" "$
     && WIFI_PENDING=true
 
 # Output final JSON
-printf '{"ip":"%s","name":"%s","mac":"%s","conn_type":"%s","conn_last":"%s","timestamp":%d,"blocked":%s,"block_packets":%d,"block_bytes":%.0f,"wifi_blocked":%s,"wifi_block_pending":%s,"total":%.0f,"protocols":{"tcp":%d,"udp":%d,"other":%d},"tcp_states":{"established":%d,"time_wait":%d,"syn_sent":%d,"close_wait":%d},"connections":[%s],"rate_limit_kbit":%d,"shape_kbit":%d}\n' \
+printf '{"ip":"%s","name":"%s","mac":"%s","conn_type":"%s","conn_last":"%s","timestamp":%d,"blocked":%s,"block_packets":%d,"block_bytes":%.0f,"wifi_blocked":%s,"wifi_block_pending":%s,"total":%.0f,"protocols":{"tcp":%d,"udp":%d,"other":%d},"tcp_states":{"established":%d,"time_wait":%d,"syn_sent":%d,"close_wait":%d},"connections":[%s],"rate_limit_kbit":%d,"rate_limit_kbit_up":%d,"shape_kbit":%d,"shape_kbit_up":%d}\n' \
     "$IP" "$NAME" "$MAC" "$CONN_TYPE" "$CONN_LAST" "$TIMESTAMP" "$BLOCKED" "$BLOCK_PACKETS" "$BLOCK_BYTES" \
     "$WIFI_BLOCKED" "$WIFI_PENDING" "$TOTAL" "$N_TCP" "$N_UDP" "$N_OTHER" \
-    "$EST" "$TW" "$SS" "$CW" "$CONNS_OUT" "$RATE_LIM" "$SHAPE_KBIT"
+    "$EST" "$TW" "$SS" "$CW" "$CONNS_OUT" "$RATE_LIM" "$RATE_LIM_UP" "$SHAPE_KBIT" "$SHAPE_KBIT_UP"
