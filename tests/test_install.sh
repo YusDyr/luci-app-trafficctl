@@ -112,6 +112,7 @@ for f in \
   /usr/libexec/trafficctl/trafficctl-bytes.sh \
   /usr/libexec/trafficctl/trafficctl-totals.sh \
   /usr/libexec/trafficctl/trafficctl-rdns.sh \
+  /usr/libexec/trafficctl/trafficctl-rules.sh \
   /usr/libexec/trafficctl/trafficctl-macfilter-add.sh \
   /usr/libexec/trafficctl/trafficctl-macfilter-remove.sh \
   /usr/libexec/rpcd/luci.trafficctl \

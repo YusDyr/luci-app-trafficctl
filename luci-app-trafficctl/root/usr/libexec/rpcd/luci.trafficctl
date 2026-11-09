@@ -43,7 +43,7 @@ list)
 	printf '"block":{"ip":"str","label":"str"},'
 	printf '"unblock":{"ip":"str","label":"str"},'
 	printf '"macfilter_add":{"ip":"str"},'
-	printf '"macfilter_remove":{"ip":"str"},'
+	printf '"macfilter_remove":{"ip":"str","mac":"str"},'
 	printf '"ratelimit":{"ip":"str","rate_kbit":"int","label":"str","mode":"str","rate_kbit_up":"int"},'
 	printf '"ratelimit_stats":{},'
 	printf '"subnets":{},'
@@ -51,6 +51,7 @@ list)
 	printf '"shape_remove":{"ip":"str","label":"str"},'
 	printf '"shape_status":{"ip":"str"},'
 	printf '"shape_stats":{},'
+	printf '"rules_list":{},'
 	printf '"rdns":{"ip":"str"},'
 	printf '"netify_status":{},'
 	printf '"netify_list":{},'
@@ -154,10 +155,14 @@ call)
 	macfilter_remove)
 		read -r input
 		ip=$(echo "$input" | jsonfilter -e '@.ip' 2>/dev/null)
-		if [ -z "$ip" ]; then
-			echo '{"ok":false,"msg":"ip required"}'
+		# The deny list is keyed on the MAC, and a device that has been offline
+		# long enough has no lease left to find it by IP. The Rules tab sends
+		# the MAC it read from the list; the script validates either form.
+		mac=$(echo "$input" | jsonfilter -e '@.mac' 2>/dev/null)
+		if [ -z "$ip" ] && [ -z "$mac" ]; then
+			echo '{"ok":false,"msg":"ip or mac required"}'
 		else
-			"$SCRIPTS/trafficctl-macfilter-remove.sh" "$ip"
+			"$SCRIPTS/trafficctl-macfilter-remove.sh" "${mac:-$ip}"
 		fi
 		;;
 	ratelimit)
@@ -225,6 +230,13 @@ call)
 	shape_stats)
 		printf '{"result":'
 		"$SCRIPTS/trafficctl-shape-stats.sh"
+		printf '}'
+		;;
+	rules_list)
+		# Every block, limit, shape and WiFi deny, online or not (#128). Read
+		# only: the Rules tab edits and removes through the methods above.
+		printf '{"result":'
+		"$SCRIPTS/trafficctl-rules.sh" list
 		printf '}'
 		;;
 	rdns)

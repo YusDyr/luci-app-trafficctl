@@ -66,6 +66,7 @@ trafficctl/
     trafficctl-bytes-nft.sh                 — nftables counters for software flow offload
     trafficctl-totals.sh                    — Monotonic lifetime totals; the ONLY accumulator (UI + Prometheus share its store)
     trafficctl-rdns.sh                      — Reverse DNS lookup
+    trafficctl-rules.sh                     — Every restriction, online or not (live + saved state; "Rules" tab)
     trafficctl-telegram.sh                  — Telegram bot daemon (long polling)
     trafficctl-telegram-test.sh             — Send test message to Telegram
   files/etc/config/trafficctl                — UCI config (conffile, installed 0600)
@@ -83,6 +84,7 @@ luci-app-trafficctl/
   Makefile                                  — OpenWrt package Makefile (LuCI)
   htdocs/luci-static/resources/view/trafficctl/
     status.js                               — Main frontend (single-file LuCI view, "Devices" tab)
+    rules.js                                — "Rules" tab (all restrictions, offline devices included)
     portfw.js                               — "Port Forwards" tab (inbound traffic control)
     status.css                              — Frontend styles (shared by both views)
   root/usr/libexec/rpcd/
