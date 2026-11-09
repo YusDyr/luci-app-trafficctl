@@ -289,6 +289,9 @@ msgstr ""
 msgid "Device name"
 msgstr ""
 
+msgid "Devices"
+msgstr ""
+
 msgid "Devices already known:"
 msgstr ""
 
@@ -421,6 +424,9 @@ msgstr ""
 msgid "Global internet cut needs nftables (fw4). This router is running iptables."
 msgstr ""
 
+msgid "Grant access to LuCI Traffic Control"
+msgstr ""
+
 msgid "Graph"
 msgstr ""
 
@@ -446,6 +452,9 @@ msgid "Hardware flow offloading is active."
 msgstr ""
 
 msgid "Hardware offload"
+msgstr ""
+
+msgid "History"
 msgstr ""
 
 msgid "History is not recorded by default: it writes to the router's flash on a schedule, and every other persistent store in this app was deliberately kept off that path. Enable it below."
@@ -764,6 +773,9 @@ msgid "Polling is off — set the Poll interval to see throughput."
 msgstr ""
 
 msgid "Port"
+msgstr ""
+
+msgid "Port Forwards"
 msgstr ""
 
 msgid "Port Forwards & Open Ports"

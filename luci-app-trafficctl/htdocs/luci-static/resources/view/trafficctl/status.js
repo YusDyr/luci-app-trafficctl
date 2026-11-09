@@ -3152,12 +3152,12 @@ return view.extend({
 						}
 					}
 					if ((data.shape_kbit || 0) > 0) {
-						parts.push(_('Shaped: <b style=\"color:var(--tc-speed)\">🌊 %s</b>').format(fmtCeiling(data.shape_kbit, data.shape_kbit_up)));
+						parts.push(_('Shaped: <b style="color:var(--tc-speed)">🌊 %s</b>').format(fmtCeiling(data.shape_kbit, data.shape_kbit_up)));
 						var sm = self._shapeMap[data.ip || searchSelect.getValue()] || {};
-						if ((sm.backlog||0) > 0) parts.push(_('Queued: <b style=\"color:var(--tc-speed)\">%s</b>').format(fmtBytes(sm.backlog)));
+						if ((sm.backlog||0) > 0) parts.push(_('Queued: <b style="color:var(--tc-speed)">%s</b>').format(fmtBytes(sm.backlog)));
 						if ((sm.bytes||0) > 0) parts.push(_('Passed: <b>%s</b>').format(fmtBytes(sm.bytes)));
 					} else if ((data.rate_limit_kbit || 0) > 0) {
-						parts.push(_('Speed limit: <b style=\"color:var(--tc-warn)\">⚡ %s</b>').format(fmtCeiling(data.rate_limit_kbit, data.rate_limit_kbit_up)));
+						parts.push(_('Speed limit: <b style="color:var(--tc-warn)">⚡ %s</b>').format(fmtCeiling(data.rate_limit_kbit, data.rate_limit_kbit_up)));
 						var dm = self._dropMap[data.ip || searchSelect.getValue()] || {};
 						if ((dm.packets||0) > 0) {
 							parts.push(_('Dropped: <b style="color:var(--tc-err)">🚫 %d pkts / %s</b>').format(Number(dm.packets) || 0, fmtBytes(dm.bytes||0)));

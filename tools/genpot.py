@@ -50,6 +50,14 @@ def extract(path):
 ids=[]
 for f in sorted(glob.glob('luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/*.js')):
     ids += extract(f)
+# Menu titles and ACL descriptions are translated too: LuCI looks them up at
+# runtime, and luci's own build/i18n-scan.pl collects them, so a .pot without
+# them is what an upstream review regenerates and finds four strings short.
+import json
+for f in sorted(glob.glob('luci-app-trafficctl/root/usr/share/luci/menu.d/*.json')):
+    ids += [n['title'] for n in json.load(open(f)).values() if n.get('title')]
+for f in sorted(glob.glob('luci-app-trafficctl/root/usr/share/rpcd/acl.d/*.json')):
+    ids += [n['description'] for n in json.load(open(f)).values() if n.get('description')]
 uniq=sorted(set(ids))
 
 bad=[i for i in uniq if i != i.strip()]
