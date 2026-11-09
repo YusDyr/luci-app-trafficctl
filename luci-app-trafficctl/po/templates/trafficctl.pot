@@ -1321,6 +1321,9 @@ msgstr ""
 msgid "h ago"
 msgstr ""
 
+msgid "hostapd-utils is not installed: a WiFi block lasts one hour and does not reach the running radio ACL. Install hostapd-utils for permanent blocks."
+msgstr ""
+
 msgid "is not one of the subnets this router monitors, so a limit on it would be accepted but never enforced. A firewall zone other than \"lan\" with masq=1 (the usual guest-VLAN setup) is excluded. Check with: uci show firewall | grep -E \"name=|masq=\""
 msgstr ""
 

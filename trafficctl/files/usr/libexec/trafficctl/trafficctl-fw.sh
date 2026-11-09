@@ -888,6 +888,27 @@ tctl_hostapd_ubus_ban() {
     tctl_hostapd_ubus_banned "$iface" "$mac"
 }
 
+# How well this router can block a device on WiFi, router-wide, for the UI to
+# decide what to offer before anyone presses a button:
+#
+#   none      - no wifi-iface in uci: a wired-only build or a router with its
+#               radios removed. There is nothing to block on.
+#   temporary - wifi exists but hostapd_cli does not. hostapd-utils is an
+#               optional dependency (it cannot be selected on builds without
+#               hostapd), so a block falls back to the timed ubus ban above.
+#   full      - hostapd_cli is installed; blocks go into the running ACL.
+#
+# Only the presence of the tool is checked here, not whether each AP answers:
+# that is per radio and per call, and the enforcement words above report it.
+tctl_wifi_filter_support() {
+    [ -n "$(tctl_get_wifi_interfaces)" ] || { echo none; return; }
+    if command -v hostapd_cli >/dev/null 2>&1; then
+        echo full
+    else
+        echo temporary
+    fi
+}
+
 # acl > ban > none, so a loop over several APs can keep the worst result.
 tctl_enforce_rank() {
     case "$1" in

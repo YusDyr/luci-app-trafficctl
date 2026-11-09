@@ -42,6 +42,16 @@ assert_contains() {
     fi
 }
 
+assert_eq() {
+    local desc="$1" expected="$2" actual="$3"
+    if [ "$expected" = "$actual" ]; then
+        PASS=$((PASS + 1))
+    else
+        FAIL=$((FAIL + 1))
+        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$desc" "$expected" "$actual"
+    fi
+}
+
 assert_not_contains() {
     local desc="$1" needle="$2" haystack="$3"
     if printf '%s' "$haystack" | grep -qF -- "$needle"; then
@@ -444,6 +454,66 @@ assert_contains "unblock (allow radio, cli ok): MAC back in the accept ACL" \
     "aa:bb:cc:dd:ee:ff" "$(cat "$STATE/accept_acl")"
 
 
+# ── hostapd-utils is optional ────────────────────────────────────────────────
+# trafficctl no longer depends on hostapd-utils, so it can be selected on
+# wired-only builds (hostapd-utils needs a hostapd/wpad variant). Two routers
+# have to keep working: one with no radios at all, and one with radios but no
+# hostapd_cli. The second is covered above ("cli missing": a temporary ubus ban
+# that says so). The first must refuse cleanly without touching hostapd.
+
+set_uci_wired() {
+    cat > "$MOCKBIN/uci" <<MOCK
+#!/bin/sh
+echo "\$*" >> "$UCI_LOG"
+exit 1
+MOCK
+    chmod +x "$MOCKBIN/uci"
+}
+
+set_uci_wired
+set_runtime missing noradio
+OUT=$(run_add 192.168.1.50)
+assert_contains "wired-only add: NOT ok" '"ok":false' "$OUT"
+assert_contains "wired-only add: says there is no wifi" "no wifi interfaces found" "$OUT"
+assert_not_contains "wired-only add: no shell error from a missing hostapd_cli" "not found" "$OUT"
+assert_eq "wired-only add: hostapd untouched" "" "$(cat "$HOSTAPD_LOG" "$UBUS_LOG")"
+assert_not_contains "wired-only add: no uci commit" "commit" "$(cat "$UCI_LOG")"
+OUT=$(run_remove 192.168.1.50)
+assert_contains "wired-only remove: NOT ok" '"ok":false' "$OUT"
+assert_contains "wired-only remove: says there is no wifi" "no wifi interfaces found" "$OUT"
+assert_eq "wired-only remove: hostapd untouched" "" "$(cat "$HOSTAPD_LOG" "$UBUS_LOG")"
+
+# tctl_wifi_filter_support is what the view keys the WiFi button on.
+filter_support() {
+    PATH="$MOCKBIN:$PATH" sh -c ". '$BIN/trafficctl-fw.sh'; tctl_wifi_filter_support" 2>&1
+}
+assert_eq "filter support: no wifi-iface = none" "none" "$(filter_support)"
+set_uci_single_iface deny ""
+assert_eq "filter support: wifi, no hostapd_cli = temporary" "temporary" "$(filter_support)"
+set_runtime ok ok
+assert_eq "filter support: wifi + hostapd_cli = full" "full" "$(filter_support)"
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+STATUS_JS="$ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js"
+assert_contains "device.sh emits wifi_filter" \
+    '"wifi_filter":"%s"' "$(cat "$BIN/trafficctl-device.sh")"
+assert_contains "view passes wifi_filter to the WiFi button" \
+    "updateWifiBtn(data.wifi_blocked, !!data.mac, data.wifi_filter)" "$(cat "$STATUS_JS")"
+assert_contains "view hides the WiFi button where there is no wifi" \
+    "filter === 'none' && !wifiBlocked" "$(cat "$STATUS_JS")"
+assert_contains "view explains a temporary block with a translatable note" \
+    "_('hostapd-utils is not installed:" "$(cat "$STATUS_JS")"
+# Makefile and builders: optional for the backend, kept on the web interface.
+assert_not_contains "trafficctl does not depend on hostapd-utils" "hostapd-utils" \
+    "$(grep -E '^[[:space:]]*DEPENDS:=' "$ROOT/trafficctl/Makefile")"
+assert_not_contains "build-ipk backend deps lack hostapd-utils" "hostapd-utils" \
+    "$(grep '^BE_DEPENDS=' "$ROOT/build-ipk.sh")"
+assert_not_contains "build-apk backend deps lack hostapd-utils" "hostapd-utils" \
+    "$(grep '^BE_DEPENDS=' "$ROOT/build-apk.sh")"
+assert_contains "the backend description names hostapd-utils for WiFi filtering" \
+    "WiFi MAC filtering needs hostapd-utils" "$(cat "$ROOT/trafficctl/Makefile")"
+
+
 # ── the row indicator (defect 2) ─────────────────────────────────────────────
 # The backend reported wifi_blocked correctly all along; the dashboard row did
 # not show it, because the only marking was a line-through applied inside the
@@ -453,9 +523,7 @@ assert_contains "unblock (allow radio, cli ok): MAC back in the accept ACL" \
 # the cell falls through to "?" or eth) and whenever a blocked device was on
 # cable. Source-level guards, in the same spirit as tests/test_byte_overflow.sh:
 # there is no JS test harness in this repo, and the failure mode is structural.
-
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-STATUS_JS="$ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js"
+# (ROOT and STATUS_JS are set in the hostapd-utils section above.)
 
 # The marking must hang off the finished cell, not off one branch inside it.
 CONN_CELL=$(grep -A 10 "cellMap.conn_type = E(" "$STATUS_JS")

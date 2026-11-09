@@ -81,6 +81,8 @@ assert_contains "be: replaces the old single package" "$CTRL" "^Replaces: luci-a
 assert_not_contains "be: no Conflicts (it breaks the upgrade from the single package)" "$CTRL" "^Conflicts:"
 assert_contains "be: depends on conntrack" "$CTRL" "^Depends:.*conntrack"
 assert_not_contains "be: no LuCI dependency" "$CTRL" "^Depends:.*luci-base"
+# Optional, so the backend installs on wired-only builds without hostapd.
+assert_not_contains "be: hostapd-utils is optional" "$CTRL" "^Depends:.*hostapd-utils"
 assert_eq "be: conffiles" "/etc/config/trafficctl" "$(cat "$TMPDIR/be/ctrl/conffiles")"
 for s in postinst prerm; do
     assert_eq "be: $s present" "yes" "$([ -f "$TMPDIR/be/ctrl/$s" ] && echo yes || echo no)"
@@ -104,6 +106,8 @@ assert_contains "fe: version" "$CTRL" "^Version: 0.0.1-test-1$"
 assert_contains "fe: arch is all" "$CTRL" "^Architecture: all$"
 assert_contains "fe: depends on the same trafficctl" "$CTRL" "^Depends: trafficctl (= 0.0.1-test-1)"
 assert_contains "fe: depends on luci-base" "$CTRL" "^Depends:.*luci-base"
+# Kept on the web interface so the upgrade from 1.28.0 does not orphan it.
+assert_contains "fe: keeps hostapd-utils" "$CTRL" "^Depends:.*hostapd-utils"
 assert_not_contains "fe: no Conflicts" "$CTRL" "^Conflicts:"
 assert_eq "fe: no conffiles" "no" "$([ -f "$TMPDIR/fe/ctrl/conffiles" ] && echo yes || echo no)"
 assert_contains "fe: postinst restarts rpcd" "$(cat "$TMPDIR/fe/ctrl/postinst")" "rpcd restart"

@@ -13,7 +13,10 @@ TCTL_ROOT="$(dirname "$0")"
 SRC="$TCTL_ROOT/${PKG_NAME}"
 BACKEND_SRC="$TCTL_ROOT/${BE_NAME}"
 # Runtime dependencies of the backend (DEPENDS in trafficctl/Makefile).
-BE_DEPENDS="conntrack, curl, tc, iw, hostapd-utils"
+# hostapd-utils is optional for the backend (wired-only builds) and is only
+# repeated on luci-app-trafficctl; see LUCI_DEPENDS in its Makefile.
+BE_DEPENDS="conntrack, curl, tc, iw"
+FE_EXTRA_DEPENDS="hostapd-utils"
 
 # Overridable so tests can build without touching a developer's dist/.
 OUTDIR="${OUTDIR:-dist}"
@@ -93,7 +96,8 @@ Maintainer: Denis Iusupov <yusdyr@gmail.com>
 Description: Per-device traffic monitoring (conntrack), rate limiting
  (nft/iptables), traffic shaping (tc/HTB), internet blocking, WiFi MAC
  filtering, a global internet cut, a Telegram bot and a Prometheus exporter.
- The web interface is luci-app-trafficctl.
+ The web interface is luci-app-trafficctl. WiFi MAC filtering needs
+ hostapd-utils (optional; without it a WiFi block is a temporary ban).
 EOF
 
 # Conffiles must list ONLY files that ship in data.tar.gz and may be user-edited.
@@ -194,7 +198,7 @@ mkdir -p "$CTRL"
 cat > "$CTRL/control" <<EOF
 Package: $PKG_NAME
 Version: ${PKG_VERSION}-${PKG_RELEASE}
-Depends: $BE_NAME (= ${PKG_VERSION}-${PKG_RELEASE}), $BE_DEPENDS, luci-base, rpcd
+Depends: $BE_NAME (= ${PKG_VERSION}-${PKG_RELEASE}), $BE_DEPENDS, $FE_EXTRA_DEPENDS, luci-base, rpcd
 Source: https://github.com/YusDyr/luci-app-trafficctl
 License: Apache-2.0
 Section: luci

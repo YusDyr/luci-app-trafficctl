@@ -197,6 +197,7 @@ I hope it turns out as useful for you as it has been for me.
 | `kmod-ifb` | Upload shaping | Without it the shaper applies to download only, and reports that |
 | `iw-full` | Interface detection | WiFi band identification |
 | `bridge-utils` | Interface detection | LAN port identification (brctl) |
+| `hostapd-utils` | WiFi MAC filtering | Optional for the `trafficctl` backend, so it installs on wired-only builds; `luci-app-trafficctl` still pulls it in. Without it a WiFi block is a temporary (one hour) hostapd ban |
 | `curl` + `jsonfilter` | Telegram bot | jsonfilter is part of base OpenWrt |
 | `rpcd-mod-rrdns` | Reverse DNS | Included with `rpcd`; enables rDNS in LuCI, Telegram, and CLI |
 
@@ -497,7 +498,8 @@ apk add kmod-ifb
 # For interface detection (WiFi band + LAN port)
 apk add iw-full bridge-utils
 
-# For WiFi MAC deny / deauthenticate
+# For WiFi MAC deny / deauthenticate (optional for the trafficctl backend;
+# without it a WiFi block is a temporary one-hour ban)
 apk add hostapd-utils
 
 # rpcd-mod-rrdns is included with rpcd (no extra install needed)
@@ -526,7 +528,8 @@ opkg install kmod-ifb
 # For interface detection (WiFi band + LAN port)
 opkg install iw-full bridge-utils
 
-# For WiFi MAC deny / deauthenticate
+# For WiFi MAC deny / deauthenticate (optional for the trafficctl backend;
+# without it a WiFi block is a temporary one-hour ban)
 opkg install hostapd-utils
 
 # rpcd-mod-rrdns is included with rpcd (no extra install needed)
@@ -589,10 +592,14 @@ When a device is WiFi-blocked:
 - At runtime, `hostapd_cli deny_acl ADD_MAC` adds the MAC to the deny ACL and `deauthenticate` disconnects only that client. No wifi reload -- other clients stay connected.
 - The ACL is then **read back** to confirm the entry landed. The UCI entry is durable but only applies at the next wifi restart, so a runtime step that did not happen is reported as a failure rather than as a block -- see `enforcement` in [docs/API.md](docs/API.md).
 
-This needs the `hostapd-utils` package (pulled in by `LUCI_DEPENDS`). If it is
-missing, trafficctl falls back to a temporary hostapd ban over ubus, says so,
-and tells you to install it -- a device on the deny list that is still
-connected is shown in the table as **not applied** rather than as blocked.
+This needs the `hostapd-utils` package. The `trafficctl` backend does not
+depend on it, so the backend can be installed on wired-only builds (where
+hostapd-utils cannot be selected); `luci-app-trafficctl` still pulls it in. If
+it is missing, trafficctl falls back to a temporary hostapd ban over ubus, says
+so, and tells you to install it -- a device on the deny list that is still
+connected is shown in the table as **not applied** rather than as blocked. The
+Block WiFi button carries a note saying the block is temporary, and on a router
+with no wifi-iface at all it is not shown.
 
 ---
 

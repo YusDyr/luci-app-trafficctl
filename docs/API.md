@@ -243,6 +243,7 @@ Returns detailed connection information for a single device.
   "block_bytes": 0,
   "wifi_blocked": false,
   "wifi_block_pending": false,
+  "wifi_filter": "full",
   "total": 101,
   "protocols": {"tcp": 91, "udp": 10, "other": 0},
   "tcp_states": {"established": 22, "time_wait": 3, "syn_sent": 63, "close_wait": 0},
@@ -265,6 +266,14 @@ Returns detailed connection information for a single device.
   "shape_kbit_up": 2000
 }
 ```
+
+`wifi_filter` says what a WiFi block can do on this router, router-wide:
+`"full"` (hostapd_cli is installed, blocks go into the running ACL),
+`"temporary"` (WiFi exists but the optional `hostapd-utils` is not installed,
+so a block is a timed hostapd ban over ubus and `macfilter_add` reports
+`"enforcement":"ban"`), or `"none"` (no wifi-iface in uci, e.g. a wired-only
+build; `macfilter_add` answers `"no wifi interfaces found"`). The LuCI view
+hides the WiFi block button for `"none"` and marks it for `"temporary"`.
 
 Each connection's `oif` is the egress interface, resolved via
 `ip route get <dst> mark <mark>` from the connection's conntrack fwmark. It is

@@ -27,12 +27,18 @@ PKG_MAINTAINER:=Denis Iusupov <yusdyr@gmail.com>
 
 include $(INCLUDE_DIR)/package.mk
 
+# hostapd-utils is deliberately not a dependency: it can only be selected
+# together with a hostapd/wpad variant, so depending on it would make this
+# package unselectable on wired-only builds. The WiFi block helpers check for
+# hostapd_cli at run time and fall back to a timed ubus ban
+# (tctl_hostapd_block_iface, tctl_wifi_filter_support in trafficctl-fw.sh).
+# iw stays: it is selectable on every target and only reads station lists.
 define Package/trafficctl
   SECTION:=net
   CATEGORY:=Network
   TITLE:=Per-device traffic monitoring and control
   URL:=https://github.com/YusDyr/luci-app-trafficctl
-  DEPENDS:=+conntrack +curl +tc +iw +hostapd-utils
+  DEPENDS:=+conntrack +curl +tc +iw
   PKGARCH:=all
 endef
 
@@ -41,6 +47,9 @@ define Package/trafficctl/description
  traffic shaping (tc/HTB), internet blocking, WiFi MAC filtering, a global
  internet cut, a Telegram bot and a Prometheus exporter. The web interface
  is luci-app-trafficctl.
+ WiFi MAC filtering needs hostapd-utils, which is optional so the package can
+ be installed on wired-only builds. Without it a WiFi block is a temporary
+ (one hour) hostapd ban over ubus.
 endef
 
 # Only list files that ship in the package and may be user-edited.
