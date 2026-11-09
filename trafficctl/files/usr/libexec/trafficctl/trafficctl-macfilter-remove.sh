@@ -22,7 +22,9 @@ if [ -z "$IP" ]; then
     exit 1
 fi
 
-if printf '%s' "$IP" | grep -qE '^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$'; then
+# The length check matters: grep matches line by line, so without it a MAC
+# followed by a newline and anything else would pass and reach uci.
+if [ "${#IP}" -eq 17 ] && printf '%s' "$IP" | grep -qE '^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$'; then
     MAC=$(echo "$IP" | tr 'A-F' 'a-f')
     # Only for the messages and the log; a MAC with no address left reads as
     # itself.

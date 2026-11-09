@@ -377,6 +377,8 @@ OUT=$(run "$TMPDIR/macfilter-remove.sh" 192.168.1.99)
 assert_contains "macfilter-remove by IP with no lease still fails as before" "cannot find MAC" "$OUT"
 OUT=$(run "$TMPDIR/macfilter-remove.sh" 'aa:bb;reboot')
 assert_contains "macfilter-remove: a malformed MAC is rejected" '"ok":false' "$OUT"
+OUT=$(run "$TMPDIR/macfilter-remove.sh" "$(printf 'aa:aa:aa:aa:aa:99\nx')")
+assert_contains "macfilter-remove: a MAC followed by a second line is rejected" '"ok":false' "$OUT"
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
