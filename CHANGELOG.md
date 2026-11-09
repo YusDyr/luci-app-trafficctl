@@ -4,6 +4,21 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.29.1] - 2026-11-09
+
+### Other
+- name the POT after the trafficctl i18n domain ([#131](https://github.com/YusDyr/luci-app-trafficctl/issues/131)) ([4b86476](https://github.com/YusDyr/luci-app-trafficctl/commit/4b86476b0e84b43ae4b6679e27d4cfbb0cc3a701))
+  The openwrt/luci feed names the template and every translation after
+  the i18n domain: po/templates/<domain>.pot and po/<lang>/<domain>.po.
+  luci.mk compiles each .po into <basename>.<code>.lmo, so the domain is
+  the name the router sees. Ours was luci-app-trafficctl; rename both to
+  trafficctl, which is also the LUCI_BASENAME luci.mk derives from
+  luci-app-trafficctl and the name in luci-i18n-trafficctl-<code>.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.29.0...v1.29.1
+
+---
+
 ## [1.29.0] - 2026-11-09
 
 ### Features
