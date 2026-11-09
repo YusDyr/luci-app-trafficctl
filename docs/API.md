@@ -136,6 +136,12 @@ method because it returns the contents of the configured log file.
 | `newdevice_config_set` | (inline) | `enabled`, `limit_kbit`, `limit_mode` (`limiter`\|`shaper`) | write |
 | `activity_log` | (inline) | `lines` (default 50, capped at 1000) | write |
 
+`telegram_config_set` keeps `/etc/init.d/trafficctl-telegram` enabled in rc.d
+while `telegram.enabled` is 1 and disabled while it is 0, then reloads the bot.
+Boot starts only what rc.d enables, so a reload alone left a bot switched on
+from the UI running until the next reboot. The package postinst applies the same
+rule on install and upgrade, for the bot and for `history.enabled`.
+
 Setting `newdevice.enabled` to true seeds the seen-MAC ledger
 (`/etc/trafficctl/seen_macs`) from the current DHCP leases and neighbour table, so
 switching the feature on does not classify the devices already on the network as

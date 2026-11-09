@@ -172,6 +172,20 @@ for f in \
   [ "$o" = luci-app-trafficctl ] || { echo "WRONG OWNER: $f is owned by '$o', expected luci-app-trafficctl"; exit 1; }
 done
 
+# The shipped config has the bot and the history sampler off, and the postinst
+# enables in rc.d only what its uci flag switches on. Only for the ipk, which
+# build-ipk.sh makes with our postinst alone: the apk comes from the SDK, whose
+# default_postinst enables every init script on a fresh install, and the flag
+# check in each service is what keeps that harmless.
+if [ "${PKG##*.}" = ipk ]; then
+    for svc in trafficctl-telegram trafficctl-history; do
+        if /etc/init.d/$svc enabled; then
+            echo "ENABLED: $svc is in rc.d although trafficctl.${svc#trafficctl-}.enabled is 0"
+            exit 1
+        fi
+    done
+fi
+
 echo "Install checks passed."
 
 # ── Removal test ─────────────────────────────────────────────────────────────

@@ -429,6 +429,15 @@ call)
 		done
 		tctl_commit
 		tctl_log "telegram_config_change" "" "" "luci" "${TCTL_SRC:-local}"
+		# The init script starts the bot only while the flag is set, but boot
+		# runs only what rc.d enables. A reload alone left a bot switched on
+		# here running until the next reboot and then gone; rc.d follows the
+		# flag so both agree.
+		if [ "$(uci -q get trafficctl.telegram.enabled)" = "1" ]; then
+			/etc/init.d/trafficctl-telegram enable 2>/dev/null
+		else
+			/etc/init.d/trafficctl-telegram disable 2>/dev/null
+		fi
 		/etc/init.d/trafficctl-telegram reload 2>/dev/null &
 		echo '{"ok":true}'
 		;;

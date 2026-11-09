@@ -91,6 +91,20 @@ done
 [ -n "$OLD_FW" ] || { echo "OLD install: trafficctl-fw.sh missing"; exit 1; }
 echo "Old helper scripts at: $(dirname "$OLD_FW")"
 
+# ── Step 1b: services switched on in uci but not enabled in rc.d ──────────────
+# The state a router reached with every earlier release: the Settings toggle
+# set trafficctl.telegram.enabled and only reloaded the bot, and no postinst
+# ever enabled it, so the bot did not survive a reboot. After the upgrade both
+# services must be enabled, because their flags are 1.
+uci -q get trafficctl.telegram >/dev/null || uci set trafficctl.telegram=telegram
+uci set trafficctl.telegram.enabled=1
+uci -q get trafficctl.history >/dev/null || uci set trafficctl.history=history
+uci set trafficctl.history.enabled=1
+uci commit trafficctl
+for svc in trafficctl-telegram trafficctl-history; do
+    if [ -x "/etc/init.d/$svc" ]; then "/etc/init.d/$svc" disable 2>/dev/null || true; fi
+done
+
 # ── Step 2: tag config file to verify preservation ────────────────────────────
 [ -f /etc/config/trafficctl ] || touch /etc/config/trafficctl
 echo "# UPGRADE_MARKER_$(date +%s)" >> /etc/config/trafficctl
@@ -117,6 +131,15 @@ else
     echo "FAIL: /etc/config/trafficctl marker lost — config was overwritten"
     exit 1
 fi
+
+# What runs after the upgrade must also run after a reboot.
+for svc in trafficctl-telegram trafficctl-history; do
+    if ! "/etc/init.d/$svc" enabled; then
+        echo "FAIL: trafficctl.${svc#trafficctl-}.enabled is 1 but $svc is not enabled in rc.d after the upgrade"
+        exit 1
+    fi
+done
+echo "OK: services switched on in uci are enabled in rc.d"
 
 # New files present?
 for f in /usr/libexec/trafficctl/trafficctl-fw.sh \

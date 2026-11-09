@@ -126,13 +126,22 @@ if [ -z "${IPKG_INSTROOT}" ]; then
     if [ -f /etc/config/trafficctl ]; then
         rm -f /etc/config/trafficctl-opkg.backup
     fi
-    if [ -x /etc/init.d/trafficctl-telegram ]; then
+    # Each service follows its uci flag, so what runs now is what runs after
+    # the next reboot: enabled in rc.d and started when the flag is 1, left
+    # alone when it is 0.
+    if [ -x /etc/init.d/trafficctl-telegram ] && [ "$(uci -q get trafficctl.telegram.enabled)" = "1" ]; then
+        /etc/init.d/trafficctl-telegram enable 2>/dev/null || true
         /etc/init.d/trafficctl-telegram start 2>/dev/null || true
     fi
     # A sampler started by a release up to 1.28.0 still calls the helpers at
     # /usr/local/bin, which this upgrade removed; restart it onto the new path.
-    if [ -x /etc/init.d/trafficctl-history ] && /etc/init.d/trafficctl-history enabled; then
-        /etc/init.d/trafficctl-history restart 2>/dev/null || true
+    if [ -x /etc/init.d/trafficctl-history ]; then
+        if [ "$(uci -q get trafficctl.history.enabled)" = "1" ]; then
+            /etc/init.d/trafficctl-history enable 2>/dev/null || true
+        fi
+        if /etc/init.d/trafficctl-history enabled; then
+            /etc/init.d/trafficctl-history restart 2>/dev/null || true
+        fi
     fi
 fi
 exit 0

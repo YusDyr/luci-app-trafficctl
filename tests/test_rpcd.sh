@@ -54,6 +54,7 @@ assert_not_contains() {
 RPCD="$TMPDIR/rpcd.sh"
 sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" \
     -e "s|^SCRIPTS=\"/usr/libexec/trafficctl\"|SCRIPTS=\"$MOCKBIN\"|" \
+    -e "s|/etc/init.d/trafficctl-telegram|$TMPDIR/initd/trafficctl-telegram|g" \
     "$ROOT/usr/libexec/rpcd/luci.trafficctl" > "$RPCD"
 
 # ── mocks: uci, jsonfilter, ubus, plus every sub-script the backend calls ──
@@ -376,6 +377,41 @@ assert_contains "telegram_config_set: writes the new token" "trafficctl.telegram
 OUT=$(run_call telegram_config_set '{"bot_token":"***","chat_id":"54321"}')
 assert_not_contains "telegram_config_set: the masked placeholder is never written back as the token" \
     "trafficctl.telegram.bot_token=***" "$(cat "$UCI_LOG")"
+
+# The Settings toggle must move rc.d with the flag. It used to only reload the
+# service, so a bot switched on in the UI ran until the next reboot, which
+# starts only what rc.d enables, and was then gone.
+mkdir -p "$TMPDIR/initd"
+INIT_LOG="$TMPDIR/init.log"
+cat > "$TMPDIR/initd/trafficctl-telegram" <<MOCK
+#!/bin/sh
+echo "\$1" >> "$INIT_LOG"
+MOCK
+chmod +x "$TMPDIR/initd/trafficctl-telegram"
+TG_FLAG="$TMPDIR/tg_enabled"
+cat > "$MOCKBIN/uci" <<MOCK
+#!/bin/sh
+echo "\$*" >> "$UCI_LOG"
+case "\$*" in
+    -q\ get\ trafficctl.telegram) exit 1 ;;
+    set\ trafficctl.telegram.enabled=*) echo "\${2#trafficctl.telegram.enabled=}" > "$TG_FLAG" ;;
+    -q\ get\ trafficctl.telegram.enabled) cat "$TG_FLAG" ;;
+    *) exit 0 ;;
+esac
+exit 0
+MOCK
+chmod +x "$MOCKBIN/uci"
+for flag in true false; do
+    : > "$INIT_LOG"
+    OUT=$(run_call telegram_config_set "{\"enabled\":$flag,\"chat_id\":\"54321\"}")
+    assert_contains "telegram_config_set enabled=$flag: reports ok" '"ok":true' "$OUT"
+    if [ "$flag" = true ]; then want=enable; other=disable; else want=disable; other=enable; fi
+    assert_eq "telegram_config_set enabled=$flag: runs the init script's $want" "$want" \
+        "$(grep -x "$want" "$INIT_LOG")"
+    assert_eq "telegram_config_set enabled=$flag: never runs $other" "" \
+        "$(grep -x "$other" "$INIT_LOG")"
+done
+rm -rf "$TMPDIR/initd"
 
 # ════════════════════════════════════════════════════════════════════════════
 # logging_config_set — see test_regressions.sh for the log_file/max_lines
