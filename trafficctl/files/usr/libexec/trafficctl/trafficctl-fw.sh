@@ -319,7 +319,11 @@ tctl_ratelimit_remove() {
             [ -n "$chain" ] && [ -n "$h" ] && nft delete rule netdev tm_ratelimit "$chain" handle "$h" 2>/dev/null
         done
         # Only once nothing references it: nft refuses to delete a set in use.
-        nft delete set netdev tm_ratelimit "tctl_v6_$(tctl_target_slug "$ip")" 2>/dev/null
+        # Most targets never had one (a subnet, a host with no known MAC), and
+        # nft exits 1 for a missing set. That status used to be this
+        # function's, so removing such a limit reported failure and left its
+        # rules.json record behind, to be restored at the next boot.
+        nft delete set netdev tm_ratelimit "tctl_v6_$(tctl_target_slug "$ip")" 2>/dev/null || :
     else
         while iptables -t mangle -D FORWARD -d "$ip" -m comment --comment "$comment" 2>/dev/null; do :; done
         while iptables -t mangle -D FORWARD -s "$ip" -m comment --comment "${comment}_ul" 2>/dev/null; do :; done

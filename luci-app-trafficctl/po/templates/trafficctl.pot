@@ -1,16 +1,31 @@
 msgid ""
 msgstr "Content-Type: text/plain; charset=UTF-8"
 
+msgid "\"Keep rules after reboot\" is off: blocks and speed limits listed here are lost on reboot. Shapes are always kept."
+msgstr ""
+
 msgid "\"all\" for every device, or a CIDR such as 10.0.20.0/24"
 msgstr ""
 
+msgid "%d WiFi network(s) use an allow-list. A device blocked there is one missing from that list, so it cannot be shown here; manage it in Network → Wireless."
+msgstr ""
+
 msgid "%d not applied"
+msgstr ""
+
+msgid "%d not in effect"
+msgstr ""
+
+msgid "%d on offline devices"
 msgstr ""
 
 msgid "%d packets dropped (%s)"
 msgstr ""
 
 msgid "%d pkts, %s dropped"
+msgstr ""
+
+msgid "%d restrictions"
 msgstr ""
 
 msgid "%s down / %s up"
@@ -64,6 +79,9 @@ msgstr ""
 msgid "Action"
 msgstr ""
 
+msgid "Active"
+msgstr ""
+
 msgid "Active connections in conntrack"
 msgstr ""
 
@@ -73,7 +91,13 @@ msgstr ""
 msgid "Active inbound connections"
 msgstr ""
 
+msgid "Active restrictions"
+msgstr ""
+
 msgid "Active subnet limits"
+msgstr ""
+
+msgid "Active, lost on reboot"
 msgstr ""
 
 msgid "Active:"
@@ -143,6 +167,9 @@ msgid "Blocking, rate limiting, and traffic shaping continue to work regardless.
 msgstr ""
 
 msgid "Blocks"
+msgstr ""
+
+msgid "Blocks and speed limits are not saved while \"Keep rules after reboot\" is off (Settings)."
 msgstr ""
 
 msgid "Bot commands:"
@@ -346,10 +373,19 @@ msgstr ""
 msgid "EWMA"
 msgstr ""
 
+msgid "Edit"
+msgstr ""
+
 msgid "Enabled"
 msgstr ""
 
 msgid "Enter a custom speed value"
+msgstr ""
+
+msgid "Enter a download rate above zero."
+msgstr ""
+
+msgid "Every block, speed limit, shape and WiFi block the router holds, including those on devices that are offline. Each rule keeps applying while its device is away, so this is the place to find and lift it."
 msgstr ""
 
 msgid "Every device in"
@@ -380,6 +416,9 @@ msgid "Extended Statistics (all devices)"
 msgstr ""
 
 msgid "External (WAN) port"
+msgstr ""
+
+msgid "Filter by name, IP or MAC"
 msgstr ""
 
 msgid "Filter connections by protocol"
@@ -454,6 +493,9 @@ msgstr ""
 msgid "Hardware offload"
 msgstr ""
 
+msgid "Has active connections or answers on the LAN"
+msgstr ""
+
 msgid "History"
 msgstr ""
 
@@ -487,6 +529,9 @@ msgstr ""
 msgid "In"
 msgstr ""
 
+msgid "In effect now but not saved, so a reboot drops it."
+msgstr ""
+
 msgid "In this mode the kernel's conntrack, firewall, and tc are bypassed for offloaded flows:"
 msgstr ""
 
@@ -509,6 +554,9 @@ msgid "Interfaces"
 msgstr ""
 
 msgid "Internet access status (paused = traffic blocked)"
+msgstr ""
+
+msgid "Internet blocked"
 msgstr ""
 
 msgid "Internet is cut for all devices"
@@ -637,6 +685,9 @@ msgstr ""
 msgid "No baseline recorded yet. It is taken from the current leases when you switch this on."
 msgstr ""
 
+msgid "No device is blocked, limited or shaped."
+msgstr ""
+
 msgid "No devices match filter."
 msgstr ""
 
@@ -653,6 +704,9 @@ msgid "No offload"
 msgstr ""
 
 msgid "No port forwards or WAN-open ports are configured in the firewall."
+msgstr ""
+
+msgid "No restriction matches the filter."
 msgstr ""
 
 msgid "No traffic has been recorded for this period yet. The first figures appear after the next flush."
@@ -683,6 +737,9 @@ msgid "Off"
 msgstr ""
 
 msgid "Off."
+msgstr ""
+
+msgid "Offline devices"
 msgstr ""
 
 msgid "Offloads routing to the hardware engine (PPE/NPU). Requires software offload. ⚠ On many platforms (e.g. Mediatek Filogic) the driver does not report byte counters back to the kernel — real-time speed monitoring will show zero."
@@ -781,6 +838,9 @@ msgstr ""
 msgid "Port Forwards & Open Ports"
 msgstr ""
 
+msgid "Presence"
+msgstr ""
+
 msgid "Preview:"
 msgstr ""
 
@@ -788,6 +848,9 @@ msgid "Proto"
 msgstr ""
 
 msgid "Protocol"
+msgstr ""
+
+msgid "Put this saved rule back into effect now"
 msgstr ""
 
 msgid "Qualcomm NSS acceleration is active"
@@ -838,6 +901,9 @@ msgstr ""
 msgid "Remove limit"
 msgstr ""
 
+msgid "Remove this restriction from %s?"
+msgstr ""
+
 msgid "Removing from"
 msgstr ""
 
@@ -865,10 +931,16 @@ msgstr ""
 msgid "Restoring…"
 msgstr ""
 
+msgid "Restriction"
+msgstr ""
+
 msgid "Resume"
 msgstr ""
 
 msgid "Routed via %s"
+msgstr ""
+
+msgid "Rules"
 msgstr ""
 
 msgid "Sampled. Byte counts come from conntrack, which only reports flows that are alive when it is read — a connection that both starts and finishes between two samples is not counted. Shorten the sampling interval to narrow that gap."
@@ -878,6 +950,18 @@ msgid "Save"
 msgstr ""
 
 msgid "Save as router default"
+msgstr ""
+
+msgid "Saved, applies when WiFi starts"
+msgstr ""
+
+msgid "Saved, but not in the firewall or traffic shaper right now. It is restored when the LAN interface next comes up; Apply puts it back now."
+msgstr ""
+
+msgid "Saved, not in effect"
+msgstr ""
+
+msgid "Saved, radio state unknown"
 msgstr ""
 
 msgid "Saving…"
@@ -902,6 +986,9 @@ msgid "Set a rate above 0 — with no rate this does nothing."
 msgstr ""
 
 msgid "Settings"
+msgstr ""
+
+msgid "Shaped"
 msgstr ""
 
 msgid "Shaped devices"
@@ -970,6 +1057,9 @@ msgstr ""
 msgid "Speed is measured via nftables counters installed at a higher priority (before the flowtable), so graphs are accurate."
 msgstr ""
 
+msgid "Speed limit"
+msgstr ""
+
 msgid "Speed limit: <b style=\"color:var(--tc-warn)\">⚡ %s</b>"
 msgstr ""
 
@@ -995,6 +1085,9 @@ msgid "Store"
 msgstr ""
 
 msgid "Store the current Poll and Window as this router's defaults, for browsers that have not set their own"
+msgstr ""
+
+msgid "Subnet"
 msgstr ""
 
 msgid "Switch it off"
@@ -1030,6 +1123,9 @@ msgstr ""
 msgid "Telegram, logging, new-device defaults and flow offload moved to the Settings tab."
 msgstr ""
 
+msgid "Temporary ban only"
+msgstr ""
+
 msgid "Test"
 msgstr ""
 
@@ -1040,6 +1136,9 @@ msgid "The accuracy of these interface figures could not be determined."
 msgstr ""
 
 msgid "The auto-revert helper is not running; this page re-checks the deadline while it is open."
+msgstr ""
+
+msgid "The deny list names this device but the running radio does not. Install hostapd-utils, or restart WiFi (disconnects every client)."
 msgstr ""
 
 msgid "The flowtable"
@@ -1141,6 +1240,9 @@ msgstr ""
 msgid "Unblock WiFi"
 msgstr ""
 
+msgid "Unknown device"
+msgstr ""
+
 msgid "Unknown error"
 msgstr ""
 
@@ -1175,6 +1277,9 @@ msgid "Waiting for the first byte sample."
 msgstr ""
 
 msgid "When this device last moved any traffic, not when it was last connected"
+msgstr ""
+
+msgid "Whether the rule is in the firewall or shaper now, and whether it survives a reboot"
 msgstr ""
 
 msgid "Which link carried the traffic — the question the device table cannot answer. This is a separate series, not a breakdown of it: the rows include the router's own traffic and broadcast, and they overlap each other (a VPN tunnel's bytes also travelled over its WAN), so the two tables are not meant to add up. Received and Sent are relative to the interface, so on the LAN bridge Received is what your devices sent."
@@ -1321,6 +1426,9 @@ msgstr ""
 msgid "h ago"
 msgstr ""
 
+msgid "hostapd-utils is missing, so hostapd only banned the device for a while. The deny list entry applies when WiFi restarts."
+msgstr ""
+
 msgid "hostapd-utils is not installed: a WiFi block lasts one hour and does not reach the running radio ACL. Install hostapd-utils for permanent blocks."
 msgstr ""
 
@@ -1366,10 +1474,16 @@ msgstr ""
 msgid "of its own."
 msgstr ""
 
+msgid "offline"
+msgstr ""
+
 msgid "old"
 msgstr ""
 
 msgid "on the deny list but still connected; install hostapd-utils or restart WiFi"
+msgstr ""
+
+msgid "online"
 msgstr ""
 
 msgid "open port"

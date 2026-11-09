@@ -115,7 +115,8 @@ for sub in trafficctl-summary.sh trafficctl-device.sh trafficctl-bytes.sh \
            trafficctl-subnets.sh \
            trafficctl-shape.sh trafficctl-shape-stats.sh \
            trafficctl-rdns.sh trafficctl-netify.sh trafficctl-names.sh \
-           trafficctl-portfw.sh trafficctl-telegram-test.sh; do
+           trafficctl-portfw.sh trafficctl-telegram-test.sh \
+           trafficctl-rules.sh; do
     cat > "$MOCKBIN/$sub" <<MOCK
 #!/bin/sh
 echo "$sub \$*" >> "$DISPATCH_LOG"
@@ -144,7 +145,7 @@ for m in summary device bytes block unblock macfilter_add macfilter_remove \
          portfw_list portfw_ctl config_get config_set telegram_config_get \
          ifaces \
          telegram_config_set telegram_test logging_config_get logging_config_set \
-         activity_log version; do
+         activity_log rules_list version; do
     assert_contains "list: declares method $m" "\"$m\"" "$LIST_OUT"
 done
 assert_eq "list: is valid JSON (parses with python-free brace balance check)" \
@@ -225,6 +226,33 @@ assert_contains "macfilter_add: dispatches with ip" "trafficctl-macfilter-add.sh
 : > "$DISPATCH_LOG"
 OUT=$(run_call macfilter_remove '{"ip":"192.168.1.9"}')
 assert_contains "macfilter_remove: dispatches with ip" "trafficctl-macfilter-remove.sh 192.168.1.9" "$(cat "$DISPATCH_LOG")"
+
+# The Rules tab lifts a WiFi block by MAC: an offline device may have no lease
+# left to find it by IP (#128). The MAC wins when both are sent, because it is
+# what the deny list is keyed on.
+: > "$DISPATCH_LOG"
+OUT=$(run_call macfilter_remove '{"mac":"aa:bb:cc:dd:ee:ff"}')
+assert_contains "macfilter_remove: dispatches with a MAC alone" \
+    "trafficctl-macfilter-remove.sh aa:bb:cc:dd:ee:ff" "$(cat "$DISPATCH_LOG")"
+: > "$DISPATCH_LOG"
+OUT=$(run_call macfilter_remove '{"ip":"192.168.1.9","mac":"aa:bb:cc:dd:ee:ff"}')
+assert_contains "macfilter_remove: prefers the MAC over the ip" \
+    "trafficctl-macfilter-remove.sh aa:bb:cc:dd:ee:ff" "$(cat "$DISPATCH_LOG")"
+: > "$DISPATCH_LOG"
+OUT=$(run_call macfilter_remove '{}')
+assert_contains "macfilter_remove: neither ip nor mac is rejected" '"ok":false' "$OUT"
+assert_eq "macfilter_remove: neither ip nor mac — no dispatch" "" "$(cat "$DISPATCH_LOG")"
+
+# rules_list is the Rules tab's only read; it must reach the script and come
+# back wrapped as an object, as rpcd requires.
+: > "$DISPATCH_LOG"
+OUT=$(run_call rules_list)
+assert_contains "rules_list: wraps sub-script output under result" '{"result":' "$OUT"
+assert_contains "rules_list: dispatches to trafficctl-rules.sh list" \
+    "trafficctl-rules.sh list" "$(cat "$DISPATCH_LOG")"
+ACL="$ROOT/usr/share/rpcd/acl.d/luci-app-trafficctl.json"
+READ_ACL=$(sed -n '/"read"/,/"write"/p' "$ACL")
+assert_contains "rules_list: granted by the read ACL" '"rules_list"' "$READ_ACL"
 
 : > "$DISPATCH_LOG"
 OUT=$(run_call ratelimit '{"ip":"192.168.1.9","rate_kbit":5000,"mode":"each"}')

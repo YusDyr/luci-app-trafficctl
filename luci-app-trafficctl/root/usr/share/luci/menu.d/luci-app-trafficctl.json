@@ -23,9 +23,21 @@
 		}
 	},
 
+	"admin/status/trafficctl/rules": {
+		"title": "Rules",
+		"order": 2,
+		"action": {
+			"type": "view",
+			"path": "trafficctl/rules"
+		},
+		"depends": {
+			"acl": [ "luci-app-trafficctl" ]
+		}
+	},
+
 	"admin/status/trafficctl/history": {
 		"title": "History",
-		"order": 2,
+		"order": 3,
 		"action": {
 			"type": "view",
 			"path": "trafficctl/history"
@@ -37,7 +49,7 @@
 
 	"admin/status/trafficctl/portfw": {
 		"title": "Port Forwards",
-		"order": 3,
+		"order": 4,
 		"action": {
 			"type": "view",
 			"path": "trafficctl/portfw"
@@ -48,7 +60,7 @@
 	},
 	"admin/status/trafficctl/settings": {
 		"title": "Settings",
-		"order": 4,
+		"order": 5,
 		"action": {
 			"type": "view",
 			"path": "trafficctl/settings"

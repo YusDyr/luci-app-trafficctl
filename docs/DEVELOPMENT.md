@@ -101,12 +101,14 @@ luci-app-trafficctl/                     # repository
 │       │   ├── trafficctl-macfilter-add.sh
 │       │   ├── trafficctl-macfilter-remove.sh
 │       │   ├── trafficctl-rdns.sh       # Reverse DNS (Telegram/CLI)
+│       │   ├── trafficctl-rules.sh      # Every restriction, online or not ("Rules" tab)
 │       │   └── ...                      # the rest of the helpers
 │       └── www/cgi-bin/trafficctl-metrics          # Prometheus scrape endpoint
 ├── luci-app-trafficctl/                 # package luci-app-trafficctl: the web interface
 │   ├── Makefile                         # OpenWrt package build (luci.mk), depends on trafficctl
 │   ├── htdocs/luci-static/resources/view/trafficctl/
 │   │   ├── status.js                    # Frontend (single ES5 file)
+│   │   ├── rules.js                     # "Rules" tab
 │   │   ├── portfw.js                    # "Port Forwards" tab
 │   │   └── status.css                   # Frontend styles
 │   ├── root/usr/
@@ -220,6 +222,7 @@ bash tests/test_bytes_nft.sh          # nftables byte-counter parsing
 bash tests/test_openwrt_compat.sh     # BusyBox ash compatibility / no bashisms
 bash tests/test_security.sh           # Input validation and injection resistance
 bash tests/test_rpcd.sh               # rpcd/ubus backend — every method, dispatch, ACL
+bash tests/test_rules.sh              # Rules tab backend: restrictions of offline devices
 bash tests/test_block.sh              # Internet block/unblock
 bash tests/test_macfilter.sh          # WiFi MAC deny/allow
 bash tests/test_metrics_cgi.sh        # Metrics CGI gate and token check

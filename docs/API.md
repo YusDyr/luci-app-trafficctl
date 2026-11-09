@@ -109,6 +109,7 @@ method because it returns the contents of the configured log file.
 | `shape_status` | `trafficctl-shape.sh status` | `ip` | read |
 | `names_list` | `trafficctl-names.sh list` | (none) | read |
 | `portfw_list` | `trafficctl-portfw.sh list` | (none) | read |
+| `rules_list` | `trafficctl-rules.sh list` | (none) | read |
 | `netify_status` | `trafficctl-netify.sh status` | (none) | read |
 | `netify_list` | `trafficctl-netify.sh list` | (none) | read |
 | `config_get` | (inline) | (none) — returns `enabled`, `default_mode`, `offload_mode`, `sw`, `hw`, `poll_interval`, `avg_window` | read |
@@ -124,7 +125,7 @@ method because it returns the contents of the configured log file.
 | `shape_add` | `trafficctl-shape.sh add` | `ip`, `rate_kbit`, `label` | write |
 | `shape_remove` | `trafficctl-shape.sh remove` | `ip`, `label` | write |
 | `macfilter_add` | `trafficctl-macfilter-add.sh` | `ip` | write |
-| `macfilter_remove` | `trafficctl-macfilter-remove.sh` | `ip` | write |
+| `macfilter_remove` | `trafficctl-macfilter-remove.sh` | `ip` or `mac` (`mac` wins when both are sent) | write |
 | `name_set` | `trafficctl-names.sh set` | `ip`, `name` (empty `name` clears the alias) | write |
 | `name_clear` | `trafficctl-names.sh remove` | `ip` | write |
 | `portfw_ctl` | `trafficctl-portfw.sh` | `action`, `scope`, `proto`, `ip`, `port`, `rate_kbit` | write |
@@ -544,6 +545,54 @@ Uses `ubus call network.rrdns lookup` (rpcd-mod-rrdns, ships with rpcd) with Bus
 
 ---
 
+### trafficctl-rules.sh
+
+Every restriction the app holds, whether or not the device is online: internet
+blocks, speed limits (subnets and `all` included), shapes and WiFi deny-list
+entries. This feeds the **Rules** tab. The device table is built from live
+conntrack entries, so a device that goes offline drops out of it while its
+restrictions keep applying.
+
+**Arguments:** `list` (the default)
+
+**Output:**
+
+```json
+{"fw":"nft","persist_rules":true,"wifi_allow_ifaces":0,"rules":[
+  {"type":"block","target":"192.168.1.50","ip":"192.168.1.50","mac":"aa:aa:aa:aa:aa:50","name":"kid-tablet","online":false,"applied":true,"persisted":true},
+  {"type":"ratelimit","target":"10.0.20.0/24","ip":"","mac":"","name":"","online":null,"applied":true,"persisted":false,"rate_kbit":2000,"rate_kbit_up":2000,"mode":"each"},
+  {"type":"shape","target":"192.168.1.70","ip":"192.168.1.70","mac":"","name":"Console","online":false,"applied":false,"persisted":true,"rate_kbit":3000,"rate_kbit_up":3000},
+  {"type":"wifi","target":"aa:aa:aa:aa:aa:99","ip":"","mac":"aa:aa:aa:aa:aa:99","name":"","online":null,"applied":false,"persisted":true,"enforcement":"none"}
+]}
+```
+
+Each restriction is read from where it is enforced and from where it is saved,
+and the two are merged:
+
+| `type` | Live state | Saved state |
+|--------|------------|-------------|
+| `block` | `tctl_block_<slug>` rules in `inet fw4 forward` (the `_mac` IPv6 rule folds into the same record), or the commented `FORWARD` DROP on iptables | `rules.json`, only while `persist_rules` is on |
+| `ratelimit` | `trafficctl-ratelimit-stats.sh` (download) and the `_ul` rule (upload) | `rules.json`, only while `persist_rules` is on |
+| `shape` | HTB classes on the LAN device and on `tctl-ifb0`, mapped through `tctl_shape_classmap` | `shapes.json` (always written) |
+| `wifi` | hostapd's running deny ACL, or a ubus ban | uci `maclist` of `macfilter=deny` interfaces |
+
+- `applied`: in the kernel or on the radio now. `persisted`: survives a reboot.
+  A saved record that is not applied is restored at the next `ifup lan`; a live
+  rule that is not saved is lost at the next reboot. Live rates win over saved ones.
+- With `persist_rules` off the restore hook ignores `rules.json`, so its records
+  are not listed: they restrict nothing.
+- `online` is `null` for a CIDR target and for a WiFi entry with no known address. Otherwise it is true when the address
+  has a conntrack entry or a REACHABLE/DELAY/PROBE/PERMANENT neighbour entry.
+- `name` follows the usual order: alias, DHCP lease, cached PTR.
+- `wifi` records are keyed on the MAC, and `enforcement` uses the words of
+  `trafficctl-macfilter-add.sh` (below), plus `unknown` when the radio state
+  cannot be read. `applied` is `null` then.
+- A radio with `macfilter=allow` blocks every device missing from its list, which
+  cannot be enumerated: only their number is reported, in `wifi_allow_ifaces`.
+- Port-forward pauses (own tab) and the global cut (own control) are not listed.
+
+---
+
 ## Action Scripts
 
 ### trafficctl-block.sh / trafficctl-unblock.sh
@@ -791,7 +840,9 @@ Manage tc/HTB traffic shaping.
 
 Block/unblock a device from WiFi (MAC filter).
 
-**Arguments:** `<ip>`
+**Arguments:** `<ip>`; the remove script also takes `<mac>`. A device that has
+been offline long enough has no lease or neighbour entry left to find its MAC
+by, and the deny list is keyed on the MAC.
 
 **Output:**
 ```json

@@ -5,25 +5,38 @@
 # Updates the uci maclist and the running hostapd ACL, so the client can
 # reassociate without a wifi reload and other clients stay connected. Reports
 # how far the runtime half got — see the enforcement words in trafficctl-fw.sh.
-# Usage: trafficctl-macfilter-remove.sh <ip>
+# Usage: trafficctl-macfilter-remove.sh <ip|mac>
+#
+# A MAC is accepted as well as an IP because the deny list is keyed on the MAC:
+# a device that has been off the network long enough has no lease and no
+# neighbour entry left, so looking it up by IP fails and its WiFi block could
+# never be lifted (#128).
 
 . /usr/libexec/trafficctl/trafficctl-fw.sh
 
 IP="$1"
+MAC=""
 
 if [ -z "$IP" ]; then
-    echo '{"ok":false,"msg":"usage: trafficctl-macfilter-remove.sh <ip>"}'
+    echo '{"ok":false,"msg":"usage: trafficctl-macfilter-remove.sh <ip|mac>"}'
     exit 1
 fi
 
-if ! tctl_validate_ip "$IP"; then
+# The length check matters: grep matches line by line, so without it a MAC
+# followed by a newline and anything else would pass and reach uci.
+if [ "${#IP}" -eq 17 ] && printf '%s' "$IP" | grep -qE '^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$'; then
+    MAC=$(echo "$IP" | tr 'A-F' 'a-f')
+    # Only for the messages and the log; a MAC with no address left reads as
+    # itself.
+    IP=$(awk -v m="$MAC" 'tolower($2) == m { print $3; exit }' /tmp/dhcp.leases 2>/dev/null)
+    [ -n "$IP" ] || IP="$MAC"
+elif ! tctl_validate_ip "$IP"; then
     echo '{"ok":false,"msg":"invalid IP address"}'
     exit 1
 fi
 
 # Look up MAC from DHCP leases
-MAC=""
-if [ -f /tmp/dhcp.leases ]; then
+if [ -z "$MAC" ] && [ -f /tmp/dhcp.leases ]; then
     MAC=$(awk -v ip="$IP" '$3 == ip {print toupper($2)}' /tmp/dhcp.leases | head -1)
 fi
 
