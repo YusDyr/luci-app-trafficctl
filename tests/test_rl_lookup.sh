@@ -21,7 +21,7 @@
 PASS=0
 FAIL=0
 
-BIN="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/local/bin"
+BIN="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/libexec/trafficctl"
 FWLIB="$BIN/trafficctl-fw.sh"
 
 TMPDIR=$(mktemp -d)
@@ -143,7 +143,7 @@ assert_contains "device: the upload ceiling is in the JSON" \
 # ── stats: units ─────────────────────────────────────────────────────────────
 
 STATS_SH="$TMPDIR/rl-stats.sh"
-sed "s|/usr/local/bin/trafficctl-fw.sh|$FWLIB|" "$BIN/trafficctl-ratelimit-stats.sh" > "$STATS_SH"
+sed "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FWLIB|" "$BIN/trafficctl-ratelimit-stats.sh" > "$STATS_SH"
 STATS=$(PATH="$MOCKBIN:$PATH" sh "$STATS_SH" 2>/dev/null)
 assert_contains "stats: bytes rate" '"ip":"192.168.1.5","mode":"shared","rate_kbit":5000' "$STATS"
 assert_contains "stats: kbytes listing" '"ip":"192.168.1.7","mode":"shared","rate_kbit":8192' "$STATS"

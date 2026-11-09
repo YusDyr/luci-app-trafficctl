@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=dash
 # Triggered by dnsmasq on DHCP events (add/old/del).
 # Available env vars: ACTION, MACADDR, IPADDR, HOSTNAME
@@ -37,7 +38,7 @@ fi
 LIMIT_KBIT=$(uci -q get trafficctl.newdevice.limit_kbit 2>/dev/null)
 [ -n "$LIMIT_KBIT" ] && [ "$LIMIT_KBIT" -gt 0 ] 2>/dev/null || exit 0
 
-. /usr/local/bin/trafficctl-fw.sh
+. /usr/libexec/trafficctl/trafficctl-fw.sh
 
 # The ledger decides what "new" means, so a run that has no ledger yet cannot
 # answer the question — and the wrong answer here limits every device on the
@@ -79,13 +80,13 @@ LIMIT_MODE=$(uci -q get trafficctl.newdevice.limit_mode 2>/dev/null)
 case "$LIMIT_MODE" in
     shaper)
         TCTL_VIA=newdevice TCTL_SRC=hotplug \
-            /usr/local/bin/trafficctl-shape.sh add "$IPADDR" "$LIMIT_KBIT" \
+            /usr/libexec/trafficctl/trafficctl-shape.sh add "$IPADDR" "$LIMIT_KBIT" \
             "shape_$IPADDR" >/dev/null 2>&1
         rc=$?
         ;;
     *)
         TCTL_VIA=newdevice TCTL_SRC=hotplug \
-            /usr/local/bin/trafficctl-ratelimit.sh "$IPADDR" "$LIMIT_KBIT" \
+            /usr/libexec/trafficctl/trafficctl-ratelimit.sh "$IPADDR" "$LIMIT_KBIT" \
             "$(tctl_ratelimit_comment "$IPADDR")" >/dev/null 2>&1
         rc=$?
         ;;

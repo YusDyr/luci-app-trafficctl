@@ -1,8 +1,9 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=dash
 # Firewall abstraction layer for trafficctl.
 # Detects nft vs iptables and provides unified functions.
-# Source this file: . /usr/local/bin/trafficctl-fw.sh
+# Source this file: . /usr/libexec/trafficctl/trafficctl-fw.sh
 
 if command -v nft >/dev/null 2>&1 && nft list tables 2>/dev/null | grep -q .; then
     TCTL_FW="nft"
@@ -1222,9 +1223,9 @@ tctl_has_limit() {
     local ip="$1"
     [ -n "$ip" ] || return 1
 
-    /usr/local/bin/trafficctl-ratelimit-stats.sh 2>/dev/null \
+    /usr/libexec/trafficctl/trafficctl-ratelimit-stats.sh 2>/dev/null \
         | grep -qF "\"ip\":\"$ip\"" && return 0
-    /usr/local/bin/trafficctl-shape-stats.sh 2>/dev/null \
+    /usr/libexec/trafficctl/trafficctl-shape-stats.sh 2>/dev/null \
         | grep -qF "\"ip\":\"$ip\"" && return 0
 
     if [ -f "$TCTL_RULES_FILE" ]; then

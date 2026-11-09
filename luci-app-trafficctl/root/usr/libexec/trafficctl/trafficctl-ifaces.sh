@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=dash
 # Per-interface byte counters for the global (bmon-style) overview.
 #
@@ -37,7 +38,7 @@ TTL="${TCTL_IFROLE_TTL:-60}"
 
 build_cache() {
     # COLD PATH ONLY. Never call this from the per-poll path.
-    . /usr/local/bin/trafficctl-fw.sh
+    . /usr/libexec/trafficctl/trafficctl-fw.sh
 
     # LAN = the L3 devices trafficctl already monitors (br-lan, br-guest,
     # eth0.20 …). Deliberately the L3 devices and not their bridge ports:

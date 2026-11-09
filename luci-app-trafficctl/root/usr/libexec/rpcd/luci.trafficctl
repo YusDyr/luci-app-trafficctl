@@ -1,11 +1,12 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=dash
 # rpcd/ubus backend for luci-app-trafficctl.
 # Provides ubus object "luci.trafficctl" with methods for traffic control.
 
-. /usr/local/bin/trafficctl-fw.sh
+. /usr/libexec/trafficctl/trafficctl-fw.sh
 
-SCRIPTS="/usr/local/bin"
+SCRIPTS="/usr/libexec/trafficctl"
 
 # Strip unsafe chars from label (allow alphanumeric, dash, underscore, dot)
 sanitize_label() { echo "$1" | tr -cd 'a-zA-Z0-9_.-'; }

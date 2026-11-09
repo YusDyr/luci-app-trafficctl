@@ -9,7 +9,7 @@
 # logged, which is what lets the memoization tests assert that the HOT path
 # forks nothing at all.
 #
-# `. /usr/local/bin/trafficctl-fw.sh` is an absolute path in the shipped
+# `. /usr/libexec/trafficctl/trafficctl-fw.sh` is an absolute path in the shipped
 # script, so a copy with that prefix rewritten to the stub dir is what actually
 # runs here — the same trick tests/test_byte_overflow.sh uses for metrics.sh.
 
@@ -17,7 +17,7 @@ PASS=0
 FAIL=0
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="$REPO_ROOT/luci-app-trafficctl/root/usr/local/bin"
+BIN="$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/trafficctl"
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
@@ -32,7 +32,7 @@ mkdir -p "$MOCKBIN" "$STUBLIB" "$SYSFS"
 
 # The script under test, with the hard-coded library path pointed at the stub.
 SCRIPT="$TMP/ifaces.sh"
-sed "s|/usr/local/bin/|$STUBLIB/|g" "$BIN/trafficctl-ifaces.sh" > "$SCRIPT"
+sed "s|/usr/libexec/trafficctl/|$STUBLIB/|g" "$BIN/trafficctl-ifaces.sh" > "$SCRIPT"
 
 assert_eq() {
     local desc="$1" expected="$2" actual="$3"

@@ -1,10 +1,11 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=dash
 # Reverse DNS lookup for an IP address.
 # Usage: trafficctl-rdns.sh <ip>
 # Output: {"ip":"...","host":"..."}
 
-. /usr/local/bin/trafficctl-fw.sh
+. /usr/libexec/trafficctl/trafficctl-fw.sh
 
 IP="$1"
 

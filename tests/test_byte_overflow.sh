@@ -33,7 +33,7 @@ PASS=0
 FAIL=0
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="$REPO_ROOT/luci-app-trafficctl/root/usr/local/bin"
+BIN="$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/trafficctl"
 FWLIB="$BIN/trafficctl-fw.sh"
 
 TMP=$(mktemp -d)
@@ -169,7 +169,7 @@ esac
 MOCK
 chmod +x "$MOCKBIN/nft"
 
-sed -e "s|/usr/local/bin/trafficctl-fw.sh|$FWLIB|" \
+sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FWLIB|" \
     "$BIN/trafficctl-bytes-nft.sh" > "$TMP/bytes-nft.sh"
 chmod +x "$TMP/bytes-nft.sh"
 
@@ -210,17 +210,17 @@ STATE="$TMP/totals.state"
 METRICS_MOCK="$TMP/mbin"
 mkdir -p "$METRICS_MOCK"
 
-sed -e "s|/usr/local/bin/trafficctl-fw.sh|$FWLIB|" \
-    -e "s|/usr/local/bin/trafficctl-totals.sh|$TMP/totals.sh|" \
-    -e "s|/usr/local/bin/trafficctl-summary.sh|$METRICS_MOCK/summary|" \
-    -e "s|/usr/local/bin/trafficctl-portfw.sh|$METRICS_MOCK/portfw|" \
-    -e "s|/usr/local/bin/trafficctl-netify.sh|$METRICS_MOCK/netify|" \
+sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FWLIB|" \
+    -e "s|/usr/libexec/trafficctl/trafficctl-totals.sh|$TMP/totals.sh|" \
+    -e "s|/usr/libexec/trafficctl/trafficctl-summary.sh|$METRICS_MOCK/summary|" \
+    -e "s|/usr/libexec/trafficctl/trafficctl-portfw.sh|$METRICS_MOCK/portfw|" \
+    -e "s|/usr/libexec/trafficctl/trafficctl-netify.sh|$METRICS_MOCK/netify|" \
     "$BIN/trafficctl-metrics.sh" > "$TMP/metrics.sh"
 
-sed -e "s|/usr/local/bin/trafficctl-fw.sh|$FWLIB|" \
+sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FWLIB|" \
     -e "s|STATE=\"/tmp/trafficctl_totals.state\"|STATE=\"$STATE\"|" \
     -e "s|LOCKD=\"/tmp/trafficctl_totals.lock.d\"|LOCKD=\"$TMP/lock.d\"|" \
-    -e "s|/usr/local/bin/trafficctl-bytes.sh|$METRICS_MOCK/bytes|" \
+    -e "s|/usr/libexec/trafficctl/trafficctl-bytes.sh|$METRICS_MOCK/bytes|" \
     "$BIN/trafficctl-totals.sh" > "$TMP/totals.sh"
 chmod +x "$TMP/totals.sh"
 

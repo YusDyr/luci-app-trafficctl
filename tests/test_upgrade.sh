@@ -55,8 +55,15 @@ OLD_VER=$(
 )
 echo "Old version installed: ${OLD_VER:-unknown}"
 
-# Verify file present
-[ -f /usr/local/bin/trafficctl-fw.sh ] || { echo "OLD install: trafficctl-fw.sh missing"; exit 1; }
+# Verify file present. Releases up to 1.28.0 installed the helper scripts under
+# /usr/local/bin; later ones use /usr/libexec/trafficctl. Accept either, so the
+# test keeps working once the previous release is itself a libexec one.
+OLD_FW=
+for d in /usr/local/bin /usr/libexec/trafficctl; do
+    [ -f "$d/trafficctl-fw.sh" ] && OLD_FW="$d/trafficctl-fw.sh" && break
+done
+[ -n "$OLD_FW" ] || { echo "OLD install: trafficctl-fw.sh missing"; exit 1; }
+echo "Old helper scripts at: $(dirname "$OLD_FW")"
 
 # ── Step 2: tag config file to verify preservation ────────────────────────────
 [ -f /etc/config/trafficctl ] || touch /etc/config/trafficctl
@@ -98,10 +105,21 @@ else
 fi
 
 # New files present?
-for f in /usr/local/bin/trafficctl-fw.sh \
+for f in /usr/libexec/trafficctl/trafficctl-fw.sh \
          /www/luci-static/resources/view/trafficctl/status.js; do
     [ -f "$f" ] || { echo "FAIL: $f missing after upgrade"; exit 1; }
 done
+
+# Files the old package owned and the new one does not must be gone: the
+# package manager removes them on upgrade, which is why postinst does no
+# cleanup of /usr/local/bin. A leftover copy there would be a stale second
+# set of helpers that nothing updates.
+if [ "$OLD_FW" != /usr/libexec/trafficctl/trafficctl-fw.sh ]; then
+    for f in "$(dirname "$OLD_FW")"/trafficctl-*.sh; do
+        if [ -e "$f" ]; then echo "FAIL: $f left behind by the upgrade"; exit 1; fi
+    done
+    echo "OK: helper scripts at the old path removed by the upgrade"
+fi
 
 # Only one version installed?
 case "$NEW_PKG" in

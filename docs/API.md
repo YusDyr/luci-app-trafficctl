@@ -1,6 +1,6 @@
 # API Reference
 
-All backend functionality is exposed through shell scripts in `/usr/local/bin/trafficctl-*.sh`. The LuCI frontend calls them via JSON-RPC through the rpcd backend at `/usr/libexec/rpcd/luci.trafficctl`.
+All backend functionality is exposed through shell scripts in `/usr/libexec/trafficctl/trafficctl-*.sh`. The LuCI frontend calls them via JSON-RPC through the rpcd backend at `/usr/libexec/rpcd/luci.trafficctl`.
 
 ---
 

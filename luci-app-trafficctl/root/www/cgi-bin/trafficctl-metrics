@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # Prometheus scrape endpoint. Inert unless trafficctl.metrics.enabled=1.
 #
 # This serves device names, addresses and traffic volumes with no LuCI session,
@@ -29,4 +30,4 @@ if [ -n "$TOKEN" ]; then
 fi
 
 printf 'Content-Type: text/plain; version=0.0.4; charset=utf-8\r\n\r\n'
-exec /usr/local/bin/trafficctl-metrics.sh
+exec /usr/libexec/trafficctl/trafficctl-metrics.sh

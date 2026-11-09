@@ -442,7 +442,7 @@ Copy the `luci-app-trafficctl/root/` tree to the router's filesystem, then resta
 ```sh
 scp -r luci-app-trafficctl/root/* root@router:/
 scp -r luci-app-trafficctl/htdocs/luci-static root@router:/www/
-ssh root@router 'chmod +x /usr/local/bin/trafficctl-*.sh /usr/libexec/rpcd/luci.trafficctl && /etc/init.d/rpcd restart'
+ssh root@router 'chmod +x /usr/libexec/trafficctl/trafficctl-*.sh /usr/libexec/rpcd/luci.trafficctl && /etc/init.d/rpcd restart'
 ```
 
 ### Required packages
@@ -609,9 +609,9 @@ The frontend talks to a thin rpcd dispatcher over ubus. The Telegram bot provide
 | `luci-app-trafficctl/htdocs/.../view/trafficctl/status.js` | Frontend — single ES5 file, no deps |
 | `luci-app-trafficctl/htdocs/.../view/trafficctl/status.css` | Frontend styles |
 | `luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl` | rpcd backend — JSON-RPC dispatch |
-| `luci-app-trafficctl/root/usr/local/bin/trafficctl-*.sh` | Backend scripts (monitoring + control) |
-| `luci-app-trafficctl/root/usr/local/bin/trafficctl-fw.sh` | Firewall abstraction layer (sourced) |
-| `luci-app-trafficctl/root/usr/local/bin/trafficctl-telegram.sh` | Telegram bot daemon (long polling) |
+| `luci-app-trafficctl/root/usr/libexec/trafficctl/trafficctl-*.sh` | Backend scripts (monitoring + control) |
+| `luci-app-trafficctl/root/usr/libexec/trafficctl/trafficctl-fw.sh` | Firewall abstraction layer (sourced) |
+| `luci-app-trafficctl/root/usr/libexec/trafficctl/trafficctl-telegram.sh` | Telegram bot daemon (long polling) |
 | `luci-app-trafficctl/root/etc/init.d/trafficctl-telegram` | procd init script for the bot |
 | `luci-app-trafficctl/root/etc/hotplug.d/iface/99-trafficctl-shapes` | Boot persistence for tc + block + ratelimit rules |
 | `luci-app-trafficctl/root/etc/hotplug.d/dhcp/99-trafficctl-newdevice` | Instant new-device detection via DHCP events |

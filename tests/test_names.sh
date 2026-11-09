@@ -7,7 +7,7 @@
 PASS=0
 FAIL=0
 
-BIN="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/local/bin"
+BIN="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/libexec/trafficctl"
 FWLIB="$BIN/trafficctl-fw.sh"
 
 TMPDIR=$(mktemp -d)
@@ -39,11 +39,11 @@ assert_not_contains() {
 NAMES_FILE="$TMPDIR/names"
 CACHE_FILE="$TMPDIR/rdns_cache"
 
-sed -e "s|/usr/local/bin/trafficctl-fw.sh|$FWLIB|" \
+sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FWLIB|" \
     -e "s|NAMES_FILE=\"/etc/trafficctl/names\"|NAMES_FILE=\"$NAMES_FILE\"|" \
     "$BIN/trafficctl-names.sh" > "$TMPDIR/names.sh"
 
-sed -e "s|/usr/local/bin/trafficctl-fw.sh|$FWLIB|" \
+sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FWLIB|" \
     -e "s|CACHE=\"/tmp/trafficctl_rdns_cache\"|CACHE=\"$CACHE_FILE\"|" \
     -e "s|LOCK=\"/tmp/trafficctl_rdns.lock\"|LOCK=\"$TMPDIR/rdns.lock\"|" \
     "$BIN/trafficctl-rdns-refresh.sh" > "$TMPDIR/refresh.sh"

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=dash
 # Manual device names (aliases), keyed by IP.
 #
@@ -9,7 +10,7 @@
 # Usage: trafficctl-names.sh list|set <ip> <name>|remove <ip>
 # Storage: /etc/trafficctl/names — one "IP NAME" line per device.
 
-. /usr/local/bin/trafficctl-fw.sh
+. /usr/libexec/trafficctl/trafficctl-fw.sh
 
 NAMES_FILE="/etc/trafficctl/names"
 

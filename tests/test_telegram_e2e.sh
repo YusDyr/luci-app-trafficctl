@@ -8,7 +8,7 @@ set -e
 PASS=0
 FAIL=0
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BOT_SCRIPT="$REPO_ROOT/luci-app-trafficctl/root/usr/local/bin/trafficctl-telegram.sh"
+BOT_SCRIPT="$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/trafficctl/trafficctl-telegram.sh"
 
 assert_contains() {
     local desc="$1" needle="$2" haystack="$3"
@@ -351,7 +351,7 @@ run_bot_once() {
         -e 's|sleep 5; continue|break|g' \
         -e 's|sleep "$TG_POLL"|:|g' \
         -e 's|sleep 0.1|:|g' \
-        -e 's|SCRIPTS="/usr/local/bin"|SCRIPTS="'"$MOCKBIN"'"|' \
+        -e 's|SCRIPTS="/usr/libexec/trafficctl"|SCRIPTS="'"$MOCKBIN"'"|' \
         -e 's|KNOWN_FILE="/etc/trafficctl/telegram_known.json"|KNOWN_FILE="'"$MOCKDIR"'/etc/trafficctl/telegram_known.json"|' \
         -e 's|OFFSET_FILE="/tmp/trafficctl_tg_offset"|OFFSET_FILE="'"$MOCKDIR"'/tmp/offset"|' \
         -e 's|CACHE_FILE="/tmp/trafficctl_tg_devices.json"|CACHE_FILE="'"$MOCKDIR"'/tmp/cache.json"|' \

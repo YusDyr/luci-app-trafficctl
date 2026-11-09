@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=dash
 # Per-device byte counters using nftables maps.
 # Works with software flow offload (hook priority -200, before flowtable at -150).
@@ -20,7 +21,7 @@
 # map is keyed by address alone, so there is nothing here to split TCP from UDP
 # with. Reporting 0 would render as a device that sent no TCP at all.
 
-. /usr/local/bin/trafficctl-fw.sh
+. /usr/libexec/trafficctl/trafficctl-fw.sh
 
 command -v nft >/dev/null 2>&1 || { echo '[]'; exit 0; }
 
@@ -59,7 +60,7 @@ fi
 # Without this check the maps silently never exist, every rule fails, and the
 # script returns [] forever — per-device speed just stops working.
 if ! nft list map inet trafficctl_mon bytes_in >/dev/null 2>&1; then
-    TCTL_FORCE_CONNTRACK=1 exec /usr/local/bin/trafficctl-bytes.sh
+    TCTL_FORCE_CONNTRACK=1 exec /usr/libexec/trafficctl/trafficctl-bytes.sh
 fi
 
 IN=$(nft list map inet trafficctl_mon bytes_in 2>/dev/null)

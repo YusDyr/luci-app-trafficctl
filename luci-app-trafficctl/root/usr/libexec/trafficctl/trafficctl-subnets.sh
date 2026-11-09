@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=dash
 # List the subnets this router monitors, as CIDRs the dashboard can offer as
 # rate-limit targets.
@@ -16,7 +17,7 @@
 # take a rule that never matches a packet. The dashboard warns off such a
 # target instead of pretending it applied.
 
-. /usr/local/bin/trafficctl-fw.sh
+. /usr/libexec/trafficctl/trafficctl-fw.sh
 
 tctl_monitored_subnets | awk '
 # Octets are derived with arithmetic and printed individually: each is below

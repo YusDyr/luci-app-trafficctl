@@ -63,7 +63,7 @@ mkdir -p "$DATA/www/luci-static/resources/view/trafficctl"
 cp "$SRC/htdocs/luci-static/resources/view/trafficctl/"* "$DATA/www/luci-static/resources/view/trafficctl/"
 
 # Ensure scripts are executable
-chmod +x "$DATA/usr/local/bin/trafficctl-"*.sh
+chmod +x "$DATA/usr/libexec/trafficctl/trafficctl-"*.sh
 chmod +x "$DATA/usr/libexec/rpcd/luci.trafficctl"
 [ -d "$DATA/etc/init.d" ] && chmod +x "$DATA/etc/init.d/"*
 [ -d "$DATA/etc/hotplug.d" ] && find "$DATA/etc/hotplug.d" -type f -exec chmod +x {} +
@@ -113,6 +113,11 @@ if [ -z "${IPKG_INSTROOT}" ]; then
     if [ -x /etc/init.d/trafficctl-telegram ]; then
         /etc/init.d/trafficctl-telegram start 2>/dev/null || true
     fi
+    # A sampler started by a release up to 1.28.0 still calls the helpers at
+    # /usr/local/bin, which this upgrade removed; restart it onto the new path.
+    if [ -x /etc/init.d/trafficctl-history ] && /etc/init.d/trafficctl-history enabled; then
+        /etc/init.d/trafficctl-history restart 2>/dev/null || true
+    fi
 fi
 exit 0
 EOF
@@ -127,8 +132,8 @@ fi
 # Fail open. A global internet cut left engaged by a package that is going away
 # is a lockout with no UI left to undo it — the rule would sit in nftables with
 # nothing on the router admitting to owning it.
-if [ -z "${IPKG_INSTROOT}" ] && [ -x /usr/local/bin/trafficctl-cut.sh ]; then
-    /usr/local/bin/trafficctl-cut.sh release >/dev/null 2>&1 || true
+if [ -z "${IPKG_INSTROOT}" ] && [ -x /usr/libexec/trafficctl/trafficctl-cut.sh ]; then
+    /usr/libexec/trafficctl/trafficctl-cut.sh release >/dev/null 2>&1 || true
 fi
 if [ -z "${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-cut ]; then
     /etc/init.d/trafficctl-cut stop 2>/dev/null || true

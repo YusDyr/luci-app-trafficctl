@@ -34,6 +34,12 @@ endef
 #
 # Guarded on IPKG_INSTROOT: when it is set the package is being unpacked into
 # an image being built, where there is no running rpcd to talk to.
+#
+# The history sampler is a long-running loop that calls its sibling scripts by
+# absolute path. Releases up to 1.28.0 installed them under /usr/local/bin, so
+# a sampler started by one of those keeps calling paths the upgrade has just
+# removed and records nothing until the next reboot. Restarting it picks up
+# the new init script.
 define Package/$(PKG_NAME)/postinst
 #!/bin/sh
 chmod 0600 "$${IPKG_INSTROOT}/etc/config/trafficctl" 2>/dev/null || true
@@ -41,6 +47,9 @@ if [ -z "$${IPKG_INSTROOT}" ]; then
 	/etc/init.d/rpcd restart 2>/dev/null || true
 	if [ -x /etc/init.d/trafficctl-telegram ]; then
 		/etc/init.d/trafficctl-telegram start 2>/dev/null || true
+	fi
+	if [ -x /etc/init.d/trafficctl-history ] && /etc/init.d/trafficctl-history enabled; then
+		/etc/init.d/trafficctl-history restart 2>/dev/null || true
 	fi
 fi
 exit 0
@@ -51,8 +60,8 @@ endef
 # in nftables with nothing on the router admitting to owning it.
 define Package/$(PKG_NAME)/prerm
 #!/bin/sh
-if [ -z "$${IPKG_INSTROOT}" ] && [ -x /usr/local/bin/trafficctl-cut.sh ]; then
-	/usr/local/bin/trafficctl-cut.sh release >/dev/null 2>&1 || true
+if [ -z "$${IPKG_INSTROOT}" ] && [ -x /usr/libexec/trafficctl/trafficctl-cut.sh ]; then
+	/usr/libexec/trafficctl/trafficctl-cut.sh release >/dev/null 2>&1 || true
 fi
 exit 0
 endef

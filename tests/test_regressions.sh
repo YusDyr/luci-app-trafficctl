@@ -6,7 +6,7 @@
 PASS=0
 FAIL=0
 
-BIN="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/local/bin"
+BIN="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/libexec/trafficctl"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root"
 
 TMPDIR=$(mktemp -d)
@@ -104,7 +104,7 @@ MOCK
 chmod +x "$MOCKBIN/uci" "$MOCKBIN/jsonfilter"
 
 RPCD="$TMPDIR/rpcd.sh"
-sed "s|/usr/local/bin/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" \
+sed "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" \
     "$ROOT/usr/libexec/rpcd/luci.trafficctl" > "$RPCD"
 
 run_rpcd_call() {
@@ -185,7 +185,7 @@ chmod +x "$MOCKBIN/ip"
 TC_LOG="$TMPDIR/tc.log"
 SHAPES_JSON="$TMPDIR/shapes.json"
 SHAPE="$TMPDIR/shape.sh"
-sed -e "s|/usr/local/bin/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" \
+sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" \
     -e "s|SHAPES_FILE=\"/etc/trafficctl/shapes.json\"|SHAPES_FILE=\"$SHAPES_JSON\"|" \
     "$BIN/trafficctl-shape.sh" > "$SHAPE"
 
@@ -464,8 +464,8 @@ chmod +x "$MOCKBIN/conntrack"
 
 BLOCK_SH="$TMPDIR/block.sh"
 UNBLOCK_SH="$TMPDIR/unblock.sh"
-sed "s|/usr/local/bin/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" "$BIN/trafficctl-block.sh" > "$BLOCK_SH"
-sed "s|/usr/local/bin/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" "$BIN/trafficctl-unblock.sh" > "$UNBLOCK_SH"
+sed "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" "$BIN/trafficctl-block.sh" > "$BLOCK_SH"
+sed "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" "$BIN/trafficctl-unblock.sh" > "$UNBLOCK_SH"
 
 rm -f "$BLOCKED_COMMENT_FILE"
 OUT=$(PATH="$MOCKBIN:$PATH" sh "$BLOCK_SH" 192.168.1.20 "" 2>&1)
@@ -482,7 +482,7 @@ assert_contains "unblock via Telegram path actually deleted the rule (handle 42)
 # ════════════════════════════════════════════════════════════════════════════
 
 PFW="$TMPDIR/portfw.sh"
-sed "s|/usr/local/bin/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" "$BIN/trafficctl-portfw.sh" > "$PFW"
+sed "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" "$BIN/trafficctl-portfw.sh" > "$PFW"
 
 cat > "$MOCKBIN/nft" <<'MOCK'
 #!/bin/sh

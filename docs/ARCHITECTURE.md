@@ -29,7 +29,7 @@ graph TD
             RPC["/usr/libexec/rpcd/luci.trafficctl<br/>(JSON-RPC dispatch)"]
         end
 
-        subgraph "Query Scripts — /usr/local/bin/"
+        subgraph "Query Scripts — /usr/libexec/trafficctl/"
             SUM["trafficctl-summary.sh<br/>(all active devices)"]
             DEV["trafficctl-device.sh<br/>(per-device connections)"]
             TOT["trafficctl-totals.sh<br/>(monotonic lifetime totals)"]
@@ -41,7 +41,7 @@ graph TD
             RDNS["trafficctl-rdns.sh<br/>(reverse DNS — Telegram/CLI)"]
         end
 
-        subgraph "Action Scripts — /usr/local/bin/"
+        subgraph "Action Scripts — /usr/libexec/trafficctl/"
             BLK["trafficctl-block.sh"]
             UBK["trafficctl-unblock.sh"]
             RL["trafficctl-ratelimit.sh"]
@@ -185,7 +185,7 @@ sequenceDiagram
 The file `trafficctl-fw.sh` is sourced by all scripts. It provides a unified API regardless of the firewall backend:
 
 ```sh
-. /usr/local/bin/trafficctl-fw.sh
+. /usr/libexec/trafficctl/trafficctl-fw.sh
 
 # Detection result stored in:
 # TCTL_FW = "nft" | "iptables"

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=dash
 # Global internet cut — every device loses the internet, the LAN keeps working.
 #
@@ -75,7 +76,7 @@
 # a dedicated control for them, and killing them would remove yet another
 # remote-admin path from an operator who is about to lose their LAN-hosted one.
 
-. /usr/local/bin/trafficctl-fw.sh
+. /usr/libexec/trafficctl/trafficctl-fw.sh
 
 # Same priority as port-forward control: after DNAT, and before fw4's
 # flowtable rule at filter priority 0 — otherwise an offloaded flow would

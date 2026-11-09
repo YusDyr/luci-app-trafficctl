@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=dash
 # Remove device WiFi MAC filter (unblock from wifi deny list).
 # Updates the uci maclist and the running hostapd ACL, so the client can
@@ -6,7 +7,7 @@
 # how far the runtime half got — see the enforcement words in trafficctl-fw.sh.
 # Usage: trafficctl-macfilter-remove.sh <ip>
 
-. /usr/local/bin/trafficctl-fw.sh
+. /usr/libexec/trafficctl/trafficctl-fw.sh
 
 IP="$1"
 

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=dash
 # Inbound traffic control for port forwards and WAN-open ports.
 #
@@ -17,7 +18,7 @@
 # matchable, and before the flowtable offload rule so drops/limits keep
 # working with software offload enabled.
 
-. /usr/local/bin/trafficctl-fw.sh
+. /usr/libexec/trafficctl/trafficctl-fw.sh
 
 PFW_PRIO="-190"
 

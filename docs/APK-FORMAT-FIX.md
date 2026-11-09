@@ -26,7 +26,7 @@ tar -czf "$WORKDIR/control.tar.gz" -C "$CTRL" .
 tar -czf "$WORKDIR/data.tar.gz" -C "$DATA" .
 ```
 
-**Problem**: `tar -C dir .` creates entries prefixed with `./` (e.g., `./.PKGINFO`, `./usr/local/bin/...`). 
+**Problem**: `tar -C dir .` creates entries prefixed with `./` (e.g., `./.PKGINFO`, `./usr/libexec/trafficctl/...`). 
 
 apk-tools v3 parser (`src/apk_extract_v2.c`):
 - Control tar: the `.` directory entry immediately sets `data_started=true`, so `./.PKGINFO` is never parsed as metadata
@@ -55,7 +55,7 @@ An unsigned APKv2 package is exactly: `control.tar.gz` + `data.tar.gz` (binary c
 - Format: posix/ustar (has "ustar" magic at offset 257)
 
 ### Data tar requirements:
-- Paths like `usr/local/bin/foo`, `etc/config/bar` (no leading `./` or `/`)
+- Paths like `usr/libexec/trafficctl/foo`, `etc/config/bar` (no leading `./` or `/`)
 - Format: posix/ustar
 
 ### .PKGINFO required fields:

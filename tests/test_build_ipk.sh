@@ -61,7 +61,7 @@ assert_contains "arch is all" "$(cat control)" "Architecture: all"
 
 DATA_FILES=$(tar tzf data.tar.gz)
 assert_contains "rpcd backend" "$DATA_FILES" "usr/libexec/rpcd/luci.trafficctl"
-assert_contains "summary script" "$DATA_FILES" "usr/local/bin/trafficctl-summary.sh"
+assert_contains "summary script" "$DATA_FILES" "usr/libexec/trafficctl/trafficctl-summary.sh"
 assert_contains "frontend js" "$DATA_FILES" "www/luci-static/resources/view/trafficctl/status.js"
 assert_contains "hotplug script" "$DATA_FILES" "etc/hotplug.d/iface/99-trafficctl-shapes"
 assert_contains "menu json" "$DATA_FILES" "usr/share/luci/menu.d/luci-app-trafficctl.json"

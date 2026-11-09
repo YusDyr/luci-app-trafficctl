@@ -46,10 +46,10 @@ assert_not_contains() {
     fi
 }
 
-# The cgi-bin execs /usr/local/bin/trafficctl-metrics.sh by absolute path on
+# The cgi-bin execs /usr/libexec/trafficctl/trafficctl-metrics.sh by absolute path on
 # success; stub it so this test targets only the auth gate in the cgi-bin
 # itself (the exporter has its own coverage in test_metrics.sh).
-mkdir -p "$MOCKBIN/../usr/local/bin"
+mkdir -p "$MOCKBIN/../usr/libexec/trafficctl"
 STUB_METRICS="$MOCKBIN/trafficctl-metrics.sh"
 cat > "$STUB_METRICS" <<'MOCK'
 #!/bin/sh
@@ -58,7 +58,7 @@ MOCK
 chmod +x "$STUB_METRICS"
 
 CGI_TEST="$TMPDIR/trafficctl-metrics"
-sed "s|/usr/local/bin/trafficctl-metrics.sh|$STUB_METRICS|" "$CGI" > "$CGI_TEST"
+sed "s|/usr/libexec/trafficctl/trafficctl-metrics.sh|$STUB_METRICS|" "$CGI" > "$CGI_TEST"
 chmod +x "$CGI_TEST"
 
 run_cgi() {

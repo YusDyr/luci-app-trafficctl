@@ -20,7 +20,7 @@
 PASS=0
 FAIL=0
 
-BIN="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/local/bin"
+BIN="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/libexec/trafficctl"
 HOTPLUG="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/etc/hotplug.d/iface/99-trafficctl-shapes"
 
 TMP=$(mktemp -d)
@@ -189,7 +189,7 @@ assert_not_contains "harness: no production rules path survived the rewrite" \
 
 # Every script under test sources fw.sh by absolute path too.
 patch_script() {
-    sed -e "s|/usr/local/bin/trafficctl-fw.sh|$FW|" \
+    sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FW|" \
         -e "s|SHAPES_FILE=\"/etc/trafficctl/shapes.json\"|SHAPES_FILE=\"$SHAPES\"|" \
         "$1" > "$2"
     chmod +x "$2"
@@ -308,7 +308,7 @@ assert_eq "persist: a block record is unchanged" \
 
 # ── the restore path ────────────────────────────────────────────────────────
 HOOK="$TMP/99-trafficctl-shapes"
-sed -e "s|/usr/local/bin/trafficctl-fw.sh|$FW|" \
+sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FW|" \
     -e "s|RULES_FILE=\"/etc/trafficctl/rules.json\"|RULES_FILE=\"$RULES\"|" \
     -e "s|SHAPES_FILE=\"/etc/trafficctl/shapes.json\"|SHAPES_FILE=\"$SHAPES\"|" \
     -e "s|/etc/trafficctl/cut.state|$TMP/cut.state|" \

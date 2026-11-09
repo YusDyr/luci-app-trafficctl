@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=dash
 # Populate the reverse-DNS name cache for the given IPs.
 #
@@ -14,7 +15,7 @@
 # Usage: trafficctl-rdns-refresh.sh <ip> [ip ...]
 # Cache: /tmp/trafficctl_rdns_cache — "IP HOST TIMESTAMP", HOST "-" = no record.
 
-. /usr/local/bin/trafficctl-fw.sh
+. /usr/libexec/trafficctl/trafficctl-fw.sh
 
 CACHE="/tmp/trafficctl_rdns_cache"
 LOCK="/tmp/trafficctl_rdns.lock"

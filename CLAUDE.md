@@ -24,7 +24,7 @@ luci-app-trafficctl/
     status.js                               — Main frontend (single-file LuCI view, "Devices" tab)
     portfw.js                               — "Port Forwards" tab (inbound traffic control)
     status.css                              — Frontend styles (shared by both views)
-  root/usr/local/bin/
+  root/usr/libexec/trafficctl/
     trafficctl-fw.sh                        — Shared library (fw detection, validation, persistence helpers)
     trafficctl-summary.sh                   — All devices summary (JSON array)
     trafficctl-device.sh                    — Per-device detail + connections
@@ -113,7 +113,7 @@ scp does NOT work to the router. Deploy files like this:
 ```sh
 ssh root@192.168.0.1 sh -c '"cat > /path/to/file"' < local/file
 # For scripts, also chmod:
-ssh root@192.168.0.1 sh -c '"cat > /usr/local/bin/script.sh && chmod +x /usr/local/bin/script.sh"' < luci-app-trafficctl/root/usr/local/bin/script.sh
+ssh root@192.168.0.1 sh -c '"cat > /usr/libexec/trafficctl/script.sh && chmod +x /usr/libexec/trafficctl/script.sh"' < luci-app-trafficctl/root/usr/libexec/trafficctl/script.sh
 # Frontend:
 ssh root@192.168.0.1 sh -c '"cat > /www/luci-static/resources/view/trafficctl/status.js"' < luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js
 ssh root@192.168.0.1 sh -c '"cat > /www/luci-static/resources/view/trafficctl/status.css"' < luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.css
