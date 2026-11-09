@@ -142,12 +142,23 @@ assert_contains "trafficctl Makefile postinst tightens the config mode" 'chmod 0
 assert_contains "trafficctl build-ipk.sh postinst tightens the config mode" 'chmod 0600' "$BE_IPK_POSTINST"
 assert_contains "trafficctl build-apk.sh post-install tightens the config mode" 'chmod 0600' "$BE_APK_POSTINST"
 
-# 4. A Telegram bot that was running before the upgrade comes back without a
-#    reboot. Same drift, lower stakes.
-TG="/etc/init.d/trafficctl-telegram start"
-assert_contains "trafficctl Makefile postinst starts the telegram service" "$TG" "$BE_MK_POSTINST"
-assert_contains "trafficctl build-ipk.sh postinst starts the telegram service" "$TG" "$BE_IPK_POSTINST"
-assert_contains "trafficctl build-apk.sh post-install starts the telegram service" "$TG" "$BE_APK_POSTINST"
+# 4. The Telegram bot follows its uci flag: enabled in rc.d and started when
+#    trafficctl.telegram.enabled is 1, so it is still there after a reboot.
+#    The postinst used to start it unconditionally and never enable it, so an
+#    upgrade revived a bot that the next reboot would drop again.
+for step in "/etc/init.d/trafficctl-telegram enable" "/etc/init.d/trafficctl-telegram start"; do
+    assert_contains "trafficctl Makefile postinst runs '$step'" "$step" "$BE_MK_POSTINST"
+    assert_contains "trafficctl build-ipk.sh postinst runs '$step'" "$step" "$BE_IPK_POSTINST"
+    assert_contains "trafficctl build-apk.sh post-install runs '$step'" "$step" "$BE_APK_POSTINST"
+done
+for flag in telegram history; do
+    gate="\"\$(uci -q get trafficctl.$flag.enabled)\" = \"1\""
+    # Make needs the command substitution written as $$(...).
+    assert_contains "trafficctl Makefile postinst reads trafficctl.$flag.enabled" \
+        "$(printf '%s' "$gate" | sed 's/\$/$$/')" "$BE_MK_POSTINST"
+    assert_contains "trafficctl build-ipk.sh postinst reads trafficctl.$flag.enabled" "$gate" "$BE_IPK_POSTINST"
+    assert_contains "trafficctl build-apk.sh post-install reads trafficctl.$flag.enabled" "$gate" "$BE_APK_POSTINST"
+done
 
 # 5. The history sampler is restarted after an upgrade. It is a loop that
 #    calls the helpers by absolute path, so one started by a release that
@@ -214,6 +225,78 @@ if [ -n "$SHELL_CMD" ]; then
 else
     echo "NOTE: no POSIX shell found to syntax-check the Makefile scripts with."
 fi
+
+# ── Behaviour ─────────────────────────────────────────────────────────────
+# Run every copy of the trafficctl postinst against fake init scripts and a
+# fake uci. What runs after the install must be what runs after a reboot, and
+# a reboot runs only what rc.d enables, so for each service: flag 1 means
+# enabled in rc.d and (re)started, flag 0 means nothing is started and rc.d is
+# not touched.
+FAKE="$TMP/fake"
+run_postinst() { # <script> <telegram flag> <history flag> <history in rc.d: 0|1> [IPKG_INSTROOT]
+    rm -rf "$FAKE"
+    mkdir -p "$FAKE/etc/init.d" "$FAKE/etc/config" "$FAKE/rc.d" "$FAKE/bin"
+    : > "$FAKE/calls"
+    : > "$FAKE/etc/config/trafficctl"
+    printf '%s\n' "$2" > "$FAKE/telegram.flag"
+    printf '%s\n' "$3" > "$FAKE/history.flag"
+    [ "$4" = 1 ] && : > "$FAKE/rc.d/trafficctl-history"
+    for svc in trafficctl-telegram trafficctl-history; do
+        cat > "$FAKE/etc/init.d/$svc" <<FAKEINIT
+#!/bin/sh
+echo "$svc \$1" >> "$FAKE/calls"
+case "\$1" in
+    enable) : > "$FAKE/rc.d/$svc" ;;
+    disable) rm -f "$FAKE/rc.d/$svc" ;;
+    enabled) [ -e "$FAKE/rc.d/$svc" ] ;;
+esac
+FAKEINIT
+        chmod +x "$FAKE/etc/init.d/$svc"
+    done
+    cat > "$FAKE/bin/uci" <<FAKEUCI
+#!/bin/sh
+case "\$*" in
+    "-q get trafficctl.telegram.enabled") cat "$FAKE/telegram.flag" ;;
+    "-q get trafficctl.history.enabled") cat "$FAKE/history.flag" ;;
+    *) exit 1 ;;
+esac
+FAKEUCI
+    chmod +x "$FAKE/bin/uci"
+    sed -e "s|/etc/init.d/|$FAKE/etc/init.d/|g" -e "s|/etc/config/|$FAKE/etc/config/|g" "$1" > "$FAKE/postinst"
+    # shellcheck disable=SC2086 # SHELL_CMD may be "busybox ash"
+    IPKG_INSTROOT="${5:-}" PATH="$FAKE/bin:$PATH" ${SHELL_CMD:-sh} "$FAKE/postinst" >/dev/null 2>&1
+}
+calls() { grep -c -x "$1" "$FAKE/calls"; }
+in_rcd() { [ -e "$FAKE/rc.d/$1" ] && echo yes || echo no; }
+
+printf '%s\n' "$BE_IPK_POSTINST" > "$TMP/ipk.postinst"
+printf '%s\n' "$BE_APK_POSTINST" > "$TMP/apk.postinst"
+for f in "$TMP/trafficctl.postinst" "$TMP/ipk.postinst" "$TMP/apk.postinst"; do
+    n=$(basename "$f")
+
+    run_postinst "$f" 1 1 0
+    assert_eq "$n, telegram.enabled=1: the bot is enabled in rc.d" yes "$(in_rcd trafficctl-telegram)"
+    assert_eq "$n, telegram.enabled=1: the bot is started" 1 "$(calls 'trafficctl-telegram start')"
+    assert_eq "$n, history.enabled=1: the sampler is enabled in rc.d" yes "$(in_rcd trafficctl-history)"
+    assert_eq "$n, history.enabled=1: the sampler is restarted" 1 "$(calls 'trafficctl-history restart')"
+
+    run_postinst "$f" 0 0 0
+    assert_eq "$n, telegram.enabled=0: the bot is not enabled in rc.d" no "$(in_rcd trafficctl-telegram)"
+    assert_eq "$n, telegram.enabled=0: the bot's init script is not called" 0 "$(grep -c '^trafficctl-telegram ' "$FAKE/calls")"
+    assert_eq "$n, history.enabled=0: the sampler is not enabled in rc.d" no "$(in_rcd trafficctl-history)"
+    assert_eq "$n, history.enabled=0: the sampler is not started" 0 "$(calls 'trafficctl-history restart')"
+
+    # A sampler already enabled in rc.d starts at boot whatever the flag, so
+    # it is restarted onto the new helpers, and never disabled here.
+    run_postinst "$f" 0 0 1
+    assert_eq "$n, history in rc.d with the flag at 0: restarted as at boot" 1 "$(calls 'trafficctl-history restart')"
+    assert_eq "$n, history in rc.d with the flag at 0: left enabled" yes "$(in_rcd trafficctl-history)"
+
+    # Unpacking into an image: no services and no rc.d of ours to manage.
+    mkdir -p "$TMP/img/etc/config"
+    run_postinst "$f" 1 1 0 "$TMP/img"
+    assert_eq "$n, IPKG_INSTROOT set: no init script is called" 0 "$(grep -c . "$FAKE/calls")"
+done
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

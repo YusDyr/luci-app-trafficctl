@@ -103,6 +103,18 @@ endef
 # The config holds the Telegram bot token and the metrics token, so it must not
 # be world-readable before the first save from the UI applies the same mode.
 #
+# Services follow their uci flag, so the state after an install or an upgrade
+# is the state after the next reboot. Boot only runs what rc.d enables, and
+# the released packages never enabled trafficctl-telegram: the postinst
+# started the bot unconditionally and the Settings toggle only reloaded it.
+# A bot switched on in the UI therefore ran until the next reboot and was then
+# gone, and an upgrade brought it back until the reboot after that. When the
+# flag is 1 the service is enabled and started; when it is 0 nothing is
+# started or enabled (the init script would not start the bot anyway). The
+# same goes for history.enabled. rc.d is never disabled here: the SDK's
+# default_postinst, which runs after this script, enables every init script
+# on a fresh install, and the flag check in each service keeps that harmless.
+#
 # The history sampler is a long-running loop that calls its sibling scripts by
 # absolute path. Releases up to 1.28.0 installed them under /usr/local/bin, so
 # a sampler started by one of those keeps calling paths the upgrade has just
@@ -124,11 +136,17 @@ if [ -z "$${IPKG_INSTROOT}" ]; then
 	if [ -f /etc/config/trafficctl ]; then
 		rm -f /etc/config/trafficctl-opkg.backup
 	fi
-	if [ -x /etc/init.d/trafficctl-telegram ]; then
+	if [ -x /etc/init.d/trafficctl-telegram ] && [ "$$(uci -q get trafficctl.telegram.enabled)" = "1" ]; then
+		/etc/init.d/trafficctl-telegram enable 2>/dev/null || true
 		/etc/init.d/trafficctl-telegram start 2>/dev/null || true
 	fi
-	if [ -x /etc/init.d/trafficctl-history ] && /etc/init.d/trafficctl-history enabled; then
-		/etc/init.d/trafficctl-history restart 2>/dev/null || true
+	if [ -x /etc/init.d/trafficctl-history ]; then
+		if [ "$$(uci -q get trafficctl.history.enabled)" = "1" ]; then
+			/etc/init.d/trafficctl-history enable 2>/dev/null || true
+		fi
+		if /etc/init.d/trafficctl-history enabled; then
+			/etc/init.d/trafficctl-history restart 2>/dev/null || true
+		fi
 	fi
 fi
 exit 0
