@@ -23,6 +23,11 @@ LUCI_DESCRIPTION:=Per-device traffic monitoring, rate limiting (nft/iptables), \
 # configured. Measured on OpenWrt 24.10.6 with `opkg install trafficctl.ipk
 # luci-app-trafficctl.ipk` and with `opkg upgrade` from a feed. Keeping them
 # here costs nothing, since trafficctl needs them anyway.
+#
+# hostapd-utils is the exception: trafficctl no longer depends on it (it is
+# optional there, for wired-only builds), but it stays here so the upgrade from
+# 1.28.0 does not drop it and silently turn every WiFi block into a temporary
+# ban. trafficctl on its own does not need it.
 LUCI_DEPENDS:=+trafficctl +conntrack +curl +tc +iw +hostapd-utils +luci-base +rpcd
 LUCI_PKGARCH:=all
 

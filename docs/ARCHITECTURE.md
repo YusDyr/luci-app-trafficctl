@@ -375,6 +375,8 @@ This returns paths like `wireless.default_radio0`, `wireless.default_radio1`, et
 
 This approach disconnects only the target client. All other WiFi clients remain connected.
 
+`hostapd_cli` comes from `hostapd-utils`, which the `trafficctl` backend does not depend on (it can only be selected with a hostapd/wpad variant, so the dependency would block wired-only builds). Without it step 4 falls back to `ubus call hostapd.<iface> del_client` with a one-hour `ban_time`, reported as `"enforcement":"ban"`. With no wifi-iface at all the scripts answer `"no wifi interfaces found"` and touch nothing. `tctl_wifi_filter_support` reports `none` / `temporary` / `full` as `wifi_filter` in `trafficctl-device.sh`, and the view hides or annotates the Block WiFi button from it.
+
 ---
 
 ## Persistence

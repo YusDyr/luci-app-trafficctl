@@ -402,8 +402,12 @@ WIFI_PENDING=false
 tctl_wifi_block_pending "$([ "$WIFI_BLOCKED" = "true" ] && echo 1 || echo 0)" "$CONN_TYPE" \
     && WIFI_PENDING=true
 
+# none / temporary / full: lets the view hide or qualify the WiFi block button
+# on routers without radios or without the optional hostapd-utils.
+WIFI_FILTER=$(tctl_wifi_filter_support)
+
 # Output final JSON
-printf '{"ip":"%s","name":"%s","mac":"%s","conn_type":"%s","conn_last":"%s","timestamp":%d,"blocked":%s,"block_packets":%d,"block_bytes":%.0f,"wifi_blocked":%s,"wifi_block_pending":%s,"total":%.0f,"protocols":{"tcp":%d,"udp":%d,"other":%d},"tcp_states":{"established":%d,"time_wait":%d,"syn_sent":%d,"close_wait":%d},"connections":[%s],"rate_limit_kbit":%d,"rate_limit_kbit_up":%d,"shape_kbit":%d,"shape_kbit_up":%d}\n' \
+printf '{"ip":"%s","name":"%s","mac":"%s","conn_type":"%s","conn_last":"%s","timestamp":%d,"blocked":%s,"block_packets":%d,"block_bytes":%.0f,"wifi_blocked":%s,"wifi_block_pending":%s,"wifi_filter":"%s","total":%.0f,"protocols":{"tcp":%d,"udp":%d,"other":%d},"tcp_states":{"established":%d,"time_wait":%d,"syn_sent":%d,"close_wait":%d},"connections":[%s],"rate_limit_kbit":%d,"rate_limit_kbit_up":%d,"shape_kbit":%d,"shape_kbit_up":%d}\n' \
     "$IP" "$NAME" "$MAC" "$CONN_TYPE" "$CONN_LAST" "$TIMESTAMP" "$BLOCKED" "$BLOCK_PACKETS" "$BLOCK_BYTES" \
-    "$WIFI_BLOCKED" "$WIFI_PENDING" "$TOTAL" "$N_TCP" "$N_UDP" "$N_OTHER" \
+    "$WIFI_BLOCKED" "$WIFI_PENDING" "$WIFI_FILTER" "$TOTAL" "$N_TCP" "$N_UDP" "$N_OTHER" \
     "$EST" "$TW" "$SS" "$CW" "$CONNS_OUT" "$RATE_LIM" "$RATE_LIM_UP" "$SHAPE_KBIT" "$SHAPE_KBIT_UP"

@@ -2264,10 +2264,21 @@ return view.extend({
 		}
 		updateInetBtn(false);
 
-		function updateWifiBtn(wifiBlocked, hasMac) {
-			if (!hasMac) { wifiBtn.classList.add('tc-hidden'); return; }
+		// filter is the backend's wifi_filter: "none" on a router without any
+		// wifi-iface (wired-only builds), "temporary" where the optional
+		// hostapd-utils is missing and a block is only a timed hostapd ban,
+		// "full" otherwise. Older backends send nothing, read as "full". An
+		// existing block is always offered for removal, whatever the router
+		// can do now.
+		function updateWifiBtn(wifiBlocked, hasMac, filter) {
+			if (!hasMac || (filter === 'none' && !wifiBlocked)) { wifiBtn.classList.add('tc-hidden'); return; }
 			wifiBtn.classList.remove('tc-hidden');
 			wifiBtn.disabled = false;
+			if (filter === 'temporary') {
+				wifiBtn.setAttribute('data-tip', _('hostapd-utils is not installed: a WiFi block lasts one hour and does not reach the running radio ACL. Install hostapd-utils for permanent blocks.'));
+			} else {
+				wifiBtn.removeAttribute('data-tip');
+			}
 			if (wifiBlocked) {
 				wifiBtn.textContent = _('Unblock WiFi');
 				wifiBtn.className = 'cbi-button cbi-button-positive';
@@ -3182,7 +3193,7 @@ return view.extend({
 				}
 
 				updateInetBtn(data.blocked);
-				updateWifiBtn(data.wifi_blocked, !!data.mac);
+				updateWifiBtn(data.wifi_blocked, !!data.mac, data.wifi_filter);
 
 				var curShapeRate = data.shape_kbit || 0;
 				var curLimitRate = data.rate_limit_kbit || 0;

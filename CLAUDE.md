@@ -34,6 +34,12 @@ copy opkg leaves when a modified conffile changes owner. The backend's
 dependencies are repeated on luci-app-trafficctl: otherwise opkg removes
 conntrack, curl, iw and hostapd-utils as orphans of the old package in the same
 run that installs trafficctl (`tests/test_upgrade.sh` checks this).
+hostapd-utils is the one dependency only luci-app-trafficctl declares: it can
+only be selected with a hostapd/wpad variant, so on trafficctl it would block
+wired-only builds. Every hostapd_cli call checks `command -v` first and falls
+back to a timed ubus ban; `tctl_wifi_filter_support` (none/temporary/full,
+emitted as `wifi_filter` by trafficctl-device.sh) lets the view hide or qualify
+the WiFi block button.
 
 ```
 trafficctl/

@@ -147,7 +147,7 @@ In practice, both achieve the same result (excess packets are dropped), but the 
 
 11. **Both ACL modes supported** -- The package adapts to whichever `macfilter` policy each wifi-iface already uses and never changes it. On a `deny` (blacklist) radio, blocking adds the MAC to `maclist`; on an `allow` (whitelist) radio, blocking *removes* it, since there being listed is what grants access. Only when a radio has no `macfilter` set at all does the package create one, using `deny`. Mixed-mode setups are handled per radio: a device counts as wifi-blocked if it is blocked on any radio.
 
-12. **WiFi deauth** -- MAC filter changes are applied via `hostapd_cli deny_acl` + `deauthenticate`. Only the target client is disconnected; other clients are unaffected. Disconnection is near-instant (no wifi reload).
+12. **WiFi deauth** -- MAC filter changes are applied via `hostapd_cli deny_acl` + `deauthenticate`. Only the target client is disconnected; other clients are unaffected. Disconnection is near-instant (no wifi reload). `hostapd-utils` is optional for the `trafficctl` backend (it cannot be selected on wired-only builds): without `hostapd_cli` a block is a temporary ubus ban, and on a router with no wifi-iface the WiFi block is not offered.
 
 ---
 
