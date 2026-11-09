@@ -10,21 +10,24 @@ PKG_MAINTAINER:=Denis Iusupov <yusdyr@gmail.com>
 LUCI_TITLE:=LuCI Traffic Control
 LUCI_DESCRIPTION:=Per-device traffic monitoring, rate limiting (nft/iptables), \
  traffic shaping (tc/HTB), internet blocking, and WiFi MAC filtering.
-LUCI_DEPENDS:=+conntrack +luci-base +rpcd +curl +tc +iw +hostapd-utils
+# The backend (helper scripts, init scripts, hotplug hooks, the config and the
+# metrics CGI) is its own package, ../trafficctl. What is left here is the
+# view, its rpcd plugin, the ACL and the menu entry.
+#
+# The backend's runtime dependencies are repeated here although this package
+# does not call them itself. Releases up to 1.28.x were one package that
+# depended on them directly, and when that package is upgraded to this one in
+# the same run that installs trafficctl, opkg sees conntrack, curl, iw and
+# hostapd-utils lose their only installed dependent and removes them as
+# orphans: it does not count trafficctl, which is unpacked but not yet
+# configured. Measured on OpenWrt 24.10.6 with `opkg install trafficctl.ipk
+# luci-app-trafficctl.ipk` and with `opkg upgrade` from a feed. Keeping them
+# here costs nothing, since trafficctl needs them anyway.
+LUCI_DEPENDS:=+trafficctl +conntrack +curl +tc +iw +hostapd-utils +luci-base +rpcd
 LUCI_PKGARCH:=all
 
 include $(TOPDIR)/feeds/luci/luci.mk
 
-# Only list files that ship in the package and may be user-edited.
-# shapes.json / telegram_known.json are runtime state created by scripts; they
-# survive sysupgrade via root/lib/upgrade/keep.d/ instead.
-define Package/$(PKG_NAME)/conffiles
-/etc/config/trafficctl
-endef
-
-# The config holds the Telegram bot token and the metrics token, so it must not
-# be world-readable before the first save from the UI applies the same mode.
-#
 # rpcd only learns about a plugin when it starts, so without the restart below
 # every ubus call lands on "Object not found" (-32000) and the dashboard is
 # empty until the router is rebooted. build-ipk.sh and build-apk.sh have always
@@ -32,36 +35,30 @@ endef
 # packages are the ones built from here through the SDK — so the bug only ever
 # reached the people installing the published artifacts.
 #
+# The LuCI index and module caches are dropped as well, as luci.mk's default
+# postinst does, so a changed menu entry shows up without a re-login.
+#
 # Guarded on IPKG_INSTROOT: when it is set the package is being unpacked into
 # an image being built, where there is no running rpcd to talk to.
 #
-# The history sampler is a long-running loop that calls its sibling scripts by
-# absolute path. Releases up to 1.28.0 installed them under /usr/local/bin, so
-# a sampler started by one of those keeps calling paths the upgrade has just
-# removed and records nothing until the next reboot. Restarting it picks up
-# the new init script.
+# trafficctl-opkg.backup is the copy opkg makes of a modified
+# /etc/config/trafficctl when this package, which owned it up to 1.28.x, is
+# upgraded to one that no longer does. trafficctl's postinst removes it too,
+# but when trafficctl was installed in an earlier run the copy only appears
+# with this upgrade. The config itself is kept by trafficctl, so the copy is
+# removed only while the real file is there.
+#
+# The config mode, the services and the cut release on removal belong to the
+# backend and live in ../trafficctl/Makefile.
 define Package/$(PKG_NAME)/postinst
 #!/bin/sh
-chmod 0600 "$${IPKG_INSTROOT}/etc/config/trafficctl" 2>/dev/null || true
 if [ -z "$${IPKG_INSTROOT}" ]; then
+	if [ -f /etc/config/trafficctl ]; then
+		rm -f /etc/config/trafficctl-opkg.backup
+	fi
+	rm -f /tmp/luci-indexcache.*
+	rm -rf /tmp/luci-modulecache
 	/etc/init.d/rpcd restart 2>/dev/null || true
-	if [ -x /etc/init.d/trafficctl-telegram ]; then
-		/etc/init.d/trafficctl-telegram start 2>/dev/null || true
-	fi
-	if [ -x /etc/init.d/trafficctl-history ] && /etc/init.d/trafficctl-history enabled; then
-		/etc/init.d/trafficctl-history restart 2>/dev/null || true
-	fi
-fi
-exit 0
-endef
-
-# Fail open on removal. A global internet cut left engaged by a package that is
-# going away is a lockout with no UI left to undo it — the drop rule would sit
-# in nftables with nothing on the router admitting to owning it.
-define Package/$(PKG_NAME)/prerm
-#!/bin/sh
-if [ -z "$${IPKG_INSTROOT}" ] && [ -x /usr/libexec/trafficctl/trafficctl-cut.sh ]; then
-	/usr/libexec/trafficctl/trafficctl-cut.sh release >/dev/null 2>&1 || true
 fi
 exit 0
 endef

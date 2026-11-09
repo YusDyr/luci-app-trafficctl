@@ -27,8 +27,8 @@ PASS=0
 FAIL=0
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="$ROOT/luci-app-trafficctl/root/usr/libexec/trafficctl"
-HOTPLUG="$ROOT/luci-app-trafficctl/root/etc/hotplug.d/iface/99-trafficctl-shapes"
+BIN="$ROOT/trafficctl/files/usr/libexec/trafficctl"
+HOTPLUG="$ROOT/trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes"
 RPCD="$ROOT/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
 
 TMP=$(mktemp -d)

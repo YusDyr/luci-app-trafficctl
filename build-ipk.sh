@@ -6,9 +6,14 @@ PKG_VERSION="${1:-1.0.0}"
 PKG_RELEASE="${2:-1}"
 PKG_ARCH="all"
 
-# Package source tree (feed-compatible subdirectory layout)
+# The two packages, in the feed-compatible subdirectory layout: the backend
+# (trafficctl) and the web interface that depends on it (luci-app-trafficctl).
+BE_NAME="trafficctl"
 TCTL_ROOT="$(dirname "$0")"
 SRC="$TCTL_ROOT/${PKG_NAME}"
+BACKEND_SRC="$TCTL_ROOT/${BE_NAME}"
+# Runtime dependencies of the backend (DEPENDS in trafficctl/Makefile).
+BE_DEPENDS="conntrack, curl, tc, iw, hostapd-utils"
 
 # Overridable so tests can build without touching a developer's dist/.
 OUTDIR="${OUTDIR:-dist}"
@@ -52,48 +57,54 @@ assemble_ipk() { # <package name> <arch> <stage dir with data/ and control/>
     echo "$_ipk"
 }
 
-# Build data.tar.gz — actual package files
-STAGE="$WORKDIR/main"
-DATA="$STAGE/data"
-mkdir -p "$DATA"
+# ── trafficctl: the backend ────────────────────────────────────────────────
+# Helper scripts, init scripts, hotplug hooks, the config and the metrics CGI.
+BE_STAGE="$WORKDIR/backend"
+BE_DATA="$BE_STAGE/data"
+mkdir -p "$BE_DATA"
 
-cp -a "$SRC/root/"* "$DATA/"
-mkdir -p "$DATA/www/luci-static/resources/view/trafficctl"
-# Copy every view/asset so new files (portfw.js, ...) can't be missed
-cp "$SRC/htdocs/luci-static/resources/view/trafficctl/"* "$DATA/www/luci-static/resources/view/trafficctl/"
+cp -a "$BACKEND_SRC/files/"* "$BE_DATA/"
 
 # Ensure scripts are executable
-chmod +x "$DATA/usr/libexec/trafficctl/trafficctl-"*.sh
-chmod +x "$DATA/usr/libexec/rpcd/luci.trafficctl"
-[ -d "$DATA/etc/init.d" ] && chmod +x "$DATA/etc/init.d/"*
-[ -d "$DATA/etc/hotplug.d" ] && find "$DATA/etc/hotplug.d" -type f -exec chmod +x {} +
+chmod +x "$BE_DATA/usr/libexec/trafficctl/trafficctl-"*.sh
+chmod +x "$BE_DATA/www/cgi-bin/trafficctl-metrics"
+[ -d "$BE_DATA/etc/init.d" ] && chmod +x "$BE_DATA/etc/init.d/"*
+[ -d "$BE_DATA/etc/hotplug.d" ] && find "$BE_DATA/etc/hotplug.d" -type f -exec chmod +x {} +
 
-# Build control.tar.gz — package metadata
-CTRL="$STAGE/control"
-mkdir -p "$CTRL"
+BE_CTRL="$BE_STAGE/control"
+mkdir -p "$BE_CTRL"
 
-cat > "$CTRL/control" <<EOF
-Package: $PKG_NAME
+# Replaces: releases up to 1.28.x shipped every file of this package inside
+# luci-app-trafficctl. The SDK build cannot emit this field and needs none
+# (opkg hands the files over when both packages are installed in one run), but
+# with it these files also install in either order, or this one on its own
+# over an old luci-app-trafficctl. No Conflicts: the new luci-app-trafficctl
+# depends on this package, so a conflict would make the upgrade impossible.
+cat > "$BE_CTRL/control" <<EOF
+Package: $BE_NAME
 Version: ${PKG_VERSION}-${PKG_RELEASE}
-Depends: conntrack, luci-base, rpcd, curl, tc, iw, hostapd-utils
+Depends: $BE_DEPENDS
+Replaces: $PKG_NAME
 Source: https://github.com/YusDyr/luci-app-trafficctl
 License: Apache-2.0
-Section: luci
+Section: net
 Architecture: $PKG_ARCH
 Maintainer: Denis Iusupov <yusdyr@gmail.com>
-Description: Per-device traffic monitoring, rate limiting (nft/iptables),
- traffic shaping (tc/HTB), internet blocking, and WiFi MAC filtering.
+Description: Per-device traffic monitoring (conntrack), rate limiting
+ (nft/iptables), traffic shaping (tc/HTB), internet blocking, WiFi MAC
+ filtering, a global internet cut, a Telegram bot and a Prometheus exporter.
+ The web interface is luci-app-trafficctl.
 EOF
 
 # Conffiles must list ONLY files that ship in data.tar.gz and may be user-edited.
 # shapes.json / telegram_known.json are runtime state created by scripts at
 # runtime — they're NOT in the package, so listing them as conffiles makes
 # opkg complain "Failed to open file" on every install.
-cat > "$CTRL/conffiles" <<EOF
+cat > "$BE_CTRL/conffiles" <<EOF
 /etc/config/trafficctl
 EOF
 
-cat > "$CTRL/preinst" <<'EOF'
+cat > "$BE_CTRL/preinst" <<'EOF'
 #!/bin/sh
 # Stop telegram bot before upgrade to avoid stale process
 if [ -z "${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-telegram ]; then
@@ -101,15 +112,20 @@ if [ -z "${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-telegram ]; then
 fi
 exit 0
 EOF
-chmod +x "$CTRL/preinst"
 
-cat > "$CTRL/postinst" <<'EOF'
+# The same steps as Package/trafficctl/postinst in trafficctl/Makefile, which
+# explains each one; tests/test_postinst_parity.sh keeps the copies in step.
+cat > "$BE_CTRL/postinst" <<'EOF'
 #!/bin/sh
 # The config holds the Telegram bot token and the metrics token, so it must not
 # be world-readable before the first save from the UI applies the same mode.
 chmod 0600 "${IPKG_INSTROOT}/etc/config/trafficctl" 2>/dev/null || true
 if [ -z "${IPKG_INSTROOT}" ]; then
-    /etc/init.d/rpcd restart 2>/dev/null || true
+    # opkg's copy of the config, left by the move out of the single package of
+    # releases up to 1.28.x. The config itself is kept.
+    if [ -f /etc/config/trafficctl ]; then
+        rm -f /etc/config/trafficctl-opkg.backup
+    fi
     if [ -x /etc/init.d/trafficctl-telegram ]; then
         /etc/init.d/trafficctl-telegram start 2>/dev/null || true
     fi
@@ -121,9 +137,8 @@ if [ -z "${IPKG_INSTROOT}" ]; then
 fi
 exit 0
 EOF
-chmod +x "$CTRL/postinst"
 
-cat > "$CTRL/prerm" <<'EOF'
+cat > "$BE_CTRL/prerm" <<'EOF'
 #!/bin/sh
 if [ -z "${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-telegram ]; then
     /etc/init.d/trafficctl-telegram stop 2>/dev/null || true
@@ -141,10 +156,66 @@ if [ -z "${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-cut ]; then
 fi
 exit 0
 EOF
-chmod +x "$CTRL/prerm"
+chmod +x "$BE_CTRL/preinst" "$BE_CTRL/postinst" "$BE_CTRL/prerm"
+
+# ── luci-app-trafficctl: the web interface ─────────────────────────────────
+STAGE="$WORKDIR/main"
+DATA="$STAGE/data"
+mkdir -p "$DATA"
+
+cp -a "$SRC/root/"* "$DATA/"
+mkdir -p "$DATA/www/luci-static/resources/view/trafficctl"
+# Copy every view/asset so new files (portfw.js, ...) can't be missed
+cp "$SRC/htdocs/luci-static/resources/view/trafficctl/"* "$DATA/www/luci-static/resources/view/trafficctl/"
+
+chmod +x "$DATA/usr/libexec/rpcd/luci.trafficctl"
+
+CTRL="$STAGE/control"
+mkdir -p "$CTRL"
+
+# The backend is pinned to the same version: the rpcd plugin calls the helpers
+# with the arguments of its own release, and without the pin
+# `opkg upgrade luci-app-trafficctl` would leave an older backend in place.
+#
+# The backend's own dependencies are repeated here on purpose; see
+# LUCI_DEPENDS in luci-app-trafficctl/Makefile. Without them, upgrading from a
+# release up to 1.28.x makes opkg drop conntrack, curl, iw and hostapd-utils
+# as orphans of the old luci-app-trafficctl, in the same run that installs
+# trafficctl, which needs them.
+cat > "$CTRL/control" <<EOF
+Package: $PKG_NAME
+Version: ${PKG_VERSION}-${PKG_RELEASE}
+Depends: $BE_NAME (= ${PKG_VERSION}-${PKG_RELEASE}), $BE_DEPENDS, luci-base, rpcd
+Source: https://github.com/YusDyr/luci-app-trafficctl
+License: Apache-2.0
+Section: luci
+Architecture: $PKG_ARCH
+Maintainer: Denis Iusupov <yusdyr@gmail.com>
+Description: Per-device traffic monitoring, rate limiting (nft/iptables),
+ traffic shaping (tc/HTB), internet blocking, and WiFi MAC filtering.
+EOF
+
+# The same steps as Package/luci-app-trafficctl/postinst in
+# luci-app-trafficctl/Makefile, which explains each one.
+cat > "$CTRL/postinst" <<'EOF'
+#!/bin/sh
+if [ -z "${IPKG_INSTROOT}" ]; then
+    if [ -f /etc/config/trafficctl ]; then
+        rm -f /etc/config/trafficctl-opkg.backup
+    fi
+    rm -f /tmp/luci-indexcache.*
+    rm -rf /tmp/luci-modulecache
+    /etc/init.d/rpcd restart 2>/dev/null || true
+fi
+exit 0
+EOF
+chmod +x "$CTRL/postinst"
+
+# Printed first; callers taking the last line of stdout get luci-app-trafficctl.
+assemble_ipk "$BE_NAME" "$PKG_ARCH" "$BE_STAGE"
 
 # Translations, one package per language, mirroring what the feed build
-# produces. Printed BEFORE the main package so that callers taking the last
+# produces. Printed BEFORE luci-app-trafficctl so that callers taking the last
 # line of stdout still get luci-app-trafficctl itself.
 # shellcheck source=tools/i18n.sh
 . "$TCTL_ROOT/tools/i18n.sh"

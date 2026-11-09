@@ -70,6 +70,7 @@ jobs:
             || { echo "::error::Release $TAG does not exist — nothing to rebuild"; exit 1; }
 
       - name: Locate and patch Makefile
+        id: layout
         env:
           INPUT_VERSION: ${{ inputs.version }}
           INPUT_RELEASE_NUM: ${{ inputs.release_num }}
@@ -84,10 +85,21 @@ jobs:
             echo "::error::No Makefile found at known locations"
             exit 1
           fi
-          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$INPUT_VERSION/" "$MAKEFILE"
-          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$INPUT_RELEASE_NUM/" "$MAKEFILE"
-          echo "Patched $MAKEFILE:"
-          grep -E '^PKG_(VERSION|RELEASE)' "$MAKEFILE"
+          # Releases after 1.28.x ship the backend as its own package,
+          # trafficctl/Makefile, released in lockstep with the web interface.
+          MAKEFILES="$MAKEFILE"
+          PACKAGES=luci-app-trafficctl
+          if [ -f trafficctl/Makefile ]; then
+            MAKEFILES="$MAKEFILE trafficctl/Makefile"
+            PACKAGES="trafficctl luci-app-trafficctl"
+          fi
+          for mk in $MAKEFILES; do
+            sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$INPUT_VERSION/" "$mk"
+            sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$INPUT_RELEASE_NUM/" "$mk"
+            echo "Patched $mk:"
+            grep -E '^PKG_(VERSION|RELEASE)' "$mk"
+          done
+          echo "packages=$PACKAGES" >> "$GITHUB_OUTPUT"
 
       - name: Build .ipk (standalone)
         env:
@@ -97,6 +109,10 @@ jobs:
           ./build-ipk.sh "$INPUT_VERSION" "$INPUT_RELEASE_NUM"
           ln -f dist/luci-app-trafficctl_*_all.ipk dist/luci-app-trafficctl_all.ipk
           ln -f dist/luci-app-trafficctl_*_all.ipk dist/luci-app-trafficctl.ipk
+          if ls dist/trafficctl_*_all.ipk >/dev/null 2>&1; then
+            ln -f dist/trafficctl_*_all.ipk dist/trafficctl_all.ipk
+            ln -f dist/trafficctl_*_all.ipk dist/trafficctl.ipk
+          fi
           ls -la dist/
           cp dist/*.ipk /tmp/
 
@@ -108,7 +124,7 @@ jobs:
         env:
           ARCH: x86_64-25.12.4
           FEEDNAME: trafficctl
-          PACKAGES: luci-app-trafficctl
+          PACKAGES: ${{ steps.layout.outputs.packages }}
           PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
           V: sc
           KEY_BUILD: ${{ secrets.USIGN_PRIVATE_KEY }}
@@ -118,29 +134,37 @@ jobs:
           INPUT_VERSION: ${{ inputs.version }}
           INPUT_RELEASE_NUM: ${{ inputs.release_num }}
         run: |
-          APK=$(find bin/ -name "luci-app-trafficctl*.apk" 2>/dev/null | head -1)
-          if [ -z "$APK" ]; then
-            echo "::error::APK not found in SDK output"
-            find bin/ -type f -name "*.apk" || true
-            exit 1
-          fi
           mkdir -p dist
-          # luci-i18n-trafficctl-* as well as the main package: build-ipk.sh
-          # emits one translation package per language and the SDK action wiped
-          # dist/, so a glob anchored on the main package name drops them.
+          # luci-i18n-trafficctl-* and trafficctl_* as well as the main
+          # package: build-ipk.sh emits one translation package per language
+          # plus the backend, and the SDK action wiped dist/, so a glob
+          # anchored on the main package name drops them.
           cp /tmp/luci-*trafficctl*.ipk dist/ 2>/dev/null || true
+          cp /tmp/trafficctl*.ipk dist/ 2>/dev/null || true
           # The SDK builds the translation subpackages alongside the main one.
           find bin/ -name "luci-i18n-trafficctl-*.apk" -exec cp {} dist/ \; 2>/dev/null || true
-          DEST="dist/luci-app-trafficctl_${INPUT_VERSION}-r${INPUT_RELEASE_NUM}_noarch.apk"
-          cp "$APK" "$DEST"
-          ln -f "$DEST" dist/luci-app-trafficctl_noarch.apk
-          ln -f "$DEST" dist/luci-app-trafficctl.apk
+          # The SDK names them <name>-<version>.apk; "<name>-[0-9]*" keeps
+          # trafficctl from matching luci-app-trafficctl.
+          for pkg in ${{ steps.layout.outputs.packages }}; do
+            APK=$(find bin/ -name "${pkg}-[0-9]*.apk" 2>/dev/null | head -1)
+            if [ -z "$APK" ]; then
+              echo "::error::$pkg APK not found in SDK output"
+              find bin/ -type f -name "*.apk" || true
+              exit 1
+            fi
+            DEST="dist/${pkg}_${INPUT_VERSION}-r${INPUT_RELEASE_NUM}_noarch.apk"
+            cp "$APK" "$DEST"
+            ln -f "$DEST" "dist/${pkg}_noarch.apk"
+            ln -f "$DEST" "dist/${pkg}.apk"
+          done
           ls -la dist/
 
       - name: Verify artifacts include status.css
         run: |
           set -e
-          for ART in dist/*.ipk; do
+          # The web interface only: the backend and translation packages
+          # carry no stylesheet.
+          for ART in dist/luci-app-trafficctl*.ipk; do
             mkdir -p /tmp/verify-ipk && rm -rf /tmp/verify-ipk/*
             (cd /tmp/verify-ipk && tar xzf "$GITHUB_WORKSPACE/$ART" && tar tzf data.tar.gz) | \
               grep -q 'status\.css' || { echo "::error::status.css missing from $ART"; exit 1; }

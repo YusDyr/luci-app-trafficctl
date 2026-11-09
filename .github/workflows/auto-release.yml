@@ -287,33 +287,45 @@ jobs:
             echo ""
             echo "### Download"
             echo ""
-            echo "| File | OpenWrt version | Install command |"
-            echo "|------|----------------|-----------------|"
-            echo "| \`luci-app-trafficctl.ipk\` | 21.02 — 24.10 | \`opkg install <file>\` |"
-            echo "| \`luci-app-trafficctl.apk\` | 25.12+ | \`apk add --allow-untrusted <file>\` |"
+            echo "Two packages: \`trafficctl\` (the backend) and \`luci-app-trafficctl\` (the web"
+            echo "interface, which depends on it). Install both in ONE command."
             echo ""
-            echo "Stable URL (always points to the latest release):"
+            echo "| Files | OpenWrt version | Install command |"
+            echo "|-------|----------------|-----------------|"
+            echo "| \`trafficctl.ipk\` + \`luci-app-trafficctl.ipk\` | 21.02 — 24.10 | \`opkg install <both files>\` |"
+            echo "| \`trafficctl.apk\` + \`luci-app-trafficctl.apk\` | 25.12+ | \`apk add --allow-untrusted <both files>\` |"
+            echo ""
+            echo "Or add the signed package feed once and let the package manager fetch both:"
+            echo "https://yusdyr.github.io/luci-app-trafficctl/"
+            echo ""
+            echo "Stable URLs (always point to the latest release):"
             echo "\`\`\`"
+            echo "wget https://github.com/${{ github.repository }}/releases/latest/download/trafficctl.ipk"
             echo "wget https://github.com/${{ github.repository }}/releases/latest/download/luci-app-trafficctl.ipk"
+            echo "wget https://github.com/${{ github.repository }}/releases/latest/download/trafficctl.apk"
             echo "wget https://github.com/${{ github.repository }}/releases/latest/download/luci-app-trafficctl.apk"
             echo "\`\`\`"
             echo ""
-            echo "Other filenames (\`_all.ipk\`, \`_noarch.apk\`, versioned) are the same file."
+            echo "Other filenames (\`_all.ipk\`, \`_noarch.apk\`, versioned) are the same files."
             echo ""
             echo "### Upgrading an existing install"
             echo ""
             echo "Install over the current version — both package managers upgrade in"
-            echo "place, so there is no need to remove the old one first."
+            echo "place, so there is no need to remove the old one first. Coming from 1.28.x"
+            echo "or older, the backend moves from luci-app-trafficctl into trafficctl in"
+            echo "the same run."
             echo ""
             echo "\`\`\`sh"
             echo "cd /tmp"
             echo "# OpenWrt 21.02 - 24.10"
+            echo "wget https://github.com/${{ github.repository }}/releases/latest/download/trafficctl.ipk"
             echo "wget https://github.com/${{ github.repository }}/releases/latest/download/luci-app-trafficctl.ipk"
-            echo "opkg install /tmp/luci-app-trafficctl.ipk"
+            echo "opkg install /tmp/trafficctl.ipk /tmp/luci-app-trafficctl.ipk"
             echo ""
             echo "# OpenWrt 25.12+ / snapshot"
+            echo "wget https://github.com/${{ github.repository }}/releases/latest/download/trafficctl.apk"
             echo "wget https://github.com/${{ github.repository }}/releases/latest/download/luci-app-trafficctl.apk"
-            echo "apk add --allow-untrusted /tmp/luci-app-trafficctl.apk"
+            echo "apk add --allow-untrusted /tmp/trafficctl.apk /tmp/luci-app-trafficctl.apk"
             echo ""
             echo "# required either way - rpcd caches the backend"
             echo "/etc/init.d/rpcd restart"
@@ -357,18 +369,24 @@ jobs:
 
       - name: Set the package version
         run: |
-          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${{ needs.prepare.outputs.new_version }}/" luci-app-trafficctl/Makefile
-          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=1/" luci-app-trafficctl/Makefile
-          # Fail loudly if the substitution did not take (e.g. Makefile format
-          # changed) instead of tagging a release with an unbumped version.
-          grep -qx "PKG_VERSION:=${{ needs.prepare.outputs.new_version }}" luci-app-trafficctl/Makefile \
-          || { echo "ERROR: PKG_VERSION was not updated in the Makefile"; exit 1; }
+          # Both packages carry the release version: the backend (trafficctl)
+          # and the web interface ship in lockstep.
+          for mk in luci-app-trafficctl/Makefile trafficctl/Makefile; do
+            sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${{ needs.prepare.outputs.new_version }}/" "$mk"
+            sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=1/" "$mk"
+            # Fail loudly if the substitution did not take (e.g. Makefile format
+            # changed) instead of tagging a release with an unbumped version.
+            grep -qx "PKG_VERSION:=${{ needs.prepare.outputs.new_version }}" "$mk" \
+            || { echo "ERROR: PKG_VERSION was not updated in $mk"; exit 1; }
+          done
 
       - name: Build .ipk (standalone)
         run: |
           ./build-ipk.sh "${{ needs.prepare.outputs.new_version }}" 1
           ln -f dist/luci-app-trafficctl_*_all.ipk dist/luci-app-trafficctl_all.ipk
           ln -f dist/luci-app-trafficctl_*_all.ipk dist/luci-app-trafficctl.ipk
+          ln -f dist/trafficctl_*_all.ipk dist/trafficctl_all.ipk
+          ln -f dist/trafficctl_*_all.ipk dist/trafficctl.ipk
           cp dist/*.ipk /tmp/
 
       # Secrets are not readable from step `if:` expressions, so detect them
@@ -401,7 +419,7 @@ jobs:
         env:
           ARCH: x86_64-25.12.4
           FEEDNAME: trafficctl
-          PACKAGES: luci-app-trafficctl
+          PACKAGES: trafficctl luci-app-trafficctl
           PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
           V: sc
           KEY_BUILD: ${{ secrets.USIGN_PRIVATE_KEY }}
@@ -413,7 +431,7 @@ jobs:
           # luci-i18n-trafficctl-* as well as the main package: build-ipk.sh
           # emits one translation package per language and the SDK action wiped
           # dist/, so a glob anchored on the main package name drops them.
-          cp /tmp/luci-*trafficctl*.ipk dist/ 2>/dev/null || true
+          cp /tmp/luci-*trafficctl*.ipk /tmp/trafficctl_*.ipk dist/ 2>/dev/null || true
           # The SDK builds the translation subpackages alongside the main one.
           # Renamed to the release version rather than copied verbatim: the SDK
           # names them from its own APK_VERSION, which is a date-and-commit
@@ -429,16 +447,23 @@ jobs:
             _name=$(printf '%s' "$_base" | sed -E 's/-[0-9][^-]*\..*$//; s/\.apk$//')
             cp "$_apk" "dist/${_name}_${{ needs.prepare.outputs.new_version }}-r1_noarch.apk"
           done
-          APK=$(find bin/ -name "luci-app-trafficctl*.apk" 2>/dev/null | head -1)
-          if [ -n "$APK" ]; then
-            cp "$APK" "dist/luci-app-trafficctl_${{ needs.prepare.outputs.new_version }}-r1_noarch.apk"
-            ln -f "dist/luci-app-trafficctl_${{ needs.prepare.outputs.new_version }}-r1_noarch.apk" dist/luci-app-trafficctl_noarch.apk
-            ln -f "dist/luci-app-trafficctl_${{ needs.prepare.outputs.new_version }}-r1_noarch.apk" dist/luci-app-trafficctl.apk
-          else
-            echo "::error::APK not found in SDK output"
-            find bin/ -type f -name "*.apk" || true
-            exit 1
-          fi
+          # The web interface and the backend (trafficctl-<ver>.apk), under the
+          # release names. -name matches the whole basename, so
+          # "trafficctl-[0-9]*" cannot pick up luci-app-trafficctl-*.
+          V="${{ needs.prepare.outputs.new_version }}"
+          for pkg in luci-app-trafficctl trafficctl; do
+            APK=$(find bin/ -name "${pkg}-[0-9]*.apk" 2>/dev/null | head -1)
+            if [ -z "$APK" ]; then
+              echo "::error::$pkg APK not found in SDK output"
+              find bin/ -type f -name "*.apk" || true
+              exit 1
+            fi
+            cp "$APK" "dist/${pkg}_${V}-r1_noarch.apk"
+          done
+          ln -f "dist/luci-app-trafficctl_${V}-r1_noarch.apk" dist/luci-app-trafficctl_noarch.apk
+          ln -f "dist/luci-app-trafficctl_${V}-r1_noarch.apk" dist/luci-app-trafficctl.apk
+          ln -f "dist/trafficctl_${V}-r1_noarch.apk" dist/trafficctl_noarch.apk
+          ln -f "dist/trafficctl_${V}-r1_noarch.apk" dist/trafficctl.apk
 
       - name: Build .apk (standalone, unsigned fallback)
         if: needs.prepare.outputs.bump != 'none' && steps.apk_secrets.outputs.have != '1'
@@ -525,12 +550,14 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${{ needs.prepare.outputs.new_version }}/" luci-app-trafficctl/Makefile
-          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=1/" luci-app-trafficctl/Makefile
-          # Fail loudly if the substitution did not take (e.g. Makefile format
-          # changed) instead of tagging a release with an unbumped version.
-          grep -qx "PKG_VERSION:=${{ needs.prepare.outputs.new_version }}" luci-app-trafficctl/Makefile \
-            || { echo "ERROR: PKG_VERSION was not updated in the Makefile"; exit 1; }
+          for mk in luci-app-trafficctl/Makefile trafficctl/Makefile; do
+            sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${{ needs.prepare.outputs.new_version }}/" "$mk"
+            sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=1/" "$mk"
+            # Fail loudly if the substitution did not take (e.g. Makefile format
+            # changed) instead of tagging a release with an unbumped version.
+            grep -qx "PKG_VERSION:=${{ needs.prepare.outputs.new_version }}" "$mk" \
+              || { echo "ERROR: PKG_VERSION was not updated in $mk"; exit 1; }
+          done
           # Keep CHANGELOG.md current. The release notes are already generated by
           # the "Generate changelog" step; without this they only ever landed on
           # the GitHub Releases page while the file itself drifted out of date.
@@ -558,7 +585,7 @@ jobs:
           with open(path, 'w') as fh:
               fh.write(text)
           PYEOF
-          git add luci-app-trafficctl/Makefile CHANGELOG.md
+          git add luci-app-trafficctl/Makefile trafficctl/Makefile CHANGELOG.md
           git commit -m "chore: bump version to ${{ needs.prepare.outputs.new_version }}"
           # No rebase here on purpose. This commit was built on the tip of main
           # as of the "Sync to the tip of main" step, so there is nothing to

@@ -9,6 +9,11 @@
 #   ./scripts/feeds install -p trafficctl luci-app-trafficctl
 #   make package/luci-app-trafficctl/compile V=s
 #
+# The feed holds two packages, trafficctl (the backend) and luci-app-trafficctl
+# (the web interface, which depends on it). Users still install only the
+# latter by name; `scripts/feeds install` must follow the dependency and link
+# trafficctl too, so this checks both links and builds both packages.
+#
 # We use `src-link` instead of `src-git` to point at the locally-mounted repo,
 # but the feed scanner code path is identical — if feeds update fails on the
 # real repo, it fails here too.
@@ -56,6 +61,10 @@ echo "Running scripts/feeds install -p trafficctl luci-app-trafficctl..."
 echo "Listing trafficctl feed contents..."
 ls -la package/feeds/trafficctl/ || {
     echo "ERROR: feed install did not create symlinks"; exit 1; }
+for pkg in trafficctl luci-app-trafficctl; do
+    [ -e "package/feeds/trafficctl/$pkg/Makefile" ] || {
+        echo "ERROR: scripts/feeds install did not link $pkg"; exit 1; }
+done
 
 # Install all feed packages so transitive deps (lua headers for lucihttp-lua,
 # ucode headers for lucihttp-ucode) are staged. Without this, the lucihttp
@@ -69,33 +78,40 @@ make defconfig V=s > /tmp/tctl_defconfig.log 2>&1 || {
     tail -20 /tmp/tctl_defconfig.log; echo "ERROR: make defconfig failed"; exit 1
 }
 tail -20 /tmp/tctl_defconfig.log
-if ! grep -q "luci-app-trafficctl" .config 2>/dev/null; then
-    echo "Enabling package in .config..."
-    echo 'CONFIG_PACKAGE_luci-app-trafficctl=m' >> .config
-fi
+for pkg in trafficctl luci-app-trafficctl; do
+    if ! grep -q "^CONFIG_PACKAGE_$pkg=" .config 2>/dev/null; then
+        echo "Enabling $pkg in .config..."
+        echo "CONFIG_PACKAGE_$pkg=m" >> .config
+    fi
+done
 # luci-app-trafficctl doesn't need lucihttp's lua/ucode bindings — disable them
 # so we don't have to compile bindings we don't use.
 echo 'CONFIG_PACKAGE_liblucihttp-lua=n' >> .config
 echo 'CONFIG_PACKAGE_liblucihttp-ucode=n' >> .config
 make defconfig
 
-echo "Building package..."
-# Capture make's real exit code — a `make … | tail` pipeline returns tail's
-# status (0), which under set -e would silently hide a genuine build failure.
-# This matters now that the feed-install job is blocking (no continue-on-error).
-if ! make package/luci-app-trafficctl/compile V=s -j"$(nproc)" > /tmp/tctl_compile.log 2>&1; then
-    tail -80 /tmp/tctl_compile.log
-    echo "ERROR: make compile failed"
-    exit 1
-fi
-tail -50 /tmp/tctl_compile.log
+FOUND=
+for pkg in trafficctl luci-app-trafficctl; do
+    echo "Building $pkg..."
+    # Capture make's real exit code — a `make … | tail` pipeline returns tail's
+    # status (0), which under set -e would silently hide a genuine build failure.
+    # This matters now that the feed-install job is blocking (no continue-on-error).
+    if ! make "package/$pkg/compile" V=s -j"$(nproc)" > "/tmp/tctl_compile_$pkg.log" 2>&1; then
+        tail -80 "/tmp/tctl_compile_$pkg.log"
+        echo "ERROR: make compile of $pkg failed"
+        exit 1
+    fi
+    tail -30 "/tmp/tctl_compile_$pkg.log"
 
-# Verify build artifact exists
-FOUND=$(find bin/ -name "luci-app-trafficctl*" \( -name "*.ipk" -o -name "*.apk" \) 2>/dev/null | head -1)
-if [ -z "$FOUND" ]; then
-    echo "ERROR: no package artifact found in bin/"
-    find bin/ -type f 2>/dev/null | head -20
-    exit 1
-fi
+    # Verify the build artifact exists. "<name>_<ver>" for ipk, "<name>-<ver>"
+    # for apk: a bare "trafficctl*" would also match luci-app-trafficctl.
+    art=$(find bin/ \( -name "${pkg}_[0-9]*.ipk" -o -name "${pkg}-[0-9]*.apk" \) 2>/dev/null | head -1)
+    if [ -z "$art" ]; then
+        echo "ERROR: no $pkg package artifact found in bin/"
+        find bin/ -type f 2>/dev/null | head -20
+        exit 1
+    fi
+    FOUND="$FOUND $art"
+done
 
-echo "Feed install + build succeeded: $FOUND"
+echo "Feed install + build succeeded:$FOUND"

@@ -17,7 +17,7 @@
 
 ```sh
 # Deploy all backend scripts
-scp luci-app-trafficctl/root/usr/libexec/trafficctl/trafficctl-*.sh root@192.168.0.1:/usr/libexec/trafficctl/
+scp trafficctl/files/usr/libexec/trafficctl/trafficctl-*.sh root@192.168.0.1:/usr/libexec/trafficctl/
 ssh root@192.168.0.1 'chmod +x /usr/libexec/trafficctl/trafficctl-*.sh'
 
 # Deploy rpcd backend
@@ -62,10 +62,10 @@ cd openwrt && git checkout v23.05.4
 
 echo "src-link trafficctl /path/to/luci-app-trafficctl" >> feeds.conf
 ./scripts/feeds update trafficctl
-./scripts/feeds install luci-app-trafficctl
+./scripts/feeds install luci-app-trafficctl   # links trafficctl too, as a dependency
 
 make menuconfig  # Select: LuCI > Applications > luci-app-trafficctl
-make package/luci-app-trafficctl/compile V=s
+make package/trafficctl/compile package/luci-app-trafficctl/compile V=s
 ```
 
 ---
@@ -73,44 +73,51 @@ make package/luci-app-trafficctl/compile V=s
 ## Project Structure
 
 ```
-luci-app-trafficctl/
-├── luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/
-│   ├── status.js                        # Frontend (single ES5 file, ~3100 lines)
-│   └── status.css                       # Frontend styles (~610 lines)
-├── luci-app-trafficctl/root/
-│   ├── etc/
-│   │   ├── config/trafficctl            # UCI config placeholder
-│   │   └── hotplug.d/iface/
-│   │       └── 99-trafficctl-shapes     # Restore tc rules on boot
-│   ├── usr/
-│   │   ├── libexec/rpcd/
-│   │   │   └── luci.trafficctl         # rpcd backend (JSON-RPC dispatch)
-│   │   ├── local/bin/
-│   │   │   ├── trafficctl-fw.sh        # Firewall abstraction (sourced)
-│   │   │   ├── trafficctl-summary.sh   # All-device summary
-│   │   │   ├── trafficctl-device.sh    # Per-device detail
-│   │   │   ├── trafficctl-bytes.sh     # Byte counters for speed (conntrack)
-│   │   │   ├── trafficctl-bytes-nft.sh # nft counter init helper
-│   │   │   ├── trafficctl-totals.sh    # Monotonic lifetime totals (shared by UI + exporter)
-│   │   │   ├── trafficctl-ifaces.sh    # Per-interface counters (global overview)
-│   │   │   ├── trafficctl-block.sh     # Internet block
-│   │   │   ├── trafficctl-unblock.sh   # Internet unblock
-│   │   │   ├── trafficctl-shape.sh     # tc/HTB shaping
-│   │   │   ├── trafficctl-shape-stats.sh
-│   │   │   ├── trafficctl-ratelimit.sh # nft policer
-│   │   │   ├── trafficctl-ratelimit-stats.sh
-│   │   │   ├── trafficctl-macfilter-add.sh
-│   │   │   ├── trafficctl-macfilter-remove.sh
-│   │   │   └── trafficctl-rdns.sh      # Reverse DNS (Telegram/CLI)
+luci-app-trafficctl/                     # repository
+├── trafficctl/                          # package trafficctl: the backend
+│   ├── Makefile                         # OpenWrt package build (package.mk, lists every file)
+│   └── files/
+│       ├── etc/
+│       │   ├── config/trafficctl        # UCI config (the conffile)
+│       │   ├── init.d/                  # trafficctl-telegram, trafficctl-history, trafficctl-cut
+│       │   └── hotplug.d/
+│       │       ├── iface/99-trafficctl-shapes      # Restore tc rules on boot
+│       │       └── dhcp/99-trafficctl-newdevice    # New-device detection
+│       ├── lib/upgrade/keep.d/trafficctl          # /etc/trafficctl/ kept across sysupgrade
+│       ├── usr/libexec/trafficctl/
+│       │   ├── trafficctl-fw.sh         # Firewall abstraction (sourced)
+│       │   ├── trafficctl-summary.sh    # All-device summary
+│       │   ├── trafficctl-device.sh     # Per-device detail
+│       │   ├── trafficctl-bytes.sh      # Byte counters for speed (conntrack)
+│       │   ├── trafficctl-bytes-nft.sh  # nft counter init helper
+│       │   ├── trafficctl-totals.sh     # Monotonic lifetime totals (shared by UI + exporter)
+│       │   ├── trafficctl-ifaces.sh     # Per-interface counters (global overview)
+│       │   ├── trafficctl-block.sh      # Internet block
+│       │   ├── trafficctl-unblock.sh    # Internet unblock
+│       │   ├── trafficctl-shape.sh      # tc/HTB shaping
+│       │   ├── trafficctl-shape-stats.sh
+│       │   ├── trafficctl-ratelimit.sh  # nft policer
+│       │   ├── trafficctl-ratelimit-stats.sh
+│       │   ├── trafficctl-macfilter-add.sh
+│       │   ├── trafficctl-macfilter-remove.sh
+│       │   ├── trafficctl-rdns.sh       # Reverse DNS (Telegram/CLI)
+│       │   └── ...                      # the rest of the helpers
+│       └── www/cgi-bin/trafficctl-metrics          # Prometheus scrape endpoint
+├── luci-app-trafficctl/                 # package luci-app-trafficctl: the web interface
+│   ├── Makefile                         # OpenWrt package build (luci.mk), depends on trafficctl
+│   ├── htdocs/luci-static/resources/view/trafficctl/
+│   │   ├── status.js                    # Frontend (single ES5 file)
+│   │   ├── portfw.js                    # "Port Forwards" tab
+│   │   └── status.css                   # Frontend styles
+│   ├── root/usr/
+│   │   ├── libexec/rpcd/luci.trafficctl # rpcd backend (JSON-RPC dispatch)
 │   │   └── share/
-│   │       ├── luci/menu.d/
-│   │       │   └── luci-app-trafficctl.json
-│   │       └── rpcd/acl.d/
-│   │           └── luci-app-trafficctl.json
-├── Makefile                             # OpenWrt package build
-├── po/templates/                        # i18n template
+│   │       ├── luci/menu.d/luci-app-trafficctl.json
+│   │       └── rpcd/acl.d/luci-app-trafficctl.json
+│   └── po/                              # i18n
+├── build-ipk.sh, build-apk.sh           # Standalone builders, emit both packages
 ├── docs/                                # Documentation
-├── .github/workflows/ci.yml             # CI (shellcheck + eslint)
+├── .github/workflows/                   # CI
 └── .eslintrc.json                       # ES5 linting config
 ```
 
@@ -190,7 +197,7 @@ ssh root@192.168.0.1 'nft list chain inet fw4 forward'
 
 ```sh
 # Shell (requires shellcheck)
-shellcheck luci-app-trafficctl/root/usr/libexec/trafficctl/trafficctl-*.sh
+shellcheck trafficctl/files/usr/libexec/trafficctl/trafficctl-*.sh
 
 # JavaScript (requires node + eslint)
 npm install   # installs eslint from package.json devDependencies

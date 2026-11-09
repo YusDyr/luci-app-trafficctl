@@ -227,7 +227,7 @@ Runs on all architectures (no compiled code, pure shell + LuCI JavaScript).
 | **25.12.4** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | | ✓ |
 | **snapshot** | ✓ | | ✓ | ✓ | | | ✓ | | |
 
-Each test builds the `.ipk`, runs `opkg install --force-depends` inside the real OpenWrt rootfs container for that version/arch, then verifies all files are present and all scripts pass `ash -n` syntax check.
+Each test builds both `.ipk` files (`trafficctl` and `luci-app-trafficctl`), runs `opkg install --force-depends` inside the real OpenWrt rootfs container for that version/arch, then verifies all files are present and all scripts pass `ash -n` syntax check.
 
 ---
 
@@ -288,16 +288,30 @@ devices) are family-independent and work regardless.
 > - OpenWrt **25.12+** and snapshot → download `.apk` (apk)
 > - Want upgrades through `opkg upgrade` / `apk upgrade`? Add the [package feed](#package-feed-recommended) instead
 
-Each release includes multiple filenames for the same package:
+The app is two packages, released together with the same version:
+
+- **`trafficctl`**: the backend. Helper scripts in `/usr/libexec/trafficctl/`,
+  `/etc/config/trafficctl`, the Telegram bot and history services, the hotplug
+  hooks and the Prometheus CGI.
+- **`luci-app-trafficctl`**: the web interface (LuCI views and the rpcd plugin).
+  It depends on `trafficctl`.
+
+Releases up to 1.28.x shipped both as `luci-app-trafficctl` alone. Upgrading
+from one of them moves the backend files into `trafficctl` and keeps your
+configuration. From the feed, `opkg upgrade luci-app-trafficctl` /
+`apk upgrade luci-app-trafficctl` does it. From downloaded files, install both
+files in one command, as below.
+
+Each release includes multiple filenames for each package:
 
 | Asset name | Purpose |
 |-----------|---------|
-| `luci-app-trafficctl.ipk` | Stable download URL (opkg) |
-| `luci-app-trafficctl_all.ipk` | Same file, OpenWrt naming convention |
-| `luci-app-trafficctl_X.Y.Z-1_all.ipk` | Same file, version-pinned |
-| `luci-app-trafficctl.apk` | Stable download URL (apk) |
-| `luci-app-trafficctl_noarch.apk` | Same file, OpenWrt naming convention |
-| `luci-app-trafficctl_X.Y.Z-r1_noarch.apk` | Same file, version-pinned |
+| `trafficctl.ipk`, `luci-app-trafficctl.ipk` | Stable download URLs (opkg) |
+| `trafficctl_all.ipk`, `luci-app-trafficctl_all.ipk` | Same files, OpenWrt naming convention |
+| `trafficctl_X.Y.Z-1_all.ipk`, `luci-app-trafficctl_X.Y.Z-1_all.ipk` | Same files, version-pinned |
+| `trafficctl.apk`, `luci-app-trafficctl.apk` | Stable download URLs (apk) |
+| `trafficctl_noarch.apk`, `luci-app-trafficctl_noarch.apk` | Same files, OpenWrt naming convention |
+| `trafficctl_X.Y.Z-r1_noarch.apk`, `luci-app-trafficctl_X.Y.Z-r1_noarch.apk` | Same files, version-pinned |
 
 The "stable URL" links below always download from the latest release — the filename stays constant across versions.
 
@@ -331,9 +345,22 @@ apk add luci-app-trafficctl
 /etc/init.d/rpcd restart
 ```
 
-Translations install the same way (`luci-i18n-trafficctl-zh-cn`). To upgrade
-later: `opkg update && opkg upgrade luci-app-trafficctl`, or
-`apk update && apk upgrade luci-app-trafficctl`. No `--allow-untrusted` is
+`luci-app-trafficctl` pulls in `trafficctl`. Translations install the same way
+(`luci-i18n-trafficctl-zh-cn`). To upgrade later:
+`opkg update && opkg upgrade trafficctl luci-app-trafficctl`, or
+`apk update && apk upgrade trafficctl luci-app-trafficctl`.
+
+> **OpenWrt 25.12, installed from a downloaded `.apk` file?** apk keeps a
+> package installed from a file pinned to that file, so `apk upgrade` never
+> moves it to the feed's version. Switch it over once:
+>
+> ```sh
+> apk add 'luci-app-trafficctl>=1.29.0'
+> ```
+>
+> After that `apk upgrade` works as above.
+
+No `--allow-untrusted` is
 needed: the apk index is signed with [`keys/apk-signing.pub`](keys/apk-signing.pub)
 (published as `trafficctl.pem`), the opkg index with
 [`keys/usign-64513c3027229c14.pub`](keys/usign-64513c3027229c14.pub). The feed
@@ -345,14 +372,14 @@ The single-file methods below still work and need no feed.
 ### OpenWrt 25.12+ (.apk)
 
 **Option A — LuCI web UI:**
-1. Download [`luci-app-trafficctl.apk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.apk) to your computer
+1. Download [`trafficctl.apk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.apk) and [`luci-app-trafficctl.apk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.apk) to your computer
 2. In LuCI: **System → Software → Upload Package...**
-3. Select the downloaded file and click **OK**
+3. Upload `trafficctl.apk` first, then `luci-app-trafficctl.apk`
 
-**Option B — SSH (recommended):**
+**Option B — SSH (recommended):** both files in one command, `trafficctl` first:
 
 ```sh
-cd /tmp && wget -O luci-app-trafficctl.apk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.apk && apk add --allow-untrusted luci-app-trafficctl.apk
+cd /tmp && wget -O trafficctl.apk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.apk && wget -O luci-app-trafficctl.apk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.apk && apk add --allow-untrusted trafficctl.apk luci-app-trafficctl.apk
 # If you get "modified conffile" on upgrade, add `--force-maintainer` to override
 ```
 
@@ -362,43 +389,44 @@ cd /tmp && wget -O luci-app-trafficctl.apk https://github.com/YusDyr/luci-app-tr
 > outright in October 2025. `--allow-untrusted` is therefore the normal way to
 > install a single package file, not a security workaround being suggested
 > lightly. If you want to pin what you install, download the version-stamped
-> asset (`luci-app-trafficctl_X.Y.Z-r1_noarch.apk`) rather than the floating
-> `latest` URL, so the file cannot change under you between download and
+> assets (`trafficctl_X.Y.Z-r1_noarch.apk`, `luci-app-trafficctl_X.Y.Z-r1_noarch.apk`) rather than the floating
+> `latest` URLs, so the files cannot change under you between download and
 > install.
 
 ### OpenWrt 21.02 — 24.10 (.ipk)
 
 **Option A — LuCI web UI:**
-1. Download [`luci-app-trafficctl.ipk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk) to your computer
+1. Download [`trafficctl.ipk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.ipk) and [`luci-app-trafficctl.ipk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk) to your computer
 2. In LuCI: **System → Software → Upload Package...**
-3. Select the downloaded file and click **OK**
+3. Upload `trafficctl.ipk` first, then `luci-app-trafficctl.ipk`
 
-**Option B — SSH** (requires HTTPS support — `libustream-wolfssl` or `libustream-openssl`):
+**Option B — SSH** (requires HTTPS support — `libustream-wolfssl` or `libustream-openssl`). Both files in one command, `trafficctl` first:
 
 ```sh
-opkg install https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk
+opkg install https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk
 ```
 
 **Option C — SSH from your machine:**
 
 ```sh
-ssh root@router 'opkg install https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk'
+ssh root@router 'opkg install https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk'
 ```
 
 ### Uninstalling
 
 ```sh
 # OpenWrt 25.12+ (apk)
-apk del luci-app-trafficctl
+apk del luci-app-trafficctl trafficctl
 
-# OpenWrt 21.02 - 24.10 (opkg)
+# OpenWrt 21.02 - 24.10 (opkg): the web interface first, then the backend
 opkg remove luci-app-trafficctl
+opkg remove trafficctl
 
 # either way, reload the LuCI backend afterwards
 /etc/init.d/rpcd restart
 ```
 
-Removing the package deletes its scripts and the LuCI page but leaves
+Removing the packages deletes the scripts and the LuCI page but leaves
 `/etc/config/trafficctl` in place, so your settings survive a reinstall. Delete
 it yourself if you want a clean slate:
 
@@ -429,17 +457,21 @@ echo "src-git trafficctl https://github.com/YusDyr/luci-app-trafficctl.git" >> f
 ./scripts/feeds update luci trafficctl
 ./scripts/feeds install -p trafficctl luci-app-trafficctl
 
-# Enable and build:
+# Enable and build. `feeds install` links trafficctl (the backend) as well,
+# because luci-app-trafficctl depends on it:
 echo 'CONFIG_PACKAGE_luci-app-trafficctl=m' >> .config
 make defconfig
-make package/luci-app-trafficctl/compile V=s
+make package/trafficctl/compile package/luci-app-trafficctl/compile V=s
 ```
 
 ### Manual installation
 
-Copy the `luci-app-trafficctl/root/` tree to the router's filesystem, then restart rpcd:
+Copy the backend tree (`trafficctl/files/`) and the web interface
+(`luci-app-trafficctl/root/`, `luci-app-trafficctl/htdocs/`) to the router's
+filesystem, then restart rpcd:
 
 ```sh
+scp -r trafficctl/files/* root@router:/
 scp -r luci-app-trafficctl/root/* root@router:/
 scp -r luci-app-trafficctl/htdocs/luci-static root@router:/www/
 ssh root@router 'chmod +x /usr/libexec/trafficctl/trafficctl-*.sh /usr/libexec/rpcd/luci.trafficctl && /etc/init.d/rpcd restart'
@@ -609,13 +641,15 @@ The frontend talks to a thin rpcd dispatcher over ubus. The Telegram bot provide
 | `luci-app-trafficctl/htdocs/.../view/trafficctl/status.js` | Frontend — single ES5 file, no deps |
 | `luci-app-trafficctl/htdocs/.../view/trafficctl/status.css` | Frontend styles |
 | `luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl` | rpcd backend — JSON-RPC dispatch |
-| `luci-app-trafficctl/root/usr/libexec/trafficctl/trafficctl-*.sh` | Backend scripts (monitoring + control) |
-| `luci-app-trafficctl/root/usr/libexec/trafficctl/trafficctl-fw.sh` | Firewall abstraction layer (sourced) |
-| `luci-app-trafficctl/root/usr/libexec/trafficctl/trafficctl-telegram.sh` | Telegram bot daemon (long polling) |
-| `luci-app-trafficctl/root/etc/init.d/trafficctl-telegram` | procd init script for the bot |
-| `luci-app-trafficctl/root/etc/hotplug.d/iface/99-trafficctl-shapes` | Boot persistence for tc + block + ratelimit rules |
-| `luci-app-trafficctl/root/etc/hotplug.d/dhcp/99-trafficctl-newdevice` | Instant new-device detection via DHCP events |
 | `luci-app-trafficctl/root/usr/share/rpcd/acl.d/` | ACL permissions |
+| `trafficctl/Makefile` | Backend package (`trafficctl`), installs everything under `trafficctl/files/` |
+| `trafficctl/files/usr/libexec/trafficctl/trafficctl-*.sh` | Backend scripts (monitoring + control) |
+| `trafficctl/files/usr/libexec/trafficctl/trafficctl-fw.sh` | Firewall abstraction layer (sourced) |
+| `trafficctl/files/usr/libexec/trafficctl/trafficctl-telegram.sh` | Telegram bot daemon (long polling) |
+| `trafficctl/files/etc/init.d/trafficctl-telegram` | procd init script for the bot |
+| `trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes` | Boot persistence for tc + block + ratelimit rules |
+| `trafficctl/files/etc/hotplug.d/dhcp/99-trafficctl-newdevice` | Instant new-device detection via DHCP events |
+| `trafficctl/files/www/cgi-bin/trafficctl-metrics` | Prometheus scrape endpoint (CGI) |
 | `Makefile` | OpenWrt package build |
 | `docs/` | Extended docs (architecture, API, compat) |
 

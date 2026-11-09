@@ -658,7 +658,7 @@ Ticking *Keep after reboot* additionally writes `/etc/trafficctl/cut.state`,
 restored on `ifup lan` by `trafficctl-cut.sh restore` — guarded on that file's
 own `persist=1`, **not** on the global `persist_rules` flag, and honouring the
 original absolute deadline rather than restarting the clock. It is deliberately
-absent from `root/lib/upgrade/keep.d/`: a cut outliving a *firmware upgrade* is
+absent from `trafficctl/files/lib/upgrade/keep.d/trafficctl`: a cut outliving a *firmware upgrade* is
 strictly worse than one outliving a reboot.
 
 **Auto-revert.** `/etc/init.d/trafficctl-cut` supervises a keeper that ticks

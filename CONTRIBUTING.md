@@ -29,8 +29,8 @@ node --check luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/st
 npm install && npm run lint
 
 # Shell: syntax and static analysis
-for f in luci-app-trafficctl/root/usr/libexec/trafficctl/trafficctl-*.sh; do sh -n "$f" || echo "FAIL $f"; done
-shellcheck luci-app-trafficctl/root/usr/libexec/trafficctl/trafficctl-*.sh
+for f in trafficctl/files/usr/libexec/trafficctl/trafficctl-*.sh; do sh -n "$f" || echo "FAIL $f"; done
+shellcheck trafficctl/files/usr/libexec/trafficctl/trafficctl-*.sh
 
 # Tests — see docs/DEVELOPMENT.md for the full list and what each covers
 bash tests/test_fw.sh

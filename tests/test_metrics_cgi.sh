@@ -8,7 +8,7 @@
 PASS=0
 FAIL=0
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)/trafficctl/files"
 CGI="$ROOT/www/cgi-bin/trafficctl-metrics"
 
 TMPDIR=$(mktemp -d)

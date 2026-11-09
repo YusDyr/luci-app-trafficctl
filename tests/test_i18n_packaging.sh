@@ -126,8 +126,10 @@ OUT=$(cd "$REPO_ROOT" && OUTDIR="$DIST" sh build-ipk.sh 0.0.1-test 1 2>/dev/null
 
 assert_eq "the main package is still the LAST line of stdout" \
     "$DIST/luci-app-trafficctl_0.0.1-test-1_all.ipk" "$(printf '%s\n' "$OUT" | tail -1)"
-assert_eq "a translation package is emitted too" \
-    "$DIST/luci-i18n-trafficctl-xx-test_0.0.1-test-1_all.ipk" "$(printf '%s\n' "$OUT" | head -1)"
+assert_eq "the backend package is the FIRST line of stdout" \
+    "$DIST/trafficctl_0.0.1-test-1_all.ipk" "$(printf '%s\n' "$OUT" | head -1)"
+assert_eq "a translation package is emitted too, between the two" "1" \
+    "$(printf '%s\n' "$OUT" | sed '1d;$d' | grep -cFx "$DIST/luci-i18n-trafficctl-xx-test_0.0.1-test-1_all.ipk")"
 
 I18N_IPK="$DIST/luci-i18n-trafficctl-xx-test_0.0.1-test-1_all.ipk"
 MAIN_IPK="$DIST/luci-app-trafficctl_0.0.1-test-1_all.ipk"

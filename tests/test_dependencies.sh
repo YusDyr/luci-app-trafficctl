@@ -1,7 +1,10 @@
 #!/bin/sh
+# shellcheck disable=SC2086 # $PKGS is a list of package files, split on purpose
 # Runs INSIDE an OpenWrt rootfs Docker container.
-# Usage: sh /tests/test_dependencies.sh /dist/package.ipk
-#    or: sh /tests/test_dependencies.sh /dist/package.apk
+# Usage: sh /tests/test_dependencies.sh /dist/trafficctl.ipk /dist/luci-app-trafficctl.ipk
+#    or: sh /tests/test_dependencies.sh /dist/trafficctl.apk /dist/luci-app-trafficctl.apk
+# Every package file of one run has the same format. trafficctl (the backend)
+# brings conntrack and friends, luci-app-trafficctl brings luci-base and rpcd.
 #
 # Verifies that:
 #   1) Installing WITHOUT resolving deps fails with a sane error
@@ -14,8 +17,13 @@
 # exiting 1 in ~2s with no stdout — this surfaces whether the script even runs.
 set -e
 
+[ $# -ge 1 ] || { echo "usage: $0 <package files...>"; exit 1; }
+for f in "$@"; do
+    [ -f "$f" ] || { echo "Package not found: $f"; exit 1; }
+done
+# Only for the format: all files of one run share it.
 PKG="$1"
-[ -f "$PKG" ] || { echo "Package not found: $PKG"; exit 1; }
+PKGS="$*"
 
 # opkg-specific setup. Skip entirely on apk-only rootfs images (25.12+) where
 # /usr/lib/opkg/status and /etc/opkg.conf don't exist — running awk on the
@@ -40,7 +48,7 @@ echo "=== Phase 1: install without dep resolution (expecting failure) ==="
 case "$PKG" in
     *.ipk)
         # Without --force-depends, opkg should refuse if deps missing
-        if opkg install "$PKG" 2>&1 | tee /tmp/opkg.out; then
+        if opkg install $PKGS 2>&1 | tee /tmp/opkg.out; then
             # Did it actually install? Check
             if opkg list-installed | grep -q "^luci-app-trafficctl "; then
                 echo "WARNING: install succeeded — deps may already be present in this image."
@@ -56,7 +64,7 @@ case "$PKG" in
         fi
         ;;
     *.apk)
-        if apk add --allow-untrusted "$PKG" 2>&1 | tee /tmp/apk.out; then
+        if apk add --allow-untrusted $PKGS 2>&1 | tee /tmp/apk.out; then
             if apk info -e luci-app-trafficctl >/dev/null 2>&1; then
                 echo "WARNING: apk install succeeded — deps may already be present."
             fi
@@ -82,20 +90,20 @@ case "$PKG" in
             exit 0
         fi
         # Now install — opkg should pull in conntrack/luci-base/rpcd automatically
-        opkg install --force-depends "$PKG"
+        opkg install --force-depends $PKGS
         ;;
     *.apk)
         if ! apk update 2>&1 | tee /tmp/apk-update.out; then
             echo "WARNING: apk update failed — skipping Phase 2"
             exit 0
         fi
-        apk add --allow-untrusted "$PKG"
+        apk add --allow-untrusted $PKGS
         ;;
 esac
 
 # Verify deps were actually pulled in
 echo "=== Verifying deps installed ==="
-for dep in conntrack rpcd luci-base; do
+for dep in trafficctl luci-app-trafficctl conntrack curl rpcd luci-base; do
     case "$PKG" in
         *.ipk)
             if opkg list-installed | grep -q "^$dep "; then
