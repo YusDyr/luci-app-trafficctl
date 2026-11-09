@@ -4,6 +4,20 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.28.1] - 2026-11-09
+
+### Other
+- install helper scripts under /usr/libexec/trafficctl ([#127](https://github.com/YusDyr/luci-app-trafficctl/issues/127)) ([9f46afb](https://github.com/YusDyr/luci-app-trafficctl/commit/9f46afbf8f455a710111c2ba510460a58e16d610))
+  OpenWrt packages must not install into /usr/local, which is one of the
+  things that keeps this package out of the official feeds. The 26 helper
+  scripts are internal (called by rpcd, init scripts, hotplug and the
+  metrics CGI, never by users), so they move to /usr/libexec/trafficctl
+  with their names unchanged.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.28.0...v1.28.1
+
+---
+
 ## [1.28.0] - 2026-11-07
 
 ### Features
