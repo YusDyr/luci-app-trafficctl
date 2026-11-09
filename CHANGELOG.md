@@ -4,6 +4,20 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.28.2] - 2026-11-09
+
+### Bug Fixes
+- make the menu and ACL strings translatable ([#129](https://github.com/YusDyr/luci-app-trafficctl/issues/129)) ([9c3e9bd](https://github.com/YusDyr/luci-app-trafficctl/commit/9c3e9bd10738b54a6a9e3e1975e23aba228424b1))
+  The menu titles (Devices, History, Port Forwards) and the ACL
+  description are looked up through the translation catalogue at runtime,
+  but tools/genpot.py only scanned the JS views, so the .pot never had
+  them. luci's build/i18n-scan.pl collects both, and finds 493 msgids
+  against our 489.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.28.1...v1.28.2
+
+---
+
 ## [1.28.1] - 2026-11-09
 
 ### Other
