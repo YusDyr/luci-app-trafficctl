@@ -18,7 +18,7 @@ include $(TOPDIR)/rules.mk
 PKG_NAME:=trafficctl
 # Released in lockstep with luci-app-trafficctl: auto-release.yml sets both
 # PKG_VERSIONs to the same value.
-PKG_VERSION:=1.28.2
+PKG_VERSION:=1.29.0
 PKG_RELEASE:=1
 
 PKG_LICENSE:=Apache-2.0

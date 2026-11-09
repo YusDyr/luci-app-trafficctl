@@ -4,6 +4,19 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.29.0] - 2026-11-09
+
+### Features
+- split the backend into a separate trafficctl package ([#130](https://github.com/YusDyr/luci-app-trafficctl/issues/130)) ([64b98e2](https://github.com/YusDyr/luci-app-trafficctl/commit/64b98e2418223f5623ff4d67c556b01386c99a95))
+  The backend (helper scripts, /etc/config/trafficctl, init scripts, hotplug
+  hooks, the Telegram bot and the metrics CGI) is now its own package,
+  trafficctl. luci-app-trafficctl keeps only the web interface and depends
+  on trafficctl, so the backend also runs on routers without LuCI.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.28.2...v1.29.0
+
+---
+
 ## [1.28.2] - 2026-11-09
 
 ### Bug Fixes
