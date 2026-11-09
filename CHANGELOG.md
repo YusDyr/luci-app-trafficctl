@@ -4,6 +4,25 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.30.0] - 2026-11-09
+
+### Features
+- make hostapd-utils optional ([#132](https://github.com/YusDyr/luci-app-trafficctl/issues/132)) ([8f4c43a](https://github.com/YusDyr/luci-app-trafficctl/commit/8f4c43a8652bdd07d975a84a575189478f33fae2))
+  hostapd-utils can only be selected together with a hostapd/wpad variant,
+  so DEPENDS:=+hostapd-utils made trafficctl unselectable on wired-only
+  builds, which blocks submitting it to openwrt/packages.
+- add a Rules tab listing restrictions for offline devices ([#133](https://github.com/YusDyr/luci-app-trafficctl/issues/133)) ([def5775](https://github.com/YusDyr/luci-app-trafficctl/commit/def57756a7dcd1f8a63b0be813dd58780f2bc984))
+  The device table is built from conntrack, so a device that went offline
+  dropped out of it while its block, limit, shape or WiFi deny kept
+  applying, and nothing in the UI showed it or could lift it. The new Rules
+  tab lists every restriction from where it is enforced (nft/iptables, tc,
+  the radio) and where it is saved (rules.json, shapes.json, the uci
+  maclist), via a new read method rules_list backed by trafficctl-rules.sh.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.29.2...v1.30.0
+
+---
+
 ## [1.29.2] - 2026-11-09
 
 ### Bug Fixes
