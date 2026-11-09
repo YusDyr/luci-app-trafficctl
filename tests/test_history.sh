@@ -23,7 +23,7 @@ PASS=0
 FAIL=0
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/trafficctl"
+BIN="$REPO_ROOT/trafficctl/files/usr/libexec/trafficctl"
 
 # Deliberately under /tmp rather than wherever mktemp defaults to. The store
 # directory is validated against a list of allowed roots (it is a mkdir -p AND

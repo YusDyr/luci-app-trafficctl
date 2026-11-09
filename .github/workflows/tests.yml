@@ -86,6 +86,10 @@ jobs:
         run: bash tests/test_oif_label.sh
       - name: Postinst parity tests
         run: bash tests/test_postinst_parity.sh
+      # trafficctl/Makefile lists its files by name; this compares the list
+      # with trafficctl/files/ and pins the relationship of the two packages.
+      - name: Package split tests
+        run: bash tests/test_package_split.sh
       # po2lmo.py reimplements a C tool whose output is consumed by a hash
       # lookup — a wrong bit yields no error, just silent English. The test
       # compares against a golden .lmo built by the real po2lmo.

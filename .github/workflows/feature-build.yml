@@ -4,8 +4,11 @@ name: Feature Build
 # floating pre-release so the download URLs stay stable across pushes.
 #
 # Release tag:  build-feature-<branch-slug>
-# Download URLs:
+# Download URLs (both packages are needed: trafficctl is the backend,
+# luci-app-trafficctl the web interface):
+#   …/releases/download/build-feature-<slug>/trafficctl.ipk
 #   …/releases/download/build-feature-<slug>/luci-app-trafficctl.ipk
+#   …/releases/download/build-feature-<slug>/trafficctl.apk
 #   …/releases/download/build-feature-<slug>/luci-app-trafficctl.apk
 
 on:
@@ -41,19 +44,23 @@ jobs:
           echo "tag=build-${SAFE}"  >> "$GITHUB_OUTPUT"
           echo "date=$DATE"         >> "$GITHUB_OUTPUT"
 
+      # Before the build: the test builds into dist/ itself and empties it.
+      - name: Smoke-test the IPK builder
+        run: bash tests/test_build_ipk.sh
+
       - name: Build .ipk
         run: |
           ./build-ipk.sh "0.0.0-${{ steps.meta.outputs.sha }}" 0
+          ln -f dist/trafficctl_*_all.ipk dist/trafficctl.ipk
           ln -f dist/luci-app-trafficctl_*_all.ipk dist/luci-app-trafficctl.ipk
-
-      - name: Smoke-test the IPK
-        run: sh tests/test_build_ipk.sh
 
       - name: Upload IPK artifact
         uses: actions/upload-artifact@v5
         with:
           name: ipk
-          path: dist/luci-app-trafficctl.ipk
+          path: |
+            dist/trafficctl.ipk
+            dist/luci-app-trafficctl.ipk
 
   build-apk:
     name: Build APK
@@ -66,32 +73,40 @@ jobs:
       - name: Patch Makefile version
         run: |
           SHA="${GITHUB_SHA:0:7}"
-          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=0.0.0-${SHA}/" luci-app-trafficctl/Makefile
-          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=0/"            luci-app-trafficctl/Makefile
+          for mk in luci-app-trafficctl/Makefile trafficctl/Makefile; do
+            sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=0.0.0-${SHA}/" "$mk"
+            sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=0/"            "$mk"
+          done
 
       - name: Build .apk via OpenWrt SDK
         uses: openwrt/gh-action-sdk@main
         env:
           ARCH: x86_64-25.12.4
           FEEDNAME: trafficctl
-          PACKAGES: luci-app-trafficctl
+          PACKAGES: trafficctl luci-app-trafficctl
           V: sc
 
       - name: Collect APK
         run: |
-          APK=$(find bin/ -name "luci-app-trafficctl*.apk" 2>/dev/null | head -1)
-          if [ -z "$APK" ]; then
-            echo "::error::APK not found in SDK output"
-            find bin/ -type f -name "*.apk" || true
-            exit 1
-          fi
-          cp "$APK" luci-app-trafficctl.apk
+          # The SDK names them <name>-<version>.apk; "<name>-[0-9]*" keeps
+          # trafficctl from matching luci-app-trafficctl.
+          for pkg in trafficctl luci-app-trafficctl; do
+            APK=$(find bin/ -name "${pkg}-[0-9]*.apk" 2>/dev/null | head -1)
+            if [ -z "$APK" ]; then
+              echo "::error::$pkg APK not found in SDK output"
+              find bin/ -type f -name "*.apk" || true
+              exit 1
+            fi
+            cp "$APK" "$pkg.apk"
+          done
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v5
         with:
           name: apk
-          path: luci-app-trafficctl.apk
+          path: |
+            trafficctl.apk
+            luci-app-trafficctl.apk
 
   publish:
     name: Publish pre-release
@@ -122,7 +137,8 @@ jobs:
           BRANCH="${GITHUB_REF_NAME}"
           REPO="${GITHUB_REPOSITORY}"
 
-          gh release create "$TAG" dist/luci-app-trafficctl.ipk dist/luci-app-trafficctl.apk \
+          gh release create "$TAG" dist/trafficctl.ipk dist/luci-app-trafficctl.ipk \
+            dist/trafficctl.apk dist/luci-app-trafficctl.apk \
             --prerelease \
             --title "Dev: ${BRANCH} @ ${SHA}" \
             --notes "$(cat <<NOTES
@@ -134,17 +150,22 @@ jobs:
 
           | File | OpenWrt version | Command |
           |------|----------------|---------|
-          | \`luci-app-trafficctl.ipk\` | 21.02 – 24.10 | \`opkg install <url>\` |
-          | \`luci-app-trafficctl.apk\` | 25.12+ | \`apk add --allow-untrusted <url>\` |
+          | \`trafficctl.ipk\` + \`luci-app-trafficctl.ipk\` | 21.02 – 24.10 | \`opkg install <url> <url>\` |
+          | \`trafficctl.apk\` + \`luci-app-trafficctl.apk\` | 25.12+ | \`apk add --allow-untrusted <url> <url>\` |
 
           ### Install
 
+          Both packages in one command: trafficctl is the backend,
+          luci-app-trafficctl the web interface.
+
           \`\`\`sh
           # OpenWrt 21.02 – 24.10
-          opkg install https://github.com/${REPO}/releases/download/${TAG}/luci-app-trafficctl.ipk
+          opkg install https://github.com/${REPO}/releases/download/${TAG}/trafficctl.ipk \\
+            https://github.com/${REPO}/releases/download/${TAG}/luci-app-trafficctl.ipk
 
           # OpenWrt 25.12+
-          apk add --allow-untrusted https://github.com/${REPO}/releases/download/${TAG}/luci-app-trafficctl.apk
+          apk add --allow-untrusted https://github.com/${REPO}/releases/download/${TAG}/trafficctl.apk \\
+            https://github.com/${REPO}/releases/download/${TAG}/luci-app-trafficctl.apk
           \`\`\`
           NOTES
           )"

@@ -1,13 +1,18 @@
 #!/bin/sh
 # Runs INSIDE an OpenWrt rootfs Docker container.
-# Usage: sh /tests/test_install.sh /dist/package.ipk
-#    or: sh /tests/test_install.sh /dist/package.apk
-# Detects format by extension. Extracts and verifies installation.
+# Usage: sh /tests/test_install.sh /dist/trafficctl.ipk /dist/luci-app-trafficctl.ipk
+#    or: sh /tests/test_install.sh /dist/trafficctl.apk /dist/luci-app-trafficctl.apk
+# Detects format by extension. Installs both packages in one run, verifies the
+# files and who owns them, then removes both.
 set -e
 
+[ "$#" -ge 2 ] || { echo "usage: $0 <trafficctl package> <luci-app-trafficctl package>"; exit 1; }
 PKG="$1"
-
-[ -f "$PKG" ] || { echo "Package not found: $PKG"; exit 1; }
+for p in "$@"; do
+    [ -f "$p" ] || { echo "Package not found: $p"; exit 1; }
+    [ "${p##*.}" = "${PKG##*.}" ] || { echo "Mixed package formats: $*"; exit 1; }
+done
+PKGS="trafficctl luci-app-trafficctl"
 
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
@@ -35,12 +40,14 @@ case "$PKG" in
 
             # Install for real and require success — no tar fallback, so a
             # genuine opkg failure fails the test instead of being masked.
-            opkg install --force-depends "$PKG" 2>&1 | tee /tmp/opkg.out || true
-            if ! opkg list-installed | grep -q '^luci-app-trafficctl '; then
-                echo "ERROR: opkg install failed — luci-app-trafficctl not registered"
-                cat /tmp/opkg.out
-                exit 1
-            fi
+            opkg install --force-depends "$@" 2>&1 | tee /tmp/opkg.out || true
+            for name in $PKGS; do
+                if ! opkg list-installed | grep -q "^$name "; then
+                    echo "ERROR: opkg install failed — $name not registered"
+                    cat /tmp/opkg.out
+                    exit 1
+                fi
+            done
             echo "Installed via opkg."
         else
             echo "ERROR: opkg not available in this container"
@@ -66,15 +73,17 @@ case "$PKG" in
             # the snapshot rootfs occasionally exit non-zero). What matters is
             # that OUR package's files land on the rootfs — the file-presence
             # check below will fail loudly if they didn't.
-            apk add --allow-untrusted "$PKG" || {
+            apk add --allow-untrusted "$@" || {
                 APK_EXIT=$?
-                echo "::warning::apk add exited $APK_EXIT — checking whether luci-app-trafficctl installed regardless."
-                if apk info -e luci-app-trafficctl >/dev/null 2>&1; then
-                    echo "luci-app-trafficctl is installed despite apk add exit $APK_EXIT (likely upstream post-install hook noise)."
-                else
-                    echo "ERROR: apk add failed and luci-app-trafficctl is not installed."
-                    exit "$APK_EXIT"
-                fi
+                echo "::warning::apk add exited $APK_EXIT — checking whether both packages installed regardless."
+                for name in $PKGS; do
+                    if apk info -e "$name" >/dev/null 2>&1; then
+                        echo "$name is installed despite apk add exit $APK_EXIT (likely upstream post-install hook noise)."
+                    else
+                        echo "ERROR: apk add failed and $name is not installed."
+                        exit "$APK_EXIT"
+                    fi
+                done
             }
         else
             echo "ERROR: apk not available in this container"
@@ -113,7 +122,9 @@ for f in \
   /etc/config/trafficctl \
   /etc/hotplug.d/dhcp/99-trafficctl-newdevice \
   /etc/hotplug.d/iface/99-trafficctl-shapes \
-  /etc/init.d/trafficctl-telegram; do
+  /etc/init.d/trafficctl-telegram \
+  /lib/upgrade/keep.d/trafficctl \
+  /www/cgi-bin/trafficctl-metrics; do
   [ -f "$f" ] || { echo "MISSING: $f"; exit 1; }
 done
 
@@ -135,6 +146,32 @@ for s in \
   [ -x "$s" ] || { echo "NOT EXECUTABLE: $s"; exit 1; }
 done
 
+# Each file belongs to the package that is meant to ship it: the backend to
+# trafficctl, the view and its rpcd plugin to luci-app-trafficctl.
+owner_of() {
+    case "$PKG" in
+        *.ipk) opkg search "$1" | awk '{print $1; exit}' ;;
+        *.apk) apk info --who-owns "$1" 2>/dev/null | awk '{print $NF; exit}' | sed 's/-[0-9][^-]*-r[0-9]*$//' ;;
+    esac
+}
+for f in \
+  /usr/libexec/trafficctl/trafficctl-fw.sh \
+  /etc/config/trafficctl \
+  /etc/init.d/trafficctl-telegram \
+  /etc/hotplug.d/iface/99-trafficctl-shapes \
+  /lib/upgrade/keep.d/trafficctl \
+  /www/cgi-bin/trafficctl-metrics; do
+  o=$(owner_of "$f")
+  [ "$o" = trafficctl ] || { echo "WRONG OWNER: $f is owned by '$o', expected trafficctl"; exit 1; }
+done
+for f in \
+  /usr/libexec/rpcd/luci.trafficctl \
+  /www/luci-static/resources/view/trafficctl/status.js \
+  /usr/share/rpcd/acl.d/luci-app-trafficctl.json; do
+  o=$(owner_of "$f")
+  [ "$o" = luci-app-trafficctl ] || { echo "WRONG OWNER: $f is owned by '$o', expected luci-app-trafficctl"; exit 1; }
+done
+
 echo "Install checks passed."
 
 # ── Removal test ─────────────────────────────────────────────────────────────
@@ -143,10 +180,12 @@ case "$PKG" in
     *.ipk)
         # Install is now guaranteed to have gone through opkg, so the package is
         # in opkg's DB — remove it the real way and require success.
-        opkg remove luci-app-trafficctl || { echo "REMOVAL FAILED: opkg remove returned non-zero"; exit 1; }
+        # The web interface first: it depends on the backend.
+        opkg remove luci-app-trafficctl || { echo "REMOVAL FAILED: opkg remove luci-app-trafficctl returned non-zero"; exit 1; }
+        opkg remove trafficctl || { echo "REMOVAL FAILED: opkg remove trafficctl returned non-zero"; exit 1; }
         ;;
     *.apk)
-        apk del luci-app-trafficctl || {
+        apk del luci-app-trafficctl trafficctl || {
             echo "REMOVAL FAILED: apk del returned non-zero"; exit 1; }
         ;;
 esac
@@ -159,7 +198,8 @@ for f in \
   /usr/libexec/rpcd/luci.trafficctl \
   /www/luci-static/resources/view/trafficctl/status.js \
   /www/luci-static/resources/view/trafficctl/status.css \
-  /etc/init.d/trafficctl-telegram; do
+  /etc/init.d/trafficctl-telegram \
+  /www/cgi-bin/trafficctl-metrics; do
   [ -f "$f" ] && { echo "REMOVAL FAILED: $f still exists"; exit 1; }
 done
 

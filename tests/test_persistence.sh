@@ -21,9 +21,9 @@ PASS=0
 FAIL=0
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/trafficctl"
-CONF="$REPO_ROOT/luci-app-trafficctl/root/etc/config/trafficctl"
-HOOK="$REPO_ROOT/luci-app-trafficctl/root/etc/hotplug.d/iface/99-trafficctl-shapes"
+BIN="$REPO_ROOT/trafficctl/files/usr/libexec/trafficctl"
+CONF="$REPO_ROOT/trafficctl/files/etc/config/trafficctl"
+HOOK="$REPO_ROOT/trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes"
 
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT

@@ -1,70 +1,121 @@
 #!/bin/sh
-# Build .apk package for OpenWrt 25.12+ (apk-tools v3)
+# Build .apk packages for OpenWrt 25.12+ (apk-tools v3)
 # Requires: apk-tools compiled with -Dminimal=false (provides 'apk mkpkg')
 # Usage: sh build-apk.sh <version> <release>
-# Output: dist/luci-app-trafficctl_<version>-r<release>_noarch.apk
+# Output: dist/trafficctl_<version>-r<release>_noarch.apk (the backend),
+#         dist/luci-i18n-trafficctl-<lang>_<version>-r<release>_noarch.apk,
+#         dist/luci-app-trafficctl_<version>-r<release>_noarch.apk (last line)
 set -e
 
 PKG_NAME="luci-app-trafficctl"
+BE_NAME="trafficctl"
 PKG_VERSION="${1:-1.0.0}"
 PKG_RELEASE="${2:-1}"
 
-# Package source tree (feed-compatible subdirectory layout)
+# Package source trees (feed-compatible subdirectory layout)
 TCTL_ROOT="$(dirname "$0")"
 SRC="$TCTL_ROOT/${PKG_NAME}"
+BACKEND_SRC="$TCTL_ROOT/${BE_NAME}"
+
+# Runtime dependencies of the backend (DEPENDS in trafficctl/Makefile). They
+# are repeated on luci-app-trafficctl for the reason given at LUCI_DEPENDS in
+# luci-app-trafficctl/Makefile.
+BE_DEPENDS="conntrack curl tc iw hostapd-utils"
 
 OUTDIR="dist"
 WORKDIR=$(mktemp -d)
 trap 'rm -rf "$WORKDIR"' EXIT
 
-# --- Prepare package file tree ---
-DATA="$WORKDIR/data"
-mkdir -p "$DATA"
+have_mkpkg() {
+    command -v apk >/dev/null 2>&1 && apk mkpkg --help >/dev/null 2>&1
+}
 
-cp -a "$SRC/root/"* "$DATA/"
-mkdir -p "$DATA/www/luci-static/resources/view/trafficctl"
-# Copy every view/asset so new files (portfw.js, ...) can't be missed
-cp "$SRC/htdocs/luci-static/resources/view/trafficctl/"* "$DATA/www/luci-static/resources/view/trafficctl/"
+# build_apk <name> <section> <description> <depends> <data dir> <scripts dir> [replaces]
+# Prints the path of the package written. <scripts dir> may be empty or hold
+# any of post-install, pre-upgrade, post-upgrade, pre-deinstall.
+build_apk() {
+    _name="$1" _section="$2" _desc="$3" _deps="$4" _data="$5" _scripts="$6" _replaces="${7:-}"
+    _file="$OUTDIR/${_name}_${PKG_VERSION}-r${PKG_RELEASE}_noarch.apk"
+    mkdir -p "$OUTDIR"
 
-chmod +x "$DATA/usr/libexec/trafficctl/trafficctl-"*.sh
-chmod +x "$DATA/usr/libexec/rpcd/luci.trafficctl"
-[ -d "$DATA/etc/init.d" ] && chmod +x "$DATA/etc/init.d/"*
-[ -d "$DATA/etc/hotplug.d" ] && find "$DATA/etc/hotplug.d" -type f -exec chmod +x {} +
+    if have_mkpkg; then
+        # Use apk mkpkg if available (OpenWrt's apk-tools fork)
+        set -- \
+            --info "name:${_name}" \
+            --info "version:${PKG_VERSION}-r${PKG_RELEASE}" \
+            --info "description:${_desc}" \
+            --info "arch:noarch" \
+            --info "license:Apache-2.0" \
+            --info "origin:https://github.com/YusDyr/luci-app-trafficctl" \
+            --info "url:https://github.com/YusDyr/luci-app-trafficctl" \
+            --info "maintainer:Denis Iusupov <yusdyr@gmail.com>" \
+            --info "depends:${_deps}" \
+            --info "provides:${_name}=${PKG_VERSION}-r${PKG_RELEASE}" \
+            --info "tags:openwrt:section=${_section}"
+        [ -n "$_replaces" ] && set -- "$@" --info "replaces:${_replaces}"
+        for _s in post-install pre-upgrade post-upgrade pre-deinstall; do
+            [ -n "$_scripts" ] && [ -f "$_scripts/$_s" ] && set -- "$@" --script "$_s:$_scripts/$_s"
+        done
+        apk mkpkg "$@" --files "$_data" --output "$_file"
+    else
+        # Fallback: build APKv2 manually (two concatenated gzipped tars)
+        _ctrl="$WORKDIR/control-$_name"
+        mkdir -p "$_ctrl"
+        {
+            echo "pkgname = ${_name}"
+            echo "pkgver = ${PKG_VERSION}-r${PKG_RELEASE}"
+            echo "pkgdesc = ${_desc}"
+            echo "arch = noarch"
+            echo "license = Apache-2.0"
+            echo "origin = https://github.com/YusDyr/luci-app-trafficctl"
+            echo "url = https://github.com/YusDyr/luci-app-trafficctl"
+            echo "maintainer = Denis Iusupov <yusdyr@gmail.com>"
+            for _d in $_deps; do echo "depend = $_d"; done
+            [ -n "$_replaces" ] && echo "replaces = $_replaces"
+        } > "$_ctrl/.PKGINFO"
+        for _s in post-install pre-upgrade post-upgrade pre-deinstall; do
+            [ -n "$_scripts" ] && [ -f "$_scripts/$_s" ] && cp "$_scripts/$_s" "$_ctrl/.$_s"
+        done
+
+        # Control tar (metadata + scripts), data tar (package files)
+        tar -czf "$WORKDIR/control-$_name.tar.gz" -C "$_ctrl" .
+        tar -czf "$WORKDIR/data-$_name.tar.gz" -C "$_data" .
+
+        # APKv2: concatenate control + data
+        cat "$WORKDIR/control-$_name.tar.gz" "$WORKDIR/data-$_name.tar.gz" > "$_file"
+    fi
+    echo "$_file"
+}
+
+# ── trafficctl: the backend ────────────────────────────────────────────────
+BE_DATA="$WORKDIR/backend-data"
+mkdir -p "$BE_DATA"
+cp -a "$BACKEND_SRC/files/"* "$BE_DATA/"
+
+chmod +x "$BE_DATA/usr/libexec/trafficctl/trafficctl-"*.sh
+chmod +x "$BE_DATA/www/cgi-bin/trafficctl-metrics"
+[ -d "$BE_DATA/etc/init.d" ] && chmod +x "$BE_DATA/etc/init.d/"*
+[ -d "$BE_DATA/etc/hotplug.d" ] && find "$BE_DATA/etc/hotplug.d" -type f -exec chmod +x {} +
 
 # --- Conffiles (embedded in lib/apk/packages for APK protected-paths) ---
 # Only list files that ship in the package; shapes.json / telegram_known.json
 # are runtime state created by scripts and should NOT be conffiles.
-mkdir -p "$DATA/lib/apk/packages"
-cat > "$DATA/lib/apk/packages/${PKG_NAME}.conffiles" <<'EOF'
+mkdir -p "$BE_DATA/lib/apk/packages"
+cat > "$BE_DATA/lib/apk/packages/${BE_NAME}.conffiles" <<'EOF'
 /etc/config/trafficctl
 EOF
 
-# --- Lifecycle scripts ---
-SCRIPTS="$WORKDIR/scripts"
-mkdir -p "$SCRIPTS"
+BE_SCRIPTS="$WORKDIR/backend-scripts"
+mkdir -p "$BE_SCRIPTS"
 
-cat > "$SCRIPTS/post-install" <<'SCRIPT'
+# The same steps as Package/trafficctl/postinst in trafficctl/Makefile, which
+# explains each one; the SDK runs that one after an install and an upgrade.
+cat > "$BE_SCRIPTS/post-install" <<'SCRIPT'
 #!/bin/sh
 # The config holds the Telegram bot token and the metrics token, so it must not
 # be world-readable before the first save from the UI applies the same mode.
 chmod 0600 "${IPKG_INSTROOT}/etc/config/trafficctl" 2>/dev/null || true
-[ -n "${IPKG_INSTROOT}" ] || /etc/init.d/rpcd restart 2>/dev/null || true
-exit 0
-SCRIPT
-
-cat > "$SCRIPTS/pre-upgrade" <<'SCRIPT'
-#!/bin/sh
-# Stop telegram bot before upgrade to avoid stale process
-if [ -z "${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-telegram ]; then
-    /etc/init.d/trafficctl-telegram stop 2>/dev/null || true
-fi
-exit 0
-SCRIPT
-
-cat > "$SCRIPTS/post-upgrade" <<'SCRIPT'
-#!/bin/sh
 if [ -z "${IPKG_INSTROOT}" ]; then
-    /etc/init.d/rpcd restart 2>/dev/null || true
     if [ -x /etc/init.d/trafficctl-telegram ]; then
         /etc/init.d/trafficctl-telegram start 2>/dev/null || true
     fi
@@ -76,79 +127,76 @@ if [ -z "${IPKG_INSTROOT}" ]; then
 fi
 exit 0
 SCRIPT
+cp "$BE_SCRIPTS/post-install" "$BE_SCRIPTS/post-upgrade"
 
-cat > "$SCRIPTS/pre-deinstall" <<'SCRIPT'
+cat > "$BE_SCRIPTS/pre-upgrade" <<'SCRIPT'
+#!/bin/sh
+# Stop telegram bot before upgrade to avoid stale process
+if [ -z "${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-telegram ]; then
+    /etc/init.d/trafficctl-telegram stop 2>/dev/null || true
+fi
+exit 0
+SCRIPT
+
+cat > "$BE_SCRIPTS/pre-deinstall" <<'SCRIPT'
 #!/bin/sh
 if [ -z "${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-telegram ]; then
     /etc/init.d/trafficctl-telegram stop 2>/dev/null || true
     /etc/init.d/trafficctl-telegram disable 2>/dev/null || true
 fi
+# Fail open. A global internet cut left engaged by a package that is going away
+# is a lockout with no UI left to undo it.
+if [ -z "${IPKG_INSTROOT}" ] && [ -x /usr/libexec/trafficctl/trafficctl-cut.sh ]; then
+    /usr/libexec/trafficctl/trafficctl-cut.sh release >/dev/null 2>&1 || true
+fi
+if [ -z "${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-cut ]; then
+    /etc/init.d/trafficctl-cut stop 2>/dev/null || true
+    /etc/init.d/trafficctl-cut disable 2>/dev/null || true
+fi
 exit 0
 SCRIPT
+chmod +x "$BE_SCRIPTS"/*
 
+# replaces: releases up to 1.28.x shipped these files in luci-app-trafficctl.
+# Lets this package be added on its own, or before the new
+# luci-app-trafficctl, over an old install. The SDK build cannot set it and
+# does not need it when both are upgraded in one transaction.
+build_apk "$BE_NAME" net \
+    "Per-device traffic monitoring (conntrack), rate limiting (nft/iptables), traffic shaping (tc/HTB), internet blocking, WiFi MAC filtering, a global internet cut, a Telegram bot and a Prometheus exporter. The web interface is luci-app-trafficctl." \
+    "$BE_DEPENDS" "$BE_DATA" "$BE_SCRIPTS" "$PKG_NAME"
+
+# ── luci-app-trafficctl: the web interface ─────────────────────────────────
+DATA="$WORKDIR/data"
+mkdir -p "$DATA"
+
+cp -a "$SRC/root/"* "$DATA/"
+mkdir -p "$DATA/www/luci-static/resources/view/trafficctl"
+# Copy every view/asset so new files (portfw.js, ...) can't be missed
+cp "$SRC/htdocs/luci-static/resources/view/trafficctl/"* "$DATA/www/luci-static/resources/view/trafficctl/"
+
+chmod +x "$DATA/usr/libexec/rpcd/luci.trafficctl"
+
+SCRIPTS="$WORKDIR/scripts"
+mkdir -p "$SCRIPTS"
+
+# The same steps as Package/luci-app-trafficctl/postinst in
+# luci-app-trafficctl/Makefile, after an install and after an upgrade.
+cat > "$SCRIPTS/post-install" <<'SCRIPT'
+#!/bin/sh
+if [ -z "${IPKG_INSTROOT}" ]; then
+    rm -f /tmp/luci-indexcache.*
+    rm -rf /tmp/luci-modulecache
+    /etc/init.d/rpcd restart 2>/dev/null || true
+fi
+exit 0
+SCRIPT
+cp "$SCRIPTS/post-install" "$SCRIPTS/post-upgrade"
 chmod +x "$SCRIPTS"/*
 
-# --- Build .apk ---
-mkdir -p "$OUTDIR"
-APK_FILE="$OUTDIR/${PKG_NAME}_${PKG_VERSION}-r${PKG_RELEASE}_noarch.apk"
-
-if command -v apk >/dev/null 2>&1 && apk mkpkg --help >/dev/null 2>&1; then
-    # Use apk mkpkg if available (OpenWrt's apk-tools fork)
-    apk mkpkg \
-        --info "name:${PKG_NAME}" \
-        --info "version:${PKG_VERSION}-r${PKG_RELEASE}" \
-        --info "description:Per-device traffic monitoring, rate limiting (nft/iptables), traffic shaping (tc/HTB), internet blocking, WiFi MAC filtering, and Telegram bot control." \
-        --info "arch:noarch" \
-        --info "license:Apache-2.0" \
-        --info "origin:https://github.com/YusDyr/luci-app-trafficctl" \
-        --info "url:https://github.com/YusDyr/luci-app-trafficctl" \
-        --info "maintainer:Denis Iusupov <yusdyr@gmail.com>" \
-        --info "depends:conntrack luci-base rpcd curl tc iw hostapd-utils" \
-        --info "provides:${PKG_NAME}=${PKG_VERSION}-r${PKG_RELEASE}" \
-        --info "tags:openwrt:section=luci" \
-        --script "post-install:$SCRIPTS/post-install" \
-        --script "pre-upgrade:$SCRIPTS/pre-upgrade" \
-        --script "post-upgrade:$SCRIPTS/post-upgrade" \
-        --script "pre-deinstall:$SCRIPTS/pre-deinstall" \
-        --files "$DATA" \
-        --output "$APK_FILE"
-else
-    # Fallback: build APKv2 manually (two concatenated gzipped tars)
-    CTRL="$WORKDIR/control"
-    mkdir -p "$CTRL"
-
-    cat > "$CTRL/.PKGINFO" <<PKGINFO
-pkgname = ${PKG_NAME}
-pkgver = ${PKG_VERSION}-r${PKG_RELEASE}
-pkgdesc = Per-device traffic monitoring, rate limiting (nft/iptables), traffic shaping (tc/HTB), internet blocking, WiFi MAC filtering, and Telegram bot control.
-arch = noarch
-license = Apache-2.0
-origin = https://github.com/YusDyr/luci-app-trafficctl
-url = https://github.com/YusDyr/luci-app-trafficctl
-maintainer = Denis Iusupov <yusdyr@gmail.com>
-depend = conntrack
-depend = luci-base
-depend = rpcd
-depend = curl
-depend = tc
-depend = iw
-depend = hostapd-utils
-PKGINFO
-
-    cp "$SCRIPTS/post-install" "$CTRL/.post-install"
-    cp "$SCRIPTS/pre-upgrade" "$CTRL/.pre-upgrade"
-    cp "$SCRIPTS/post-upgrade" "$CTRL/.post-upgrade"
-    cp "$SCRIPTS/pre-deinstall" "$CTRL/.pre-deinstall"
-
-    # Control tar (metadata + scripts)
-    tar -czf "$WORKDIR/control.tar.gz" -C "$CTRL" .
-
-    # Data tar (package files)
-    tar -czf "$WORKDIR/data.tar.gz" -C "$DATA" .
-
-    # APKv2: concatenate control + data
-    cat "$WORKDIR/control.tar.gz" "$WORKDIR/data.tar.gz" > "$APK_FILE"
-fi
+# The backend is pinned to the same version, as in build-ipk.sh.
+APK_FILE=$(build_apk "$PKG_NAME" luci \
+    "Per-device traffic monitoring, rate limiting (nft/iptables), traffic shaping (tc/HTB), internet blocking, WiFi MAC filtering, and Telegram bot control." \
+    "${BE_NAME}=${PKG_VERSION}-r${PKG_RELEASE} $BE_DEPENDS luci-base rpcd" "$DATA" "$SCRIPTS")
 
 # --- Translations, one package per language ---
 #

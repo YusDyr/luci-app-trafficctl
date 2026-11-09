@@ -33,7 +33,7 @@ PASS=0
 FAIL=0
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/trafficctl"
+BIN="$REPO_ROOT/trafficctl/files/usr/libexec/trafficctl"
 FWLIB="$BIN/trafficctl-fw.sh"
 
 TMP=$(mktemp -d)

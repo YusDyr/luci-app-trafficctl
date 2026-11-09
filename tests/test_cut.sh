@@ -20,7 +20,7 @@ PASS=0
 FAIL=0
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/trafficctl"
+BIN="$REPO_ROOT/trafficctl/files/usr/libexec/trafficctl"
 RPCD="$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
 ACL="$REPO_ROOT/luci-app-trafficctl/root/usr/share/rpcd/acl.d/luci-app-trafficctl.json"
 
@@ -701,7 +701,7 @@ assert_contains "acl: cut_status is a write method, like activity_log" '"cut_sta
 # persistent internet kill out of an unrelated decision. Asserted by running
 # the hook with persist_rules OFF and a cut state file present: the cut must
 # still come back, which can only happen from outside that block.
-HOTPLUG="$REPO_ROOT/luci-app-trafficctl/root/etc/hotplug.d/iface/99-trafficctl-shapes"
+HOTPLUG="$REPO_ROOT/trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes"
 HP="$TMP/hotplug"
 CUT_CALL_LOG="$TMP/cutcall.log"
 sed -e "s|\\. /usr/libexec/trafficctl/trafficctl-fw.sh|. $BIN/trafficctl-fw.sh|" \
@@ -737,7 +737,7 @@ assert_empty "hotplug: no state file means the cut is not touched at all" "$(run
 
 # A cut that outlives a firmware upgrade is strictly worse than one that
 # outlives a reboot, so its state deliberately is not preserved by sysupgrade.
-KEEPD="$REPO_ROOT/luci-app-trafficctl/root/lib/upgrade/keep.d/luci-app-trafficctl"
+KEEPD="$REPO_ROOT/trafficctl/files/lib/upgrade/keep.d/trafficctl"
 assert_empty "keep.d: the cut state is deliberately NOT carried across a sysupgrade" \
     "$(grep -F 'cut.state' "$KEEPD")"
 

@@ -7,7 +7,7 @@
 PASS=0
 FAIL=0
 
-BIN="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/libexec/trafficctl"
+BIN="$(cd "$(dirname "$0")/.." && pwd)/trafficctl/files/usr/libexec/trafficctl"
 
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT

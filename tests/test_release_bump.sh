@@ -197,6 +197,68 @@ else
     PASS=$((PASS + 1))
 fi
 
+# ── Both packages are released in lockstep ──────────────────────────────────
+#
+# trafficctl (the backend) and luci-app-trafficctl (the web interface) are cut
+# from one tag with one version, and the web interface pins the backend to it.
+# Bumping only one Makefile would build a luci-app-trafficctl the SDK feed
+# cannot satisfy. Each step that edits PKG_VERSION is run verbatim against
+# copies of both Makefiles.
+
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+for step in "Set the package version" "Update Makefile version and tag"; do
+    # `sed -i.bak` instead of `sed -i`: the same edit on GNU and BSD sed.
+    loop=$(awk -v want="      - name: $step" '
+        $0 == want { s = 1; next }
+        s && /^      - name: / { exit }
+        s && /^ *for mk in / { f = 1 }
+        f { print }
+        f && /^ *done$/ { exit }
+    ' "$WF" | sed -e 's/\${{ needs.prepare.outputs.new_version }}/9.8.7/g' -e 's/sed -i /sed -i.bak /g')
+    if [ -z "$loop" ]; then
+        FAIL=$((FAIL + 1))
+        printf "FAIL: step '%s' has no 'for mk in ...' loop over the Makefiles\n" "$step"
+        continue
+    fi
+    bt=$(mktemp -d)
+    mkdir -p "$bt/luci-app-trafficctl" "$bt/trafficctl"
+    cp "$ROOT_DIR/luci-app-trafficctl/Makefile" "$bt/luci-app-trafficctl/Makefile"
+    cp "$ROOT_DIR/trafficctl/Makefile" "$bt/trafficctl/Makefile"
+    if (cd "$bt" && eval "$loop") >/dev/null 2>&1; then
+        for mk in luci-app-trafficctl/Makefile trafficctl/Makefile; do
+            if grep -qx 'PKG_VERSION:=9.8.7' "$bt/$mk" && grep -qx 'PKG_RELEASE:=1' "$bt/$mk"; then
+                PASS=$((PASS + 1))
+            else
+                FAIL=$((FAIL + 1))
+                printf "FAIL: step '%s' does not set the version in %s\n" "$step" "$mk"
+            fi
+        done
+    else
+        FAIL=$((FAIL + 1))
+        printf "FAIL: the Makefile loop of step '%s' fails\n" "$step"
+    fi
+    rm -rf "$bt"
+done
+
+if grep -qE '^ *git add .*luci-app-trafficctl/Makefile' "$WF" \
+        && grep -qE '^ *git add .* trafficctl/Makefile' "$WF"; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    printf "FAIL: the bump commit does not add both Makefiles\n"
+fi
+
+# The two Makefiles in the tree already agree, or the next release starts from
+# two different versions.
+v_fe=$(sed -n 's/^PKG_VERSION:=//p' "$ROOT_DIR/luci-app-trafficctl/Makefile")
+v_be=$(sed -n 's/^PKG_VERSION:=//p' "$ROOT_DIR/trafficctl/Makefile")
+if [ -n "$v_fe" ] && [ "$v_fe" = "$v_be" ]; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    printf "FAIL: PKG_VERSION differs: luci-app-trafficctl '%s', trafficctl '%s'\n" "$v_fe" "$v_be"
+fi
+
 # ── Cancelling runs must never be able to kill a release ────────────────────
 #
 # ci.yml and compat.yml cancel superseded runs on a pull request. Both are also
@@ -421,7 +483,8 @@ else
 
     # 5. Both builders must create the same two aliases, or "address it through
     #    the alias" only works on one of the two paths.
-    for alias in 'dist/luci-app-trafficctl.ipk' 'dist/luci-app-trafficctl.apk'; do
+    for alias in 'dist/luci-app-trafficctl.ipk' 'dist/luci-app-trafficctl.apk' \
+                 'dist/trafficctl.ipk' 'dist/trafficctl.apk'; do
         for f in "$WF" "$CWF"; do
             if grep -q "ln -f .*$alias" "$f"; then
                 PASS=$((PASS + 1))

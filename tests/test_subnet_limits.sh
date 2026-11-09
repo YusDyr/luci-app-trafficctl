@@ -20,8 +20,8 @@
 PASS=0
 FAIL=0
 
-BIN="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/libexec/trafficctl"
-HOTPLUG="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/etc/hotplug.d/iface/99-trafficctl-shapes"
+BIN="$(cd "$(dirname "$0")/.." && pwd)/trafficctl/files/usr/libexec/trafficctl"
+HOTPLUG="$(cd "$(dirname "$0")/.." && pwd)/trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes"
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT

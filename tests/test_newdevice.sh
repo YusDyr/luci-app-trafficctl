@@ -14,8 +14,8 @@ PASS=0
 FAIL=0
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/trafficctl"
-HOTPLUG="$REPO_ROOT/luci-app-trafficctl/root/etc/hotplug.d/dhcp/99-trafficctl-newdevice"
+BIN="$REPO_ROOT/trafficctl/files/usr/libexec/trafficctl"
+HOTPLUG="$REPO_ROOT/trafficctl/files/etc/hotplug.d/dhcp/99-trafficctl-newdevice"
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT

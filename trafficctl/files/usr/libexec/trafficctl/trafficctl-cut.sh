@@ -98,7 +98,7 @@ CUT_RUN_DIR="/var/run/trafficctl"
 CUT_STATE="/var/run/trafficctl/cut.state"
 
 # The opt-in copy. Written only when the operator ticks "keep after reboot",
-# and deliberately NOT listed in root/lib/upgrade/keep.d: a cut that outlives a
+# and deliberately NOT listed in lib/upgrade/keep.d/trafficctl: a cut that outlives a
 # firmware upgrade is strictly worse than one that outlives a reboot.
 CUT_PERSIST_STATE="/etc/trafficctl/cut.state"
 

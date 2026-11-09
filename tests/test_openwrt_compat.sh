@@ -62,7 +62,7 @@ if [ -z "$SHELL_CMD" ]; then
 fi
 echo "Using POSIX shell for syntax/bashism checks: $SHELL_CMD"
 
-for script in "$REPO_ROOT"/luci-app-trafficctl/root/usr/libexec/trafficctl/trafficctl-*.sh; do
+for script in "$REPO_ROOT"/trafficctl/files/usr/libexec/trafficctl/trafficctl-*.sh; do
     name=$(basename "$script")
     # shellcheck disable=SC2086 # SHELL_CMD may be "busybox ash", intentionally split
     assert_ok "syntax: $name" $SHELL_CMD -n "$script"
@@ -71,9 +71,9 @@ done
 # shellcheck disable=SC2086
 assert_ok "syntax: rpcd/trafficctl" $SHELL_CMD -n "$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
 # shellcheck disable=SC2086
-assert_ok "syntax: hotplug" $SHELL_CMD -n "$REPO_ROOT/luci-app-trafficctl/root/etc/hotplug.d/iface/99-trafficctl-shapes"
+assert_ok "syntax: hotplug" $SHELL_CMD -n "$REPO_ROOT/trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes"
 # shellcheck disable=SC2086
-assert_ok "syntax: init.d/trafficctl-telegram" $SHELL_CMD -n "$REPO_ROOT/luci-app-trafficctl/root/etc/init.d/trafficctl-telegram"
+assert_ok "syntax: init.d/trafficctl-telegram" $SHELL_CMD -n "$REPO_ROOT/trafficctl/files/etc/init.d/trafficctl-telegram"
 
 # ── No bashisms (check common ones) ───────────────────────────────────────
 
@@ -101,7 +101,7 @@ check_bashism() {
     PASS=$((PASS + 1))
 }
 
-for script in "$REPO_ROOT"/luci-app-trafficctl/root/usr/libexec/trafficctl/trafficctl-*.sh; do
+for script in "$REPO_ROOT"/trafficctl/files/usr/libexec/trafficctl/trafficctl-*.sh; do
     check_bashism "$script"
 done
 check_bashism "$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
@@ -109,42 +109,54 @@ check_bashism "$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/rpcd/luci.traffic
 # ── IPK build and structure ────────────────────────────────────────────────
 
 cd "$REPO_ROOT" || exit 1
-IPK=$(./build-ipk.sh 0.0.0-test 1 2>/dev/null | tail -1)
-assert_eq "ipk builds" "yes" "$([ -f "$IPK" ] && echo yes || echo no)"
+# One path per line: trafficctl first, luci-app-trafficctl last.
+IPK_OUT=$(./build-ipk.sh 0.0.0-test 1 2>/dev/null)
+BE_IPK=$(printf '%s\n' "$IPK_OUT" | head -1)
+IPK=$(printf '%s\n' "$IPK_OUT" | tail -1)
+assert_eq "trafficctl ipk builds" "yes" "$([ -f "$BE_IPK" ] && echo yes || echo no)"
+assert_eq "luci-app-trafficctl ipk builds" "yes" "$([ -f "$IPK" ] && echo yes || echo no)"
 
-if [ -f "$IPK" ]; then
+if [ -f "$BE_IPK" ] && [ -f "$IPK" ]; then
     TMPDIR=$(mktemp -d)
-    cd "$TMPDIR" || exit 1
-    tar xzf "$REPO_ROOT/$IPK"
+    mkdir -p "$TMPDIR/be" "$TMPDIR/fe"
+    tar xzf "$REPO_ROOT/$BE_IPK" -C "$TMPDIR/be"
+    tar xzf "$REPO_ROOT/$IPK" -C "$TMPDIR/fe"
 
-    # Verify all critical files in data.tar.gz
-    DATA_FILES=$(tar tzf data.tar.gz)
+    # Verify all critical files, each in the package that owns it
+    BE_FILES=$(tar tzf "$TMPDIR/be/data.tar.gz")
+    FE_FILES=$(tar tzf "$TMPDIR/fe/data.tar.gz")
     for expected in \
-        "usr/libexec/rpcd/luci.trafficctl" \
-        "usr/libexec/trafficctl/trafficctl-summary.sh" \
-        "usr/libexec/trafficctl/trafficctl-device.sh" \
-        "usr/libexec/trafficctl/trafficctl-fw.sh" \
-        "usr/libexec/trafficctl/trafficctl-telegram.sh" \
-        "www/luci-static/resources/view/trafficctl/status.js" \
-        "usr/share/luci/menu.d/luci-app-trafficctl.json" \
-        "usr/share/rpcd/acl.d/luci-app-trafficctl.json" \
-        "etc/hotplug.d/iface/99-trafficctl-shapes" \
-        "etc/init.d/trafficctl-telegram" \
-        "etc/config/trafficctl"; do
-        if echo "$DATA_FILES" | grep -q "$expected"; then
+        "be usr/libexec/trafficctl/trafficctl-summary.sh" \
+        "be usr/libexec/trafficctl/trafficctl-device.sh" \
+        "be usr/libexec/trafficctl/trafficctl-fw.sh" \
+        "be usr/libexec/trafficctl/trafficctl-telegram.sh" \
+        "be etc/hotplug.d/iface/99-trafficctl-shapes" \
+        "be etc/init.d/trafficctl-telegram" \
+        "be etc/config/trafficctl" \
+        "be www/cgi-bin/trafficctl-metrics" \
+        "fe usr/libexec/rpcd/luci.trafficctl" \
+        "fe www/luci-static/resources/view/trafficctl/status.js" \
+        "fe usr/share/luci/menu.d/luci-app-trafficctl.json" \
+        "fe usr/share/rpcd/acl.d/luci-app-trafficctl.json"; do
+        pkg=${expected%% *} path=${expected#* }
+        if [ "$pkg" = be ]; then files=$BE_FILES; name=trafficctl; else files=$FE_FILES; name=luci-app-trafficctl; fi
+        if echo "$files" | grep -q "$path"; then
             PASS=$((PASS + 1))
         else
             FAIL=$((FAIL + 1))
-            printf "FAIL: ipk missing: %s\n" "$expected"
+            printf "FAIL: %s ipk missing: %s\n" "$name" "$path"
         fi
     done
 
     # Verify control metadata
-    tar xzf control.tar.gz
-    assert_ok "control has Depends" grep -q "Depends:" control
-    assert_ok "control has curl dep" grep -q "curl" control
-    assert_ok "conffiles has trafficctl" grep -q "/etc/config/trafficctl" conffiles
-    assert_ok "postinst is executable" test -x postinst
+    tar xzf "$TMPDIR/be/control.tar.gz" -C "$TMPDIR/be"
+    tar xzf "$TMPDIR/fe/control.tar.gz" -C "$TMPDIR/fe"
+    assert_ok "trafficctl control has Depends" grep -q "Depends:" "$TMPDIR/be/control"
+    assert_ok "trafficctl control has curl dep" grep -q "curl" "$TMPDIR/be/control"
+    assert_ok "trafficctl conffiles has trafficctl" grep -q "/etc/config/trafficctl" "$TMPDIR/be/conffiles"
+    assert_ok "trafficctl postinst is executable" test -x "$TMPDIR/be/postinst"
+    assert_ok "luci-app control depends on trafficctl" grep -q "^Depends: trafficctl " "$TMPDIR/fe/control"
+    assert_ok "luci-app postinst is executable" test -x "$TMPDIR/fe/postinst"
 
     cd "$REPO_ROOT" || exit 1
     rm -rf "$TMPDIR" dist/
@@ -152,11 +164,11 @@ fi
 
 # ── Script permissions ─────────────────────────────────────────────────────
 
-for script in "$REPO_ROOT"/luci-app-trafficctl/root/usr/libexec/trafficctl/trafficctl-*.sh; do
+for script in "$REPO_ROOT"/trafficctl/files/usr/libexec/trafficctl/trafficctl-*.sh; do
     assert_ok "executable: $(basename "$script")" test -x "$script"
 done
 assert_ok "executable: rpcd" test -x "$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
-assert_ok "executable: init.d" test -x "$REPO_ROOT/luci-app-trafficctl/root/etc/init.d/trafficctl-telegram"
+assert_ok "executable: init.d" test -x "$REPO_ROOT/trafficctl/files/etc/init.d/trafficctl-telegram"
 
 # ── JSON validity ──────────────────────────────────────────────────────────
 

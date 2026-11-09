@@ -14,17 +14,31 @@ luci-app-trafficctl — OpenWrt LuCI plugin for real-time traffic monitoring and
 
 ## Directory Structure
 
-All package files live under `luci-app-trafficctl/` (feed-compatible layout — required for
-`./scripts/feeds update` to pick up the Makefile, which uses `-mindepth 1`).
+The repository is a feed with two packages, each in its own top-level directory
+(feed-compatible layout — `./scripts/feeds update` finds each Makefile with
+`-mindepth 1`). Both are released in lockstep with the same PKG_VERSION.
+
+- `trafficctl/`: the backend, openwrt/packages style (`package.mk`). Owns the
+  helpers, `/etc/config/trafficctl` (the conffile), init.d, hotplug.d, keep.d
+  and the metrics CGI. Its Makefile lists every file by name;
+  `tests/test_package_split.sh` checks that list against `files/`.
+- `luci-app-trafficctl/`: the web interface (`luci.mk`). Owns the views, the
+  rpcd plugin, menu.d, acl.d and po/. `LUCI_DEPENDS:=+trafficctl ...`.
+
+Releases up to 1.28.x were one package, `luci-app-trafficctl`, holding all of
+it. The upgrade moves the backend files and the conffile to `trafficctl`:
+trafficctl's control carries `Replaces: luci-app-trafficctl` (ipk) /
+`replaces:luci-app-trafficctl` (apk), never CONFLICTS (that breaks the
+upgrade), and both postinsts remove `/etc/config/trafficctl-opkg.backup`, the
+copy opkg leaves when a modified conffile changes owner. The backend's
+dependencies are repeated on luci-app-trafficctl: otherwise opkg removes
+conntrack, curl, iw and hostapd-utils as orphans of the old package in the same
+run that installs trafficctl (`tests/test_upgrade.sh` checks this).
 
 ```
-luci-app-trafficctl/
-  Makefile                                  — OpenWrt package Makefile (LuCI)
-  htdocs/luci-static/resources/view/trafficctl/
-    status.js                               — Main frontend (single-file LuCI view, "Devices" tab)
-    portfw.js                               — "Port Forwards" tab (inbound traffic control)
-    status.css                              — Frontend styles (shared by both views)
-  root/usr/libexec/trafficctl/
+trafficctl/
+  Makefile                                  — OpenWrt package Makefile (package.mk, explicit INSTALL_* per file)
+  files/usr/libexec/trafficctl/
     trafficctl-fw.sh                        — Shared library (fw detection, validation, persistence helpers)
     trafficctl-summary.sh                   — All devices summary (JSON array)
     trafficctl-device.sh                    — Per-device detail + connections
@@ -48,14 +62,26 @@ luci-app-trafficctl/
     trafficctl-rdns.sh                      — Reverse DNS lookup
     trafficctl-telegram.sh                  — Telegram bot daemon (long polling)
     trafficctl-telegram-test.sh             — Send test message to Telegram
-  root/usr/libexec/rpcd/
-    luci.trafficctl                         — rpcd/ubus backend (JSON object output, not arrays)
-  root/etc/init.d/
+  files/etc/config/trafficctl                — UCI config (conffile, installed 0600)
+  files/etc/init.d/
     trafficctl-telegram                     — procd init script for the bot
+    trafficctl-history                      — history sampler
     trafficctl-cut                          — procd keeper for the global cut (auto-revert + re-assert)
-  root/etc/hotplug.d/
+  files/etc/hotplug.d/
     iface/99-trafficctl-shapes              — Restore shapes+blocks+ratelimits on boot (ifup lan)
     dhcp/99-trafficctl-newdevice            — New device detection via DHCP events
+  files/lib/upgrade/keep.d/trafficctl       — /etc/trafficctl/ kept across sysupgrade
+  files/www/cgi-bin/trafficctl-metrics      — Prometheus scrape endpoint (CGI)
+
+luci-app-trafficctl/
+  Makefile                                  — OpenWrt package Makefile (LuCI)
+  htdocs/luci-static/resources/view/trafficctl/
+    status.js                               — Main frontend (single-file LuCI view, "Devices" tab)
+    portfw.js                               — "Port Forwards" tab (inbound traffic control)
+    status.css                              — Frontend styles (shared by both views)
+  root/usr/libexec/rpcd/
+    luci.trafficctl                         — rpcd/ubus backend (JSON object output, not arrays)
+  root/usr/share/luci/menu.d/, root/usr/share/rpcd/acl.d/ — menu entry and ACL
   po/templates/                             — i18n templates
 
 docs/
@@ -75,7 +101,7 @@ docs/
 
 - Shebang: `#!/bin/sh`
 - All scripts output JSON to stdout
-- rpcd scripts (`luci-app-trafficctl/root/usr/libexec/rpcd/trafficctl`) must output JSON **objects** (not bare arrays) — wrap with `{"result": ...}`
+- rpcd scripts (`luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl`) must output JSON **objects** (not bare arrays) — wrap with `{"result": ...}`
 - Validate IPs with `tctl_validate_ip` from trafficctl-fw.sh
 - Use `2>/dev/null` on commands that may fail (nft, tc, iptables)
 - Filter `dig` output: `grep -v '^;;'` to remove error messages
@@ -113,7 +139,7 @@ scp does NOT work to the router. Deploy files like this:
 ```sh
 ssh root@192.168.0.1 sh -c '"cat > /path/to/file"' < local/file
 # For scripts, also chmod:
-ssh root@192.168.0.1 sh -c '"cat > /usr/libexec/trafficctl/script.sh && chmod +x /usr/libexec/trafficctl/script.sh"' < luci-app-trafficctl/root/usr/libexec/trafficctl/script.sh
+ssh root@192.168.0.1 sh -c '"cat > /usr/libexec/trafficctl/script.sh && chmod +x /usr/libexec/trafficctl/script.sh"' < trafficctl/files/usr/libexec/trafficctl/script.sh
 # Frontend:
 ssh root@192.168.0.1 sh -c '"cat > /www/luci-static/resources/view/trafficctl/status.js"' < luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js
 ssh root@192.168.0.1 sh -c '"cat > /www/luci-static/resources/view/trafficctl/status.css"' < luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.css
@@ -135,7 +161,7 @@ ssh root@192.168.0.1 sh -c '"cat > /www/luci-static/resources/view/trafficctl/st
 - nft limiter rates are written in **bytes/second**, `tctl_rate_bytes` = kbit × 125 (SI, like tc and the UI). nft's `kbytes` is 1024 bytes — the old `rate_kbit / 8 kbytes` policed 2.4% high — and nft lists a rate in its largest whole unit, stepping by 1024 (1024000 bytes/second lists as `1000 kbytes/second`). Every reader converts through the shared awk `TCTL_NFT_RATE_AWK` (`tctl_rate_kbit(n, unit)`); never grep for `kbytes`
 - Persistent shapes stored in `/etc/trafficctl/shapes.json`
 - Persistent blocks/ratelimits stored in `/etc/trafficctl/rules.json` (when `persist_rules` enabled)
-- Note: Only `/etc/config/trafficctl` is tracked as a conffile for package upgrades. The runtime state under `/etc/trafficctl/` (names, shapes.json, rules.json, telegram_known.json) is not a conffile but IS listed in `root/lib/upgrade/keep.d/luci-app-trafficctl`, because default sysupgrade preserves `/etc/config/*` only — without that file every device alias and shaping rule was lost on a firmware upgrade
+- Note: Only `/etc/config/trafficctl` is tracked as a conffile for package upgrades. The runtime state under `/etc/trafficctl/` (names, shapes.json, rules.json, telegram_known.json) is not a conffile but IS listed in `trafficctl/files/lib/upgrade/keep.d/trafficctl`, because default sysupgrade preserves `/etc/config/*` only — without that file every device alias and shaping rule was lost on a firmware upgrade
 - The config file holds the Telegram bot token and the metrics token, so it is kept at mode 0600. `uci` rewrites the file at the default mode on every commit, hence the single `tctl_commit` helper in the rpcd backend that re-applies the mode after each one
 - Activity logging: `trafficctl.logging.log_file` is constrained to `/tmp/trafficctl/*` or `/var/log/*` and `max_lines` to 20..100000 (`tctl_validate_log_file` / `tctl_log_max_lines`). The path is both an append target and a `tail`+`mv` rotation target, so an unconstrained value gave the write ACL an arbitrary root file read (via `activity_log`) and truncate — `max_lines=1` rounded the rotation keep-count to zero and emptied whatever the path pointed at. `activity_log` is a **write** method for that reason
 - Global internet cut (all devices at once): own nft table `inet tctl_cut` with TWO chains, loaded as one atomic `nft -f` transaction. Own table because fw4 rebuilds `inet fw4` on every reload and the `ifup lan` restore hook does not fire for that — a rule placed there lapses silently while the UI still reads ON, which for this control is the worst failure. **The primary chain is at `prerouting` priority -300, not `forward`**: a forward rule only sees traffic the router FORWARDS, and on a router running a transparent proxy (podkop/sing-box, passwall, homeproxy) TPROXY intercepts at prerouting and delivers the packet LOCALLY — client→router is `input`, router→internet is `output`, neither leg is forwarded, so a forward-only cut misses the bulk of the traffic while reporting success. -300 (`raw`) is ahead of conntrack (-200), `mangle` (-150) and `dstnat` (-100) where those proxies hook. The forward chain at -190 is kept as a second layer. Locally-originated traffic never traverses prerouting, so the proxy's own outbound path, the router's tunnels and its DNS are untouched. **Rule order is a safety property**: `fib daddr type { local, broadcast, multicast } accept` comes FIRST, before anything that trusts the LAN device list, so LuCI/SSH/DNS/DHCP survive even if that list is wrong — a prerouting drop without that escape hatch is a total LAN lockout, which is also why the install must be atomic (rule-by-rule would apply the accepts that parse plus the drop). Interface matching rather than addresses so IPv4 **and** IPv6 are cut by the same rules (the per-device block is `ip saddr` and v4-only); at prerouting there is no `oifname` yet, so `fib daddr . iif oifname` asks the FIB the same question. Inbound port forwards are deliberately left alone. **Refuses to engage when no LAN device can be resolved** — the drop-all it would otherwise build black-holes the LAN too. `cut_coverage` reports `full`/`forward` from live kernel state; on a kernel without `nft_fib` the forward-only fallback is taken, and if a `tproxy` rule is detected in the ruleset that fallback **refuses** rather than installing a cut that misses proxied traffic. Engaged state lives in tmpfs (`/var/run/trafficctl/cut.state`): it is the one control that can lock out its own operator, so a reboot must clear it. "Keep after reboot" is its **own** opt-in writing `/etc/trafficctl/cut.state`, never the global `persist_rules` flag, restored on `ifup lan` at the original absolute deadline; deliberately not in `keep.d`. Auto-revert is enforced both by the procd keeper (`/etc/init.d/trafficctl-cut`, 5s tick, also re-asserts the rule) and independently by `cut_status`, which is why that is a **write** method

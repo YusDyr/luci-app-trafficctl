@@ -39,8 +39,9 @@
 # key we publish before anything is signed: a feed signed with a key the
 # routers do not have fails on every `opkg update`, which is worse than no feed.
 #
-# Only the packages of this release go in (the versioned file names; the
-# luci-app-trafficctl.ipk / _all / .apk / _noarch aliases are the same bytes).
+# Only the packages of this release go in (the versioned file names, which
+# cover trafficctl, luci-app-trafficctl and the translations; the
+# <name>.ipk / _all / .apk / _noarch aliases are the same bytes).
 # That is all an upgrade needs.
 set -euo pipefail
 
@@ -189,8 +190,12 @@ apk update
 apk add luci-app-trafficctl
 /etc/init.d/rpcd restart</pre>
 
-<p>Upgrades: <code>opkg update &amp;&amp; opkg upgrade luci-app-trafficctl</code>, or
-<code>apk update &amp;&amp; apk upgrade luci-app-trafficctl</code>.</p>
+<p>luci-app-trafficctl is the web interface; it pulls in trafficctl, the backend.</p>
+<p>Upgrades: <code>opkg update &amp;&amp; opkg upgrade trafficctl luci-app-trafficctl</code>, or
+<code>apk update &amp;&amp; apk upgrade trafficctl luci-app-trafficctl</code>.
+Upgrading from 1.28.x or earlier, when the backend was part of luci-app-trafficctl, is
+<code>opkg upgrade luci-app-trafficctl</code> / <code>apk upgrade luci-app-trafficctl</code>:
+it installs trafficctl on the way and keeps the configuration.</p>
 <p>Indexes: <a href="opkg/Packages">opkg/Packages</a>, <a href="apk/packages.adb">apk/packages.adb</a>.
 Keys: <a href="keys/usign-${USIGN_ID}.pub">usign-${USIGN_ID}.pub</a>, <a href="keys/trafficctl.pem">trafficctl.pem</a>.</p>
 </body>

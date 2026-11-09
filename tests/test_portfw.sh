@@ -7,8 +7,8 @@
 PASS=0
 FAIL=0
 
-SCRIPT="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/libexec/trafficctl/trafficctl-portfw.sh"
-FWLIB="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/libexec/trafficctl/trafficctl-fw.sh"
+SCRIPT="$(cd "$(dirname "$0")/.." && pwd)/trafficctl/files/usr/libexec/trafficctl/trafficctl-portfw.sh"
+FWLIB="$(cd "$(dirname "$0")/.." && pwd)/trafficctl/files/usr/libexec/trafficctl/trafficctl-fw.sh"
 
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
