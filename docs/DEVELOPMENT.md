@@ -114,7 +114,7 @@ luci-app-trafficctl/                     # repository
 │   │   └── share/
 │   │       ├── luci/menu.d/luci-app-trafficctl.json
 │   │       └── rpcd/acl.d/luci-app-trafficctl.json
-│   └── po/                              # i18n
+│   └── po/                              # i18n: templates/trafficctl.pot, <lang>/trafficctl.po
 ├── build-ipk.sh, build-apk.sh           # Standalone builders, emit both packages
 ├── docs/                                # Documentation
 ├── .github/workflows/                   # CI

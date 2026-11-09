@@ -118,7 +118,7 @@ fi
 # before and after a real translation lands and never collides with one.
 
 mkdir -p "$REPO_ROOT/luci-app-trafficctl/po/xx_Test"
-cp "$FIXTURES/sample.po" "$REPO_ROOT/luci-app-trafficctl/po/xx_Test/luci-app-trafficctl.po"
+cp "$FIXTURES/sample.po" "$REPO_ROOT/luci-app-trafficctl/po/xx_Test/trafficctl.po"
 printf 'xx_Test\txx-test\tTestish (Test Language)\n' >> "$LANG_TABLE"
 
 DIST="$TMP/dist"
@@ -141,9 +141,9 @@ mkdir -p "$TMP/x/ctrl" && tar -xzf "$TMP/x/control.tar.gz" -C "$TMP/x/ctrl" 2>/d
 
 # luci.mk installs to $(LUCI_LIBRARYDIR)/i18n/$(basename $(po)).$(code).lmo
 assert_ok "lmo lands where LuCI looks for it" \
-    test -f "$TMP/x/data/usr/lib/lua/luci/i18n/luci-app-trafficctl.xx-test.lmo"
+    test -f "$TMP/x/data/usr/lib/lua/luci/i18n/trafficctl.xx-test.lmo"
 assert_ok "the shipped lmo is the compiled container, not the .po" \
-    cmp -s "$FIXTURES/sample.lmo" "$TMP/x/data/usr/lib/lua/luci/i18n/luci-app-trafficctl.xx-test.lmo"
+    cmp -s "$FIXTURES/sample.lmo" "$TMP/x/data/usr/lib/lua/luci/i18n/trafficctl.xx-test.lmo"
 
 # Verbatim from luci.mk, dashes turned into underscores because a uci option
 # name cannot contain a dash.
@@ -165,6 +165,43 @@ assert_eq "the main package ships no translations of its own" "0" \
     "$(tar -tzf "$TMP/m/data.tar.gz" 2>/dev/null | grep -c '\.lmo$')"
 
 rm -rf "$REPO_ROOT/luci-app-trafficctl/po/xx_Test"
+
+# --- the i18n domain --------------------------------------------------------
+#
+# openwrt/luci names the template and every .po after the i18n domain
+# (po/templates/<domain>.pot, po/<lang>/<domain>.po), and luci.mk turns each
+# .po into $(basename $(po)).<code>.lmo. The domain here is trafficctl, the
+# same name luci.mk derives as LUCI_BASENAME from luci-app-trafficctl, so the
+# feed build installs trafficctl.<code>.lmo. The standalone builders must
+# produce the same file name for the same .po.
+
+PO_ROOT="$REPO_ROOT/luci-app-trafficctl/po"
+assert_ok "the template is named after the domain" test -f "$PO_ROOT/templates/trafficctl.pot"
+assert_eq "po/templates holds no other template" "trafficctl.pot" \
+    "$(cd "$PO_ROOT/templates" && ls)"
+for dir in "$PO_ROOT"/*/; do
+    lang=$(basename "$dir")
+    [ "$lang" = "templates" ] && continue
+    assert_eq "po/$lang holds only the domain's .po" "trafficctl.po" "$(cd "$dir" && ls)"
+done
+
+# The shipped translation, through build-ipk.sh, from the real zh_Hans .po.
+ZH_IPK="$DIST/luci-i18n-trafficctl-zh-cn_0.0.1-test-1_all.ipk"
+ZH_LMO="usr/lib/lua/luci/i18n/trafficctl.zh-cn.lmo"
+assert_ok "the zh-cn translation ipk is built" test -f "$ZH_IPK"
+mkdir -p "$TMP/zh/data" && tar -xzf "$ZH_IPK" -C "$TMP/zh" 2>/dev/null
+tar -xzf "$TMP/zh/data.tar.gz" -C "$TMP/zh/data" 2>/dev/null
+assert_eq "the zh-cn ipk ships exactly the domain's lmo" "./$ZH_LMO" \
+    "$(tar -tzf "$TMP/zh/data.tar.gz" 2>/dev/null | grep '\.lmo$')"
+python3 "$REPO_ROOT/tools/po2lmo.py" "$PO_ROOT/zh_Hans/trafficctl.po" "$TMP/zh.lmo"
+assert_ok "the shipped zh-cn lmo is po2lmo of po/zh_Hans/trafficctl.po" \
+    cmp -s "$TMP/zh.lmo" "$TMP/zh/data/$ZH_LMO"
+
+# build-apk.sh stages the same payload through the shared i18n_stage (both
+# builders are checked to source it below), so the staged tree is the apk's.
+i18n_stage zh_Hans "$TMP/zh-stage"
+assert_eq "i18n_stage names the zh-cn lmo after the domain" "$ZH_LMO" \
+    "$(cd "$TMP/zh-stage" && find . -name '*.lmo' | sed 's#^\./##')"
 
 # --- the two standalone builders must not drift apart ----------------------
 

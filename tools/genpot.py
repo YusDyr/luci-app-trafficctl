@@ -1,5 +1,13 @@
 import re, sys, glob
 
+# Usage: python3 tools/genpot.py [output]   (run from the repository root)
+#
+# The template is named after the i18n domain, trafficctl, as every
+# openwrt/luci application names its own (po/templates/<domain>.pot, with
+# po/<lang>/<domain>.po beside it). luci.mk compiles each .po into
+# <basename>.<lang>.lmo, so the .po basename is what lands on the router.
+DEFAULT_OUT = 'luci-app-trafficctl/po/templates/trafficctl.pot'
+
 # Extract the msgids a LuCI view exposes, and write them in .po syntax.
 #
 # Two escaping layers meet here and getting them confused produced a template
@@ -67,5 +75,5 @@ if bad:
 out=['msgid ""','msgstr "Content-Type: text/plain; charset=UTF-8"']
 for i in uniq:
     out += ['', 'msgid "%s"' % po_escape(i), 'msgstr ""']
-open(sys.argv[1],'w').write('\n'.join(out)+'\n')
+open(sys.argv[1] if len(sys.argv) > 1 else DEFAULT_OUT,'w').write('\n'.join(out)+'\n')
 print("entries:", len(uniq))
