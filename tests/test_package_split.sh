@@ -107,6 +107,12 @@ done
 assert_eq "trafficctl is architecture independent" "1" "$(grep -cE '^[[:space:]]*PKGARCH:=all$' "$BE_MK")"
 assert_eq "trafficctl ends with BuildPackage" \
     '$(eval $(call BuildPackage,trafficctl))' "$(grep -v '^[[:space:]]*$' "$BE_MK" | tail -1)"
+# Every openwrt/luci application Makefile ends with this comment; luci.mk makes
+# the BuildPackage call itself, so an explicit one would be a duplicate.
+assert_eq "luci-app-trafficctl ends with the buildroot signature" \
+    '# call BuildPackage - OpenWrt buildroot signature' "$(grep -v '^[[:space:]]*$' "$FE_MK" | tail -1)"
+assert_eq "luci-app-trafficctl makes no BuildPackage call of its own" "0" \
+    "$(grep -c '^[^#]*call BuildPackage' "$FE_MK")"
 
 v_fe=$(sed -n 's/^PKG_VERSION:=//p' "$FE_MK")
 v_be=$(sed -n 's/^PKG_VERSION:=//p' "$BE_MK")

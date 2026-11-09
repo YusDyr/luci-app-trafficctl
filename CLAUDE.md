@@ -82,7 +82,8 @@ luci-app-trafficctl/
   root/usr/libexec/rpcd/
     luci.trafficctl                         — rpcd/ubus backend (JSON object output, not arrays)
   root/usr/share/luci/menu.d/, root/usr/share/rpcd/acl.d/ — menu entry and ACL
-  po/templates/                             — i18n templates
+  po/templates/trafficctl.pot               — i18n template, named after the domain `trafficctl` (regenerate: `python3 tools/genpot.py`)
+  po/<lang>/trafficctl.po                   — translations; built into usr/lib/lua/luci/i18n/trafficctl.<code>.lmo
 
 docs/
   capture.js                                — Playwright screenshot/GIF automation (masks MACs & hostname)

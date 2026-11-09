@@ -26,7 +26,7 @@ FAIL=0
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VIEWS="$REPO_ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl"
-POT="$REPO_ROOT/luci-app-trafficctl/po/templates/luci-app-trafficctl.pot"
+POT="$REPO_ROOT/luci-app-trafficctl/po/templates/trafficctl.pot"
 GEN="$REPO_ROOT/tools/genpot.py"
 
 TMP=$(mktemp -d)
