@@ -4,6 +4,21 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.29.2] - 2026-11-09
+
+### Bug Fixes
+- start the Telegram bot on upgrade only as it would start after a reboot ([#134](https://github.com/YusDyr/luci-app-trafficctl/issues/134)) ([fb609cf](https://github.com/YusDyr/luci-app-trafficctl/commit/fb609cfa07f0e4ac33e432a09050dd496d7d07cb))
+  Boot starts only what rc.d enables, and nothing ever enabled
+  /etc/init.d/trafficctl-telegram for packages built by build-ipk.sh
+  or build-apk.sh: the postinst ran "start" unconditionally and the
+  Settings toggle (rpcd telegram_config_set) only ran "reload". A bot
+  switched on in the UI ran until the next reboot and was then gone,
+  with trafficctl.telegram.enabled still 1. An upgrade started it again
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.29.1...v1.29.2
+
+---
+
 ## [1.29.1] - 2026-11-09
 
 ### Other
