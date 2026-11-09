@@ -141,6 +141,8 @@ chore: bump ESLint config
 
 **Package feed:** after each release, job `pages` in `auto-release.yml` runs `tools/build-feed.sh` (SDK image: `ipkg-make-index.sh` + `usign` for opkg, `apk mkndx --sign` for apk) and deploys a signed feed of that release to GitHub Pages (`https://yusdyr.github.io/luci-app-trafficctl/{opkg,apk,keys}/`). Only with the signing secrets; it needs Pages set to the "GitHub Actions" source.
 
+**SDK cache:** every OpenWrt SDK build in CI (`tools/sdk-build.sh` in `auto-release.yml`/`compat.yml`, `tests/test_feed_install.sh` in `feed-install.yml`) carries the SDK's downloads, feed checkouts and compiled dependencies between runs with `actions/cache` + `tools/sdk-cache.sh`. Paths containing `trafficctl` are never cached, so our packages always build from scratch. Key and rules: `docs/DEVELOPMENT.md`, "OpenWrt SDK cache".
+
 ## Deployment
 
 scp does NOT work to the router. Deploy files like this:

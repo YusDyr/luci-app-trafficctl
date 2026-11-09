@@ -283,6 +283,35 @@ once inside `ci.yml`, which is why the checks list showed both `ShellCheck` and
 trigger for the same reason: on main it already runs inside `auto-release.yml`,
 and it is by far the most expensive job here.
 
+#### OpenWrt SDK cache
+
+Every OpenWrt SDK build (`tools/sdk-build.sh` in `auto-release.yml` and
+`compat.yml`, `tests/test_feed_install.sh` in `feed-install.yml`) restores and
+saves a cache through `actions/cache` and `tools/sdk-cache.sh`. Almost all of
+a cold SDK build is spent compiling dependencies (hostapd in ~30 variants,
+iproute2, curl, openssl, luci-base, …), not our two packages, so the cache
+carries them: `dl/`, the official feed checkouts, and the build stamps,
+staging and `bin/` output of every dependency.
+
+- **Key:** `sdk-<salt>-<driver>-<image tag>-<image digest>-<hash>`, where the
+  hash covers `tools/sdk-cache.sh`, the driver script and the `DEPENDS` lines
+  of both Makefiles. The restore key drops the hash, so a new dependency
+  starts from the previous entry. Bump `SALT` in `sdk-cache.sh` to drop every
+  entry. A pull request restores `main`'s entry (written by the release) but
+  saves its own, which only that pull request can read.
+- **Our packages are never cached:** every path containing `trafficctl` is
+  left out on save and skipped on restore, so they are compiled from scratch
+  each time.
+- **Not cached:** a feed pinned to a tag rather than a commit (24.10's
+  `base ...;v24.10.6`): `feeds update` runs `git pull` on an existing
+  checkout, which fails on a detached tag, so that feed is cloned fresh and
+  its packages rebuilt every run. A feed on a branch (23.05's `base`) is
+  cached and pulled.
+- **Still slow when warm:** the 25.12 SDK repackages all ~480 kmods on every
+  `package/<pkg>/compile`, cached or not (~3 min per package).
+- A run whose cache is broken can be made cold by deleting its entry:
+  `gh cache list` / `gh cache delete <id>`.
+
 The release depends on the compatibility matrix as well as the fast checks —
 otherwise a tag and the `releases/latest/download` URL could publish an
 uninstallable package minutes before `compat` went red. Note that `main` has no
