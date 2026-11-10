@@ -1,0 +1,128 @@
+Station 02:00:00:00:00:19 (on phy0-ap0)
+	inactive time:	0 ms
+	rx bytes:	1120932244
+	rx packets:	2076096
+	tx bytes:	123552912
+	tx packets:	1844971
+	tx retries:	98227
+	tx failed:	98255
+	rx drop misc:	1
+	signal:  	-29 [-32, -34, -38, -34] dBm
+	signal avg:	-29 [-32, -33, -38, -34] dBm
+	tx bitrate:	54.0 MBit/s
+	tx duration:	210102821 us
+	rx bitrate:	54.0 MBit/s
+	rx duration:	755811857 us
+	last ack signal:-26 dBm
+	avg ack signal:	-26 dBm
+	airtime weight: 256
+	authorized:	yes
+	authenticated:	yes
+	associated:	yes
+	preamble:	short
+	WMM/WME:	no
+	MFP:		no
+	TDLS peer:	no
+	DTIM period:	2
+	beacon interval:100
+	short preamble:	yes
+	connected time:	292960 seconds
+	associated at [boottime]:	22.443s
+	associated at:	1794026138150 ms
+	current time:	1794319097726 ms
+Station 02:00:00:00:00:1f (on phy0-ap0)
+	inactive time:	140 ms
+	rx bytes:	39604172
+	rx packets:	1592954
+	tx bytes:	1098618
+	tx packets:	17359
+	tx retries:	892
+	tx failed:	895
+	rx drop misc:	1
+	signal:  	-38 [-45, -40, -48, -42] dBm
+	signal avg:	-38 [-44, -40, -48, -42] dBm
+	tx bitrate:	54.0 MBit/s
+	tx duration:	2046338 us
+	rx bitrate:	54.0 MBit/s
+	rx duration:	615351600 us
+	last ack signal:-40 dBm
+	avg ack signal:	-39 dBm
+	airtime weight: 256
+	authorized:	yes
+	authenticated:	yes
+	associated:	yes
+	preamble:	short
+	WMM/WME:	no
+	MFP:		no
+	TDLS peer:	no
+	DTIM period:	2
+	beacon interval:100
+	short preamble:	yes
+	connected time:	292952 seconds
+	associated at [boottime]:	30.698s
+	associated at:	1794026146405 ms
+	current time:	1794319097726 ms
+Station 02:00:00:00:00:09 (on phy0-ap0)
+	inactive time:	330 ms
+	rx bytes:	2809194
+	rx packets:	16809
+	tx bytes:	1336078
+	tx packets:	15093
+	tx retries:	2252
+	tx failed:	2252
+	rx drop misc:	0
+	signal:  	-49 [-56, -55, -54, -53] dBm
+	signal avg:	-49 [-56, -56, -55, -52] dBm
+	tx bitrate:	104.0 MBit/s MCS 13
+	tx duration:	1819560 us
+	rx bitrate:	130.0 MBit/s MCS 15
+	rx duration:	1352064 us
+	last ack signal:-50 dBm
+	avg ack signal:	-49 dBm
+	airtime weight: 256
+	authorized:	yes
+	authenticated:	yes
+	associated:	yes
+	preamble:	short
+	WMM/WME:	yes
+	MFP:		no
+	TDLS peer:	no
+	DTIM period:	2
+	beacon interval:100
+	short preamble:	yes
+	connected time:	33761 seconds
+	associated at [boottime]:	259221.784s
+	associated at:	1794285337491 ms
+	current time:	1794319097726 ms
+Station 02:00:00:00:00:16 (on phy0-ap0)
+	inactive time:	4520 ms
+	rx bytes:	502449
+	rx packets:	2892
+	tx bytes:	2520457
+	tx packets:	2861
+	tx retries:	127
+	tx failed:	127
+	rx drop misc:	1
+	signal:  	-60 [-63, -74, -69, -63] dBm
+	signal avg:	-60 [-62, -73, -70, -63] dBm
+	tx bitrate:	65.0 MBit/s MCS 7
+	tx duration:	636571 us
+	rx bitrate:	39.0 MBit/s MCS 4
+	rx duration:	771395 us
+	last ack signal:-62 dBm
+	avg ack signal:	-60 dBm
+	airtime weight: 256
+	authorized:	yes
+	authenticated:	yes
+	associated:	yes
+	preamble:	short
+	WMM/WME:	yes
+	MFP:		no
+	TDLS peer:	no
+	DTIM period:	2
+	beacon interval:100
+	short preamble:	yes
+	connected time:	3167 seconds
+	associated at [boottime]:	289815.878s
+	associated at:	1794315931586 ms
+	current time:	1794319097726 ms

@@ -1,0 +1,196 @@
+package dhcp
+
+config dnsmasq
+	option domainneeded '1'
+	option localise_queries '1'
+	option rebind_protection '1'
+	option rebind_localhost '1'
+	option local '/host-34/'
+	option domain 'host-34'
+	option expandhosts '1'
+	option leasefile '/tmp/dhcp.leases'
+	option localservice '1'
+	option ednspacket_max '1232'
+	option sequential_ip '1'
+	option allservers '1'
+	option localuse '1'
+	list interface 'lan'
+	option quietdhcp '1'
+	option dnsforwardmax '450'
+	option noresolv '1'
+	option cachesize '0'
+	option addmac '1'
+	option resolvfile '/tmp/resolv.conf.d/resolv.conf.auto'
+	option podkop_noresolv '0'
+	option podkop_cachesize '150'
+	list server '127.0.0.42'
+
+config dhcp 'lan'
+	option interface 'lan'
+	option dhcpv4 'server'
+	option dhcpv6 'server'
+	option ra_management '1'
+	option limit '200'
+	option start '100'
+	option leasetime '24h'
+	list dhcp_option '44,192.168.0.1'
+	list ntp '192.168.0.1'
+	list ntp '2001:db8:2:4b00::1'
+	list ntp 'fd00:0:1::1'
+	option ra_useleasetime '1'
+
+config dhcp 'wan'
+	option interface 'wan'
+	option ignore '1'
+
+config odhcpd 'odhcpd'
+	option maindhcp '0'
+	option leasefile '/tmp/hosts/odhcpd'
+	option leasetrigger '/usr/sbin/odhcpd-update'
+	option loglevel '4'
+
+config domain
+	option ip '192.168.0.140'
+	option name 'ha'
+
+config host
+	option name 'host-18'
+	option dns '1'
+	option ip '192.168.0.142'
+	list mac '02:00:00:00:00:09'
+
+config host
+	option mac '02:00:00:00:00:0a'
+	option name 'host-30'
+	option dns '1'
+
+config host
+	option name 'host-11'
+	option dns '1'
+	option mac '02:00:00:00:00:0b'
+	option ip '192.168.0.7'
+
+config host
+	option name 'host-21'
+	option dns '1'
+	option mac '02:00:00:00:00:0c'
+	option ip '192.168.0.6'
+
+config host
+	option name 'host-35'
+	option ip '192.168.0.220'
+	option dns '1'
+	list mac '02:00:00:00:00:0d'
+
+config host
+	option name 'host-24'
+	option ip '192.168.0.224'
+	list mac '02:00:00:00:00:0e'
+	option dns '1'
+
+config host
+	option name 'host-19'
+	option ip '192.168.0.222'
+	list mac '02:00:00:00:00:0f'
+	option dns '1'
+
+config domain
+	option name 'gw'
+	option ip '192.168.0.1'
+
+config host
+	option name 'host-22'
+	option ip '192.168.0.223'
+	list mac '02:00:00:00:00:10'
+	option dns '1'
+
+config host
+	option name 'host-23'
+	option ip '192.168.0.221'
+	list mac '02:00:00:00:00:11'
+	option dns '1'
+
+config host
+	option ip '192.168.0.140'
+	option name 'ha'
+	option dns '1'
+	list mac '02:00:00:00:00:12'
+
+config host
+	option ip '192.168.0.240'
+	option name 'host-17'
+	option dns '1'
+	list mac '02:00:00:00:00:13'
+
+config host
+	option name 'host-09'
+	option dns '1'
+	list mac '02:00:00:00:00:14'
+	option ip '192.168.0.106'
+	option leasetime 'infinite'
+
+config host
+	option name 'host-09'
+	option dns '1'
+	option leasetime 'infinite'
+	option duid '00010001c792bc863c0b5fb0f7ce'
+
+config host
+	option name 'host-32'
+	option dns '1'
+	list mac '02:00:00:00:00:15'
+	option ip '192.168.0.103'
+
+config host
+	option name 'host-32'
+	option dns '1'
+	option duid '00030001203dbdfec6de'
+
+config host
+	option name 'host-27'
+	option dns '1'
+	list mac '02:00:00:00:00:16'
+	option leasetime 'infinite'
+
+config host
+	option name 'host-27'
+	option dns '1'
+	option leasetime 'infinite'
+	option duid '0003000154b7e56f7cdb'
+
+config host
+	option name 'host-28'
+	option dns '1'
+	list mac '02:00:00:00:00:04'
+	option ip '192.168.0.210'
+	option leasetime 'infinite'
+
+config host
+	option name 'host-31'
+	option ip '192.168.0.119'
+	list mac '02:00:00:00:00:03'
+	option dns '1'
+	option leasetime 'infinite'
+
+config host
+	option name 'host-29'
+	option mac '02:00:00:00:00:17'
+	option ip '192.168.0.120'
+	option dns '1'
+
+config host
+	option name 'host-20'
+	option mac '02:00:00:00:00:18'
+	option ip '192.168.0.105'
+
+config host
+	option name 'host-08'
+	option mac '02:00:00:00:00:08'
+	option ip '192.168.0.109'
+
+config host
+	option name 'host-33'
+	option mac '02:00:00:00:00:19'
+	option ip '192.168.0.100'
+	option dns '1'
+

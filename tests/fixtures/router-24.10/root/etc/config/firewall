@@ -1,0 +1,289 @@
+package firewall
+
+config defaults
+	option input 'REJECT'
+	option output 'ACCEPT'
+	option forward 'REJECT'
+	option synflood_protect '1'
+	option flow_offloading '1'
+	option flow_offloading_hw '1'
+
+config zone
+	option name 'lan'
+	option input 'ACCEPT'
+	option output 'ACCEPT'
+	option forward 'ACCEPT'
+	list network 'lan'
+
+config zone
+	option name 'wan'
+	option input 'REJECT'
+	option output 'ACCEPT'
+	option forward 'REJECT'
+	option masq '1'
+	option mtu_fix '1'
+	list network 'wan'
+	list network 'wan6'
+	list network 'wan6_alias0'
+	list network 'awg0'
+	list network 'awg1'
+	list network 'awg2'
+	list network 'awg3'
+	list network 'awg4'
+
+config zone
+	option name 'vpn'
+	option forward 'ACCEPT'
+	option output 'ACCEPT'
+	option input 'ACCEPT'
+	option masq '1'
+	option mtu_fix '1'
+	list network 'vpn'
+	list network 'vpn6'
+
+config forwarding
+	option name 'rule-10'
+	option dest 'vpn'
+	option src 'lan'
+
+config forwarding
+	option src 'lan'
+	option dest 'wan'
+
+config rule
+	option src 'lan'
+	option dest 'wan'
+	option name 'rule-03'
+	list src_mac '02:00:00:00:00:02'
+	option target 'REJECT'
+	option weekdays 'Mon Tue Wed Thu Fri'
+	option start_time '00:00:00'
+	option stop_time '07:00:00'
+	list proto 'all'
+	option enabled '0'
+
+config rule
+	option src 'lan'
+	option dest 'wan'
+	option name 'rule-03'
+	list src_ip '192.168.0.243'
+	option target 'REJECT'
+	option weekdays 'Mon Tue Wed Thu Fri'
+	option start_time '00:00:00'
+	option stop_time '07:00:00'
+	list proto 'all'
+	option enabled '0'
+
+config rule
+	option name 'rule-04'
+	list proto 'all'
+	option src 'lan'
+	list src_mac '02:00:00:00:00:03'
+	option dest '*'
+	option target 'DROP'
+	option enabled '0'
+
+config rule
+	option name 'rule-01'
+	list proto 'icmp'
+	option src 'lan'
+	list src_mac '02:00:00:00:00:04'
+	option dest 'wan'
+	option target 'REJECT'
+
+config rule
+	option name 'Allow-DHCP-Renew'
+	option src 'wan'
+	option proto 'udp'
+	option dest_port '68'
+	option target 'ACCEPT'
+	option family 'ipv4'
+
+config rule
+	option name 'Allow-Ping'
+	option src 'wan'
+	option proto 'icmp'
+	option icmp_type 'echo-request'
+	option family 'ipv4'
+	option target 'ACCEPT'
+
+config rule
+	option name 'Allow-IGMP'
+	option src 'wan'
+	option proto 'igmp'
+	option family 'ipv4'
+	option target 'ACCEPT'
+
+config rule
+	option name 'Allow-DHCPv6'
+	option src 'wan'
+	option proto 'udp'
+	option dest_port '546'
+	option family 'ipv6'
+	option target 'ACCEPT'
+
+config rule
+	option name 'Allow-MLD'
+	option src 'wan'
+	option proto 'icmp'
+	option src_ip 'fe80::/10'
+	list icmp_type '130/0'
+	list icmp_type '131/0'
+	list icmp_type '132/0'
+	list icmp_type '143/0'
+	option family 'ipv6'
+	option target 'ACCEPT'
+
+config rule
+	option name 'Allow-ICMPv6-Input'
+	option src 'wan'
+	option proto 'icmp'
+	list icmp_type 'echo-request'
+	list icmp_type 'echo-reply'
+	list icmp_type 'destination-unreachable'
+	list icmp_type 'packet-too-big'
+	list icmp_type 'time-exceeded'
+	list icmp_type 'bad-header'
+	list icmp_type 'unknown-header-type'
+	list icmp_type 'router-solicitation'
+	list icmp_type 'neighbour-solicitation'
+	list icmp_type 'router-advertisement'
+	list icmp_type 'neighbour-advertisement'
+	option limit '1000/sec'
+	option family 'ipv6'
+	option target 'ACCEPT'
+
+config rule
+	option name 'Allow-ICMPv6-Forward'
+	option src 'wan'
+	option dest '*'
+	option proto 'icmp'
+	list icmp_type 'echo-request'
+	list icmp_type 'echo-reply'
+	list icmp_type 'destination-unreachable'
+	list icmp_type 'packet-too-big'
+	list icmp_type 'time-exceeded'
+	list icmp_type 'bad-header'
+	list icmp_type 'unknown-header-type'
+	option limit '1000/sec'
+	option family 'ipv6'
+	option target 'ACCEPT'
+
+config rule
+	option name 'Allow-IPSec-ESP'
+	option src 'wan'
+	option dest 'lan'
+	option proto 'esp'
+	option target 'ACCEPT'
+
+config rule
+	option name 'Allow-ISAKMP'
+	option src 'wan'
+	option dest 'lan'
+	option dest_port '500'
+	option proto 'udp'
+	option target 'ACCEPT'
+
+config rule
+	option name 'Allow-HTTP-for-ACME'
+	list proto 'tcp'
+	option src 'wan'
+	option dest_port '80'
+	option target 'ACCEPT'
+	option enabled '0'
+
+config rule
+	option name 'rule-11'
+	list proto 'tcp'
+	option src 'lan'
+	option dest_port '22'
+	option target 'ACCEPT'
+	option enabled '0'
+
+config rule
+	option name 'rule-06'
+	list proto 'tcp'
+	option src '*'
+	option dest_port '18123'
+	option target 'ACCEPT'
+
+config include 'pbr'
+	option fw4_compatible '1'
+	option type 'script'
+	option path '/usr/share/pbr/firewall.include'
+
+config include 'passwall'
+	option type 'script'
+	option path '/var/etc/passwall.include'
+	option reload '1'
+
+config include 'passwall_server'
+	option type 'script'
+	option path '/var/etc/passwall_server.include'
+	option reload '1'
+
+config rule
+	option name 'rule-05'
+	list proto 'tcp'
+	option src '*'
+	option dest_port '88'
+	option target 'ACCEPT'
+
+config include 'homeproxy_forward'
+	option type 'nftables'
+	option path '/var/run/homeproxy/fw4_forward.nft'
+	option position 'chain-pre'
+	option chain 'forward'
+
+config include 'homeproxy_input'
+	option type 'nftables'
+	option path '/var/run/homeproxy/fw4_input.nft'
+	option position 'chain-pre'
+	option chain 'input'
+
+config include 'homeproxy_post'
+	option type 'nftables'
+	option path '/var/run/homeproxy/fw4_post.nft'
+	option position 'table-post'
+
+config include
+	option path '/etc/killswitch.sh'
+	option type 'script'
+
+config redirect
+	option dest 'lan'
+	option target 'DNAT'
+	option name 'rule-09'
+	list proto 'tcp'
+	option src 'wan'
+	option src_dport '14022'
+	option dest_ip '192.168.0.140'
+	option dest_port '22'
+
+config rule
+	option name 'rule-07'
+	option src 'wan'
+	option dest_port '8443'
+	option proto 'tcp'
+	option target 'ACCEPT'
+
+config redirect
+	option name 'rule-08'
+	option src 'wan'
+	option src_dport '52873'
+	option dest 'lan'
+	option dest_ip '192.168.0.251'
+	option dest_port '52873'
+	option proto 'tcp udp'
+	option target 'DNAT'
+
+config rule
+	option name 'rule-02'
+	option src 'lan'
+	option dest '*'
+	option family 'ipv6'
+	option proto 'all'
+	list src_mac '02:00:00:00:00:03'
+	list src_mac '02:00:00:00:00:04'
+	option target 'REJECT'
+

@@ -1,0 +1,26 @@
+2001:db8:3::4 dev awg2  metric 256 
+2001:db8:3::3 dev awg1  metric 256 
+2001:db8:3::5 dev awg3  metric 256 
+2001:db8:3::2 dev awg0  metric 256 
+2001:db8:2:4b02::1 dev wan  metric 256 
+fd00:0:1::/64 dev br-lan  metric 1024 
+fd00:0:1:4::/62 via fe80::13 dev br-lan  metric 1024 
+fd00:0:1:10::/64 dev awg0  metric 1024 
+fd00:0:1:11::/64 dev wan  metric 1024 
+unreachable fd00:0:1::/48 dev lo  metric 2147483647 
+fe80::/64 dev eth0  metric 256 
+fe80::/64 dev br-lan  metric 256 
+fe80::/64 dev wan  metric 256 
+anycast fd00:0:1:: dev br-lan  metric 0 
+anycast fd00:0:1:10:: dev awg0  metric 0 
+anycast fd00:0:1:11:: dev wan  metric 0 
+anycast fe80:: dev eth0  metric 0 
+anycast fe80:: dev br-lan  metric 0 
+anycast fe80:: dev wan  metric 0 
+multicast 2001:db8:5::/8 dev eth0  metric 256 
+multicast 2001:db8:5::/8 dev br-lan  metric 256 
+multicast 2001:db8:5::/8 dev wan  metric 256 
+multicast 2001:db8:5::/8 dev awg0  metric 256 
+multicast 2001:db8:5::/8 dev awg2  metric 256 
+multicast 2001:db8:5::/8 dev awg3  metric 256 
+multicast 2001:db8:5::/8 dev awg1  metric 256 

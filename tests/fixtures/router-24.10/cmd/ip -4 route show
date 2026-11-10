@@ -1,0 +1,6 @@
+default via 10.128.28.254 dev wan  src 10.128.28.73 
+10.128.28.0/24 dev wan scope link  src 10.128.28.73 
+192.168.0.0/24 dev br-lan scope link  src 192.168.0.1 
+198.18.0.66 via 10.128.28.254 dev wan 
+198.18.0.24 via 10.128.28.254 dev wan 
+198.18.0.15 via 10.128.28.254 dev wan 

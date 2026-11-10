@@ -1,0 +1,52 @@
+192.168.137.1 dev br-lan  used 0/0/0 probes 6 FAILED
+192.168.0.140 dev br-lan lladdr 02:00:00:00:00:12 ref 1 used 0/0/0 probes 5 REACHABLE
+192.168.0.109 dev br-lan lladdr 02:00:00:00:00:08 ref 1 used 0/0/0 probes 1 REACHABLE
+192.168.0.104 dev br-lan  used 0/0/0 probes 6 FAILED
+192.168.0.222 dev br-lan lladdr 02:00:00:00:00:0f used 0/0/0 probes 1 STALE
+192.168.0.142 dev br-lan lladdr 02:00:00:00:00:09 ref 1 used 0/0/0 probes 1 REACHABLE
+192.168.0.111 dev br-lan lladdr 02:00:00:00:00:1a ref 1 used 0/0/0 probes 1 REACHABLE
+192.168.0.213 dev br-lan lladdr 02:00:00:00:00:1f used 0/0/0 probes 1 STALE
+172.26.96.1 dev br-lan  used 0/0/0 probes 6 FAILED
+192.168.0.120 dev br-lan lladdr 02:00:00:00:00:17 used 0/0/0 probes 1 STALE
+192.168.0.119 dev br-lan lladdr 02:00:00:00:00:03 used 0/0/0 probes 1 STALE
+192.168.0.221 dev br-lan lladdr 02:00:00:00:00:11 used 0/0/0 probes 1 STALE
+192.168.0.251 dev br-lan  ref 1 used 0/0/0 probes 4 INCOMPLETE
+192.168.0.224 dev br-lan lladdr 02:00:00:00:00:0e used 0/0/0 probes 1 STALE
+192.168.0.100 dev br-lan lladdr 02:00:00:00:00:19 used 0/0/0 probes 1 STALE
+192.168.0.210 dev br-lan lladdr 02:00:00:00:00:04 ref 1 used 0/0/0 probes 1 REACHABLE
+192.168.0.254 dev br-lan  used 0/0/0 probes 6 FAILED
+192.168.0.223 dev br-lan lladdr 02:00:00:00:00:10 used 0/0/0 probes 1 STALE
+192.168.0.113 dev br-lan lladdr 02:00:00:00:00:07 ref 1 used 0/0/0 probes 1 REACHABLE
+192.168.0.240 dev br-lan lladdr 02:00:00:00:00:13 used 0/0/0 probes 1 STALE
+192.168.0.107 dev br-lan lladdr 02:00:00:00:00:1d used 0/0/0 probes 1 STALE
+192.168.0.253 dev br-lan lladdr 02:00:00:00:00:28 ref 1 used 0/0/0 probes 1 REACHABLE
+192.168.0.102 dev br-lan lladdr 02:00:00:00:00:06 used 0/0/0 probes 1 STALE
+192.168.0.212 dev br-lan lladdr 02:00:00:00:00:16 used 0/0/0 probes 3 STALE
+192.168.0.110 dev br-lan lladdr 02:00:00:00:00:1b ref 1 used 0/0/0 probes 1 REACHABLE
+10.128.28.254 dev wan lladdr 02:00:00:00:00:68 ref 1 used 0/0/0 probes 4 REACHABLE
+192.168.0.211 dev br-lan lladdr 02:00:00:00:00:23 used 0/0/0 probes 1 STALE
+192.168.0.101 dev br-lan lladdr 02:00:00:00:00:69 ref 1 used 0/0/0 probes 1 REACHABLE
+192.168.0.220 dev br-lan lladdr 02:00:00:00:00:0d used 0/0/0 probes 1 STALE
+fe80::9 dev br-lan lladdr 02:00:00:00:00:16 used 0/0/0 probes 4 STALE
+fe80::a dev br-lan lladdr 02:00:00:00:00:08 used 0/0/0 probes 0 STALE
+fe80::b dev br-lan lladdr 02:00:00:00:00:02 used 0/0/0 probes 0 STALE
+fe80::c dev br-lan lladdr 02:00:00:00:00:10 used 0/0/0 probes 0 STALE
+fe80::d dev br-lan lladdr 02:00:00:00:00:69 used 0/0/0 probes 0 STALE
+fe80::e dev br-lan lladdr 02:00:00:00:00:13 used 0/0/0 probes 0 STALE
+fe80::f dev br-lan lladdr 02:00:00:00:00:08 used 0/0/0 probes 0 STALE
+fe80::10 dev br-lan lladdr 02:00:00:00:00:08 used 0/0/0 probes 0 STALE
+fe80::11 dev br-lan lladdr 02:00:00:00:00:17 used 0/0/0 probes 0 STALE
+fe80::12 dev br-lan lladdr 02:00:00:00:00:24 used 0/0/0 probes 1 STALE
+fe80::13 dev br-lan lladdr 02:00:00:00:00:0d used 0/0/0 probes 1 STALE
+fe80::14 dev br-lan lladdr 02:00:00:00:00:06 used 0/0/0 probes 0 STALE
+fe80::15 dev br-lan lladdr 02:00:00:00:00:1b used 0/0/0 probes 0 STALE
+fe80::16 dev br-lan lladdr 02:00:00:00:00:28 used 0/0/0 probes 0 STALE
+fe80::17 dev br-lan lladdr 02:00:00:00:00:23 used 0/0/0 probes 0 STALE
+fe80::18 dev br-lan lladdr 02:00:00:00:00:08 used 0/0/0 probes 0 STALE
+fe80::19 dev br-lan lladdr 02:00:00:00:00:22 used 0/0/0 probes 1 STALE
+fe80::1a dev br-lan lladdr 02:00:00:00:00:08 used 0/0/0 probes 0 STALE
+fe80::1b dev br-lan lladdr 02:00:00:00:00:12 used 0/0/0 probes 0 STALE
+fe80::1c dev br-lan lladdr 02:00:00:00:00:03 used 0/0/0 probes 0 STALE
+fe80::8 dev wan lladdr 02:00:00:00:00:01 used 0/0/0 probes 0 STALE
+fe80::1d dev br-lan lladdr 02:00:00:00:00:07 used 0/0/0 probes 1 STALE
+fe80::1e dev br-lan lladdr 02:00:00:00:00:1d used 0/0/0 probes 0 STALE

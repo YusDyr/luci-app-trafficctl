@@ -1,0 +1,32 @@
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 state UNKNOWN qlen 1000
+    inet6 ::1/128 scope host 
+       valid_lft forever preferred_lft forever
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1504 state UP qlen 1000
+    inet6 fe80::7/64 scope link 
+       valid_lft forever preferred_lft forever
+6: wan@eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 state UP qlen 1000
+    inet6 2001:db8:2:4b02::1/128 scope global 
+       valid_lft forever preferred_lft forever
+    inet6 fd00:0:1:11::1/64 scope global noprefixroute 
+       valid_lft forever preferred_lft forever
+    inet6 fe80::8/64 scope link 
+       valid_lft forever preferred_lft forever
+7: br-lan: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 state UP qlen 1000
+    inet6 fd00:0:1::1/60 scope global noprefixroute 
+       valid_lft forever preferred_lft forever
+    inet6 fe80::7/64 scope link 
+       valid_lft forever preferred_lft forever
+8: awg0: <POINTOPOINT,NOARP,UP,LOWER_UP> mtu 1420 state UNKNOWN qlen 1000
+    inet6 fd00:0:1:10::1/64 scope global noprefixroute 
+       valid_lft forever preferred_lft forever
+    inet6 2001:db8:3::2/128 scope global 
+       valid_lft forever preferred_lft forever
+15: awg2: <POINTOPOINT,NOARP,UP,LOWER_UP> mtu 1420 state UNKNOWN qlen 1000
+    inet6 2001:db8:3::4/128 scope global 
+       valid_lft forever preferred_lft forever
+16: awg3: <POINTOPOINT,NOARP,UP,LOWER_UP> mtu 1420 state UNKNOWN qlen 1000
+    inet6 2001:db8:3::5/128 scope global 
+       valid_lft forever preferred_lft forever
+17: awg1: <POINTOPOINT,NOARP,UP,LOWER_UP> mtu 1420 state UNKNOWN qlen 1000
+    inet6 2001:db8:3::3/128 scope global 
+       valid_lft forever preferred_lft forever

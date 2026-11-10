@@ -1,0 +1,10 @@
+class htb 1:1 root rate 1Gbit ceil 1Gbit burst 125000b cburst 125000b
+class htb 1:fffe parent 1:1 leaf 8001: prio 0 rate 1Gbit ceil 1Gbit burst 125000b cburst 125000b
+class htb 1:3 parent 1:1 leaf 8003: prio 0 rate 2Mbit ceil 2Mbit burst 2500b cburst 2500b
+class htb 1:4 parent 1:1 leaf 8004: prio 0 rate 1Mbit ceil 1Mbit burst 1600b cburst 1600b
+class htb 1:5 parent 1:1 leaf 8006: prio 0 rate 2Mbit ceil 2Mbit burst 2500b cburst 2500b
+class fq_codel 8001:2e6 parent 8001: 
+class fq_codel 8004:110 parent 8004: 
+class fq_codel 8004:12e parent 8004: 
+class fq_codel 8006:104 parent 8006: 
+class fq_codel 8006:3d6 parent 8006: 

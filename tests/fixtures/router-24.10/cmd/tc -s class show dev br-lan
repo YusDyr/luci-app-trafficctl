@@ -1,0 +1,50 @@
+class htb 1:1 root rate 1Gbit ceil 1Gbit burst 125000b cburst 125000b
+ Sent 196086158934 bytes 160577372 pkt (dropped 0, overlimits 7590 requeues 0) 
+ backlog 0b 0p requeues 0
+ lended: 0 borrowed: 0 giants: 0
+ tokens: 15553 ctokens: 15553
+
+class htb 1:fffe parent 1:1 leaf 8001: prio 0 rate 1Gbit ceil 1Gbit burst 125000b cburst 125000b
+ Sent 194837676537 bytes 159290669 pkt (dropped 0, overlimits 25461 requeues 0) 
+ backlog 0b 0p requeues 0
+ lended: 109637541 borrowed: 0 giants: 0
+ tokens: 15553 ctokens: 15553
+
+class htb 1:3 parent 1:1 leaf 8003: prio 0 rate 2Mbit ceil 2Mbit burst 2500b cburst 2500b
+ Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) 
+ backlog 0b 0p requeues 0
+ lended: 0 borrowed: 0 giants: 0
+ tokens: 156250 ctokens: 156250
+
+class htb 1:4 parent 1:1 leaf 8004: prio 0 rate 1Mbit ceil 1Mbit burst 1600b cburst 1600b
+ Sent 21286 bytes 158 pkt (dropped 0, overlimits 2 requeues 0) 
+ backlog 0b 0p requeues 0
+ lended: 157 borrowed: 0 giants: 0
+ tokens: 110250 ctokens: 110250
+
+class htb 1:5 parent 1:1 leaf 8006: prio 0 rate 2Mbit ceil 2Mbit burst 2500b cburst 2500b
+ Sent 1248408613 bytes 1286099 pkt (dropped 0, overlimits 884668 requeues 0) 
+ backlog 0b 0p requeues 0
+ lended: 1177261 borrowed: 0 giants: 0
+ tokens: 152875 ctokens: 152875
+
+class fq_codel 8001:2e6 parent 8001: 
+ (dropped 0, overlimits 0 requeues 0) 
+ backlog 0b 0p requeues 0
+  deficit 808 count 0 lastcount 0 ldelay 6us
+class fq_codel 8004:110 parent 8004: 
+ (dropped 0, overlimits 0 requeues 0) 
+ backlog 0b 0p requeues 0
+  deficit 229 count 0 lastcount 0 ldelay 4us
+class fq_codel 8004:12e parent 8004: 
+ (dropped 0, overlimits 0 requeues 0) 
+ backlog 0b 0p requeues 0
+  deficit 322 count 0 lastcount 0 ldelay 5us
+class fq_codel 8006:104 parent 8006: 
+ (dropped 0, overlimits 0 requeues 0) 
+ backlog 0b 0p requeues 0
+  deficit 1280 count 3 lastcount 1 ldelay 1us
+class fq_codel 8006:3d6 parent 8006: 
+ (dropped 0, overlimits 0 requeues 0) 
+ backlog 0b 0p requeues 0
+  deficit 1406 count 1 lastcount 1 ldelay 1us
