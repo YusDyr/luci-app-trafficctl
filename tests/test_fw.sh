@@ -20,7 +20,7 @@ nft() { return 1; }
 command() { return 1; }
 export -f uci nft command
 
-# Source the firewall library (will fall back to iptables mode)
+# Source the firewall library
 . "$(dirname "$0")/../trafficctl/files/usr/libexec/trafficctl/trafficctl-fw.sh"
 
 # --- tctl_validate_ip ---
@@ -67,9 +67,10 @@ assert_eq "wan device: fails when nothing resolves" 1 "$(_wan_device_no_candidat
 assert_eq "wan device: emits no bogus name" "" "$(_wan_device_no_candidates 2>/dev/null)"
 rmdir "$_EMPTY_SYSFS" 2>/dev/null
 
-# --- TCTL_FW detection ---
+# --- TCTL_FW ---
 
-assert_eq "firewall mode is iptables when nft unavailable" "iptables" "$TCTL_FW"
+# nft lists nothing before fw4 loads at boot; that must not change the backend.
+assert_eq "firewall mode is nft even when nft lists no tables" "nft" "$TCTL_FW"
 
 # --- tctl_get_offload_mode ---
 # Each case runs in a subshell with stubbed uci/nft, sources the library fresh,

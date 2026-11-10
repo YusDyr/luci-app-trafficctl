@@ -374,6 +374,5 @@ The script auto-detects a target device from the overview table, preferring (in 
 
 1. Fork the repo, create a feature branch.
 2. Test on real hardware (or QEMU).
-3. Ensure both nft and iptables paths work if touching firewall code.
-4. Run `shellcheck` and `eslint`.
-5. Submit PR with description of what and why.
+3. Run `shellcheck` and `eslint`.
+4. Submit PR with description of what and why.

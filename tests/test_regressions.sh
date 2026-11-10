@@ -271,7 +271,7 @@ assert_not_contains "shaper: never deletes the foreign root qdisc" "qdisc del de
 
 # ════════════════════════════════════════════════════════════════════════════
 # 5. Rule removal is anchored — unblocking one address must not remove another
-#    whose address is a substring/prefix match. Cover both nft and iptables.
+#    whose address is a substring/prefix match.
 # ════════════════════════════════════════════════════════════════════════════
 
 # --- nft branch ---
@@ -311,99 +311,19 @@ assert_not_contains "nft unblock: does not touch 192.168.1.10's rule" "handle 11
 OUT=$(PATH="$MOCKBIN:$PATH" sh -c ". '$BIN/trafficctl-fw.sh'; tctl_is_blocked 192.168.1.1 && echo BLOCKED || echo NOTBLOCKED")
 assert_eq "nft: tctl_is_blocked matches the exact address" "BLOCKED" "$OUT"
 
-# --- iptables branch (TCTL_FW=iptables), using the real -L -n column layout
-# trafficctl-fw.sh's tctl_is_blocked parses ---
-IPT_L_FILE="$TMPDIR/iptables_L_n.txt"
-cat > "$IPT_L_FILE" <<'EOF'
-Chain FORWARD (policy ACCEPT)
-target     prot opt source               destination
-DROP       all  --  192.168.1.1          0.0.0.0/0
-DROP       all  --  192.168.1.10         0.0.0.0/0
+# Only 192.168.1.10 is blocked: an unanchored match on "192.168.1.1" would
+# read that row as 192.168.1.1's.
+cat > "$NFT_DUMP_FILE" <<'EOF'
+table inet fw4 {
+	chain forward {
+		ip saddr 192.168.1.10 counter packets 3 bytes 300 drop comment "tctl_block_192_168_1_10" # handle 11
+	}
+}
 EOF
-cat > "$MOCKBIN/nft" <<'MOCK'
-#!/bin/sh
-exit 1
-MOCK
-cat > "$MOCKBIN/iptables" <<MOCK
-#!/bin/sh
-case "\$*" in
-    -L\ FORWARD\ -n) cat "$IPT_L_FILE" ;;
-    *) exit 0 ;;
-esac
-MOCK
-chmod +x "$MOCKBIN/nft" "$MOCKBIN/iptables"
-
 OUT=$(PATH="$MOCKBIN:$PATH" sh -c ". '$BIN/trafficctl-fw.sh'; tctl_is_blocked 192.168.1.1 && echo BLOCKED || echo NOTBLOCKED")
-assert_eq "iptables: tctl_is_blocked 192.168.1.1 matches its own exact row" "BLOCKED" "$OUT"
-
-OUT=$(PATH="$MOCKBIN:$PATH" sh -c ". '$BIN/trafficctl-fw.sh'; tctl_is_blocked 192.168.1.11 && echo BLOCKED || echo NOTBLOCKED")
-assert_eq "iptables: tctl_is_blocked 192.168.1.11 (unanchored prefix of .1 / .10) is NOT blocked" \
-    "NOTBLOCKED" "$OUT"
-
-# The scenario from the brief: only 192.168.1.10 is blocked (192.168.1.1 is
-# NOT). tctl_is_blocked 192.168.1.1 must therefore be false — an unanchored
-# match on the string "192.168.1.1" would incorrectly match the
-# "192.168.1.10" row (which contains "192.168.1.1" as a substring).
-IPT_ONLY_10_FILE="$TMPDIR/iptables_only_10.txt"
-cat > "$IPT_ONLY_10_FILE" <<'EOF'
-Chain FORWARD (policy ACCEPT)
-target     prot opt source               destination
-DROP       all  --  192.168.1.10         0.0.0.0/0
-EOF
-cat > "$MOCKBIN/iptables" <<MOCK
-#!/bin/sh
-case "\$*" in
-    -L\ FORWARD\ -n) cat "$IPT_ONLY_10_FILE" ;;
-    *) exit 0 ;;
-esac
-MOCK
-chmod +x "$MOCKBIN/iptables"
-OUT=$(PATH="$MOCKBIN:$PATH" sh -c ". '$BIN/trafficctl-fw.sh'; tctl_is_blocked 192.168.1.1 && echo BLOCKED || echo NOTBLOCKED")
-assert_eq "iptables: only .10 blocked — tctl_is_blocked 192.168.1.1 is NOT blocked" "NOTBLOCKED" "$OUT"
+assert_eq "nft: only .10 blocked — tctl_is_blocked 192.168.1.1 is NOT blocked" "NOTBLOCKED" "$OUT"
 OUT=$(PATH="$MOCKBIN:$PATH" sh -c ". '$BIN/trafficctl-fw.sh'; tctl_is_blocked 192.168.1.10 && echo BLOCKED || echo NOTBLOCKED")
-assert_eq "iptables: only .10 blocked — tctl_is_blocked 192.168.1.10 IS blocked" "BLOCKED" "$OUT"
-
-# Restore the two-row fixture for the assertions below.
-cat > "$MOCKBIN/iptables" <<MOCK
-#!/bin/sh
-case "\$*" in
-    -L\ FORWARD\ -n) cat "$IPT_L_FILE" ;;
-    *) exit 0 ;;
-esac
-MOCK
-chmod +x "$MOCKBIN/iptables"
-
-# The equivalent summary.sh column layout (-L -nvx: pkts/bytes/target/prot/opt/in/out/source/destination)
-SUMMARY_L_FILE="$TMPDIR/summary_iptables_L_nvx.txt"
-cat > "$SUMMARY_L_FILE" <<'EOF'
-Chain FORWARD (policy ACCEPT 0 packets, 0 bytes)
-    pkts      bytes target     prot opt in     out     source               destination
-       5      500 DROP       all  --  *      *       192.168.1.1          0.0.0.0/0
-       3      300 DROP       all  --  *      *       192.168.1.10         0.0.0.0/0
-EOF
-# trafficctl-summary.sh's lookup_blocked (iptables branch) reads column 4 (src)
-# after skipping pkts/bytes/target — verify unblocking 192.168.1.1 leaves
-# 192.168.1.10's row intact and distinguishable.
-BLOCKED_11=$(awk -v ip="192.168.1.1" '
-    $3 == "DROP" {
-        for (i = 4; i <= NF; i++) {
-            src = $i
-            sub(/\/32$/, "", src)
-            if (src == ip) { found = 1; exit }
-        }
-    }
-    END { print (found ? 1 : 0) }' "$SUMMARY_L_FILE")
-BLOCKED_1_10=$(awk -v ip="192.168.1.10" '
-    $3 == "DROP" {
-        for (i = 4; i <= NF; i++) {
-            src = $i
-            sub(/\/32$/, "", src)
-            if (src == ip) { found = 1; exit }
-        }
-    }
-    END { print (found ? 1 : 0) }' "$SUMMARY_L_FILE")
-assert_eq "summary iptables -nvx layout: 192.168.1.1 blocked" "1" "$BLOCKED_11"
-assert_eq "summary iptables -nvx layout: 192.168.1.10 blocked independently" "1" "$BLOCKED_1_10"
+assert_eq "nft: only .10 blocked — tctl_is_blocked 192.168.1.10 IS blocked" "BLOCKED" "$OUT"
 
 # ════════════════════════════════════════════════════════════════════════════
 # 6. Rule comments are derived from the target, not the caller's label
@@ -478,53 +398,7 @@ DELETED=$(cat "$NFT_DELETE_LOG")
 assert_contains "unblock via Telegram path actually deleted the rule (handle 42)" "handle 42" "$DELETED"
 
 # ════════════════════════════════════════════════════════════════════════════
-# 7. Port ranges survive on the iptables branch; hashlimit name stays <=15 chars
-# ════════════════════════════════════════════════════════════════════════════
-
-PFW="$TMPDIR/portfw.sh"
-sed "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" "$BIN/trafficctl-portfw.sh" > "$PFW"
-
-cat > "$MOCKBIN/nft" <<'MOCK'
-#!/bin/sh
-exit 1
-MOCK
-IPT_LOG="$TMPDIR/iptables_calls.log"
-: > "$IPT_LOG"
-# -S (list rule specs) always returns empty here (no pre-existing rules to
-# delete), and a bare `-D <chain>` with no further args (i.e. delete_by_comment
-# re-evaluating an empty match) must FAIL like the real iptables does —
-# otherwise pfw_delete_by_comment's `while ... :; done` loop never terminates.
-cat > "$MOCKBIN/iptables" <<MOCK
-#!/bin/sh
-echo "\$*" >> "$IPT_LOG"
-case "\$*" in
-    -S\ *) exit 0 ;;
-    -D\ FORWARD|-D\ INPUT) exit 1 ;;
-    *) exit 0 ;;
-esac
-MOCK
-chmod +x "$MOCKBIN/nft" "$MOCKBIN/iptables"
-
-: > "$IPT_LOG"
-OUT=$(PATH="$MOCKBIN:$PATH" sh "$PFW" pause forward tcp 192.168.1.30 8000-8100 2>&1)
-assert_contains "pfw pause: ok" '"ok":true' "$OUT"
-CALLS=$(cat "$IPT_LOG")
-assert_contains "pfw pause: iptables gets the FULL range 8000:8100, not truncated to 8000" \
-    "--dport 8000:8100" "$CALLS"
-assert_not_contains "pfw pause: does not pass the bare truncated low port alone" \
-    "--dport 8000 " "$CALLS"
-
-: > "$IPT_LOG"
-OUT=$(PATH="$MOCKBIN:$PATH" sh "$PFW" limit forward tcp 192.168.1.30 8000-8100 5000 2>&1)
-assert_contains "pfw limit: ok" '"ok":true' "$OUT"
-CALLS=$(cat "$IPT_LOG")
-assert_contains "pfw limit: iptables gets the full range for --dport too" "--dport 8000:8100" "$CALLS"
-HLNAME=$(printf '%s' "$CALLS" | grep -o 'hashlimit-name [^ ]*' | head -1 | awk '{print $2}')
-assert_eq "pfw limit: hashlimit name stays within iptables' 15-char limit" \
-    "yes" "$([ "${#HLNAME}" -le 15 ] && echo yes || echo no)"
-
-# ════════════════════════════════════════════════════════════════════════════
-# 8. Telegram bot token never appears in fake-curl argv (goes via stdin)
+# 7. Telegram bot token never appears in fake-curl argv (goes via stdin)
 # ════════════════════════════════════════════════════════════════════════════
 # (Covered end-to-end against tg_api/tg_send in test_security.sh; repeated
 # here narrowly against trafficctl-telegram-test.sh's independent tg call

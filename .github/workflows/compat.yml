@@ -173,7 +173,6 @@ jobs:
       # pretended-tested.
       matrix:
         include:
-          - { version: "21.02",   arch: "x86-64", image: "x86-64-v21.02.6" }
           - { version: "22.03",   arch: "x86-64", image: "x86-64-v22.03.7" }
           - { version: "23.05",   arch: "x86-64", image: "x86-64-v23.05.6" }
           - { version: "24.10.1", arch: "x86-64", image: "x86-64-v24.10.1" }

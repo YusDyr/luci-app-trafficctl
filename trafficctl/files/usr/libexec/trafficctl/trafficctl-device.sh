@@ -127,19 +127,13 @@ BLOCK_PACKETS=0
 BLOCK_BYTES=0
 if tctl_is_blocked "$IP"; then
     BLOCKED=true
-    if [ "$TCTL_FW" = "nft" ]; then
-        # A block is two rules — the v4 one keyed on the address and the v6 one
-        # keyed on the MAC (see tctl_block_add) — so the counters are summed
-        # across both. The v6 rule carries no address, only its "_mac" comment.
-        block_line=$(nft list chain inet fw4 forward 2>/dev/null \
-            | grep -e "ip saddr $IP.*drop" -e "comment \"$(tctl_block_comment "$IP")_mac\"")
-        BLOCK_PACKETS=$(echo "$block_line" | grep -oE 'packets [0-9]+' | awk '{ t += $2 } END { printf "%.0f", t }')
-        BLOCK_BYTES=$(echo "$block_line" | grep -oE 'bytes [0-9]+' | awk '{ t += $2 } END { printf "%.0f", t }')
-    else
-        block_line=$(iptables -L FORWARD -nvx 2>/dev/null | grep "DROP" | grep "$IP")
-        BLOCK_PACKETS=$(echo "$block_line" | awk '{print $1}')
-        BLOCK_BYTES=$(echo "$block_line" | awk '{print $2}')
-    fi
+    # A block is two rules — the v4 one keyed on the address and the v6 one
+    # keyed on the MAC (see tctl_block_add) — so the counters are summed
+    # across both. The v6 rule carries no address, only its "_mac" comment.
+    block_line=$(nft list chain inet fw4 forward 2>/dev/null \
+        | grep -e "ip saddr $IP.*drop" -e "comment \"$(tctl_block_comment "$IP")_mac\"")
+    BLOCK_PACKETS=$(echo "$block_line" | grep -oE 'packets [0-9]+' | awk '{ t += $2 } END { printf "%.0f", t }')
+    BLOCK_BYTES=$(echo "$block_line" | grep -oE 'bytes [0-9]+' | awk '{ t += $2 } END { printf "%.0f", t }')
 fi
 [ -z "$BLOCK_PACKETS" ] && BLOCK_PACKETS=0
 [ -z "$BLOCK_BYTES" ] && BLOCK_BYTES=0
@@ -164,19 +158,9 @@ fi
 
 # Get rate limit, each direction: upload has its own ceiling since #83.
 RATE_LIM=0; RATE_LIM_UP=0
-if [ "$TCTL_FW" = "nft" ]; then
-    RL_DUMP=$(nft list table netdev tm_ratelimit 2>/dev/null)
-    RATE_LIM=$(echo "$RL_DUMP" | tctl_rl_rate_kbit "$IP")
-    RATE_LIM_UP=$(echo "$RL_DUMP" | tctl_rl_rate_kbit "$IP" saddr)
-else
-    # The address as a whole field, not a substring (see tctl_rl_rate_kbit).
-    # The download rule is listed first; the upload one is the "_ul" name.
-    RL_DUMP=$(iptables -t mangle -L FORWARD -nv 2>/dev/null | grep "rl_ratelimit" \
-        | awk -v ip="$IP" '{ for (i = 1; i <= NF; i++) if ($i == ip || $i == ip "/32") { print; next } }')
-    RATE_LIM=$(echo "$RL_DUMP" | awk "$TCTL_NFT_RATE_AWK"'{ r = tctl_ipt_first_rate(); if (r >= 0) { print r; exit } }')
-    RATE_LIM_UP=$(echo "$RL_DUMP" | grep -E 'rl_ratelimit.*_ul' \
-        | awk "$TCTL_NFT_RATE_AWK"'{ r = tctl_ipt_first_rate(); if (r >= 0) { print r; exit } }')
-fi
+RL_DUMP=$(nft list table netdev tm_ratelimit 2>/dev/null)
+RATE_LIM=$(echo "$RL_DUMP" | tctl_rl_rate_kbit "$IP")
+RATE_LIM_UP=$(echo "$RL_DUMP" | tctl_rl_rate_kbit "$IP" saddr)
 [ -z "$RATE_LIM" ] && RATE_LIM=0
 [ -z "$RATE_LIM_UP" ] && RATE_LIM_UP=0
 

@@ -22,7 +22,7 @@ BACKEND_SRC="$TCTL_ROOT/${BE_NAME}"
 # luci-app-trafficctl/Makefile.
 # hostapd-utils is optional for the backend (wired-only builds) and is only
 # repeated on luci-app-trafficctl.
-BE_DEPENDS="conntrack curl tc iw"
+BE_DEPENDS="conntrack curl tc iw firewall4"
 FE_EXTRA_DEPENDS="hostapd-utils"
 
 OUTDIR="dist"
@@ -174,7 +174,7 @@ chmod +x "$BE_SCRIPTS"/*
 # luci-app-trafficctl, over an old install. The SDK build cannot set it and
 # does not need it when both are upgraded in one transaction.
 build_apk "$BE_NAME" net \
-    "Per-device traffic monitoring (conntrack), rate limiting (nft/iptables), traffic shaping (tc/HTB), internet blocking, WiFi MAC filtering, a global internet cut, a Telegram bot and a Prometheus exporter. The web interface is luci-app-trafficctl. WiFi MAC filtering needs hostapd-utils (optional; without it a WiFi block is a temporary ban)." \
+    "Per-device traffic monitoring (conntrack), rate limiting (nftables), traffic shaping (tc/HTB), internet blocking, WiFi MAC filtering, a global internet cut, a Telegram bot and a Prometheus exporter. The web interface is luci-app-trafficctl. WiFi MAC filtering needs hostapd-utils (optional; without it a WiFi block is a temporary ban)." \
     "$BE_DEPENDS" "$BE_DATA" "$BE_SCRIPTS" "$PKG_NAME"
 
 # ── luci-app-trafficctl: the web interface ─────────────────────────────────
@@ -207,7 +207,7 @@ chmod +x "$SCRIPTS"/*
 
 # The backend is pinned to the same version, as in build-ipk.sh.
 APK_FILE=$(build_apk "$PKG_NAME" luci \
-    "Per-device traffic monitoring, rate limiting (nft/iptables), traffic shaping (tc/HTB), internet blocking, WiFi MAC filtering, and Telegram bot control." \
+    "Per-device traffic monitoring, rate limiting (nftables), traffic shaping (tc/HTB), internet blocking, WiFi MAC filtering, and Telegram bot control." \
     "${BE_NAME}=${PKG_VERSION}-r${PKG_RELEASE} $BE_DEPENDS $FE_EXTRA_DEPENDS luci-base rpcd" "$DATA" "$SCRIPTS")
 
 # --- Translations, one package per language ---

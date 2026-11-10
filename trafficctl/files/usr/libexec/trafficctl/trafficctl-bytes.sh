@@ -37,7 +37,7 @@ case "$_offload" in
     none|*-counter) ;;
     *)
         _uncountered=1
-        [ "$TCTL_FW" = "nft" ] && [ -z "$TCTL_FORCE_CONNTRACK" ] && \
+        [ -z "$TCTL_FORCE_CONNTRACK" ] && \
             exec /usr/libexec/trafficctl/trafficctl-bytes-nft.sh
         ;;
 esac
@@ -45,10 +45,8 @@ esac
 # Reaching here with uncountered offload means the nft fallback was unavailable
 # and we are about to read counters the forwarding path does not update.
 #
-# Two ways in, and the second is easy to miss:
-#   * TCTL_FORCE_CONNTRACK — bytes-nft.sh bounced back because the kernel has
-#     no dynamic counter map support. Observed on real hardware.
-#   * fw3/iptables — there is no nft fallback to reach in the first place.
+# The only way in is TCTL_FORCE_CONNTRACK: bytes-nft.sh bounced back because
+# the kernel has no dynamic counter map support. Observed on real hardware.
 #
 # The numbers that follow are not merely imprecise, they are FROZEN for every
 # offloaded flow: they stop moving while traffic continues. Left unflagged, a

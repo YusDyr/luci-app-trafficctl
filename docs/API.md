@@ -66,7 +66,6 @@ the same bypass as having no rule, reached more slowly. A MAC does not rotate.
   (`tctl_ip_is_nexthop`): its MAC is the source of every packet it forwards, so
   a MAC-keyed rule would hit every client behind it. Reported the same way,
   naming the reason.
-- **fw3 / iptables (21.02)** is IPv4-only throughout; no `ip6tables` path.
 
 **The IPv6 scope expression differs by family.** The block lives in `inet fw4
 forward` and uses `meta nfproto ipv6`. The limiter's chains are in the **netdev**
@@ -157,9 +156,7 @@ browser. Both are bounded: `poll_interval` is 0 (polling off) or 1–300 seconds
 is how many samples every open browser keeps *per device*, and each poll costs
 the router a conntrack read.
 
-`port` accepts a single port or a `lo-hi` range. On the iptables path a range is
-passed through as `lo:hi`; it used to be truncated to the low port, which left the
-rest of the range open while the UI reported the whole range paused.
+`port` accepts a single port or a `lo-hi` range.
 
 ---
 
@@ -324,12 +321,11 @@ folding the two together would make a trust change look like a source change
 and throw away a real delta.
 
 `degraded` is `true` when the router has **uncountered** flow offload (plain
-`hardware` or `software`) *and* the nftables fallback is unavailable — either
-because the kernel has no dynamic counter map support (`trafficctl-bytes-nft.sh`
-re-execs with `TCTL_FORCE_CONNTRACK=1`), or because the router runs fw3/iptables
-and there is no fallback to reach. The counters then stop moving for every
-offloaded flow while traffic continues, so any total built from them is a lower
-bound that stalls. Consumers must refuse to present it as a total.
+`hardware` or `software`) *and* the nftables fallback is unavailable because the
+kernel has no dynamic counter map support (`trafficctl-bytes-nft.sh` re-execs
+with `TCTL_FORCE_CONNTRACK=1`). The counters then stop moving for every offloaded
+flow while traffic continues, so any total built from them is a lower bound that
+stalls. Consumers must refuse to present it as a total.
 
 Which source is used is decided per call: with flow offload active and no
 working `counter` flag, conntrack stops accounting for offloaded flows, so the
@@ -571,7 +567,7 @@ and the two are merged:
 
 | `type` | Live state | Saved state |
 |--------|------------|-------------|
-| `block` | `tctl_block_<slug>` rules in `inet fw4 forward` (the `_mac` IPv6 rule folds into the same record), or the commented `FORWARD` DROP on iptables | `rules.json`, only while `persist_rules` is on |
+| `block` | `tctl_block_<slug>` rules in `inet fw4 forward` (the `_mac` IPv6 rule folds into the same record) | `rules.json`, only while `persist_rules` is on |
 | `ratelimit` | `trafficctl-ratelimit-stats.sh` (download) and the `_ul` rule (upload) | `rules.json`, only while `persist_rules` is on |
 | `shape` | HTB classes on the LAN device and on `tctl-ifb0`, mapped through `tctl_shape_classmap` | `shapes.json` (always written) |
 | `wifi` | hostapd's running deny ACL, or a ubus ban | uci `maclist` of `macfilter=deny` interfaces |
@@ -612,12 +608,11 @@ no MAC can be keyed on — see [Address family coverage](#address-family-coverag
 `msg` names the reason, and LuCI and the Telegram bot both surface it.
 
 **Side effects (block):**
-- Inserts a drop rule matching `ip saddr` in `inet fw4 forward` (nft) or the
-  `FORWARD` chain (iptables).
+- Inserts a drop rule matching `ip saddr` in `inet fw4 forward`.
 - Inserts a second drop rule matching `meta nfproto ipv6 ether saddr <mac>`
-  (nft only), when the device has a resolvable MAC and is not a routed next
-  hop. `insert`, not `add`: fw4's forward chain accepts established and
-  offloaded flows near the top, and a rule below that never fires.
+  when the device has a resolvable MAC and is not a routed next hop. `insert`,
+  not `add`: fw4's forward chain accepts established and offloaded flows near
+  the top, and a rule below that never fires.
 - Kills existing conntrack entries for the device — IPv4 by address, and IPv6
   for every address the neighbour table currently maps to that MAC
   (`conntrack -D -f ipv6`). Without the second pass an established v6 flow
@@ -780,10 +775,6 @@ trafficctl-ratelimit.sh 192.168.20.0/24 0 "iot-cap"
   isolated with `masq 1` is therefore not covered: the rule is accepted and
   never matches a packet. `trafficctl-subnets.sh` lists what is covered, and
   the dashboard warns when a target falls outside it.
-- **`shared` needs nftables.** On the iptables fallback the policer is
-  `hashlimit --hashlimit-mode dstip`, which is per-address whatever mode was
-  asked for; `trafficctl-ratelimit-stats.sh` reports `each` there for that
-  reason.
 
 **Persistence:** with `persist_rules` on, the target, rate **and mode** are
 written to `/etc/trafficctl/rules.json` and restored on `ifup lan`. Records

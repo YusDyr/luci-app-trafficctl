@@ -58,7 +58,7 @@ cat > "$MOCKBIN/ifaces.sh" <<MOCK
 printf '# 1\nawg3 wan 1 0 0 0 Finland\nusb0 wan 0 0 0 0 -\neth1 wan 0 1 1 0 wan\n' > "$ROLES"
 echo '[]'
 MOCK
-for c in uci ubus nft iptables iw conntrack; do printf '#!/bin/sh\nexit 1\n' > "$MOCKBIN/$c"; done
+for c in uci ubus nft iw conntrack; do printf '#!/bin/sh\nexit 1\n' > "$MOCKBIN/$c"; done
 chmod +x "$MOCKBIN"/*
 
 sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FWLIB|" \

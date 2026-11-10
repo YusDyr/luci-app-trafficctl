@@ -11,9 +11,9 @@
 # A restriction lives in up to two places, and this reads both:
 #
 #   type       live (kernel / radio)                    persisted
-#   block      inet fw4 forward / iptables FORWARD,     rules.json (persist_rules)
+#   block      inet fw4 forward,                        rules.json (persist_rules)
 #              comment tctl_block_<slug>[_mac]
-#   ratelimit  netdev tm_ratelimit / mangle FORWARD     rules.json (persist_rules)
+#   ratelimit  netdev tm_ratelimit                      rules.json (persist_rules)
 #              (via trafficctl-ratelimit-stats.sh)
 #   shape      HTB class on the LAN device              shapes.json (always)
 #   wifi       hostapd running ACL                      uci wireless maclist (deny)
@@ -24,7 +24,7 @@
 # both reading as "active". Nothing here changes state: the view edits and
 # removes through the same rpcd methods the device table uses.
 #
-# Output: {"fw":"nft|iptables","persist_rules":bool,"wifi_allow_ifaces":N,
+# Output: {"fw":"nft","persist_rules":bool,"wifi_allow_ifaces":N,
 #          "rules":[{"type","target","ip","mac","name","online",
 #                    "applied","persisted","rate_kbit","rate_kbit_up","mode",
 #                    "enforcement"}]}
@@ -73,27 +73,20 @@ emit_naming() {
 # its comment slug is the way back to one (a slug of an IPv4 address only ever
 # replaced dots).
 emit_live_blocks() {
-    if [ "$TCTL_FW" = "nft" ]; then
-        nft list chain inet fw4 forward 2>/dev/null | awk '
-        /comment "tctl_block_/ && /drop/ {
-            ip = ""; mac = "-"
-            for (i = 1; i < NF; i++) {
-                if ($i == "saddr" && $(i-1) == "ip") ip = $(i+1)
-                if ($i == "saddr" && $(i-1) == "ether") mac = tolower($(i+1))
-            }
-            if (ip == "" && match($0, /"tctl_block_[0-9_]+_mac"/)) {
-                ip = substr($0, RSTART + 12, RLENGTH - 17)
-                gsub(/_/, ".", ip)
-            }
-            sub(/\/32$/, "", ip)
-            if (ip ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) print "LB", ip, mac
-        }'
-    else
-        iptables -S FORWARD 2>/dev/null | awk '
-        /tctl_block_/ && /-j DROP/ {
-            for (i = 1; i < NF; i++) if ($i == "-s") { ip = $(i+1); sub(/\/32$/, "", ip); print "LB", ip, "-" }
-        }'
-    fi
+    nft list chain inet fw4 forward 2>/dev/null | awk '
+    /comment "tctl_block_/ && /drop/ {
+        ip = ""; mac = "-"
+        for (i = 1; i < NF; i++) {
+            if ($i == "saddr" && $(i-1) == "ip") ip = $(i+1)
+            if ($i == "saddr" && $(i-1) == "ether") mac = tolower($(i+1))
+        }
+        if (ip == "" && match($0, /"tctl_block_[0-9_]+_mac"/)) {
+            ip = substr($0, RSTART + 12, RLENGTH - 17)
+            gsub(/_/, ".", ip)
+        }
+        sub(/\/32$/, "", ip)
+        if (ip ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) print "LB", ip, mac
+    }'
 }
 
 # ── rate limits ───────────────────────────────────────────────────────────
@@ -104,21 +97,11 @@ emit_live_limits() {
     local dump stats
     stats=$("$SCRIPTS/trafficctl-ratelimit-stats.sh" 2>/dev/null)
     [ -n "$stats" ] || return 0
-    if [ "$TCTL_FW" = "nft" ]; then
-        dump=$(nft list table netdev tm_ratelimit 2>/dev/null)
-    else
-        dump=$(iptables -t mangle -L FORWARD -nv 2>/dev/null | grep 'rl_ratelimit.*_ul')
-    fi
+    dump=$(nft list table netdev tm_ratelimit 2>/dev/null)
     printf '%s\n' "$stats" | sed 's/},{/}\n{/g' | sed -n \
         's/.*"ip":"\([^"]*\)","mode":"\([a-z]*\)","rate_kbit":\([0-9]*\).*/\1 \2 \3/p' |
     while read -r ip mode rate; do
-        if [ "$TCTL_FW" = "nft" ]; then
-            up=$(printf '%s\n' "$dump" | tctl_rl_rate_kbit "$ip" saddr)
-        else
-            up=$(printf '%s\n' "$dump" | awk -v ip="$ip" "$TCTL_NFT_RATE_AWK"'
-                { for (i = 1; i <= NF; i++) if ($i == ip || $i == ip "/32") {
-                      r = tctl_ipt_first_rate(); if (r >= 0) { print r; exit } } }')
-        fi
+        up=$(printf '%s\n' "$dump" | tctl_rl_rate_kbit "$ip" saddr)
         echo "LR $ip $mode $rate ${up:-0}"
     done
 }

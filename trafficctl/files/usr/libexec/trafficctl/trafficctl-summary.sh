@@ -213,13 +213,8 @@ if [ "$(uci -q get trafficctl.main.netify_enabled 2>/dev/null)" != "0" ] && [ -S
 fi
 
 # Firewall dumps (IP-independent — fetched once, grepped per device below)
-if [ "$TCTL_FW" = "nft" ]; then
-    FWD_DUMP=$(nft list chain inet fw4 forward 2>/dev/null)
-    RL_DUMP=$(nft list table netdev tm_ratelimit 2>/dev/null)
-else
-    FWD_DUMP=$(iptables -L FORWARD -nvx 2>/dev/null)
-    RL_DUMP=$(iptables -t mangle -L FORWARD -nv 2>/dev/null)
-fi
+FWD_DUMP=$(nft list chain inet fw4 forward 2>/dev/null)
+RL_DUMP=$(nft list table netdev tm_ratelimit 2>/dev/null)
 
 # tc HTB classes → "classid rate_kbit" maps (one tc call per device, parsed
 # once): download on the LAN device, upload on the IFB.
@@ -289,63 +284,31 @@ lookup_mac() {
 # 192.168.1.10's block as belonging to 192.168.1.1.
 lookup_blocked() {
     local ip="$1"
-    if [ "$TCTL_FW" = "nft" ]; then
-        echo "$FWD_DUMP" | grep -q "ip saddr $ip .*drop" && { echo 1; return; }
-        # The IPv6 half of a block matches a MAC and carries no address, so it
-        # is found by its own full comment. Without this the table reports "not
-        # blocked" for a device whose v6 rule is the only one left standing.
-        echo "$FWD_DUMP" | grep -qF "comment \"$(tctl_block_comment "$ip")_mac\"" \
-            && echo 1 || echo 0
-    else
-        echo "$FWD_DUMP" | awk -v ip="$ip" '
-            $3 == "DROP" {
-                for (i = 4; i <= NF; i++) {
-                    src = $i
-                    sub(/\/32$/, "", src)
-                    if (src == ip) { found = 1; exit }
-                }
-            }
-            END { print (found ? 1 : 0) }'
-    fi
+    echo "$FWD_DUMP" | grep -q "ip saddr $ip .*drop" && { echo 1; return; }
+    # The IPv6 half of a block matches a MAC and carries no address, so it
+    # is found by its own full comment. Without this the table reports "not
+    # blocked" for a device whose v6 rule is the only one left standing.
+    echo "$FWD_DUMP" | grep -qF "comment \"$(tctl_block_comment "$ip")_mac\"" \
+        && echo 1 || echo 0
 }
 
 lookup_block_bytes() {
     local ip="$1" b
-    if [ "$TCTL_FW" = "nft" ]; then
-        # Both halves of the block, summed: the v4 rule keyed on the address
-        # and the v6 rule keyed on the MAC. Counting only the first would make
-        # a dual-stack device's dropped bytes read low for the same reason the
-        # traffic used to escape entirely.
-        b=$(echo "$FWD_DUMP" | grep -e "ip saddr $ip " \
-                -e "comment \"$(tctl_block_comment "$ip")_mac\"" \
-            | grep -oE 'bytes [0-9]+' | awk '{ t += $2 } END { printf "%.0f", t }')
-    else
-        b=$(echo "$FWD_DUMP" | awk -v ip="$ip" '
-            $3 == "DROP" {
-                for (i = 4; i <= NF; i++) {
-                    src = $i
-                    sub(/\/32$/, "", src)
-                    if (src == ip) { print $2; exit }
-                }
-            }' | head -1)
-    fi
+    # Both halves of the block, summed: the v4 rule keyed on the address
+    # and the v6 rule keyed on the MAC. Counting only the first would make
+    # a dual-stack device's dropped bytes read low for the same reason the
+    # traffic used to escape entirely.
+    b=$(echo "$FWD_DUMP" | grep -e "ip saddr $ip " \
+            -e "comment \"$(tctl_block_comment "$ip")_mac\"" \
+        | grep -oE 'bytes [0-9]+' | awk '{ t += $2 } END { printf "%.0f", t }')
     echo "${b:-0}"
 }
 
 # $2 "up" reads the upload ceiling instead of the download one.
 lookup_rate_limit() {
-    local ip="$1" r fld=daddr pat='rl_ratelimit'
-    [ "$2" = "up" ] && { fld=saddr; pat='rl_ratelimit.*_ul'; }
-    if [ "$TCTL_FW" = "nft" ]; then
-        r=$(echo "$RL_DUMP" | tctl_rl_rate_kbit "$ip" "$fld")
-    else
-        # The address as a whole field, not a substring (see tctl_rl_rate_kbit).
-        # The download rule is listed first, so it is the first match either
-        # way; the upload one is the only "_ul" name.
-        r=$(echo "$RL_DUMP" | grep -E "$pat" \
-            | awk -v ip="$ip" '{ for (i = 1; i <= NF; i++) if ($i == ip || $i == ip "/32") { print; next } }' \
-            | awk "$TCTL_NFT_RATE_AWK"'{ r = tctl_ipt_first_rate(); if (r >= 0) { print r; exit } }')
-    fi
+    local ip="$1" r fld=daddr
+    [ "$2" = "up" ] && fld=saddr
+    r=$(echo "$RL_DUMP" | tctl_rl_rate_kbit "$ip" "$fld")
     echo "${r:-0}"
 }
 
