@@ -39,6 +39,20 @@ fi
 echo "Using SDK buildroot: $BUILDROOT"
 cd "$BUILDROOT"
 
+# CI only (feed-install.yml): SDK_CACHE_DIR carries the official feed
+# checkouts and the compiled dependencies between runs, see
+# tools/sdk-cache.sh. Our feed is never in it, so everything below still runs
+# against this checkout: the src-link feed is scanned, installed and both
+# packages are compiled from scratch. CONFIG_AUTOREMOVE=y (what
+# openwrt/gh-action-sdk passes too) then trims each dependency's build tree
+# to its stamps, which keeps the cache small; it does not change what is
+# built. Unset (a developer's run), nothing changes.
+CACHE_MAKEARGS=
+if [ -n "${SDK_CACHE_DIR:-}" ]; then
+    bash "$SRC/tools/sdk-cache.sh" restore "$SDK_CACHE_DIR"
+    CACHE_MAKEARGS=CONFIG_AUTOREMOVE=y
+fi
+
 # Ensure the LuCI feed is enabled (our Makefile includes feeds/luci/luci.mk)
 echo "Configuring feeds..."
 if ! grep -q "^src-.*luci" feeds.conf.default 2>/dev/null; then
@@ -96,7 +110,8 @@ for pkg in trafficctl luci-app-trafficctl; do
     # Capture make's real exit code — a `make … | tail` pipeline returns tail's
     # status (0), which under set -e would silently hide a genuine build failure.
     # This matters now that the feed-install job is blocking (no continue-on-error).
-    if ! make "package/$pkg/compile" V=s -j"$(nproc)" > "/tmp/tctl_compile_$pkg.log" 2>&1; then
+    # shellcheck disable=SC2086 # CACHE_MAKEARGS is empty or one word
+    if ! make $CACHE_MAKEARGS "package/$pkg/compile" V=s -j"$(nproc)" > "/tmp/tctl_compile_$pkg.log" 2>&1; then
         tail -80 "/tmp/tctl_compile_$pkg.log"
         echo "ERROR: make compile of $pkg failed"
         exit 1
@@ -115,3 +130,7 @@ for pkg in trafficctl luci-app-trafficctl; do
 done
 
 echo "Feed install + build succeeded:$FOUND"
+
+if [ -n "${SDK_CACHE_DIR:-}" ] && [ "${SDK_CACHE_SAVE:-1}" != 0 ]; then
+    bash "$SRC/tools/sdk-cache.sh" save "$SDK_CACHE_DIR"
+fi

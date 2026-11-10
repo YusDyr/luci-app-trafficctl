@@ -342,6 +342,9 @@ jobs:
   build:
     name: Build the artifacts
     runs-on: ubuntu-latest
+    env:
+      # The SDK image tag, shared by the cache key and the build.
+      SDK_ARCH: x86_64-25.12.4
     needs: [prepare]
     if: needs.prepare.outputs.bump != 'none'
     # Whether this build produced a signed APK. `compat` reuses these
@@ -405,6 +408,34 @@ jobs:
             echo "::notice::APK signing secrets not configured — building unsigned APK with build-apk.sh (installable with 'apk add --allow-untrusted')"
           fi
 
+      # Carries the SDK's downloads, feed checkouts and compiled dependencies
+      # between runs; our own packages are never in it (tools/sdk-cache.sh).
+      # Keyed on the image digest and the packages' DEPENDS, so a new SDK
+      # image or a new dependency makes a new entry, seeded from the last one.
+      - name: Compute the OpenWrt SDK cache key
+        if: needs.prepare.outputs.bump != 'none' && steps.apk_secrets.outputs.have == '1'
+        id: sdk_cache_key
+        run: |
+          IMAGE="ghcr.io/openwrt/sdk:$SDK_ARCH"
+          for i in 1 2 3; do
+            docker pull -q "$IMAGE" && break
+            [ "$i" = 3 ] && exit 1
+            sleep 15
+          done
+          read -r key prefix < <(tools/sdk-cache.sh key "$IMAGE" tools/sdk-entrypoint.sh)
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+          echo "SDK cache key: $key"
+
+      - name: Restore the OpenWrt SDK cache
+        if: needs.prepare.outputs.bump != 'none' && steps.apk_secrets.outputs.have == '1'
+        id: sdk_cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/sdk-cache
+          key: ${{ steps.sdk_cache_key.outputs.key }}
+          restore-keys: ${{ steps.sdk_cache_key.outputs.prefix }}
+
       - name: Build .apk (via OpenWrt SDK, signed)
         if: needs.prepare.outputs.bump != 'none' && steps.apk_secrets.outputs.have == '1'
         # 17-36 min across the last 22 successful runs of each workflow. With
@@ -417,7 +448,10 @@ jobs:
         # already contains (that download is what hit the limit).
         run: tools/sdk-build.sh
         env:
-          ARCH: x86_64-25.12.4
+          ARCH: ${{ env.SDK_ARCH }}
+          SDK_CACHE: ${{ runner.temp }}/sdk-cache
+          # An exact hit is saved already; rewriting the archive would be waste.
+          SDK_CACHE_SAVE: ${{ steps.sdk_cache.outputs.cache-hit == 'true' && '0' || '1' }}
           FEEDNAME: trafficctl
           PACKAGES: trafficctl luci-app-trafficctl
           PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}

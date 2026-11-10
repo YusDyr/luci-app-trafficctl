@@ -60,7 +60,39 @@ jobs:
           - { version: "25.12.4",  sdk_image: "openwrt/sdk:x86_64-25.12.4" }
     steps:
       - uses: actions/checkout@v6
+
+      # The official feeds and the compiled dependencies, carried between
+      # runs (tools/sdk-cache.sh); our feed is never in the cache. Keyed per
+      # SDK image digest, so each matrix entry has its own.
+      - name: Compute the OpenWrt SDK cache key
+        id: sdk_cache_key
+        run: |
+          pulled=0
+          for attempt in 1 2 3; do
+            if docker pull -q "${{ matrix.sdk_image }}"; then pulled=1; break; fi
+            echo "docker pull attempt $attempt failed; retrying..." >&2
+            sleep $((attempt * 5))
+          done
+          [ "$pulled" = 1 ] || exit 0
+          read -r key prefix < <(tools/sdk-cache.sh key "${{ matrix.sdk_image }}" tests/test_feed_install.sh)
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+          echo "SDK cache key: $key"
+
+      - name: Restore the OpenWrt SDK cache
+        id: sdk_cache
+        if: steps.sdk_cache_key.outputs.key != ''
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/sdk-cache
+          key: ${{ steps.sdk_cache_key.outputs.key }}
+          restore-keys: ${{ steps.sdk_cache_key.outputs.prefix }}
+
       - name: Run feed install test in ${{ matrix.sdk_image }}
+        env:
+          SDK_CACHE: ${{ runner.temp }}/sdk-cache
+          # An exact hit is saved already; rewriting the archive would be waste.
+          SDK_CACHE_SAVE: ${{ steps.sdk_cache.outputs.cache-hit == 'true' && '0' || '1' }}
         run: |
           pulled=0
           for attempt in 1 2 3; do
@@ -72,9 +104,19 @@ jobs:
             echo "::warning::SDK image ${{ matrix.sdk_image }} not pullable, skipping"
             exit 0
           fi
+          # The image runs as buildbot (uid 1000), which writes the cache.
+          mkdir -p "$SDK_CACHE"
+          sudo chown -R 1000:1000 "$SDK_CACHE"
+          ret=0
           docker run --rm \
             -v "$PWD:/src:ro" \
+            -v "$SDK_CACHE:/sdk-cache" \
+            --env SDK_CACHE_DIR=/sdk-cache \
+            --env SDK_CACHE_SAVE \
             --entrypoint /bin/sh \
             "${{ matrix.sdk_image }}" \
-            /src/tests/test_feed_install.sh /src
+            /src/tests/test_feed_install.sh /src || ret=$?
+          # Back to the runner user, so actions/cache can archive it.
+          sudo chown -R "$(id -u):$(id -g)" "$SDK_CACHE"
+          exit "$ret"
 

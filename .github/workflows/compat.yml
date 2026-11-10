@@ -88,9 +88,19 @@ jobs:
   # entrypoint.sh runs `./scripts/feeds update -a` unconditionally, the fresh
   # feed checkouts give every package Makefile a new mtime, and `make` then
   # clean-builds the toolchain and all 45 dependencies regardless.
+  #
+  # tools/sdk-cache.sh (the "OpenWrt SDK cache" steps below) gets round both
+  # problems: it restores into the container instead of baking an image, and
+  # it restores the feed checkouts too, with their nanosecond mtimes. With the
+  # checkout present and its commit pinned in feeds.conf, `feeds update`
+  # leaves it alone, so the dependencies' stamps stay valid and only our two
+  # packages, which are never cached, are compiled.
   build-packages:
     name: Build packages
     runs-on: ubuntu-latest
+    env:
+      # The SDK image tag, shared by the cache key and the build.
+      SDK_ARCH: x86_64-25.12.4
     if: ${{ inputs.package_artifact == '' }}
     steps:
       - uses: actions/checkout@v6
@@ -99,6 +109,32 @@ jobs:
         run: |
           ./build-ipk.sh 0.0.0-test 1
           cp dist/*.ipk /tmp/
+
+      # Carries the SDK's downloads, feed checkouts and compiled dependencies
+      # between runs; our own packages are never in it (tools/sdk-cache.sh).
+      # Keyed on the image digest and the packages' DEPENDS, so a new SDK
+      # image or a new dependency makes a new entry, seeded from the last one.
+      - name: Compute the OpenWrt SDK cache key
+        id: sdk_cache_key
+        run: |
+          IMAGE="ghcr.io/openwrt/sdk:$SDK_ARCH"
+          for i in 1 2 3; do
+            docker pull -q "$IMAGE" && break
+            [ "$i" = 3 ] && exit 1
+            sleep 15
+          done
+          read -r key prefix < <(tools/sdk-cache.sh key "$IMAGE" tools/sdk-entrypoint.sh)
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+          echo "SDK cache key: $key"
+
+      - name: Restore the OpenWrt SDK cache
+        id: sdk_cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/sdk-cache
+          key: ${{ steps.sdk_cache_key.outputs.key }}
+          restore-keys: ${{ steps.sdk_cache_key.outputs.prefix }}
 
       - name: Build .apk (via OpenWrt SDK, signed)
         # 17-36 min across the last 22 successful runs of each workflow. With
@@ -110,7 +146,10 @@ jobs:
         # already contains (that download is what hit the limit).
         run: tools/sdk-build.sh
         env:
-          ARCH: x86_64-25.12.4
+          ARCH: ${{ env.SDK_ARCH }}
+          SDK_CACHE: ${{ runner.temp }}/sdk-cache
+          # An exact hit is saved already; rewriting the archive would be waste.
+          SDK_CACHE_SAVE: ${{ steps.sdk_cache.outputs.cache-hit == 'true' && '0' || '1' }}
           FEEDNAME: trafficctl
           PACKAGES: trafficctl luci-app-trafficctl
           PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
