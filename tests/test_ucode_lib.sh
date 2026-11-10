@@ -116,7 +116,7 @@ OUT=$(lib run '"sleep 20"' 300)
 assert_eq "run with a timeout: killed" "" "$OUT"
 assert_eq "run with a timeout: returns early" "yes" "$([ $(( $(date +%s) - START )) -lt 10 ] && echo yes || echo no)"
 assert_eq "run with a timeout: output still captured" "hi" "$(lib run '"echo hi"' 2000)"
-assert_eq "run with a timeout: no temp file left" "" "$(ls -A "$R/tmp" | grep trafficctl_run)"
+assert_eq "run with a timeout: no temp file left" "" "$(find "$R/tmp" -name '*trafficctl_run*')"
 
 # ── files ───────────────────────────────────────────────────────────────────
 
