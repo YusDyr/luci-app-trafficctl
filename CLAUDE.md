@@ -45,7 +45,7 @@ the WiFi block button.
 trafficctl/
   Makefile                                  — OpenWrt package Makefile (package.mk, explicit INSTALL_* per file)
   files/usr/libexec/trafficctl/
-    trafficctl-fw.sh                        — Shared library (fw detection, validation, persistence helpers)
+    trafficctl-fw.sh                        — Shared library (nft helpers, validation, persistence)
     trafficctl-summary.sh                   — All devices summary (JSON array)
     trafficctl-device.sh                    — Per-device detail + connections
     trafficctl-block.sh                     — Block internet (nft)
