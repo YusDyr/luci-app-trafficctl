@@ -86,6 +86,8 @@ fetch ucode jow-/ucode "$ucode"
 # Old trees under a current gcc trip -Werror on warnings that did not exist
 # when they were written; the code itself is what the router runs.
 sed -i 's/-Werror/-Wno-error/g' "$src"/*/CMakeLists.txt
+# The older jsonpath compiles lemon with a bare `gcc`, outside CFLAGS.
+sed -i 's|COMMAND gcc -o|COMMAND gcc -std=gnu17 -o|' "$src/jsonpath/CMakeLists.txt"
 # ubusd applies ACLs to every non-root client and only reads root-owned ACL
 # files. On the router the backend runs as root; the CI user is not.
 sed -i 's/if (!cl || !cl->uid || !obj)/if (1)/' "$src/ubus/ubusd_acl.c"
