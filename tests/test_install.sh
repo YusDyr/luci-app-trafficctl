@@ -98,9 +98,16 @@ esac
 
 # Verify all expected files are present
 for f in \
+  /usr/sbin/trafficctl \
+  /usr/share/ucode/trafficctl/lib.uc \
+  /usr/share/ucode/trafficctl/net.uc \
   /usr/libexec/trafficctl/trafficctl-summary.sh \
   /usr/libexec/trafficctl/trafficctl-fw.sh \
   /usr/libexec/trafficctl/trafficctl-device.sh \
+  /usr/libexec/trafficctl/trafficctl-names.sh \
+  /usr/libexec/trafficctl/trafficctl-subnets.sh \
+  /usr/libexec/trafficctl/trafficctl-ifaces.sh \
+  /usr/libexec/trafficctl/trafficctl-rdns-refresh.sh \
   /usr/libexec/trafficctl/trafficctl-telegram.sh \
   /usr/libexec/trafficctl/trafficctl-telegram-test.sh \
   /usr/libexec/trafficctl/trafficctl-block.sh \
@@ -141,11 +148,27 @@ done
 
 # Verify execute bit on files that are called directly (not via sh)
 for s in \
+  /usr/sbin/trafficctl \
   /usr/libexec/trafficctl/trafficctl-*.sh \
   /usr/libexec/rpcd/luci.trafficctl \
   /etc/init.d/trafficctl-telegram; do
   [ -x "$s" ] || { echo "NOT EXECUTABLE: $s"; exit 1; }
 done
+
+# The ucode CLI runs on this release's own interpreter and finds its modules
+# on the default search path, directly and through the old script names.
+# None of these needs a running ubusd.
+for c in "/usr/sbin/trafficctl names list" "/usr/libexec/trafficctl/trafficctl-names.sh list"; do
+    out=$($c 2>&1)
+    [ "$out" = "[]" ] || { echo "CLI FAILED: $c printed: $out"; exit 1; }
+done
+for c in subnets ifaces; do
+    out=$(/usr/sbin/trafficctl $c 2>&1)
+    case "$out" in "["*"]") ;; *) echo "CLI FAILED: trafficctl $c printed: $out"; exit 1 ;; esac
+done
+if /usr/sbin/trafficctl bogus >/dev/null 2>&1; then
+    echo "CLI FAILED: an unknown command exited 0"; exit 1
+fi
 
 # Each file belongs to the package that is meant to ship it: the backend to
 # trafficctl, the view and its rpcd plugin to luci-app-trafficctl.
@@ -156,6 +179,8 @@ owner_of() {
     esac
 }
 for f in \
+  /usr/sbin/trafficctl \
+  /usr/share/ucode/trafficctl/lib.uc \
   /usr/libexec/trafficctl/trafficctl-fw.sh \
   /etc/config/trafficctl \
   /etc/init.d/trafficctl-telegram \
@@ -207,6 +232,8 @@ esac
 
 # Verify primary files are gone (config files in /etc/config may be kept by design)
 for f in \
+  /usr/sbin/trafficctl \
+  /usr/share/ucode/trafficctl/lib.uc \
   /usr/libexec/trafficctl/trafficctl-summary.sh \
   /usr/libexec/trafficctl/trafficctl-fw.sh \
   /usr/libexec/trafficctl/trafficctl-block.sh \

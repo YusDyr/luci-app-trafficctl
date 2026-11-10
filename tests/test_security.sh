@@ -213,6 +213,18 @@ tg_send 'hello'
 assert_not_contains "bot token never appears in curl argv" "$(cat "$CURL_ARGV_LOG")" "SUPERSECRETTOKEN"
 assert_contains "bot token reaches curl via stdin instead" "$(cat "$TMPDIR/curl.log")" "SUPERSECRETTOKEN"
 
+# ── ucode: one place builds shell command lines ─────────────────────────────
+# lib.uc's run()/lines()/sh() are the only callers of popen() and system(),
+# so q() is applied in one reviewed place rather than at every call site.
+UC_DIR="$BIN/../../share/ucode/trafficctl"
+UC_FILES="$UC_DIR/*.uc $BIN/../../sbin/trafficctl"
+# shellcheck disable=SC2086 # a glob on purpose
+STRAY=$(grep -nE '\b(popen|system|exec)[[:space:]]*\(' $UC_FILES | grep -v "^$UC_DIR/lib.uc:")
+assert_eq "ucode: popen/system appear only in lib.uc" "" "$STRAY"
+# shellcheck disable=SC2086
+assert_eq "ucode: every file starts strict" "" \
+    "$(for f in $UC_FILES; do grep -q "^'use strict';$" "$f" || echo "$f"; done)"
+
 # ── Results ─────────────────────────────────────────────────────────────────
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"

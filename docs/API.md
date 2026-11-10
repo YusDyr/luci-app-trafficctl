@@ -162,6 +162,11 @@ the router a conntrack read.
 
 ## Query Scripts
 
+`trafficctl-subnets.sh`, `trafficctl-names.sh`, `trafficctl-rdns.sh`,
+`trafficctl-rdns-refresh.sh` and `trafficctl-ifaces.sh` are two-line wrappers
+for the ucode CLI: `/usr/sbin/trafficctl subnets|names|rdns|rdns-refresh|ifaces`
+takes the same arguments and prints the same bytes.
+
 ### trafficctl-summary.sh
 
 Returns a summary of all active LAN devices with traffic control status and connection type.

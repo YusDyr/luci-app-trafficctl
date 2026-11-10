@@ -84,6 +84,10 @@ luci-app-trafficctl/                     # repository
 │       │       ├── iface/99-trafficctl-shapes      # Restore tc rules on boot
 │       │       └── dhcp/99-trafficctl-newdevice    # New-device detection
 │       ├── lib/upgrade/keep.d/trafficctl          # /etc/trafficctl/ kept across sysupgrade
+│       ├── usr/sbin/trafficctl          # The CLI (ucode): subnets, names, rdns, rdns-refresh, ifaces
+│       ├── usr/share/ucode/trafficctl/
+│       │   ├── lib.uc                   # Shared helpers: uci/ubus, commands, JSON, validation, files, log
+│       │   └── net.uc                   # Subnets, interface roles, reverse DNS
 │       ├── usr/libexec/trafficctl/
 │       │   ├── trafficctl-fw.sh         # Firewall abstraction (sourced)
 │       │   ├── trafficctl-summary.sh    # All-device summary
@@ -91,7 +95,7 @@ luci-app-trafficctl/                     # repository
 │       │   ├── trafficctl-bytes.sh      # Byte counters for speed (conntrack)
 │       │   ├── trafficctl-bytes-nft.sh  # nft counter init helper
 │       │   ├── trafficctl-totals.sh     # Monotonic lifetime totals (shared by UI + exporter)
-│       │   ├── trafficctl-ifaces.sh     # Per-interface counters (global overview)
+│       │   ├── trafficctl-ifaces.sh     # Wrapper for `trafficctl ifaces`
 │       │   ├── trafficctl-block.sh      # Internet block
 │       │   ├── trafficctl-unblock.sh    # Internet unblock
 │       │   ├── trafficctl-shape.sh      # tc/HTB shaping
@@ -100,7 +104,7 @@ luci-app-trafficctl/                     # repository
 │       │   ├── trafficctl-ratelimit-stats.sh
 │       │   ├── trafficctl-macfilter-add.sh
 │       │   ├── trafficctl-macfilter-remove.sh
-│       │   ├── trafficctl-rdns.sh       # Reverse DNS (Telegram/CLI)
+│       │   ├── trafficctl-rdns.sh       # Wrapper for `trafficctl rdns`
 │       │   ├── trafficctl-rules.sh      # Every restriction, online or not ("Rules" tab)
 │       │   └── ...                      # the rest of the helpers
 │       └── www/cgi-bin/trafficctl-metrics          # Prometheus scrape endpoint
@@ -215,7 +219,6 @@ Run all tests locally. These run on the host with fake `nft`/`tc`/`ip`/`uci`/
 bash tests/test_fw.sh                 # Firewall helper library
 bash tests/test_direction.sh          # Bidirectional limit/shape, classid allocation
 bash tests/test_portfw.sh             # Port-forward control, port ranges
-bash tests/test_names.sh              # Device aliases + reverse-DNS cache
 bash tests/test_netify.sh             # Netify (DPI) integration
 bash tests/test_metrics.sh            # Prometheus exporter
 bash tests/test_bytes_nft.sh          # nftables byte-counter parsing
@@ -231,6 +234,19 @@ bash tests/test_telegram.sh           # Telegram bot units
 bash tests/test_telegram_mock.sh      # Telegram bot with mocked API responses
 bash tests/test_telegram_e2e.sh       # End-to-end bot tests
 bash tests/test_build_ipk.sh          # IPK package build verification
+```
+
+The ucode backend's tests need ucode, uci and ubus built for the host, at the
+oldest (2022-12-02, OpenWrt 22.03) and the newest version supported;
+`tools/ci/build-ucode.sh` builds them into `~/.cache/trafficctl-ucode/<version>`:
+
+```sh
+tools/ci/build-ucode.sh 2022-12-02
+export UCODE_PREFIX=~/.cache/trafficctl-ucode/2022-12-02
+bash tests/test_ucode_lib.sh          # lib.uc helpers, subnets
+bash tests/test_names.sh              # Device aliases + reverse-DNS cache
+bash tests/test_ifaces.sh             # Per-interface counters and roles
+bash tests/equiv.sh                   # ucode output == the v1.30.0 shell output
 ```
 
 Four further tests only run inside the OpenWrt rootfs containers that

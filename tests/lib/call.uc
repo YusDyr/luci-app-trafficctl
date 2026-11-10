@@ -5,11 +5,10 @@
 // Usage: ucode -S -L <libdir> call.uc <module> <function> [json-arg...]
 //   e.g. call.uc trafficctl.net lan_subnets
 //
-// require(), not import: ucode 2022-12 cannot load a module by a name known
-// only at run time any other way, and its require() rejects files that use
-// `export`. Backend modules therefore end in `return { ... };`, as fw4 does.
+// The modules use `export`, which require() rejects in every ucode version,
+// and import takes no run-time name: so the import is compiled at run time.
 
-let mod = require(ARGV[0]);
+let mod = loadstring(sprintf('import * as m from %J; return m;', ARGV[0]))();
 let fn = mod?.[ARGV[1]];
 
 if (type(fn) != 'function')

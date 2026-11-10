@@ -26,8 +26,6 @@ jobs:
         run: bash tests/test_bytes_nft.sh
       - name: Port-forward control tests
         run: bash tests/test_portfw.sh
-      - name: Device naming tests
-        run: bash tests/test_names.sh
       - name: Netify (DPI) integration tests
         run: bash tests/test_netify.sh
       - name: Bidirectional limit/shape tests
@@ -82,8 +80,6 @@ jobs:
       # The upload row was built but never attached to the panel (#66).
       - name: Split up/down control and split ceiling display
         run: bash tests/test_split_ui.sh
-      - name: Per-interface counter tests (global overview)
-        run: bash tests/test_ifaces.sh
       - name: Egress interface naming tests
         run: bash tests/test_oif_label.sh
       - name: Postinst parity tests
@@ -108,8 +104,9 @@ jobs:
       - name: IPK build test
         run: bash tests/test_build_ipk.sh
 
-  # The ucode backend against the legacy shell one (tests/equiv.sh), on the
-  # oldest and the newest ucode we support. A missing ucode fails the job.
+  # The ucode backend: its unit tests, and its output against the legacy
+  # shell one (tests/equiv.sh), on the oldest and the newest ucode we support.
+  # A missing ucode fails the job.
   ucode-tests:
     name: ucode ${{ matrix.ucode }}
     runs-on: ubuntu-latest
@@ -125,6 +122,12 @@ jobs:
           key: ucode-${{ matrix.ucode }}-${{ runner.os }}-${{ hashFiles('tools/ci/build-ucode.sh') }}
       - name: Build ucode, ubus and uci at pinned commits
         run: tools/ci/build-ucode.sh "${{ matrix.ucode }}"
+      - name: ucode library tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_ucode_lib.sh
+      - name: Device naming tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_names.sh
+      - name: Per-interface counter tests (global overview)
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_ifaces.sh
       - name: Equivalence tests
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/equiv.sh
 

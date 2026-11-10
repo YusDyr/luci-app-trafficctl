@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# The backend of luci-app-trafficctl: the helper scripts, the init scripts, the
+# The backend of luci-app-trafficctl: the trafficctl CLI and its ucode
+# modules, the helper scripts, the init scripts, the
 # hotplug hooks, the config and the metrics CGI. Everything except the LuCI
 # view and its rpcd plugin, which stay in ../luci-app-trafficctl, so the
 # backend can run (Telegram bot, Prometheus exporter, the helpers from a
@@ -40,7 +41,7 @@ define Package/trafficctl
   CATEGORY:=Network
   TITLE:=Per-device traffic monitoring and control
   URL:=https://github.com/YusDyr/luci-app-trafficctl
-  DEPENDS:=+conntrack +curl +tc +iw +firewall4
+  DEPENDS:=+conntrack +curl +tc +iw +firewall4 +ucode +ucode-mod-fs +ucode-mod-uci +ucode-mod-ubus
   PKGARCH:=all
 endef
 
@@ -68,6 +69,11 @@ endef
 # compares this list with the tree under files/, so a new file that is not
 # added here fails the suite instead of going missing from the release.
 define Package/trafficctl/install
+	$(INSTALL_DIR) $(1)/usr/sbin
+	$(INSTALL_BIN) ./files/usr/sbin/trafficctl $(1)/usr/sbin/
+	$(INSTALL_DIR) $(1)/usr/share/ucode/trafficctl
+	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/lib.uc $(1)/usr/share/ucode/trafficctl/
+	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/net.uc $(1)/usr/share/ucode/trafficctl/
 	$(INSTALL_DIR) $(1)/usr/libexec/trafficctl
 	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-block.sh $(1)/usr/libexec/trafficctl/
 	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-bytes-nft.sh $(1)/usr/libexec/trafficctl/

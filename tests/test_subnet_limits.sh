@@ -200,7 +200,6 @@ patch_script() {
     chmod +x "$2"
 }
 patch_script "$BIN/trafficctl-ratelimit-stats.sh" "$TMP/ratelimit-stats.sh"
-patch_script "$BIN/trafficctl-subnets.sh"         "$TMP/subnets.sh"
 patch_script "$BIN/trafficctl-ratelimit.sh"       "$TMP/ratelimit.sh"
 
 run() { PATH="$MOCKBIN:$PATH" sh "$@" 2>/dev/null; }
@@ -262,30 +261,8 @@ assert_eq "stats: upload rules are not counted as separate targets" "1" \
 : > "$TMP/nft_table.txt"
 assert_eq "stats: an empty table is an empty array" "[]" "$(run "$TMP/ratelimit-stats.sh")"
 
-# ════════════════════════════════════════════════════════════════════════════
-# 2. Which subnets a limit can be enforced on
-# ════════════════════════════════════════════════════════════════════════════
-rm -f "$TCTL_TEST_GUEST_MASQ"
-SUBNETS=$(run "$TMP/subnets.sh")
-
-assert_contains "subnets: a connected LAN is offered, with its device" \
-    '{"cidr":"10.10.4.128/25","device":"br-lan","kind":"lan"}' "$SUBNETS"
-assert_contains "subnets: a guest VLAN without masq is offered" \
-    '{"cidr":"192.168.20.0/24","device":"br-guest","kind":"lan"}' "$SUBNETS"
-assert_contains "subnets: a downstream routed subnet is offered too" \
-    '{"cidr":"10.0.5.0/24","device":"br-lan","kind":"routed"}' "$SUBNETS"
-assert_not_contains "subnets: the wan zone is never offered" '"eth1"' "$SUBNETS"
-
-# The #64 case: masq on a non-lan zone takes it out of tctl_lan_subnets, so no
-# netdev hook is ever attached to br-guest and a limit there matches nothing.
-# The list must not offer it — the dashboard picker is built from this.
-: > "$TCTL_TEST_GUEST_MASQ"
-SUBNETS_MASQ=$(run "$TMP/subnets.sh")
-assert_not_contains "subnets: a masquerading guest VLAN is NOT offered" \
-    '192.168.20.0/24' "$SUBNETS_MASQ"
-assert_contains "subnets: the other LANs are unaffected by that exclusion" \
-    '10.10.4.128/25' "$SUBNETS_MASQ"
-rm -f "$TCTL_TEST_GUEST_MASQ"
+# Which subnets a limit can be enforced on (`trafficctl subnets`, now ucode):
+# tests/test_ucode_lib.sh.
 
 # ════════════════════════════════════════════════════════════════════════════
 # 3. The bucket layout survives a reboot

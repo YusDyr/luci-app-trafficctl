@@ -22,7 +22,7 @@ BACKEND_SRC="$TCTL_ROOT/${BE_NAME}"
 # luci-app-trafficctl/Makefile.
 # hostapd-utils is optional for the backend (wired-only builds) and is only
 # repeated on luci-app-trafficctl.
-BE_DEPENDS="conntrack curl tc iw firewall4"
+BE_DEPENDS="conntrack curl tc iw firewall4 ucode ucode-mod-fs ucode-mod-uci ucode-mod-ubus"
 FE_EXTRA_DEPENDS="hostapd-utils"
 
 OUTDIR="dist"
@@ -95,7 +95,7 @@ BE_DATA="$WORKDIR/backend-data"
 mkdir -p "$BE_DATA"
 cp -a "$BACKEND_SRC/files/"* "$BE_DATA/"
 
-chmod +x "$BE_DATA/usr/libexec/trafficctl/trafficctl-"*.sh
+chmod +x "$BE_DATA/usr/libexec/trafficctl/trafficctl-"*.sh "$BE_DATA/usr/sbin/trafficctl"
 chmod +x "$BE_DATA/www/cgi-bin/trafficctl-metrics"
 [ -d "$BE_DATA/etc/init.d" ] && chmod +x "$BE_DATA/etc/init.d/"*
 [ -d "$BE_DATA/etc/hotplug.d" ] && find "$BE_DATA/etc/hotplug.d" -type f -exec chmod +x {} +
