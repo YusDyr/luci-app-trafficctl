@@ -4,6 +4,16 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.30.1] - 2026-11-10
+
+### Other
+- cache the OpenWrt SDK downloads and host tools ([#135](https://github.com/YusDyr/luci-app-trafficctl/issues/135)) ([f601e15](https://github.com/YusDyr/luci-app-trafficctl/commit/f601e151e2e52051313977f6c794eceaa208526f))
+  SDK and feed-install jobs restore the OpenWrt SDK and host tools from actions/cache. Build packages went from 37 to 9 minutes, feed install on 23.05 and 25.12 from 20-32 to 5-10 minutes. Packages built with a warm cache are byte-identical to cold ones (ipk).
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.30.0...v1.30.1
+
+---
+
 ## [1.30.0] - 2026-11-09
 
 ### Features
