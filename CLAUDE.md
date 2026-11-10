@@ -109,7 +109,12 @@ docs/
   `export { ... };` (2022-12 wants a `;` after `export function`); call
   functions only after their declaration (no hoisting).
 - External commands go through `lib.run`/`lines`/`sh` with every value in
-  `lib.q()`; nothing else calls `popen`/`system` (`tests/test_security.sh`).
+  `lib.q()`; nothing else calls `popen`/`system` (`tests/lib/uc_cmd_lint.py`,
+  run by `tests/test_security.sh`).
+- `match()`/`replace()`/`lc()` stop at a NUL byte: validate with the lib
+  helpers, which refuse such strings, before matching untrusted input.
+- The modules cache the uci cursor, the ubus connection and the interface
+  dump for one run. A long-running caller calls `net.reset()` per request.
 - JSON output goes through `lib.to_json`, which keeps the shell backend's
   bytes. File paths go through `lib.path()`/the file helpers, so `TCTL_ROOT`
   can point a test at a scratch root.

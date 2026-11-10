@@ -6,7 +6,7 @@ All backend functionality is exposed through shell scripts in `/usr/libexec/traf
 
 ## Common Conventions
 
-- **Input validation**: scripts that take an address validate it with regex + octet range (0–255) via `tctl_validate_ip`; `tctl_validate_target` additionally accepts a CIDR or `all`.
+- **Input validation**: scripts that take an address validate it with regex + octet range (0–255, no leading zeros: `010.0.0.1` is refused) via `tctl_validate_ip`; `tctl_validate_target` additionally accepts a CIDR (prefix length without a leading zero) or `all`.
 - **Error format**: `{"ok":false,"msg":"Human-readable error message"}`
 - **Success format (actions)**: `{"ok":true,"msg":"Human-readable success message"}`
 - **Rate units**: All rate values are in **kbit/s** (kilobits per second).

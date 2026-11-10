@@ -12,29 +12,37 @@
 //   ROOT                          getenv('TCTL_ROOT'), '' on a router (tests only)
 //   path(p)                       ROOT + p
 //   pid()                         this process id (no getpid() in 2022-12)
+//   reset()                       drop the cached uci cursor and ubus
+//                                 connection; a long-running caller (rpcd
+//                                 plugin, bot, keepers) calls it, and
+//                                 net.reset(), once per request or tick
 // uci and ubus
 //   cursor()                      shared uci cursor, confdir/savedir under ROOT
 //   uci_get(conf, sect, opt)      value as a string, a list joined by ' ', or null
 //   uci_words(conf, sect, opt)    value split on whitespace, [] when unset
 //   uci_foreach(conf, stype, fn)  cursor().foreach; fn returning false stops
 //   commit(conf)                  commit; trafficctl's file goes back to 0600
-//   ubus_call(obj, method, args)  reply, or null on any failure
+//   ubus_call(obj, method, args)  reply, or null on any failure; a failed
+//                                 connect is retried on the next call
 //                                 (socket: getenv('TCTL_UBUS_SOCKET'))
 // External commands. Interpolate every value through q(); nothing else may
 // call popen() or system() (tests/test_security.sh enforces this).
-//   q(s)                          single-quoted for /bin/sh
-//   run(cmd, ms)                  stdout as a string, stderr dropped;
+//   q(s)                          single-quoted for /bin/sh; dies on
+//                                 anything but a string or an int
+//   run(cmd, ms)                  stdout as a string, stderr dropped, no stdin;
 //                                 with ms, cmd is one program, killed after ms
 //   lines(cmd, ms)                run() split into lines
 //   sh(cmd, ms)                   exit status, all output dropped
 // JSON
 //   to_json(v)                    compact: no spaces, keys in insertion
 //                                 order, integers only, '/' not escaped
-// Validation and addresses (the semantics of trafficctl-fw.sh)
-//   valid_ip(s)                   dotted quad, octets 0..255
+// Validation and addresses (the semantics of trafficctl-fw.sh). match() and
+// replace() stop at a NUL byte, so every check refuses strings holding one.
+//   plain(s)                      a string without a NUL byte
+//   valid_ip(s)                   dotted quad, octets 0..255, no leading zeros
 //   valid_int(s, min, max)        digits only, in range: the int, else null
 //   norm_mac(s)                   lower-case aa:bb:cc:dd:ee:ff, else null
-//   valid_target(t)               host, CIDR /0..32 or all/any, else null
+//   valid_target(t)               host, CIDR /0..32 or all/any, as ip[/n]
 //   cidr_spec(s)                  { base, block, mask } for a.b.c.d[/1..32]
 //   ip2int(s), int2ip(n)
 // Files
@@ -42,11 +50,12 @@
 //   file_lines(p)                 lines without the final empty one, [] if none
 //   is_file(p)
 //   mkdir_p(dir)
-//   write_atomic(p, data, mode)   temp file in the same directory + rename
-//   lock(dir, tries, max_age)     mkdir lock: tries x 100 ms, then steal;
-//                                 tries 0 = one attempt, no steal; a lock
-//                                 older than max_age seconds is stale
-//   unlock(dir)
+//   write_atomic(p, data, mode)   temp file in the same directory + rename;
+//                                 mode defaults to the current file's
+//   lock(dir, tries, max_age)     mkdir lock holding our pid: tries x 100 ms
+//                                 (0 = one attempt). Taken over only when its
+//                                 holder is gone or it is max_age seconds old
+//   unlock(dir)                   only a lock this process holds
 //   field(line, n)                awk's $(n+1)
 // Activity log
 //   log(action, target, detail, via, src)   port of tctl_log
@@ -57,7 +66,7 @@
 //                                 /etc/trafficctl/seen_macs, one MAC a line
 
 import { popen, readfile as fs_readfile, writefile, open, stat, mkdir, rmdir,
-	unlink, rename, chmod, readlink, dirname } from 'fs';
+	unlink, rename, chmod, readlink, dirname, basename, lsdir } from 'fs';
 import * as ucimod from 'uci';
 import * as ubusmod from 'ubus';
 
@@ -65,6 +74,12 @@ export const ROOT = getenv('TCTL_ROOT') ?? '';
 
 function path(p) {
 	return ROOT + p;
+}
+
+const NUL = chr(0);
+
+function plain(s) {
+	return type(s) == 'string' && index(s, NUL) < 0;
 }
 
 let my_pid;
@@ -118,7 +133,7 @@ function commit(conf) {
 
 let bus;
 function ubus_call(obj, method, args) {
-	bus ??= ubusmod.connect(getenv('TCTL_UBUS_SOCKET')) ?? false;
+	bus ??= ubusmod.connect(getenv('TCTL_UBUS_SOCKET'));
 	if (!bus) {
 		ubusmod.error();
 		return null;
@@ -129,10 +144,21 @@ function ubus_call(obj, method, args) {
 	return r;
 }
 
+function reset() {
+	cur = null;
+	bus = null;
+}
+
 // ── external commands ───────────────────────────────────────────────────────
 
 function q(s) {
-	return "'" + replace('' + s, "'", "'\\''") + "'";
+	if (type(s) == 'int')
+		s = '' + s;
+	// Anything else is a caller bug that '' + s would hide (and replace()
+	// would cut the string at a NUL).
+	if (!plain(s))
+		die('q(): not a string: ' + type(s));
+	return "'" + replace(s, "'", "'\\''") + "'";
 }
 
 function run(cmd, ms) {
@@ -140,13 +166,15 @@ function run(cmd, ms) {
 		// system() is the only call with a timeout; exec so the kill reaches
 		// the program and not just the shell, and redirect so its output
 		// cannot land in ours.
+		// Redirect first: a redirect after cmd would bind to its last word.
 		let tmp = path('/tmp/.trafficctl_run.' + pid());
-		system('exec ' + cmd + ' >' + q(tmp) + ' 2>/dev/null', ms);
+		unlink(tmp);
+		system('exec >' + q(tmp) + ' 2>/dev/null </dev/null; exec ' + cmd, ms);
 		let out = fs_readfile(tmp);
 		unlink(tmp);
 		return out ?? '';
 	}
-	let p = popen('{ ' + cmd + '\n} 2>/dev/null');
+	let p = popen('{ ' + cmd + '\n} 2>/dev/null </dev/null');
 	if (!p)
 		return '';
 	let out = p.read('all');
@@ -163,8 +191,8 @@ function lines(cmd, ms) {
 
 function sh(cmd, ms) {
 	if (ms)
-		return system('exec ' + cmd + ' >/dev/null 2>&1', ms);
-	return system('{ ' + cmd + '\n} >/dev/null 2>&1');
+		return system('exec >/dev/null 2>&1 </dev/null; exec ' + cmd, ms);
+	return system('{ ' + cmd + '\n} >/dev/null 2>&1 </dev/null');
 }
 
 // ── JSON ────────────────────────────────────────────────────────────────────
@@ -174,11 +202,17 @@ function sh(cmd, ms) {
 const ESC = { '"': '\\"', '\\': '\\\\', '\n': '\\n', '\r': '\\r', '\t': '\\t',
 	'\b': '\\b', '\f': '\\f' };
 
-function jstr(s) {
+function jesc(s) {
 	if (!match(s, /[\x01-\x1f"\\]/))
-		return '"' + s + '"';
-	return '"' + replace(s, /[\x01-\x1f"\\]/g,
-		(c) => ESC[c] ?? sprintf('\\u%04x', ord(c))) + '"';
+		return s;
+	return replace(s, /[\x01-\x1f"\\]/g, (c) => ESC[c] ?? sprintf('\\u%04x', ord(c)));
+}
+
+function jstr(s) {
+	// match() and replace() stop at a NUL: escape the pieces between them.
+	if (index(s, NUL) >= 0)
+		return '"' + join('\\u0000', map(split(s, NUL), jesc)) + '"';
+	return '"' + jesc(s) + '"';
 }
 
 function to_json(v) {
@@ -204,9 +238,13 @@ function to_json(v) {
 
 // ── validation and addresses ────────────────────────────────────────────────
 
+// No leading zeros: iptoarr() refuses them, and the shell would read 010 as
+// octal.
+const OCTET = '(0|[1-9][0-9]{0,2})';
+const IPV4 = regexp(sprintf('^%s\\.%s\\.%s\\.%s$', OCTET, OCTET, OCTET, OCTET));
+
 function valid_ip(s) {
-	let m = (type(s) == 'string')
-		? match(s, /^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$/) : null;
+	let m = plain(s) ? match(s, IPV4) : null;
 	if (!m)
 		return false;
 	for (let i = 1; i <= 4; i++)
@@ -218,7 +256,7 @@ function valid_ip(s) {
 function valid_int(s, min, max) {
 	if (type(s) == 'int')
 		s = '' + s;
-	if (type(s) != 'string' || !match(s, /^[0-9]+$/))
+	if (!plain(s) || !match(s, /^[0-9]+$/))
 		return null;
 	let n = int(s);
 	if (n != n || (min != null && n < min) || (max != null && n > max))
@@ -227,8 +265,16 @@ function valid_int(s, min, max) {
 }
 
 function norm_mac(s) {
-	s = lc('' + (s ?? ''));
+	// Before lc(), which also stops at a NUL.
+	if (!plain(s))
+		return null;
+	s = lc(s);
 	return match(s, /^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/) ? s : null;
+}
+
+// A prefix length as written by ip(8) and the shell: no leading zeros.
+function prefix_len(s, min) {
+	return (plain(s) && match(s, /^(0|[1-9][0-9]?)$/)) ? valid_int(s, min, 32) : null;
 }
 
 function ip2int(s) {
@@ -245,10 +291,11 @@ function cidr_spec(s) {
 	let p = split('' + s, '/');
 	if (length(p) > 2 || !valid_ip(p[0]))
 		return null;
-	let mask = (length(p) == 2) ? valid_int(p[1], 1, 32) : 32;
-	if (mask == null)
+	let mask = (length(p) == 2) ? prefix_len(p[1], 1) : 32;
+	let ipint = ip2int(p[0]);
+	if (mask == null || ipint == null)
 		return null;
-	let ipint = ip2int(p[0]), block = 1 << (32 - mask);
+	let block = 1 << (32 - mask);
 	return { base: ipint - ipint % block, block, mask };
 }
 
@@ -256,12 +303,13 @@ function cidr_spec(s) {
 function valid_target(t) {
 	if (t == 'all' || t == 'any')
 		return '0.0.0.0/0';
-	let p = split('' + t, '/');
+	if (!plain(t))
+		return null;
+	let p = split(t, '/');
 	if (length(p) == 1)
 		return valid_ip(p[0]) ? p[0] : null;
-	if (length(p) != 2 || !valid_ip(p[0]) || valid_int(p[1], 0, 32) == null)
-		return null;
-	return t;
+	let mask = (length(p) == 2 && valid_ip(p[0])) ? prefix_len(p[1], 0) : null;
+	return (mask == null) ? null : sprintf('%s/%d', p[0], mask);
 }
 
 // ── files ───────────────────────────────────────────────────────────────────
@@ -291,21 +339,79 @@ function mkdir_p(dir) {
 	return !!mkdir(p) || stat(p)?.type == 'directory';
 }
 
+// Temp files of writers killed before their rename.
+function sweep_tmp(dst) {
+	let dir = dirname(dst), pre = basename(dst) + '.tmp.', now = time();
+	for (let e in lsdir(dir) ?? []) {
+		if (substr(e, 0, length(pre)) != pre)
+			continue;
+		let st = stat(dir + '/' + e);
+		if (st?.type == 'file' && now - st.mtime > 60)
+			unlink(dir + '/' + e);
+	}
+}
+
 function write_atomic(p, data, mode) {
 	// Same directory, so the rename is atomic even on a network mount.
 	let dst = path(p), tmp = dst + '.tmp.' + pid();
-	let f = open(tmp, 'w');
+	data = '' + data;
+	mode ??= stat(dst)?.mode ?? 0o644;
+	sweep_tmp(dst);
+	unlink(tmp);
+	// 'x' is O_EXCL: a file or symlink planted at tmp is refused, not followed.
+	let f = open(tmp, 'wx', 0o600);
 	if (!f)
 		return false;
-	let ok = f.write(data) != null;
+	// Before the data, and exact: open()'s mode is masked by the umask.
+	chmod(tmp, mode);
+	f.write(data);
 	f.close();
-	if (ok && mode != null)
-		chmod(tmp, mode);
-	if (!ok || !rename(tmp, dst)) {
+	// close() reports no write error and 2022-12's flush() none either, so a
+	// full disk shows only as a short file.
+	if (stat(tmp)?.size != length(data) || !rename(tmp, dst)) {
 		unlink(tmp);
 		return false;
 	}
 	return true;
+}
+
+function lock_owner(p) {
+	return trim(fs_readfile(p + '/pid') ?? '');
+}
+
+function lock_take(p) {
+	if (!mkdir(p))
+		return false;
+	writefile(p + '/pid', pid());
+	return true;
+}
+
+// No signal() before 2023-07: a killed holder never cleans up. A lock is
+// stale when its holder is gone, or past max_age (pid reused, or a holder
+// that never wrote its pid).
+function lock_stale(p, max_age) {
+	let st = stat(p), owner = lock_owner(p);
+	if (!st)
+		return false;
+	if (owner != '' && owner != pid() && !stat('/proc/' + owner))
+		return true;
+	return max_age > 0 && time() - st.mtime >= max_age;
+}
+
+function lock_steal(p, max_age) {
+	// rename() is atomic, so of two processes stealing one stale lock only
+	// one moves it. Checked again once moved: it may be a fresh lock taken
+	// since we looked; then it goes back.
+	let aside = p + '.stale.' + pid();
+	if (!rename(p, aside))
+		return false;
+	if (!lock_stale(aside, max_age)) {
+		rename(aside, p);
+		return false;
+	}
+	unlink(aside + '/pid');
+	rmdir(aside);
+	return lock_take(p) && lock_owner(p) == pid();
 }
 
 function lock(dir, tries, max_age) {
@@ -313,24 +419,18 @@ function lock(dir, tries, max_age) {
 	for (let i = 0; i < n; i++) {
 		if (i)
 			sleep(100);
-		if (mkdir(p))
+		if (lock_take(p) || (lock_stale(p, max_age) && lock_steal(p, max_age)))
 			return true;
-		// No signal() before 2023-07: a killed holder never cleans up.
-		let st = max_age ? stat(p) : null;
-		if (st && time() - st.mtime >= max_age) {
-			rmdir(p);
-			if (mkdir(p))
-				return true;
-		}
 	}
-	if (!(tries > 0))
-		return false;
-	rmdir(p);
-	return !!mkdir(p);
+	return false;
 }
 
 function unlock(dir) {
-	rmdir(path(dir));
+	let p = path(dir);
+	if (lock_owner(p) != pid())
+		return false;
+	unlink(p + '/pid');
+	return !!rmdir(p);
 }
 
 function field(l, n) {
@@ -353,7 +453,7 @@ const LOG_DEFAULT = '/tmp/trafficctl/activity.log';
 // Writable through the LuCI write ACL and used as an append and a rewrite
 // target, so only dedicated log locations with plain characters are taken.
 function valid_log_file(f) {
-	return type(f) == 'string' && !!match(f, /^\/(tmp\/trafficctl|var\/log)\//) &&
+	return plain(f) && !!match(f, /^\/(tmp\/trafficctl|var\/log)\//) &&
 		!match(f, /(\/\.\.\/|\/\.\.$|\/$)/) && !!match(f, /^[A-Za-z0-9._\/-]+$/);
 }
 
@@ -373,6 +473,47 @@ function category(action) {
 		if (substr(action, 0, length(c)) == c)
 			return (c == 'ratelimit') ? 'ratelimits' : (c == 'shape') ? 'shapes' : c;
 	return 'config';
+}
+
+// One line per entry: a CR or LF in a value would forge a second one.
+function one_line(s) {
+	return join(' ', map(split('' + (s ?? ''), NUL), (x) => replace(x, /[\x01-\x1f\x7f]/g, ' ')));
+}
+
+function count_lines(p) {
+	let f = open(path(p)), n = 0, c;
+	if (!f)
+		return 0;
+	while (length(c = f.read(65536)))
+		n += length(split(c, '\n')) - 1;
+	f.close();
+	return n;
+}
+
+// The last n lines, skipping the rest a line at a time.
+function last_lines(p, total, n) {
+	let f = open(path(p));
+	if (!f)
+		return null;
+	for (let i = n; i < total; i++)
+		if (f.read('line') == null)
+			break;
+	let out = f.read('all') ?? '';
+	f.close();
+	return out;
+}
+
+function rotate_log(file, max) {
+	// A line is at least its '\n', so a file this small is under the cap.
+	// Counted in chunks: the log may be far larger than ucode should hold.
+	if ((stat(path(file))?.size ?? 0) <= max)
+		return;
+	let n = count_lines(file);
+	if (n <= max)
+		return;
+	let keep = last_lines(file, n, int(max * 3 / 5));
+	if (keep != null)
+		write_atomic(file, keep);
 }
 
 function env_or(name, dflt) {
@@ -395,15 +536,12 @@ function log(action, target, detail, via, src) {
 	let max = log_max_lines();
 	let msg = sprintf('%s src=%s user=%s via=%s action=%s target=%s%s', ts,
 		(src == null || src == '') ? 'local' : src, user,
-		(via == null || via == '') ? 'cli' : via, action, target ?? '',
-		(detail != null && detail != '') ? ' detail=' + detail : '');
+		(via == null || via == '') ? 'cli' : via, action, one_line(target),
+		(detail != null && detail != '') ? ' detail=' + one_line(detail) : '');
 
 	mkdir_p(dirname(file));
 	append(file, '[trafficctl] ' + msg + '\n');
-
-	let l = file_lines(file);
-	if (length(l) > max)
-		write_atomic(file, join('\n', slice(l, -int(max * 3 / 5))) + '\n');
+	rotate_log(file, max);
 
 	if (uci_get('trafficctl', 'logging', 'syslog') == '1')
 		sh('logger -t trafficctl ' + q(msg));
@@ -451,7 +589,8 @@ function names_set(ip, name) {
 	mkdir_p(dirname(NAMES));
 	let l = names_without(ip);
 	push(l, ip + ' ' + name);
-	write_atomic(NAMES, join('\n', l) + '\n');
+	if (!write_atomic(NAMES, join('\n', l) + '\n'))
+		return { ok: false, msg: 'cannot write ' + NAMES };
 	log('config_change', ip, 'name=' + name, getenv('TCTL_VIA'), getenv('TCTL_SRC'));
 	return { ok: true, msg: sprintf('named %s as %s', ip, name) };
 }
@@ -462,7 +601,8 @@ function names_remove(ip) {
 	if (!is_file(NAMES))
 		return { ok: true, msg: 'no aliases stored' };
 	let l = names_without(ip);
-	write_atomic(NAMES, length(l) ? join('\n', l) + '\n' : '');
+	if (!write_atomic(NAMES, length(l) ? join('\n', l) + '\n' : ''))
+		return { ok: false, msg: 'cannot write ' + NAMES };
 	log('config_change', ip, 'name cleared', getenv('TCTL_VIA'), getenv('TCTL_SRC'));
 	return { ok: true, msg: sprintf('name cleared for %s', ip) };
 }
@@ -483,16 +623,16 @@ function seen_count() {
 }
 
 function seen_known(mac) {
-	mac = lc('' + (mac ?? ''));
-	if (mac == '' || !is_file(SEEN))
+	mac = norm_mac(mac);
+	if (mac == null || !is_file(SEEN))
 		return true;
 	return index(file_lines(SEEN), mac) >= 0;
 }
 
 function seen_mark(mac) {
-	mac = lc('' + (mac ?? ''));
+	mac = norm_mac(mac);
 	// Not seen_known() alone: it says "known" for a missing ledger.
-	if (mac == '' || (is_file(SEEN) && seen_known(mac)))
+	if (mac == null || (is_file(SEEN) && seen_known(mac)))
 		return;
 	mkdir_p(dirname(SEEN));
 	append(SEEN, mac + '\n');
@@ -511,12 +651,12 @@ function seen_seed() {
 	for (let l in lines('ip neigh show'))
 		if (index(l, 'lladdr') >= 0)
 			push(macs, field(l, 4));
-	macs = sort(uniq(filter(map(macs, lc), (m) => !!match(m, /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/))));
+	macs = sort(uniq(filter(map(macs, norm_mac), (m) => m != null)));
 	write_atomic(SEEN, length(macs) ? join('\n', macs) + '\n' : '');
 }
 
 // 2022-12 needs a ';' after `export function f() {}`; one list avoids it.
-export { path, pid, cursor, uci_get, uci_words, uci_foreach, commit,
+export { path, pid, reset, plain, cursor, uci_get, uci_words, uci_foreach, commit,
 	ubus_call, q, run, lines, sh, to_json, valid_ip, valid_int, norm_mac, ip2int,
 	int2ip, cidr_spec, valid_target, readfile, file_lines, is_file, mkdir_p,
 	write_atomic, lock, unlock, field, valid_log_file, log, sanitize_name,

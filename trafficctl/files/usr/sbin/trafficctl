@@ -58,9 +58,27 @@ const commands = {
 	},
 };
 
+// What a caller expecting this command's shape can still parse.
+function fallback(cmd, args, msg) {
+	if (cmd == 'subnets' || cmd == 'ifaces' || (cmd == 'names' && args[0] == 'list'))
+		return [];
+	if (cmd == 'rdns')
+		return { ip: args[0] ?? '', host: '' };
+	return { ok: false, msg };
+}
+
 let cmd = shift(ARGV);
 if (!exists(commands, cmd)) {
 	out({ ok: false, msg: 'usage: trafficctl <' + join('|', sort(keys(commands))) + '> [args]' });
 	exit(2);
 }
-exit(commands[cmd](ARGV));
+let rc;
+try {
+	rc = commands[cmd](ARGV);
+}
+catch (e) {
+	warn(sprintf('trafficctl %s: %s\n%s\n', cmd, e.message, e.stacktrace?.[0]?.context ?? ''));
+	out(fallback(cmd, ARGV, 'internal error: ' + e.message));
+	rc = 1;
+}
+exit(rc);

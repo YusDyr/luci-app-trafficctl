@@ -13,6 +13,8 @@
 //   ifaces()             the `ifaces` command: per-interface counters + roles
 //   rdns(ip)             the `rdns` command: { ip, host }, null on bad input
 //   rdns_refresh(ips)    the `rdns-refresh` command: fills the PTR cache
+//   reset()              drop the cached interface dump and LAN subnets, and
+//                        lib.reset(); long-running callers call it per request
 //
 // Subnet records are "netbase block router" as in tctl_lan_subnets
 // (trafficctl-fw.sh), which still serves the shell scripts: the two copies
@@ -20,15 +22,20 @@
 
 import * as lib from 'trafficctl.lib';
 
-let dump;
+let dump, lan_cache;
 function iface_dump() {
 	dump ??= lib.ubus_call('network.interface', 'dump')?.interface ?? [];
 	return dump;
 }
 
+function reset() {
+	dump = null;
+	lan_cache = null;
+	lib.reset();
+}
+
 // "LAN" = firewall zones that are not internet-facing: named lan, or neither
 // wan/wan6 nor masqueraded. That keeps VPN zones (masqueraded) out.
-let lan_cache;
 function lan_subnets() {
 	if (lan_cache)
 		return lan_cache;
@@ -59,6 +66,8 @@ function lan_subnets() {
 			    type(mask) != 'int' || mask < 1 || mask > 32)
 				continue;
 			let ipint = lib.ip2int(a.address), block = 1 << (32 - mask);
+			if (ipint == null)
+				continue;
 			push(out, { dev: l3, base: ipint - ipint % block, block, router: ipint });
 		}
 	}
@@ -332,6 +341,9 @@ const RDNS_CACHE = '/tmp/trafficctl_rdns_cache';
 const RDNS_LOCK = '/tmp/trafficctl_rdns.lock';
 // A refresher killed mid-run leaves its lock behind (no signal handling).
 const RDNS_LOCK_STALE = 300;
+// Stop well before the lock could be taken as stale; the rest waits for the
+// next poll.
+const RDNS_MAX_RUN = 240;
 const NSLOOKUP_MS = 5000;
 const NAME_LINE = regexp('^Name:[ \t]*(.*)$');
 
@@ -356,7 +368,7 @@ function rdns(ip) {
 				break;
 			}
 		}
-	return { ip, host: match(host, /^[a-zA-Z0-9._-]+$/) ? host : '' };
+	return { ip, host: (lib.plain(host) && match(host, /^[a-zA-Z0-9._-]+$/)) ? host : '' };
 }
 
 function ptr_name(ls) {
@@ -382,29 +394,33 @@ function resolve(ip, servers) {
 	if (host == '')
 		host = ptr_name(nslookup(ip));
 	// Some resolvers echo the reverse zone instead of NXDOMAIN.
-	if (index(host, 'in-addr.arpa') >= 0 || !match(host, /^[a-zA-Z0-9._-]+$/))
+	if (!lib.plain(host) || index(host, 'in-addr.arpa') >= 0 || !match(host, /^[a-zA-Z0-9._-]+$/))
 		return '';
 	return split(host, '.')[0];
 }
 
 // Cache lines "IP HOST TIMESTAMP", HOST '-' = no record. Run detached from the
 // summary poll: resolving is slow and must never block the device table.
+function cache_put(ip, host, now) {
+	let l = filter(lib.file_lines(RDNS_CACHE), (x) => lib.field(x, 0) != ip);
+	push(l, sprintf('%s %s %d', ip, (host != '') ? host : '-', now));
+	lib.write_atomic(RDNS_CACHE, join('\n', l) + '\n');
+}
+
 function rdns_refresh(ips) {
 	if (!lib.lock(RDNS_LOCK, 0, RDNS_LOCK_STALE))
 		return;
 	let servers = lib.uci_words('trafficctl', 'main', 'rdns_server');
 	let now = time();
 	for (let ip in ips) {
-		if (!lib.valid_ip(ip))
-			continue;
-		let host = resolve(ip, servers);
-		let l = filter(lib.file_lines(RDNS_CACHE), (x) => lib.field(x, 0) != ip);
-		push(l, sprintf('%s %s %d', ip, (host != '') ? host : '-', now));
-		lib.write_atomic(RDNS_CACHE, join('\n', l) + '\n');
+		if (time() - now >= RDNS_MAX_RUN)
+			break;
+		if (lib.valid_ip(ip))
+			cache_put(ip, resolve(ip, servers), now);
 	}
 	lib.unlock(RDNS_LOCK);
 }
 
 // 2022-12 needs a ';' after `export function f() {}`; one list avoids it.
 export { lan_subnets, lan_devices, lan_device, routed_subnets,
-	monitored_subnets, subnets, ifaces, rdns, rdns_refresh };
+	monitored_subnets, subnets, ifaces, rdns, rdns_refresh, reset };
