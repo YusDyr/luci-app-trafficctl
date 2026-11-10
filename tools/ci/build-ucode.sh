@@ -47,8 +47,9 @@ if [ -x "$prefix/bin/ucode" ] && [ -x "$prefix/sbin/ubusd" ]; then
     exit 0
 fi
 
-# Some of these link -lubox by name instead of through find_library.
-export CFLAGS="-I$prefix/include" LDFLAGS="-L$prefix/lib"
+# Some of these link -lubox by name instead of through find_library. gnu17:
+# gcc 15 defaults to C23, where lemon's `void f();` prototypes take no args.
+export CFLAGS="-std=gnu17 -I$prefix/include" LDFLAGS="-L$prefix/lib"
 
 src=$(mktemp -d)
 trap 'rm -rf "$src"' EXIT
@@ -85,6 +86,10 @@ fetch ucode jow-/ucode "$ucode"
 # Old trees under a current gcc trip -Werror on warnings that did not exist
 # when they were written; the code itself is what the router runs.
 sed -i 's/-Werror/-Wno-error/g' "$src"/*/CMakeLists.txt
+# ubusd applies ACLs to every non-root client and only reads root-owned ACL
+# files. On the router the backend runs as root; the CI user is not.
+sed -i 's/if (!cl || !cl->uid || !obj)/if (1)/' "$src/ubus/ubusd_acl.c"
+grep -q 'if (1)' "$src/ubus/ubusd_acl.c" || { echo "ubusd ACL patch did not apply" >&2; exit 1; }
 
 build libubox -DBUILD_LUA=OFF -DBUILD_EXAMPLES=OFF -DUNIT_TESTING=OFF
 build ubus -DBUILD_LUA=OFF -DBUILD_EXAMPLES=OFF -DENABLE_SYSTEMD=OFF
