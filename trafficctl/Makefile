@@ -33,17 +33,19 @@ include $(INCLUDE_DIR)/package.mk
 # hostapd_cli at run time and fall back to a timed ubus ban
 # (tctl_hostapd_block_iface, tctl_wifi_filter_support in trafficctl-fw.sh).
 # iw stays: it is selectable on every target and only reads station lists.
+# firewall4: blocks are rules in its inet fw4 table, so nftables alone is not
+# enough.
 define Package/trafficctl
   SECTION:=net
   CATEGORY:=Network
   TITLE:=Per-device traffic monitoring and control
   URL:=https://github.com/YusDyr/luci-app-trafficctl
-  DEPENDS:=+conntrack +curl +tc +iw
+  DEPENDS:=+conntrack +curl +tc +iw +firewall4
   PKGARCH:=all
 endef
 
 define Package/trafficctl/description
- Per-device traffic monitoring (conntrack), rate limiting (nft/iptables),
+ Per-device traffic monitoring (conntrack), rate limiting (nftables),
  traffic shaping (tc/HTB), internet blocking, WiFi MAC filtering, a global
  internet cut, a Telegram bot and a Prometheus exporter. The web interface
  is luci-app-trafficctl.

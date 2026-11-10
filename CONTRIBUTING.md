@@ -40,7 +40,7 @@ bash tests/test_security.sh
 
 CI runs the whole `tests/` suite, shellcheck, ESLint, and a compatibility matrix
 that installs the built package inside real OpenWrt rootfs containers from
-21.02 through 25.12.
+22.03 through 25.12.
 
 ## Writing tests
 
@@ -63,7 +63,7 @@ These run as root with parameters that came from a browser, so:
 
 - Validate at the boundary and re-validate in the script (`tctl_validate_ip`,
   `tctl_validate_target`, `valid_port`, `proto_tokens`). Never interpolate an
-  unvalidated value into an `nft`/`tc`/`iptables` command line.
+  unvalidated value into an `nft`/`tc` command line.
 - Identify rules by the target, not by a caller-supplied label
   (`tctl_block_comment`, `tctl_ratelimit_comment`), and match the **full**
   comment on removal — an unanchored match on `192.168.1.1` also hits

@@ -157,7 +157,7 @@ I hope it turns out as useful for you as it has been for me.
 - **Interactive Speed Graphs** -- Hover any sparkline for a full-size popup graph with: download + upload dual lines, gradient area fill, min/max band, crosshair with precise values, rate limit line, nice-value Y axis (multiples of 100/500 Kbit/s). Full history from page load.
 - **Traffic Shaping (Queue)** -- tc/HTB classes on the LAN bridge with fq_codel leaf qdiscs. Queues excess traffic instead of dropping, providing smoother throughput.
 - **Separate Upload and Download Ceilings** -- Both the shaper and the limiter take an upload ceiling of its own: click **⇅ Split up/down** in the Speed Limit panel, type the upload speed and pick the download one (or press Enter). The device's status line and the Limit column then show both, e.g. `↓ 10 Mbit/s / ↑ 2 Mbit/s`. Without a split, upload gets the same ceiling as download.
-- **Rate Limiting (Policer)** -- nftables or iptables-based packet dropping when a device exceeds the configured rate. Instant enforcement, no queuing. Unlike the shaper it owns no qdisc, so it works on a router already running SQM/cake — where the shaper deliberately declines rather than tear down somebody else's QoS, and says so.
+- **Rate Limiting (Policer)** -- nftables packet dropping when a device exceeds the configured rate. Instant enforcement, no queuing. Unlike the shaper it owns no qdisc, so it works on a router already running SQM/cake — where the shaper deliberately declines rather than tear down somebody else's QoS, and says so.
 - **Subnet / VLAN Limits** -- A limit can target a whole subnet (`192.168.20.0/24`) or the entire network, not only one device. Two readings of "20 Mbit for the IoT VLAN" are both available and are chosen explicitly: **each** gives every device its own 20 Mbit bucket, **shared** gives the whole VLAN one 20 Mbit bucket *between them* — the aggregate cap. Pick a monitored subnet from the target chips in the Speed Limit panel (select "All active devices" first); active subnet limits are listed there with their drop counters and a Remove button. Subnets the router does not monitor are flagged rather than silently accepted: a firewall zone other than `lan` with `masq=1` — the usual way to isolate a guest VLAN — is excluded from monitoring, and a limit on it would never match a packet. From the CLI: `trafficctl-ratelimit.sh 192.168.20.0/24 20000 "iot-cap" shared`.
 - **Internet Blocking** -- Layer 3 drop rules per device. Connections are killed immediately and counter stats are tracked.
 - **Global Internet Cut** -- One control that takes every device off the internet while the LAN keeps working, for plugging in a new device and configuring it locally before it is allowed out. Timed by default (15 min / 1 h / 4 h, or until you switch it back), so it reverts by itself. Devices keep reaching each other and the router, so LuCI stays available from the LAN; remote access that lands on a LAN host first (Tailscale on a NAS, a tunnel from a LAN box) stops while it is on. Traffic is stopped on the way in, at prerouting, so a transparent proxy running on the router (podkop/sing-box, passwall) cannot carry it out either — and the router's own traffic, including that proxy's outbound path, is untouched. It does **not** survive a reboot unless you tick "Keep after reboot".
@@ -214,13 +214,14 @@ Runs on all architectures (no compiled code, pure shell + LuCI JavaScript).
 | 24.10           | fw4 / nftables | Fully supported |
 | 23.05           | fw4 / nftables | Fully supported |
 | 22.03           | fw4 / nftables | Fully supported |
-| 21.02           | fw3 / iptables | Supported (auto-detected) |
+| 21.02           | fw3 / iptables | Not supported; use 1.30.x |
 
-**CI-tested on 52 combinations** — every push is verified against real OpenWrt rootfs containers:
+Version 2.0+ requires OpenWrt 22.03 or newer with firewall4/nftables. OpenWrt 21.02 users should stay on the 1.30.x release series.
+
+**CI-tested on 48 combinations** — every push is verified against real OpenWrt rootfs containers:
 
 | | x86‑64 | x86‑generic | mips\_24kc | aarch64 | arm\_a9 | arm\_a15 | armsr | armvirt32 | i386 |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **21.02.6** | ✓ | | | ✓ | | ✓ | | ✓ | |
 | **22.03.7** | ✓ | | | ✓ | | ✓ | | ✓ | |
 | **23.05.6** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | | ✓ |
 | **24.10.1** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | | ✓ |
@@ -274,7 +275,6 @@ rule. The MAC does not rotate, so the rules that *can* be keyed on it are.
   address of every packet it forwards, so a MAC-keyed rule aimed at it would
   black-hole or throttle every client behind it. It too is reported as
   "IPv4 only", naming the reason.
-- **fw3 / iptables (OpenWrt 21.02)** stays IPv4-only throughout.
 
 If a device must be cut off completely and its IPv6 cannot be covered, the
 **WiFi block** (for wireless clients) and the **global internet cut** (for all
@@ -286,7 +286,7 @@ devices) are family-independent and work regardless.
 
 > **Which file do I need?**
 > - **Recommended**: v1.6.5+ (earlier releases are broken — missing status.css, invalid APK format)
-> - OpenWrt **21.02 — 24.10** → download `.ipk` (opkg)
+> - OpenWrt **22.03 — 24.10** → download `.ipk` (opkg)
 > - OpenWrt **25.12+** and snapshot → download `.apk` (apk)
 > - Want upgrades through `opkg upgrade` / `apk upgrade`? Add the [package feed](#package-feed-recommended) instead
 
@@ -326,7 +326,7 @@ and upgrades the app like any other package, and checks the feed's signature on
 every update. Needs HTTPS in `wget` (`libustream-*`, present in default images
 since 21.02).
 
-**OpenWrt 21.02 — 24.10 (opkg):**
+**OpenWrt 22.03 — 24.10 (opkg):**
 
 ```sh
 wget -O /tmp/trafficctl.pub https://yusdyr.github.io/luci-app-trafficctl/keys/usign-64513c3027229c14.pub
@@ -395,7 +395,7 @@ cd /tmp && wget -O trafficctl.apk https://github.com/YusDyr/luci-app-trafficctl/
 > `latest` URLs, so the files cannot change under you between download and
 > install.
 
-### OpenWrt 21.02 — 24.10 (.ipk)
+### OpenWrt 22.03 — 24.10 (.ipk)
 
 **Option A — LuCI web UI:**
 1. Download [`trafficctl.ipk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.ipk) and [`luci-app-trafficctl.ipk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk) to your computer
@@ -420,7 +420,7 @@ ssh root@router 'opkg install https://github.com/YusDyr/luci-app-trafficctl/rele
 # OpenWrt 25.12+ (apk)
 apk del luci-app-trafficctl trafficctl
 
-# OpenWrt 21.02 - 24.10 (opkg): the web interface first, then the backend
+# OpenWrt 22.03 - 24.10 (opkg): the web interface first, then the backend
 opkg remove luci-app-trafficctl
 opkg remove trafficctl
 
@@ -512,7 +512,7 @@ apk add curl
 </details>
 
 <details>
-<summary>OpenWrt 21.02 — 24.10 (opkg)</summary>
+<summary>OpenWrt 22.03 — 24.10 (opkg)</summary>
 
 ```sh
 # Core (always required)
@@ -568,7 +568,7 @@ opkg install curl
 | Mode | Mechanism | Behavior | Best For |
 |------|-----------|----------|----------|
 | **Shaper** | tc/HTB + fq_codel | Queues excess packets | Smooth streaming, lower jitter |
-| **Limiter** | nft `limit rate` / iptables `hashlimit` | Drops excess packets | Quick enforcement, low overhead |
+| **Limiter** | nft `limit rate` | Drops excess packets | Quick enforcement, low overhead |
 
 ### Persistence
 
@@ -621,12 +621,9 @@ flowchart LR
     D --> G[(iw / brctl)]
     D --> N[(ARP / DHCP)]
 
-    E --> H[Firewall\nabstraction]
+    E --> H[nftables]
     E --> I[tc / HTB]
     E --> J[hostapd]
-
-    H --> K[(nftables)]
-    H --> L[(iptables)]
 
     I --> M[(shapes.json)]
     H --> R[(rules.json)]
@@ -638,7 +635,7 @@ flowchart LR
     LOG --> SL[(syslog)]
 ```
 
-The frontend talks to a thin rpcd dispatcher over ubus. The Telegram bot provides parallel remote control via long polling. Backend shell scripts split into two groups: **monitoring** (read-only, pulls data from conntrack, ARP, DHCP leases, and wireless subsystems) and **control** (writes firewall rules, tc classes, or WiFi MAC filters). A firewall abstraction layer auto-detects nft vs iptables at runtime. All mutable actions are logged to a local file and optionally syslog. Rules optionally persist across reboots via hotplug scripts.
+The frontend talks to a thin rpcd dispatcher over ubus. The Telegram bot provides parallel remote control via long polling. Backend shell scripts split into two groups: **monitoring** (read-only, pulls data from conntrack, ARP, DHCP leases, and wireless subsystems) and **control** (writes firewall rules via nftables, tc classes, or WiFi MAC filters). All mutable actions are logged to a local file and optionally syslog. Rules optionally persist across reboots via hotplug scripts.
 
 ---
 
@@ -669,7 +666,7 @@ The frontend talks to a thin rpcd dispatcher over ubus. The Telegram bot provide
 |----------|-------------|
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Component diagram, data flow sequences, tc/HTB hierarchy, security model |
 | [API.md](docs/API.md) | All rpcd methods, script arguments, JSON output formats |
-| [COMPATIBILITY.md](docs/COMPATIBILITY.md) | OpenWrt version matrix, nft/iptables feature parity, known limitations |
+| [COMPATIBILITY.md](docs/COMPATIBILITY.md) | OpenWrt version matrix, known limitations |
 | [DEVELOPMENT.md](docs/DEVELOPMENT.md) | Dev setup, deploy commands, code style, debugging |
 
 ---
@@ -680,10 +677,9 @@ Contributions are welcome. Please:
 
 1. Fork the repository and create a feature branch.
 2. Test on at least one real OpenWrt device.
-3. Ensure both nftables and iptables code paths work if your change touches firewall logic.
-4. Keep the single-file JavaScript approach -- no bundlers, no npm, no transpilation.
-5. Shell scripts must be POSIX sh compatible (BusyBox ash/dash).
-6. All scripts emit JSON to stdout.
+3. Keep the single-file JavaScript approach -- no bundlers, no npm, no transpilation.
+4. Shell scripts must be POSIX sh compatible (BusyBox ash/dash).
+5. All scripts emit JSON to stdout.
 
 ### Code Style
 

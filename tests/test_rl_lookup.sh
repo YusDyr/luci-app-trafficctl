@@ -85,7 +85,7 @@ case "\$*" in
 esac
 exit 0
 MOCK
-for c in uci ubus iptables; do printf '#!/bin/sh\nexit 1\n' > "$MOCKBIN/$c"; done
+for c in uci ubus; do printf '#!/bin/sh\nexit 1\n' > "$MOCKBIN/$c"; done
 chmod +x "$MOCKBIN"/*
 
 rate_of() { PATH="$MOCKBIN:$PATH" sh -c ". $FWLIB >/dev/null 2>&1; tctl_rl_rate_kbit $1" < "$DUMP" 2>&1; }
@@ -122,7 +122,7 @@ LOOKUP="$TMPDIR/lookup.sh"
 sed -n '/^lookup_rate_limit()/,/^}/p' "$BIN/trafficctl-summary.sh" > "$LOOKUP"
 assert_contains "harness: lookup_rate_limit extracted" "lookup_rate_limit()" "$(cat "$LOOKUP")"
 summary_rate() {
-    PATH="$MOCKBIN:$PATH" sh -c ". $FWLIB >/dev/null 2>&1; . $LOOKUP; TCTL_FW=nft; RL_DUMP=\$(cat $DUMP); lookup_rate_limit $1" 2>&1
+    PATH="$MOCKBIN:$PATH" sh -c ". $FWLIB >/dev/null 2>&1; . $LOOKUP; RL_DUMP=\$(cat $DUMP); lookup_rate_limit $1" 2>&1
 }
 assert_eq "summary: own limit" "5000" "$(summary_rate 192.168.1.5)"
 assert_eq "summary: a kbytes listing is not read as 0" "8192" "$(summary_rate 192.168.1.7)"
@@ -149,38 +149,6 @@ assert_contains "stats: bytes rate" '"ip":"192.168.1.5","mode":"shared","rate_kb
 assert_contains "stats: kbytes listing" '"ip":"192.168.1.7","mode":"shared","rate_kbit":8192' "$STATS"
 assert_contains "stats: mbytes listing is not read as 8 kbit/s" '"ip":"192.168.1.4","mode":"shared","rate_kbit":8389' "$STATS"
 assert_contains "stats: per-device rule in kbytes" '"ip":"192.168.1.8","mode":"each","rate_kbit":16384' "$STATS"
-
-# ── fw3/iptables: written and read in bytes ──────────────────────────────────
-#
-# "${kbit}kbit/sec" is a PACKET rate to hashlimit, and the "${kbit}kbit"
-# burst next to it is rejected (iptables 1.8.7 and 1.8.10), so fw3 never had
-# a limit installed. The listings below are what iptables-legacy 1.8.7 prints
-# for the rules the package writes now (8000 down / 2000 up).
-
-ipt_args() { sh -c ". $FWLIB >/dev/null 2>&1; tctl_ipt_limit_args $1" 2>&1; }
-assert_eq "fw3 args: bytes, burst two seconds" "--hashlimit-above 625000b/s --hashlimit-burst 1250000b" "$(ipt_args 5000)"
-assert_eq "fw3 args: burst capped to 32 bits" "--hashlimit-above 3000000000b/s --hashlimit-burst 4000000000b" "$(ipt_args 24000000)"
-assert_eq "fw3 args: no packet-rate form left" "" "$(grep -rn 'kbit/sec' "$BIN" | grep -v '^.*#')"
-
-IPT_L="$TMPDIR/ipt-L"
-cat > "$IPT_L" <<'IPT'
-    0     0 DROP       all  --  *      *       0.0.0.0/0            192.168.1.20         limit: above 1000000b/s burst 1mb mode dstip htable-expire 10000 name rl_rl_ratelimit_192_168_1_20 /* rl_ratelimit_192_168_1_20 */
-    0     0 DROP       all  --  *      *       192.168.1.20         0.0.0.0/0            limit: above 250000b/s burst 488kb mode srcip name rl_rl_ratelimit_192_168_1_20_ul /* rl_ratelimit_192_168_1_20_ul */
-    0     0 DROP       all  --  *      *       0.0.0.0/0            192.168.1.21         limit: above 1213mb/s mode dstip name rl_rl_ratelimit_192_168_1_21 /* rl_ratelimit_192_168_1_21 */
-    0     0 DROP       all  --  *      *       0.0.0.0/0            192.168.1.22         limit: above 5000/sec burst 5 mode dstip name rl_rl_ratelimit_192_168_1_22 /* rl_ratelimit_192_168_1_22 */
-IPT
-fw3_rate() {
-    sh -c ". $FWLIB >/dev/null 2>&1; . $LOOKUP; TCTL_FW=iptables; RL_DUMP=\$(cat $IPT_L); lookup_rate_limit $1" 2>&1
-}
-assert_eq "fw3 summary: download ceiling" "8000" "$(fw3_rate 192.168.1.20)"
-assert_eq "fw3 summary: upload ceiling" "2000" "$(fw3_rate '192.168.1.20 up')"
-assert_eq "fw3 summary: mb/s listing (a 10 Gbit/s rule)" "10175382" "$(fw3_rate 192.168.1.21)"
-assert_eq "fw3 summary: a packet rate is not a kbit/s ceiling" "0" "$(fw3_rate 192.168.1.22)"
-assert_eq "fw3 summary: unlimited device" "0" "$(fw3_rate 192.168.1.23)"
-
-S_LINE='-A FORWARD -d 192.168.1.30/32 -p tcp -m tcp --dport 443 -m hashlimit --hashlimit-above 625000b/s --hashlimit-burst 1mb --hashlimit-mode dstip --hashlimit-name pfw_tcp_443 -m comment --comment tctl_pfw_limit -j DROP'
-assert_eq "fw3 -S listing (port forwards)" "5000" \
-    "$(printf '%s\n' "$S_LINE" | sh -c ". $FWLIB >/dev/null 2>&1; awk \"\$TCTL_NFT_RATE_AWK\"'{ print tctl_ipt_first_rate() }'")"
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

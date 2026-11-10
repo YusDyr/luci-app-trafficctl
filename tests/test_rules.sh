@@ -4,12 +4,12 @@
 # The device table is built from conntrack, so a device that goes offline loses
 # its row, and with it the only way to see or lift its block, limit or shape —
 # while the rule keeps applying. The list built here must therefore come from
-# where the restrictions LIVE (nft/iptables, tc, the radio) and from where they
+# where the restrictions LIVE (nft, tc, the radio) and from where they
 # are SAVED (rules.json, shapes.json, the uci maclist), never from the set of
 # devices currently online, and it must say which of the two each was found in.
 #
-# Runs the real scripts with fake nft/iptables/tc/ip/uci/hostapd_cli on PATH
-# (test_direction.sh's pattern), on both firewall paths. The second half runs
+# Runs the real scripts with fake nft/tc/ip/uci/hostapd_cli on PATH
+# (test_direction.sh's pattern). The second half runs
 # the existing removal scripts the tab calls against an OFFLINE device, since
 # "listed but cannot be removed" would be the same bug one step later.
 
@@ -70,30 +70,17 @@ patch_script "$BIN/trafficctl-macfilter-remove.sh" "$TMPDIR/macfilter-remove.sh"
 chmod +x "$TMPDIR"/*.sh
 
 # ── fakes ──────────────────────────────────────────────────────────────────
-# $STATE/fw selects the firewall: "nft" or "iptables". Each listing is a
-# fixture file, so a scenario is "write the kernel state, then run".
+# Each listing is a fixture file, so a scenario is "write the kernel state,
+# then run".
 cat > "$MOCKBIN/nft" <<MOCK
 #!/bin/sh
 S="$STATE"
 echo "\$*" >> "\$S/nft.log"
 case "\$*" in
-    "list tables") [ "\$(cat "\$S/fw")" = nft ] && echo "table inet fw4"; exit 0 ;;
     "list chain inet fw4 forward"|"-a list chain inet fw4 forward") cat "\$S/fw4_forward" 2>/dev/null ;;
     "list table netdev tm_ratelimit"|"-a list table netdev tm_ratelimit") cat "\$S/tm_ratelimit" 2>/dev/null ;;
     # A real nft exits 1 for a set that does not exist.
     delete\ set*) exit 1 ;;
-esac
-exit 0
-MOCK
-cat > "$MOCKBIN/iptables" <<MOCK
-#!/bin/sh
-S="$STATE"
-echo "\$*" >> "\$S/ipt.log"
-case "\$*" in
-    "-S FORWARD") cat "\$S/ipt_forward_S" 2>/dev/null ;;
-    "-t mangle -L FORWARD -nvx") cat "\$S/ipt_mangle" 2>/dev/null ;;
-    "-t mangle -L FORWARD -nv") cat "\$S/ipt_mangle" 2>/dev/null ;;
-    -D*|"-t mangle -D"*) exit 1 ;;
 esac
 exit 0
 MOCK
@@ -196,7 +183,6 @@ cat > "$STATE/neigh" <<'EOF'
 192.168.1.80 dev br-lan lladdr aa:aa:aa:aa:aa:80 REACHABLE
 EOF
 
-echo nft > "$STATE/fw"
 echo 1 > "$STATE/persist"
 echo deny > "$STATE/wifi_mode"
 echo "AA:AA:AA:AA:AA:99 aa:aa:aa:aa:aa:50" > "$STATE/maclist"
@@ -320,28 +306,6 @@ OUT=$(run "$TMPDIR/rules.sh" list)
 assert_eq "allow-mode radio: counted" "1" "$(top "$OUT" wifi_allow_ifaces)"
 assert_eq "allow-mode radio: its maclist is not read as a deny list" "<none>" "$(rec "$OUT" wifi aa:aa:aa:aa:aa:50 mac)"
 echo deny > "$STATE/wifi_mode"
-
-# ── fw3 / iptables ─────────────────────────────────────────────────────────
-echo iptables > "$STATE/fw"
-cat > "$STATE/ipt_forward_S" <<'EOF'
--P FORWARD ACCEPT
--A FORWARD -s 192.168.1.50/32 -m comment --comment tctl_block_192_168_1_50 -j DROP
--A FORWARD -s 192.168.1.33/32 -j DROP
-EOF
-cat > "$STATE/ipt_mangle" <<'EOF'
-Chain FORWARD (policy ACCEPT 0 packets, 0 bytes)
-    pkts      bytes target     prot opt in     out     source               destination
-       4      400 DROP       all  --  *      *       0.0.0.0/0            192.168.1.60         limit: above 625000b/s burst 1250000b mode dstip /* rl_ratelimit_192_168_1_60 */
-       0        0 DROP       all  --  *      *       192.168.1.60         0.0.0.0/0            limit: above 125000b/s burst 250000b mode srcip /* rl_ratelimit_192_168_1_60_ul */
-EOF
-OUT=$(run "$TMPDIR/rules.sh" list)
-assert_eq "iptables: firewall reported" '"iptables"' "$(top "$OUT" fw)"
-assert_eq "iptables: offline block listed and applied" "true" "$(rec "$OUT" block 192.168.1.50 applied)"
-assert_eq "iptables: a foreign DROP is not listed" "<none>" "$(rec "$OUT" block 192.168.1.33 ip)"
-assert_eq "iptables: limit download" "5000" "$(rec "$OUT" ratelimit 192.168.1.60 rate_kbit)"
-assert_eq "iptables: limit upload" "1000" "$(rec "$OUT" ratelimit 192.168.1.60 rate_kbit_up)"
-assert_eq "iptables: limit applied" "true" "$(rec "$OUT" ratelimit 192.168.1.60 applied)"
-echo nft > "$STATE/fw"
 
 # ── removing what the tab lists, for an offline device ─────────────────────
 # Saved-only block: nothing in the kernel to delete, the record must still go.

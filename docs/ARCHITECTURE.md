@@ -8,8 +8,7 @@ This document describes the internal architecture of luci-app-trafficctl.
 
 1. **No daemon** -- All operations are on-demand. No background process runs when the UI is closed.
 2. **No compiled code** -- Pure shell scripts and JavaScript. Runs on any architecture without compilation.
-3. **Firewall agnostic** -- Automatically detects nftables or iptables at runtime. The same package works on OpenWrt 21.02 (fw3) through 23.05+ (fw4).
-4. **Minimal dependencies** -- Only requires `conntrack` and `luci-base`. Traffic shaping requires `tc-full` and `kmod-sched-htb` (optional).
+3. **Minimal dependencies** -- Only requires `conntrack` and `luci-base`. Traffic shaping requires `tc-full` and `kmod-sched-htb` (optional).
 
 ---
 
@@ -50,13 +49,8 @@ graph TD
             MFR["trafficctl-macfilter-remove.sh"]
         end
 
-        subgraph "Firewall Abstraction Layer"
-            FWSH["trafficctl-fw.sh<br/>(sourced by all scripts)"]
-        end
-
         subgraph "Kernel Subsystems"
             NFT["nftables<br/>(inet fw4 forward,<br/>netdev tm_ratelimit)"]
-            IPT["iptables<br/>(mangle FORWARD)"]
             TC["tc<br/>(HTB qdisc on br-lan)"]
             CTMOD["/proc/net/nf_conntrack"]
             IW["iw + brctl<br/>(WiFi/bridge detection)"]
@@ -82,10 +76,8 @@ graph TD
     BYT --> CTMOD
     BYT -->|"offload active"| BYTNFT
 
-    BLK & UBK --> FWSH
-    RL --> FWSH
-    FWSH -->|"fw4 detected"| NFT
-    FWSH -->|"fw3 detected"| IPT
+    BLK & UBK --> NFT
+    RL --> NFT
 
     SH --> TC
     SHS --> TC
@@ -114,7 +106,7 @@ sequenceDiagram
     S->>S: read /proc/net/nf_conntrack
     S->>S: iw station dump (WiFi MACs)
     S->>S: brctl showmacs (bridge ports)
-    S->>S: check nft/iptables block status
+    S->>S: check nft block status
     S->>S: check tc class (shape status)
     S-->>B: JSON array of devices
 
@@ -143,7 +135,7 @@ sequenceDiagram
     D->>D: conntrack grep src=ip
     D->>D: iw station dump (conn_type)
     D->>D: brctl showmacs (port name)
-    D->>D: nft/iptables check (block status)
+    D->>D: nft check (block status)
     D->>D: tc class check (shape status)
     D-->>B: {ip, name, mac, conn_type, connections[], ...}
 
@@ -180,39 +172,29 @@ sequenceDiagram
 
 ---
 
-## Firewall Abstraction Layer
+## Firewall Functions
 
-The file `trafficctl-fw.sh` is sourced by all scripts. It provides a unified API regardless of the firewall backend:
+The file `trafficctl-fw.sh` is sourced by all scripts and provides firewall functions:
 
 ```sh
 . /usr/libexec/trafficctl/trafficctl-fw.sh
 
-# Detection result stored in:
-# TCTL_FW = "nft" | "iptables"
+# TCTL_FW is the constant "nft"
 ```
 
-### Detection Logic
+### Key Functions
 
-```
-if command -v nft exists AND nft list tables returns results:
-    TCTL_FW = "nft"
-else:
-    TCTL_FW = "iptables"
-```
-
-### Provided Functions
-
-| Function | nft implementation | iptables implementation |
-|----------|-------------------|------------------------|
-| `tctl_ratelimit_add` | `nft add rule netdev tm_ratelimit dl ip daddr ... limit rate over ... drop` | `iptables -t mangle -A FORWARD ... -m hashlimit ... -j DROP` |
-| `tctl_ratelimit_remove` | Delete rules by handle from `netdev tm_ratelimit dl` | `iptables -t mangle -D FORWARD ... -m comment --comment ...` |
-| `tctl_block_add` | `nft add rule inet fw4 forward ip saddr ... drop` | `iptables -I FORWARD -s ... -j DROP` |
-| `tctl_block_remove` | Delete rules by handle from `inet fw4 forward` | `iptables -D FORWARD -s ... -j DROP` (loop until gone) |
-| `tctl_is_blocked` | grep nft forward chain | grep iptables FORWARD chain |
-| `tctl_get_wan_device` | `uci get network.wan.device` (fallback to `.ifname`) | Same |
-| `tctl_get_lan_device` | `uci get network.lan.device` (fallback to `.ifname`) | Same |
-| `tctl_validate_ip` | regex + octet range check | Same |
-| `tctl_get_wifi_interfaces` | `uci show wireless` parsing | Same |
+| Function | Implementation |
+|----------|----------------|
+| `tctl_ratelimit_add` | `nft add rule netdev tm_ratelimit dl ip daddr ... limit rate over ... drop` |
+| `tctl_ratelimit_remove` | Delete rules by handle from `netdev tm_ratelimit dl` |
+| `tctl_block_add` | `nft add rule inet fw4 forward ip saddr ... drop` |
+| `tctl_block_remove` | Delete rules by handle from `inet fw4 forward` |
+| `tctl_is_blocked` | grep nft forward chain |
+| `tctl_get_wan_device` | `uci get network.wan.device` (fallback to `.ifname`) |
+| `tctl_get_lan_device` | `uci get network.lan.device` (fallback to `.ifname`) |
+| `tctl_validate_ip` | regex + octet range check |
+| `tctl_get_wifi_interfaces` | `uci show wireless` parsing |
 
 ---
 

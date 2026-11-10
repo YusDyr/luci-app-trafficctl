@@ -13,7 +13,7 @@ labels: bug
 - OpenWrt version (`cat /etc/openwrt_release | grep DESCRIPTION`):
 - Device / architecture:
 - Package version (`opkg list-installed | grep trafficctl` or `apk info luci-app-trafficctl`):
-- Firewall backend — fw4/nftables or iptables (`command -v nft; command -v iptables`):
+- Firewall backend (`nft --version`):
 
 ## Reproduction
 

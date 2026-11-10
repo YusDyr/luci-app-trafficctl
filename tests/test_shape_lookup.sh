@@ -55,7 +55,7 @@ cat > "$SHAPES" <<'JSON'
 [{"ip":"192.168.1.100","rate_kbit":10000,"classid":"1:2"},{"ip":"192.168.1.101","rate_kbit":5000,"classid":"1:3","rate_kbit_up":1000},{"ip":"192.168.1.5","rate_kbit":2000}]
 JSON
 
-for c in uci ubus nft iptables; do printf '#!/bin/sh\nexit 1\n' > "$MOCKBIN/$c"; done
+for c in uci ubus nft; do printf '#!/bin/sh\nexit 1\n' > "$MOCKBIN/$c"; done
 cat > "$MOCKBIN/tc" <<'MOCK'
 #!/bin/sh
 case "$*" in

@@ -106,8 +106,8 @@ cat > "$MOCKBIN/nft" <<MOCK
 #!/bin/sh
 echo "\$*" >> "$NFT_LOG"
 case "\$*" in
-    "list tables")
-        [ -f "$TMP/no_nft" ] && exit 0
+    "list tables inet")
+        [ -f "$TMP/no_nft" ] && exit 1
         echo "table inet fw4"
         ;;
     "-f -")
@@ -340,14 +340,14 @@ trafficctl.cut.default_duration=900
 trafficctl.cut.persist=0
 VALS
 
-# An iptables-only router gets a refusal rather than a button that does
-# nothing: a silent no-op is exactly the lying-UI failure this feature is
-# supposed to avoid.
+# Unusable nf_tables gets a refusal rather than a button that does nothing:
+# a silent no-op is exactly the lying-UI failure this feature is supposed to
+# avoid.
 reset_state
 : > "$TMP/no_nft"
 OUT=$(run_cut engage 900 0)
-assert_contains "iptables backend: refuses rather than pretending" '"ok":false' "$OUT"
-assert_contains "iptables backend: names the reason" "nftables" "$OUT"
+assert_contains "no nftables: refuses rather than pretending" '"ok":false' "$OUT"
+assert_contains "no nftables: names the reason" "nftables" "$OUT"
 rm -f "$TMP/no_nft"
 
 # ════════════════════════════════════════════════════════════════════════════

@@ -145,8 +145,9 @@ cut_lan_set() {
 
 # ── nft plumbing ───────────────────────────────────────────────────────────
 
+# fw4 is a dependency, so this only fails when nf_tables itself is unusable.
 cut_supported() {
-	[ "$TCTL_FW" = "nft" ]
+	nft list tables inet >/dev/null 2>&1
 }
 
 # Live state, which is the only honest answer to "is the internet cut?".
@@ -375,7 +376,7 @@ do_engage() {
 	local expires="$1" persist="$2" quiet="$3"
 	local devs
 
-	cut_supported || fail "global cut needs nftables (fw4); this system is running iptables"
+	cut_supported || fail "global cut needs nftables (fw4); nft cannot list inet tables here"
 
 	devs=$(cut_lan_devices)
 	if [ -z "$devs" ]; then

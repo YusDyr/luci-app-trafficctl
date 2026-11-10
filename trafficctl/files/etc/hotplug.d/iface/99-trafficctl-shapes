@@ -24,6 +24,15 @@ while ! tc qdisc show dev "$(tctl_get_lan_device)" >/dev/null 2>&1; do
     sleep 0.5 2>/dev/null || sleep 1
 done
 
+# At boot ifup lan can run before fw4 has loaded its ruleset, and blocks are
+# inserted into inet fw4 forward (up to 10 seconds).
+tries=0
+while ! nft list table inet fw4 >/dev/null 2>&1; do
+    tries=$((tries + 1))
+    [ "$tries" -ge 20 ] && break
+    sleep 0.5 2>/dev/null || sleep 1
+done
+
 # Restore shaping rules
 if [ -f "$SHAPES_FILE" ]; then
     jsonfilter -i "$SHAPES_FILE" -e '@[*].ip' 2>/dev/null | while read -r ip; do

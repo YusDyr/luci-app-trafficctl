@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build a signed package feed from a release's dist/ directory:
 #
-#   <out>/opkg/  *.ipk, Packages, Packages.gz, Packages.sig  (OpenWrt 21.02-24.10)
+#   <out>/opkg/  *.ipk, Packages, Packages.gz, Packages.sig  (OpenWrt 22.03-24.10)
 #   <out>/apk/   *.apk, packages.adb                         (OpenWrt 25.12+)
 #   <out>/keys/  the public keys a router needs to trust the feed
 #   <out>/index.html
@@ -175,7 +175,7 @@ cat > "$OUT/index.html" <<EOF
 <p>Signed package feed for <a href="https://github.com/YusDyr/luci-app-trafficctl">luci-app-trafficctl</a>.
 Add it once, then install and upgrade with the router's own package manager.</p>
 
-<h2>OpenWrt 21.02 &ndash; 24.10 (opkg)</h2>
+<h2>OpenWrt 22.03 &ndash; 24.10 (opkg)</h2>
 <pre>wget -O /tmp/trafficctl.pub ${FEED_URL}/keys/usign-${USIGN_ID}.pub
 opkg-key add /tmp/trafficctl.pub
 echo 'src/gz trafficctl ${FEED_URL}/opkg' &gt;&gt; /etc/opkg/customfeeds.conf

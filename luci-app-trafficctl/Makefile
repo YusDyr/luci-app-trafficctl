@@ -8,7 +8,7 @@ PKG_LICENSE:=Apache-2.0
 PKG_MAINTAINER:=Denis Iusupov <yusdyr@gmail.com>
 
 LUCI_TITLE:=LuCI Traffic Control
-LUCI_DESCRIPTION:=Per-device traffic monitoring, rate limiting (nft/iptables), \
+LUCI_DESCRIPTION:=Per-device traffic monitoring, rate limiting (nftables), \
  traffic shaping (tc/HTB), internet blocking, and WiFi MAC filtering.
 # The backend (helper scripts, init scripts, hotplug hooks, the config and the
 # metrics CGI) is its own package, ../trafficctl. What is left here is the
@@ -28,7 +28,7 @@ LUCI_DESCRIPTION:=Per-device traffic monitoring, rate limiting (nft/iptables), \
 # optional there, for wired-only builds), but it stays here so the upgrade from
 # 1.28.0 does not drop it and silently turn every WiFi block into a temporary
 # ban. trafficctl on its own does not need it.
-LUCI_DEPENDS:=+trafficctl +conntrack +curl +tc +iw +hostapd-utils +luci-base +rpcd
+LUCI_DEPENDS:=+trafficctl +conntrack +curl +tc +iw +firewall4 +hostapd-utils +luci-base +rpcd
 LUCI_PKGARCH:=all
 
 include $(TOPDIR)/feeds/luci/luci.mk

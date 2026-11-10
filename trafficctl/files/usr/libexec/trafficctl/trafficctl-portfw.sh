@@ -24,27 +24,6 @@ PFW_PRIO="-190"
 
 # ── validation helpers ──────────────────────────────────────────────────────
 
-# iptables spells a port range lo:hi. Truncating to the low port (as this did)
-# left every other port in the range open while reporting the whole range paused.
-iptables_dport() {
-    case "$1" in
-        *-*) echo "${1%%-*}:${1##*-}" ;;
-        *) echo "$1" ;;
-    esac
-}
-
-# hashlimit names are capped at 15 characters, so a range cannot be spelled out
-# in full: 8000-8100 as "pfw_8000_8100_tcp" would be silently truncated into a
-# collision with a neighbouring range.
-hashlimit_name() {
-    local proto="$1" port="$2" lo
-    lo="${port%%-*}"
-    case "$port" in
-        *-*) echo "pfwr${lo}_${proto}" ;;
-        *) echo "pfw${lo}_${proto}" ;;
-    esac
-}
-
 valid_port() {
     case "$1" in
         [0-9]*-[0-9]*)
@@ -75,10 +54,9 @@ pfw_comment() {
     printf 'tctl_pfw_%s_%s_%s_%s' "$1" "$2" "$3" "$4"
 }
 
-# ── nft/iptables plumbing ───────────────────────────────────────────────────
+# ── nft plumbing ────────────────────────────────────────────────────────────
 
 ensure_pfw_table() {
-    [ "$TCTL_FW" = "nft" ] || return 0
     nft add table inet tctl_pfw 2>/dev/null
     nft add chain inet tctl_pfw pfw_forward \
         "{ type filter hook forward priority $PFW_PRIO; policy accept; }" 2>/dev/null
@@ -93,46 +71,26 @@ pfw_chain_for_scope() {
 # Delete every rule in our table/chains carrying the given comment
 pfw_delete_by_comment() {
     local cmt="$1" chain h
-    if [ "$TCTL_FW" = "nft" ]; then
-        for chain in pfw_forward pfw_input; do
-            for h in $(nft -a list chain inet tctl_pfw "$chain" 2>/dev/null | \
-                       grep "\"$cmt\"" | grep -o 'handle [0-9]*' | awk '{print $2}'); do
-                nft delete rule inet tctl_pfw "$chain" handle "$h" 2>/dev/null
-            done
+    for chain in pfw_forward pfw_input; do
+        for h in $(nft -a list chain inet tctl_pfw "$chain" 2>/dev/null | \
+                   grep "\"$cmt\"" | grep -o 'handle [0-9]*' | awk '{print $2}'); do
+            nft delete rule inet tctl_pfw "$chain" handle "$h" 2>/dev/null
         done
-    else
-        for chain in FORWARD INPUT; do
-            # Re-evaluate the first matching rule spec each pass until none
-            # with the comment is left (empty spec makes iptables -D fail).
-            # shellcheck disable=SC2046 # rule spec is intentionally re-split
-            while iptables -D "$chain" $(iptables -S "$chain" 2>/dev/null | \
-                    grep -m1 -- "--comment $cmt " | sed 's/^-A [A-Z]* //') 2>/dev/null; do :; done
-        done
-    fi
+    done
 }
 
 pfw_add_pause() {
     local scope="$1" proto="$2" ip="$3" port="$4"
     local cmt chain
     cmt=$(pfw_comment "pause" "$proto" "${ip:-local}" "$port")
-    if [ "$TCTL_FW" = "nft" ]; then
-        ensure_pfw_table
-        chain=$(pfw_chain_for_scope "$scope")
-        if [ "$scope" = "input" ]; then
-            nft insert rule inet tctl_pfw "$chain" \
-                "$proto" dport "$port" counter drop comment "\"$cmt\""
-        else
-            nft insert rule inet tctl_pfw "$chain" \
-                ip daddr "$ip" "$proto" dport "$port" counter drop comment "\"$cmt\""
-        fi
+    ensure_pfw_table
+    chain=$(pfw_chain_for_scope "$scope")
+    if [ "$scope" = "input" ]; then
+        nft insert rule inet tctl_pfw "$chain" \
+            "$proto" dport "$port" counter drop comment "\"$cmt\""
     else
-        if [ "$scope" = "input" ]; then
-            iptables -I INPUT -p "$proto" --dport "$(iptables_dport "$port")" -j DROP \
-                -m comment --comment "$cmt" 2>/dev/null
-        else
-            iptables -I FORWARD -d "$ip" -p "$proto" --dport "$(iptables_dport "$port")" -j DROP \
-                -m comment --comment "$cmt" 2>/dev/null
-        fi
+        nft insert rule inet tctl_pfw "$chain" \
+            ip daddr "$ip" "$proto" dport "$port" counter drop comment "\"$cmt\""
     fi
 }
 
@@ -141,32 +99,16 @@ pfw_add_limit() {
     local cmt chain rate_b
     rate_b=$(tctl_rate_bytes "$kbit")
     cmt=$(pfw_comment "limit" "$proto" "${ip:-local}" "$port")
-    if [ "$TCTL_FW" = "nft" ]; then
-        ensure_pfw_table
-        chain=$(pfw_chain_for_scope "$scope")
-        if [ "$scope" = "input" ]; then
-            nft add rule inet tctl_pfw "$chain" \
-                "$proto" dport "$port" limit rate over "$rate_b" bytes/second \
-                counter drop comment "\"$cmt\""
-        else
-            nft add rule inet tctl_pfw "$chain" \
-                ip daddr "$ip" "$proto" dport "$port" limit rate over "$rate_b" bytes/second \
-                counter drop comment "\"$cmt\""
-        fi
+    ensure_pfw_table
+    chain=$(pfw_chain_for_scope "$scope")
+    if [ "$scope" = "input" ]; then
+        nft add rule inet tctl_pfw "$chain" \
+            "$proto" dport "$port" limit rate over "$rate_b" bytes/second \
+            counter drop comment "\"$cmt\""
     else
-        if [ "$scope" = "input" ]; then
-            # shellcheck disable=SC2046 # deliberate split into the option words
-            iptables -I INPUT -p "$proto" --dport "$(iptables_dport "$port")" -m hashlimit \
-                $(tctl_ipt_limit_args "$kbit") \
-                --hashlimit-mode dstport --hashlimit-name "$(hashlimit_name "$proto" "$port")" \
-                -j DROP -m comment --comment "$cmt" 2>/dev/null
-        else
-            # shellcheck disable=SC2046 # deliberate split into the option words
-            iptables -I FORWARD -d "$ip" -p "$proto" --dport "$(iptables_dport "$port")" -m hashlimit \
-                $(tctl_ipt_limit_args "$kbit") \
-                --hashlimit-mode dstip --hashlimit-name "$(hashlimit_name "$proto" "$port")" \
-                -j DROP -m comment --comment "$cmt" 2>/dev/null
-        fi
+        nft add rule inet tctl_pfw "$chain" \
+            ip daddr "$ip" "$proto" dport "$port" limit rate over "$rate_b" bytes/second \
+            counter drop comment "\"$cmt\""
     fi
 }
 
@@ -201,11 +143,7 @@ do_list() {
     # Current control rules (one dump, grepped below):
     # comments look like tctl_pfw_<kind>_<proto>_<ip|local>_<port>
     local CTL_DUMP=""
-    if [ "$TCTL_FW" = "nft" ]; then
-        CTL_DUMP=$(nft list table inet tctl_pfw 2>/dev/null)
-    else
-        CTL_DUMP=$(printf '%s\n%s' "$(iptables -S FORWARD 2>/dev/null)" "$(iptables -S INPUT 2>/dev/null)")
-    fi
+    CTL_DUMP=$(nft list table inet tctl_pfw 2>/dev/null)
 
     # Monitored subnets — used to keep router-local (input) stats to
     # external clients only (LAN hits on router ports are not "inbound").
@@ -374,8 +312,6 @@ do_list() {
             if [ "$limit_kbit" = "0" ]; then
                 st=$(printf '%s' "$CTL_DUMP" | grep "$(pfw_comment limit "$p" "$cmt_ip" "$port")" | \
                      awk "$TCTL_NFT_RATE_AWK"'{ for (i = 1; i < NF - 1; i++) if ($i == "over") { printf "%.0f\n", tctl_rate_kbit($(i+1), $(i+2)); exit } }')
-                [ -z "$st" ] && st=$(printf '%s' "$CTL_DUMP" | grep "$(pfw_comment limit "$p" "$cmt_ip" "$port")" | \
-                     awk "$TCTL_NFT_RATE_AWK"'{ r = tctl_ipt_first_rate(); if (r >= 0) { print r; exit } }')
                 [ -n "$st" ] && limit_kbit="$st"
             fi
         done

@@ -154,6 +154,11 @@ echo "\$*" >> "$NFT_LOG"
 case "\$*" in
     "list tables") echo "table inet fw4" ;;
     "list table netdev tm_ratelimit") cat "$TMP/nft_table.txt" 2>/dev/null ;;
+    # fw4_late holds how many more probes fail before fw4 has its table.
+    "list table inet fw4")
+        n=\$(cat "$TMP/fw4_late" 2>/dev/null || echo 0)
+        [ "\$n" -gt 0 ] && { echo \$((n - 1)) > "$TMP/fw4_late"; exit 1; }
+        ;;
 esac
 exit 0
 MOCK
@@ -388,6 +393,17 @@ assert_terminated "restore: the loop ended on its own"
 assert_contains "restore: a legacy host record still applies" \
     "ip daddr 192.168.1.50 limit rate over 625000 bytes/second" "$RESTORED"
 assert_not_contains "restore: a host needs no meter" "meter" "$RESTORED"
+
+# At boot ifup lan can come before fw4 has loaded its ruleset. A block restored
+# then went nowhere, so the hook waits for inet fw4 first.
+echo 2 > "$TMP/fw4_late"
+RESTORED=$(restore '[{"type":"block","ip":"192.168.1.60","param":""}]')
+assert_terminated "restore: the loop ended on its own"
+assert_eq "restore: the hook waits for inet fw4 before restoring a block" \
+    "list table inet fw4|list table inet fw4|list table inet fw4|insert rule inet fw4 forward" \
+    "$(printf '%s\n' "$RESTORED" | grep -E '^(list table inet fw4|insert rule inet fw4 forward)' \
+        | sed 's/^\(insert rule inet fw4 forward\).*/\1/' | head -4 | paste -sd'|' -)"
+rm -f "$TMP/fw4_late"
 
 # ── the restore loop's bounds (#108) ───────────────────────────────────────
 # The loop used to be `for idx in $(seq 0 99)`, so rule 101 onward was never

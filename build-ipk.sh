@@ -15,7 +15,7 @@ BACKEND_SRC="$TCTL_ROOT/${BE_NAME}"
 # Runtime dependencies of the backend (DEPENDS in trafficctl/Makefile).
 # hostapd-utils is optional for the backend (wired-only builds) and is only
 # repeated on luci-app-trafficctl; see LUCI_DEPENDS in its Makefile.
-BE_DEPENDS="conntrack, curl, tc, iw"
+BE_DEPENDS="conntrack, curl, tc, iw, firewall4"
 FE_EXTRA_DEPENDS="hostapd-utils"
 
 # Overridable so tests can build without touching a developer's dist/.
@@ -94,7 +94,7 @@ Section: net
 Architecture: $PKG_ARCH
 Maintainer: Denis Iusupov <yusdyr@gmail.com>
 Description: Per-device traffic monitoring (conntrack), rate limiting
- (nft/iptables), traffic shaping (tc/HTB), internet blocking, WiFi MAC
+ (nftables), traffic shaping (tc/HTB), internet blocking, WiFi MAC
  filtering, a global internet cut, a Telegram bot and a Prometheus exporter.
  The web interface is luci-app-trafficctl. WiFi MAC filtering needs
  hostapd-utils (optional; without it a WiFi block is a temporary ban).
@@ -204,7 +204,7 @@ License: Apache-2.0
 Section: luci
 Architecture: $PKG_ARCH
 Maintainer: Denis Iusupov <yusdyr@gmail.com>
-Description: Per-device traffic monitoring, rate limiting (nft/iptables),
+Description: Per-device traffic monitoring, rate limiting (nftables),
  traffic shaping (tc/HTB), internet blocking, and WiFi MAC filtering.
 EOF
 

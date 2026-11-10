@@ -124,7 +124,7 @@ assert_contains "block: missing ip rejected" '"ok":false' "$OUT"
 
 OUT=$(run_block 'bad;ip')
 assert_contains "block: invalid ip rejected" '"ok":false' "$OUT"
-assert_contains "block: invalid ip rejected — no nft calls made" "" "$(cat "$NFT_LOG")"
+assert_eq "block: invalid ip rejected — no nft calls made" "" "$(cat "$NFT_LOG")"
 
 OUT=$(run_block 192.168.1.254)
 assert_contains "block: cannot block the router's own LAN address" "cannot block the router itself" "$OUT"
