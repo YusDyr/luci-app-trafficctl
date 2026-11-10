@@ -1,0 +1,279 @@
+table inet fw4 {
+	flowtable ft {
+		hook ingress priority filter
+		devices = { lan2, lan3, lan4, phy0-ap0, phy1-ap0, wan }
+		flags offload
+		counter
+	}
+
+	chain user_pre_forward {
+		type filter hook forward priority filter - 1; policy accept;
+	}
+
+	chain input {
+		type filter hook input priority filter; policy drop;
+		iif "lo" accept comment "!fw4: Accept traffic from loopback"
+		ct state vmap { established : accept, related : accept } comment "!fw4: Handle inbound flows"
+		tcp flags & (fin | syn | rst | ack) == syn jump syn_flood comment "!fw4: Rate limit TCP syn packets"
+		tcp dport 18123 counter packets 0 bytes 0 accept comment "!fw4: rule-06"
+		tcp dport 88 counter packets 0 bytes 0 accept comment "!fw4: rule-05"
+		iifname "br-lan" jump input_lan comment "!fw4: Handle lan IPv4/IPv6 input traffic"
+		iifname { "wan", "awg0", "awg1", "awg2", "awg3" } jump input_wan comment "!fw4: Handle wan IPv4/IPv6 input traffic"
+		jump handle_reject
+	}
+
+	chain forward {
+		type filter hook forward priority filter; policy drop;
+		meta l4proto { tcp, udp } flow add @ft
+		ct state vmap { established : accept, related : accept } comment "!fw4: Handle forwarded flows"
+		iifname "br-lan" jump forward_lan comment "!fw4: Handle lan IPv4/IPv6 forward traffic"
+		iifname { "wan", "awg0", "awg1", "awg2", "awg3" } jump forward_wan comment "!fw4: Handle wan IPv4/IPv6 forward traffic"
+		jump handle_reject
+	}
+
+	chain output {
+		type filter hook output priority filter; policy accept;
+		oif "lo" accept comment "!fw4: Accept traffic towards loopback"
+		ct state vmap { established : accept, related : accept } comment "!fw4: Handle outbound flows"
+		oifname "br-lan" jump output_lan comment "!fw4: Handle lan IPv4/IPv6 output traffic"
+		oifname { "wan", "awg0", "awg1", "awg2", "awg3" } jump output_wan comment "!fw4: Handle wan IPv4/IPv6 output traffic"
+	}
+
+	chain prerouting {
+		type filter hook prerouting priority filter; policy accept;
+		iifname "br-lan" jump helper_lan comment "!fw4: Handle lan IPv4/IPv6 helper assignment"
+	}
+
+	chain handle_reject {
+		meta l4proto tcp reject with tcp reset comment "!fw4: Reject TCP traffic"
+		reject comment "!fw4: Reject any other traffic"
+	}
+
+	chain syn_flood {
+		limit rate 25/second burst 50 packets return comment "!fw4: Accept SYN packets below rate-limit"
+		drop comment "!fw4: Drop excess packets"
+	}
+
+	chain input_lan {
+		ct status dnat accept comment "!fw4: Accept port redirections"
+		jump accept_from_lan
+	}
+
+	chain output_lan {
+		jump accept_to_lan
+	}
+
+	chain forward_lan {
+		meta l4proto { icmp, ipv6-icmp } ether saddr 02:00:00:00:00:04 counter packets 64 bytes 87552 jump reject_to_wan comment "!fw4: rule-01"
+		meta nfproto ipv6 ether saddr { 02:00:00:00:00:03, 02:00:00:00:00:04 } counter packets 0 bytes 0 jump handle_reject comment "!fw4: rule-02"
+		jump accept_to_vpn comment "!fw4: rule-10"
+		jump accept_to_wan comment "!fw4: Accept lan to wan forwarding"
+		ct status dnat accept comment "!fw4: Accept port forwards"
+		jump accept_to_lan
+	}
+
+	chain helper_lan {
+	}
+
+	chain accept_from_lan {
+		iifname "br-lan" counter packets 939958 bytes 219107538 accept comment "!fw4: accept lan IPv4/IPv6 traffic"
+	}
+
+	chain accept_to_lan {
+		oifname "br-lan" counter packets 150655 bytes 11250311 accept comment "!fw4: accept lan IPv4/IPv6 traffic"
+	}
+
+	chain input_wan {
+		meta nfproto ipv4 udp dport 68 counter packets 746 bytes 275477 accept comment "!fw4: Allow-DHCP-Renew"
+		icmp type echo-request counter packets 0 bytes 0 accept comment "!fw4: Allow-Ping"
+		meta nfproto ipv4 meta l4proto igmp counter packets 0 bytes 0 accept comment "!fw4: Allow-IGMP"
+		meta nfproto ipv6 udp dport 546 counter packets 0 bytes 0 accept comment "!fw4: Allow-DHCPv6"
+		ip6 saddr fe80::/10 icmpv6 type . icmpv6 code { mld-listener-query . 0, mld-listener-report . 0, mld-listener-done . 0, mld2-listener-report . 0 } counter packets 0 bytes 0 accept comment "!fw4: Allow-MLD"
+		icmpv6 type { destination-unreachable, time-exceeded, echo-request, echo-reply, nd-router-solicit, nd-router-advert } limit rate 1000/second burst 5 packets counter packets 57888 bytes 2778624 accept comment "!fw4: Allow-ICMPv6-Input"
+		icmpv6 type . icmpv6 code { packet-too-big . 0, parameter-problem . 0, nd-neighbor-solicit . 0, nd-neighbor-advert . 0, parameter-problem . 1 } limit rate 1000/second burst 5 packets counter packets 0 bytes 0 accept comment "!fw4: Allow-ICMPv6-Input"
+		tcp dport 8443 counter packets 0 bytes 0 accept comment "!fw4: rule-07"
+		ct status dnat accept comment "!fw4: Accept port redirections"
+		jump reject_from_wan
+	}
+
+	chain output_wan {
+		jump accept_to_wan
+	}
+
+	chain forward_wan {
+		icmpv6 type { destination-unreachable, time-exceeded, echo-request, echo-reply } limit rate 1000/second burst 5 packets counter packets 0 bytes 0 accept comment "!fw4: Allow-ICMPv6-Forward"
+		icmpv6 type . icmpv6 code { packet-too-big . 0, parameter-problem . 0, parameter-problem . 1 } limit rate 1000/second burst 5 packets counter packets 0 bytes 0 accept comment "!fw4: Allow-ICMPv6-Forward"
+		meta l4proto esp counter packets 0 bytes 0 jump accept_to_lan comment "!fw4: Allow-IPSec-ESP"
+		udp dport 500 counter packets 0 bytes 0 jump accept_to_lan comment "!fw4: Allow-ISAKMP"
+		ct status dnat accept comment "!fw4: Accept port forwards"
+		jump reject_to_wan
+	}
+
+	chain accept_to_wan {
+		meta nfproto ipv4 oifname { "wan", "awg0", "awg1", "awg2", "awg3" } ct state invalid counter packets 42030 bytes 3984461 drop comment "!fw4: Prevent NAT leakage"
+		oifname { "wan", "awg0", "awg1", "awg2", "awg3" } counter packets 5104285 bytes 1974942932 accept comment "!fw4: accept wan IPv4/IPv6 traffic"
+	}
+
+	chain reject_from_wan {
+		iifname { "wan", "awg0", "awg1", "awg2", "awg3" } counter packets 72262 bytes 64603295 jump handle_reject comment "!fw4: reject wan IPv4/IPv6 traffic"
+	}
+
+	chain reject_to_wan {
+		oifname { "wan", "awg0", "awg1", "awg2", "awg3" } counter packets 64 bytes 87552 jump handle_reject comment "!fw4: reject wan IPv4/IPv6 traffic"
+	}
+
+	chain input_vpn {
+		jump accept_from_vpn
+	}
+
+	chain output_vpn {
+		jump accept_to_vpn
+	}
+
+	chain forward_vpn {
+		jump accept_to_vpn
+	}
+
+	chain accept_from_vpn {
+	}
+
+	chain accept_to_vpn {
+	}
+
+	chain dstnat {
+		type nat hook prerouting priority dstnat; policy accept;
+		iifname "br-lan" jump dstnat_lan comment "!fw4: Handle lan IPv4/IPv6 dstnat traffic"
+		iifname { "wan", "awg0", "awg1", "awg2", "awg3" } jump dstnat_wan comment "!fw4: Handle wan IPv4/IPv6 dstnat traffic"
+	}
+
+	chain srcnat {
+		type nat hook postrouting priority srcnat; policy accept;
+		oifname "br-lan" jump srcnat_lan comment "!fw4: Handle lan IPv4/IPv6 srcnat traffic"
+		oifname { "wan", "awg0", "awg1", "awg2", "awg3" } jump srcnat_wan comment "!fw4: Handle wan IPv4/IPv6 srcnat traffic"
+	}
+
+	chain dstnat_lan {
+		ip saddr 192.168.0.0/24 ip daddr { 10.32.55.119, 10.32.55.195, 10.32.55.197, 10.32.90.208, 10.128.28.73 } tcp dport 14022 dnat ip to 192.168.0.140:22 comment "!fw4: rule-09 (reflection)"
+		ip saddr 192.168.0.0/24 ip daddr { 10.32.55.119, 10.32.55.195, 10.32.55.197, 10.32.90.208, 10.128.28.73 } tcp dport 52873 dnat ip to 192.168.0.251:52873 comment "!fw4: rule-08 (reflection)"
+		ip saddr 192.168.0.0/24 ip daddr { 10.32.55.119, 10.32.55.195, 10.32.55.197, 10.32.90.208, 10.128.28.73 } udp dport 52873 dnat ip to 192.168.0.251:52873 comment "!fw4: rule-08 (reflection)"
+	}
+
+	chain srcnat_lan {
+		ip saddr 192.168.0.0/24 ip daddr 192.168.0.140 tcp dport 22 snat ip to 192.168.0.1 comment "!fw4: rule-09 (reflection)"
+		ip saddr 192.168.0.0/24 ip daddr 192.168.0.251 tcp dport 52873 snat ip to 192.168.0.1 comment "!fw4: rule-08 (reflection)"
+		ip saddr 192.168.0.0/24 ip daddr 192.168.0.251 udp dport 52873 snat ip to 192.168.0.1 comment "!fw4: rule-08 (reflection)"
+	}
+
+	chain dstnat_wan {
+		meta nfproto ipv4 tcp dport 14022 counter packets 0 bytes 0 dnat ip to 192.168.0.140:22 comment "!fw4: rule-09"
+		meta nfproto ipv4 tcp dport 52873 counter packets 0 bytes 0 dnat ip to 192.168.0.251:52873 comment "!fw4: rule-08"
+		meta nfproto ipv4 udp dport 52873 counter packets 8 bytes 468 dnat ip to 192.168.0.251:52873 comment "!fw4: rule-08"
+	}
+
+	chain srcnat_wan {
+		meta nfproto ipv4 masquerade comment "!fw4: Masquerade IPv4 wan traffic"
+	}
+
+	chain srcnat_vpn {
+		meta nfproto ipv4 masquerade comment "!fw4: Masquerade IPv4 vpn traffic"
+	}
+
+	chain raw_prerouting {
+		type filter hook prerouting priority raw; policy accept;
+	}
+
+	chain raw_output {
+		type filter hook output priority raw; policy accept;
+	}
+
+	chain mangle_prerouting {
+		type filter hook prerouting priority mangle; policy accept;
+	}
+
+	chain mangle_postrouting {
+		type filter hook postrouting priority mangle; policy accept;
+		oifname { "wan", "awg0", "awg1", "awg2", "awg3" } tcp flags & (fin | syn | rst) == syn tcp option maxseg size set rt mtu comment "!fw4: Zone wan IPv4/IPv6 egress MTU fixing"
+	}
+
+	chain mangle_input {
+		type filter hook input priority mangle; policy accept;
+	}
+
+	chain mangle_output {
+		type route hook output priority mangle; policy accept;
+	}
+
+	chain mangle_forward {
+		type filter hook forward priority mangle; policy accept;
+		iifname { "wan", "awg0", "awg1", "awg2", "awg3" } tcp flags & (fin | syn | rst) == syn tcp option maxseg size set rt mtu comment "!fw4: Zone wan IPv4/IPv6 ingress MTU fixing"
+	}
+}
+table inet PodkopTable {
+	set localv4 {
+		type ipv4_addr
+		flags interval
+		auto-merge
+		elements = { 0.0.0.0/8, 10.0.0.0/8,
+			     127.0.0.0/8, 169.254.0.0/16,
+			     172.16.0.0/12, 192.0.0.0/24,
+			     192.0.2.0/24, 198.18.0.90/24,
+			     192.168.0.0/16, 198.51.100.0/24,
+			     203.0.113.0/24, 198.18.0.91/3 }
+	}
+
+	set podkop_subnets {
+		type ipv4_addr
+		flags interval
+		auto-merge
+		elements = { 198.18.0.92/18, 198.18.0.93/23,
+			     198.18.0.94-198.18.0.95, 198.18.0.96/22,
+			     198.18.0.97/20, 198.18.0.98/22,
+			     198.18.0.99/22, 198.18.0.100/22,
+			     198.18.0.101-198.18.0.102, 198.18.0.103/18,
+			     198.18.0.104, 198.18.0.105/22,
+			     198.18.0.106/18, 198.18.0.107/20,
+			     198.18.0.108/15, 198.18.0.109/13,
+			     198.18.0.110/20, 198.18.0.111/24,
+			     198.18.0.112/20, 198.18.0.113/20,
+			     198.18.0.114/16, 198.18.0.115/22,
+			     198.18.0.116/17 }
+	}
+
+	set interfaces {
+		type ifname
+		flags interval
+		elements = { "br-lan" }
+	}
+
+	chain mangle {
+		type filter hook prerouting priority mangle; policy accept;
+		ip saddr 192.168.0.210 ip daddr @localv4 return
+		iifname @interfaces ip saddr 192.168.0.210 meta l4proto udp meta mark set 0x00100000 counter packets 8391398 bytes 4208245759
+		iifname @interfaces ip saddr 192.168.0.210 meta l4proto tcp meta mark set 0x00100000 counter packets 5371759 bytes 1659637362
+		ip saddr 192.168.0.119 ip daddr @localv4 return
+		iifname @interfaces ip saddr 192.168.0.119 meta l4proto udp meta mark set 0x00100000 counter packets 15577 bytes 6843820
+		iifname @interfaces ip saddr 192.168.0.119 meta l4proto tcp meta mark set 0x00100000 counter packets 76782 bytes 10755256
+		udp dport 123 return
+		ct status dnat return
+		iifname @interfaces ip daddr @podkop_subnets meta l4proto tcp meta mark set 0x00100000 counter packets 1678160 bytes 479824422
+		iifname @interfaces ip daddr @podkop_subnets meta l4proto udp meta mark set 0x00100000 counter packets 7407 bytes 2790864
+		iifname @interfaces ip daddr 198.18.0.0/15 meta l4proto tcp meta mark set 0x00100000 counter packets 2261105 bytes 831545362
+		iifname @interfaces ip daddr 198.18.0.0/15 meta l4proto udp meta mark set 0x00100000 counter packets 2512702 bytes 506235949
+	}
+
+	chain mangle_output {
+		type route hook output priority mangle; policy accept;
+		ip daddr @localv4 return
+		meta mark 0x00200000 counter packets 0 bytes 0 return
+		ip daddr @podkop_subnets meta l4proto tcp meta mark set 0x00100000 counter packets 175952 bytes 18644534
+		ip daddr @podkop_subnets meta l4proto udp meta mark set 0x00100000 counter packets 18031 bytes 1396350
+		ip daddr 198.18.0.0/15 meta l4proto tcp meta mark set 0x00100000 counter packets 435067 bytes 44509852
+		ip daddr 198.18.0.0/15 meta l4proto udp meta mark set 0x00100000 counter packets 0 bytes 0
+	}
+
+	chain proxy {
+		type filter hook prerouting priority dstnat; policy accept;
+		meta mark & 0x00100000 == 0x00100000 meta l4proto tcp tproxy ip to 127.0.0.1:1602 counter packets 9700614 bytes 3013674421
+		meta mark & 0x00100000 == 0x00100000 meta l4proto udp tproxy ip to 127.0.0.1:1602 counter packets 10938858 bytes 4719270285
+	}
+}

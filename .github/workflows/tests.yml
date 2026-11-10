@@ -108,6 +108,26 @@ jobs:
       - name: IPK build test
         run: bash tests/test_build_ipk.sh
 
+  # The ucode backend against the legacy shell one (tests/equiv.sh), on the
+  # oldest and the newest ucode we support. A missing ucode fails the job.
+  ucode-tests:
+    name: ucode ${{ matrix.ucode }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ucode: ["2022-12-02", "25.12"]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/trafficctl-ucode/${{ matrix.ucode }}
+          key: ucode-${{ matrix.ucode }}-${{ runner.os }}-${{ hashFiles('tools/ci/build-ucode.sh') }}
+      - name: Build ucode, ubus and uci at pinned commits
+        run: tools/ci/build-ucode.sh "${{ matrix.ucode }}"
+      - name: Equivalence tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/equiv.sh
+
   telegram-integration:
     name: Telegram Integration
     runs-on: ubuntu-latest

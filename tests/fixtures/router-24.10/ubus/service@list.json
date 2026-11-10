@@ -1,0 +1,19 @@
+{
+	"trafficctl-telegram": {
+		"instances": {
+			"telegram": {
+				"running": true,
+				"pid": 23034,
+				"command": [
+					"/usr/libexec/trafficctl/trafficctl-telegram.sh"
+				],
+				"term_timeout": 5,
+				"respawn": {
+					"threshold": 3600,
+					"timeout": 5,
+					"retry": 5
+				}
+			}
+		}
+	}
+}

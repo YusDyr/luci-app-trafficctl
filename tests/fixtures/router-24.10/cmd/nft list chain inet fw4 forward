@@ -1,0 +1,10 @@
+table inet fw4 {
+	chain forward {
+		type filter hook forward priority filter; policy drop;
+		meta l4proto { tcp, udp } flow add @ft
+		ct state vmap { established : accept, related : accept } comment "!fw4: Handle forwarded flows"
+		iifname "br-lan" jump forward_lan comment "!fw4: Handle lan IPv4/IPv6 forward traffic"
+		iifname { "wan", "awg0", "awg1", "awg2", "awg3" } jump forward_wan comment "!fw4: Handle wan IPv4/IPv6 forward traffic"
+		jump handle_reject
+	}
+}

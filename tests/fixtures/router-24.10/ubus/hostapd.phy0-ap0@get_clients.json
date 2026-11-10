@@ -1,0 +1,192 @@
+{
+	"freq": 2437,
+	"clients": {
+		"02:00:00:00:00:16": {
+			"auth": true,
+			"assoc": true,
+			"authorized": true,
+			"preauth": false,
+			"wds": false,
+			"wmm": true,
+			"ht": true,
+			"vht": false,
+			"he": false,
+			"wps": false,
+			"mfp": false,
+			"mbo": false,
+			"rrm": [
+				0,
+				0,
+				0,
+				0,
+				0
+			],
+			"extended_capabilities": [
+				
+			],
+			"aid": 3,
+			"bytes": {
+				"rx": 502449,
+				"tx": 2520457
+			},
+			"airtime": {
+				"rx": 771395,
+				"tx": 636571
+			},
+			"packets": {
+				"rx": 2892,
+				"tx": 2861
+			},
+			"rate": {
+				"rx": 3900000,
+				"tx": 6500000
+			},
+			"signal": -60,
+			"capabilities": {
+				
+			}
+		},
+		"02:00:00:00:00:09": {
+			"auth": true,
+			"assoc": true,
+			"authorized": true,
+			"preauth": false,
+			"wds": false,
+			"wmm": true,
+			"ht": true,
+			"vht": false,
+			"he": false,
+			"wps": false,
+			"mfp": false,
+			"mbo": false,
+			"rrm": [
+				0,
+				0,
+				0,
+				0,
+				0
+			],
+			"extended_capabilities": [
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0
+			],
+			"aid": 1,
+			"bytes": {
+				"rx": 2809236,
+				"tx": 1336138
+			},
+			"airtime": {
+				"rx": 1352136,
+				"tx": 1819668
+			},
+			"packets": {
+				"rx": 16810,
+				"tx": 15094
+			},
+			"rate": {
+				"rx": 13000000,
+				"tx": 10400000
+			},
+			"signal": -49,
+			"capabilities": {
+				
+			}
+		},
+		"02:00:00:00:00:1f": {
+			"auth": true,
+			"assoc": true,
+			"authorized": true,
+			"preauth": false,
+			"wds": false,
+			"wmm": false,
+			"ht": false,
+			"vht": false,
+			"he": false,
+			"wps": false,
+			"mfp": false,
+			"mbo": false,
+			"rrm": [
+				0,
+				0,
+				0,
+				0,
+				0
+			],
+			"extended_capabilities": [
+				
+			],
+			"aid": 2,
+			"bytes": {
+				"rx": 39604172,
+				"tx": 1098618
+			},
+			"airtime": {
+				"rx": 615351600,
+				"tx": 2046338
+			},
+			"packets": {
+				"rx": 1592954,
+				"tx": 17359
+			},
+			"rate": {
+				"rx": 5400000,
+				"tx": 5400000
+			},
+			"signal": -38,
+			"capabilities": {
+				
+			}
+		},
+		"02:00:00:00:00:19": {
+			"auth": true,
+			"assoc": true,
+			"authorized": true,
+			"preauth": false,
+			"wds": false,
+			"wmm": false,
+			"ht": false,
+			"vht": false,
+			"he": false,
+			"wps": false,
+			"mfp": false,
+			"mbo": false,
+			"rrm": [
+				0,
+				0,
+				0,
+				0,
+				0
+			],
+			"extended_capabilities": [
+				
+			],
+			"aid": 5,
+			"bytes": {
+				"rx": 1120932244,
+				"tx": 123552912
+			},
+			"airtime": {
+				"rx": 755811857,
+				"tx": 210102821
+			},
+			"packets": {
+				"rx": 2076096,
+				"tx": 1844971
+			},
+			"rate": {
+				"rx": 5400000,
+				"tx": 5400000
+			},
+			"signal": -29,
+			"capabilities": {
+				
+			}
+		}
+	}
+}

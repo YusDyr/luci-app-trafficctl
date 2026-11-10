@@ -1,0 +1,12 @@
+{
+	"up": false,
+	"pending": true,
+	"available": true,
+	"autostart": true,
+	"dynamic": false,
+	"proto": "dhcpv6",
+	"device": "wan",
+	"data": {
+		
+	}
+}

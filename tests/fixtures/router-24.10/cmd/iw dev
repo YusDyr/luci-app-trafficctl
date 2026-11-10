@@ -1,0 +1,24 @@
+phy#1
+	Interface phy1-ap0
+		ifindex 12
+		wdev 0x100000001
+		addr 02:00:00:00:00:6c
+		ssid OpenWrt
+		type AP
+		channel 44 (5220 MHz), width: 80 MHz, center1: 5210 MHz
+		txpower 20.00 dBm
+		multicast TXQ:
+			qsz-byt	qsz-pkt	flows	drops	marks	overlmt	hashcol	tx-bytes	tx-packets
+			0	0	1246292	15	0	0	200	339289230		1281170
+phy#0
+	Interface phy0-ap0
+		ifindex 13
+		wdev 0x1
+		addr 02:00:00:00:00:6b
+		ssid OpenWrt
+		type AP
+		channel 6 (2437 MHz), width: 20 MHz, center1: 2437 MHz
+		txpower 20.00 dBm
+		multicast TXQ:
+			qsz-byt	qsz-pkt	flows	drops	marks	overlmt	hashcol	tx-bytes	tx-packets
+			0	0	1247375	0	0	0	1436	339315387		1281274

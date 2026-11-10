@@ -1,0 +1,320 @@
+Station 02:00:00:00:00:1a (on phy1-ap0)
+	inactive time:	160 ms
+	rx bytes:	168598561
+	rx packets:	383201
+	tx bytes:	212283643
+	tx packets:	457557
+	tx retries:	85726
+	tx failed:	85729
+	rx drop misc:	2
+	signal:  	-73 [-78, -78, -78, -79] dBm
+	signal avg:	-73 [-78, -77, -78, -79] dBm
+	tx bitrate:	27.0 MBit/s MCS 1 40MHz
+	tx duration:	132456541 us
+	rx bitrate:	81.0 MBit/s MCS 4 40MHz
+	rx duration:	45786832 us
+	last ack signal:-72 dBm
+	avg ack signal:	-71 dBm
+	airtime weight: 256
+	authorized:	yes
+	authenticated:	yes
+	associated:	yes
+	preamble:	long
+	WMM/WME:	yes
+	MFP:		no
+	TDLS peer:	no
+	DTIM period:	2
+	beacon interval:100
+	short slot time:yes
+	connected time:	292958 seconds
+	associated at [boottime]:	24.897s
+	associated at:	1794026140604 ms
+	current time:	1794319097719 ms
+Station 02:00:00:00:00:13 (on phy1-ap0)
+	inactive time:	1370 ms
+	rx bytes:	95754665
+	rx packets:	451270
+	tx bytes:	430547081
+	tx packets:	597825
+	tx retries:	52339
+	tx failed:	52343
+	rx drop misc:	3
+	signal:  	-58 [-69, -59, -62, -67] dBm
+	signal avg:	-56 [-67, -57, -61, -65] dBm
+	tx bitrate:	1080.6 MBit/s 80MHz HE-MCS 10 HE-NSS 2 HE-GI 0 HE-DCM 0
+	tx duration:	72564791 us
+	rx bitrate:	960.7 MBit/s 80MHz HE-MCS 9 HE-NSS 2 HE-GI 0 HE-DCM 0
+	rx duration:	32833580 us
+	last ack signal:-54 dBm
+	avg ack signal:	-54 dBm
+	airtime weight: 256
+	authorized:	yes
+	authenticated:	yes
+	associated:	yes
+	preamble:	long
+	WMM/WME:	yes
+	MFP:		no
+	TDLS peer:	no
+	DTIM period:	2
+	beacon interval:100
+	short slot time:yes
+	connected time:	292938 seconds
+	associated at [boottime]:	44.143s
+	associated at:	1794026159850 ms
+	current time:	1794319097719 ms
+Station 02:00:00:00:00:07 (on phy1-ap0)
+	inactive time:	20 ms
+	rx bytes:	2483111716
+	rx packets:	6627544
+	tx bytes:	18152987584
+	tx packets:	14960111
+	tx retries:	1087673
+	tx failed:	1087736
+	rx drop misc:	7
+	signal:  	-60 [-70, -65, -64, -65] dBm
+	signal avg:	-60 [-70, -65, -64, -65] dBm
+	tx bitrate:	1200.9 MBit/s 80MHz HE-MCS 11 HE-NSS 2 HE-GI 0 HE-DCM 0
+	tx duration:	845086383 us
+	rx bitrate:	720.6 MBit/s 80MHz HE-MCS 7 HE-NSS 2 HE-GI 0 HE-DCM 0
+	rx duration:	248181365 us
+	last ack signal:-59 dBm
+	avg ack signal:	-59 dBm
+	airtime weight: 256
+	authorized:	yes
+	authenticated:	yes
+	associated:	yes
+	preamble:	long
+	WMM/WME:	yes
+	MFP:		no
+	TDLS peer:	no
+	DTIM period:	2
+	beacon interval:100
+	short slot time:yes
+	connected time:	292782 seconds
+	associated at [boottime]:	200.758s
+	associated at:	1794026316465 ms
+	current time:	1794319097719 ms
+Station 02:00:00:00:00:04 (on phy1-ap0)
+	inactive time:	0 ms
+	rx bytes:	1740780178
+	rx packets:	4227597
+	tx bytes:	5301865095
+	tx packets:	5070532
+	tx retries:	291745
+	tx failed:	291858
+	rx drop misc:	258
+	signal:  	-62 [-72, -71, -62, -70] dBm
+	signal avg:	-61 [-71, -70, -61, -69] dBm
+	tx bitrate:	877.5 MBit/s VHT-MCS 7 80MHz VHT-NSS 3
+	tx duration:	395196985 us
+	rx bitrate:	877.5 MBit/s VHT-MCS 7 80MHz VHT-NSS 3
+	rx duration:	252208593 us
+	last ack signal:-62 dBm
+	avg ack signal:	-61 dBm
+	airtime weight: 256
+	authorized:	yes
+	authenticated:	yes
+	associated:	yes
+	preamble:	long
+	WMM/WME:	yes
+	MFP:		no
+	TDLS peer:	no
+	DTIM period:	2
+	beacon interval:100
+	short slot time:yes
+	connected time:	70272 seconds
+	associated at [boottime]:	222710.095s
+	associated at:	1794248825803 ms
+	current time:	1794319097720 ms
+Station 02:00:00:00:00:1b (on phy1-ap0)
+	inactive time:	70 ms
+	rx bytes:	230888082
+	rx packets:	411138
+	tx bytes:	979028355
+	tx packets:	837165
+	tx retries:	46067
+	tx failed:	46070
+	rx drop misc:	114
+	signal:  	-58 [-75, -62, -59, -67] dBm
+	signal avg:	-57 [-74, -61, -58, -65] dBm
+	tx bitrate:	960.7 MBit/s 80MHz HE-MCS 9 HE-NSS 2 HE-GI 0 HE-DCM 0
+	tx duration:	54115649 us
+	rx bitrate:	864.8 MBit/s 80MHz HE-MCS 8 HE-NSS 2 HE-GI 0 HE-DCM 0
+	rx duration:	26335807 us
+	last ack signal:-58 dBm
+	avg ack signal:	-57 dBm
+	airtime weight: 256
+	authorized:	yes
+	authenticated:	yes
+	associated:	yes
+	preamble:	long
+	WMM/WME:	yes
+	MFP:		no
+	TDLS peer:	no
+	DTIM period:	2
+	beacon interval:100
+	short slot time:yes
+	connected time:	29956 seconds
+	associated at [boottime]:	263026.412s
+	associated at:	1794289142120 ms
+	current time:	1794319097720 ms
+Station 02:00:00:00:00:69 (on phy1-ap0)
+	inactive time:	7530 ms
+	rx bytes:	230935
+	rx packets:	1418
+	tx bytes:	216195
+	tx packets:	693
+	tx retries:	7
+	tx failed:	7
+	rx drop misc:	0
+	signal:  	-58 [-72, -66, -61, -61] dBm
+	signal avg:	-58 [-71, -66, -61, -62] dBm
+	tx bitrate:	390.0 MBit/s VHT-MCS 9 80MHz VHT-NSS 1
+	tx duration:	66098 us
+	rx bitrate:	6.0 MBit/s
+	rx duration:	108745 us
+	last ack signal:-62 dBm
+	avg ack signal:	-62 dBm
+	airtime weight: 256
+	authorized:	yes
+	authenticated:	yes
+	associated:	yes
+	preamble:	long
+	WMM/WME:	yes
+	MFP:		no
+	TDLS peer:	no
+	DTIM period:	2
+	beacon interval:100
+	short slot time:yes
+	connected time:	5972 seconds
+	associated at [boottime]:	287010.315s
+	associated at:	1794313126023 ms
+	current time:	1794319097720 ms
+Station 02:00:00:00:00:03 (on phy1-ap0)
+	inactive time:	16550 ms
+	rx bytes:	567369
+	rx packets:	5020
+	tx bytes:	957521
+	tx packets:	2684
+	tx retries:	699
+	tx failed:	702
+	rx drop misc:	1
+	signal:  	-61 [-67, -69, -65, -67] dBm
+	signal avg:	-61 [-66, -70, -65, -68] dBm
+	tx bitrate:	864.8 MBit/s 80MHz HE-MCS 8 HE-NSS 2 HE-GI 0 HE-DCM 0
+	tx duration:	640439 us
+	rx bitrate:	6.0 MBit/s
+	rx duration:	348737 us
+	last ack signal:-63 dBm
+	avg ack signal:	-63 dBm
+	airtime weight: 256
+	authorized:	yes
+	authenticated:	yes
+	associated:	yes
+	preamble:	long
+	WMM/WME:	yes
+	MFP:		no
+	TDLS peer:	no
+	DTIM period:	2
+	beacon interval:100
+	short slot time:yes
+	connected time:	5727 seconds
+	associated at [boottime]:	287255.845s
+	associated at:	1794313371553 ms
+	current time:	1794319097720 ms
+Station 02:00:00:00:00:08 (on phy1-ap0)
+	inactive time:	160 ms
+	rx bytes:	15699618
+	rx packets:	119624
+	tx bytes:	987932292
+	tx packets:	703583
+	tx retries:	55060
+	tx failed:	55068
+	rx drop misc:	14
+	signal:  	-70 [-81, -71, -76, -78] dBm
+	signal avg:	-66 [-76, -69, -73, -73] dBm
+	tx bitrate:	432.3 MBit/s 80MHz HE-MCS 4 HE-NSS 2 HE-GI 0 HE-DCM 0
+	tx duration:	27840544 us
+	rx bitrate:	648.5 MBit/s 80MHz HE-MCS 6 HE-NSS 2 HE-GI 0 HE-DCM 0
+	rx duration:	5285200 us
+	last ack signal:-70 dBm
+	avg ack signal:	-68 dBm
+	airtime weight: 256
+	authorized:	yes
+	authenticated:	yes
+	associated:	yes
+	preamble:	long
+	WMM/WME:	yes
+	MFP:		no
+	TDLS peer:	no
+	DTIM period:	2
+	beacon interval:100
+	short slot time:yes
+	connected time:	4723 seconds
+	associated at [boottime]:	288259.491s
+	associated at:	1794314375198 ms
+	current time:	1794319097720 ms
+Station 02:00:00:00:00:23 (on phy1-ap0)
+	inactive time:	2400 ms
+	rx bytes:	706533
+	rx packets:	4771
+	tx bytes:	1465578
+	tx packets:	2718
+	tx retries:	651
+	tx failed:	652
+	rx drop misc:	1
+	signal:  	-60 [-68, -65, -63, -64] dBm
+	signal avg:	-60 [-69, -68, -63, -64] dBm
+	tx bitrate:	648.5 MBit/s 80MHz HE-MCS 6 HE-NSS 2 HE-GI 0 HE-DCM 0
+	tx duration:	349053 us
+	rx bitrate:	864.8 MBit/s 80MHz HE-MCS 8 HE-NSS 2 HE-GI 0 HE-DCM 0
+	rx duration:	293064 us
+	last ack signal:-62 dBm
+	avg ack signal:	-62 dBm
+	airtime weight: 256
+	authorized:	yes
+	authenticated:	yes
+	associated:	yes
+	preamble:	long
+	WMM/WME:	yes
+	MFP:		no
+	TDLS peer:	no
+	DTIM period:	2
+	beacon interval:100
+	short slot time:yes
+	connected time:	3528 seconds
+	associated at [boottime]:	289454.140s
+	associated at:	1794315569848 ms
+	current time:	1794319097720 ms
+Station 02:00:00:00:00:28 (on phy1-ap0)
+	inactive time:	30 ms
+	rx bytes:	3249336
+	rx packets:	21199
+	tx bytes:	49280205
+	tx packets:	40357
+	tx retries:	4275
+	tx failed:	4275
+	rx drop misc:	1
+	signal:  	-63 [-70, -65, -75, -70] dBm
+	signal avg:	-63 [-70, -64, -74, -70] dBm
+	tx bitrate:	864.8 MBit/s 80MHz HE-MCS 8 HE-NSS 2 HE-GI 0 HE-DCM 0
+	tx duration:	2703234 us
+	rx bitrate:	648.5 MBit/s 80MHz HE-MCS 6 HE-NSS 2 HE-GI 0 HE-DCM 0
+	rx duration:	940744 us
+	last ack signal:-62 dBm
+	avg ack signal:	-61 dBm
+	airtime weight: 256
+	authorized:	yes
+	authenticated:	yes
+	associated:	yes
+	preamble:	long
+	WMM/WME:	yes
+	MFP:		no
+	TDLS peer:	no
+	DTIM period:	2
+	beacon interval:100
+	short slot time:yes
+	connected time:	1722 seconds
+	associated at [boottime]:	291260.797s
+	associated at:	1794317376504 ms
+	current time:	1794319097720 ms

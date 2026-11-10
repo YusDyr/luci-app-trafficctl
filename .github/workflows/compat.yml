@@ -242,6 +242,53 @@ jobs:
           fi
           exit $rc
 
+  # What the ucode port can rely on in the oldest and newest rootfs. Reports
+  # only: a finding changes the port, not the build, so only a pull fails it.
+  ucode-probe:
+    name: ucode probe ${{ matrix.version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ["22.03.7", "25.12.4"]
+    steps:
+      - name: Probe ucode, nft and tc
+        run: |
+          IMAGE="ghcr.io/openwrt/rootfs:x86-64-v${{ matrix.version }}"
+          for attempt in 1 2 3; do
+            docker pull -q "$IMAGE" && break
+            [ "$attempt" = 3 ] && { echo "::error::Could not pull $IMAGE"; exit 1; }
+            sleep $((attempt * 5))
+          done
+          sudo modprobe sch_htb || true
+          docker run -i --rm --cap-add NET_ADMIN --entrypoint /bin/sh "$IMAGE" -s <<'PROBE' || true
+          mkdir -p /var/lock /var/log
+          pkgs() { opkg list-installed 2>/dev/null || apk info -v 2>/dev/null; }
+          have() { pkgs | grep -qE "^$1( |-[0-9])"; }
+          add() { if command -v opkg >/dev/null; then opkg install "$@"; else apk add "$@"; fi >/dev/null 2>&1; }
+          echo "== release: $(. /etc/openwrt_release; echo "$DISTRIB_RELEASE")"
+          echo "== ucode -v"; ucode -v 2>&1; echo "(rc=$?)"
+          echo "== packages"; pkgs | grep -E '^(ucode|libucode|firewall4|nftables|rpcd|jsonfilter|libubox|ubus|uci)' | sort
+          echo "== /usr/lib/ucode"; ls /usr/lib/ucode
+          for p in firewall4 nftables-json ucode-mod-fs ucode-mod-ubus ucode-mod-uci rpcd-mod-ucode; do
+              have "$p" && echo "  $p: yes" || echo "  $p: no"
+          done
+          echo "== brctl: $(command -v brctl || echo missing)"
+          echo "== nft -j list tables"; nft -j list tables 2>&1; echo "(rc=$?)"
+          # The rootfs ships no tc.
+          { opkg update || apk update; } >/dev/null 2>&1
+          command -v tc >/dev/null || add tc-tiny
+          if tc qdisc add dev eth0 root handle 1: htb default fffe &&
+             tc class add dev eth0 parent 1: classid 1:1 htb rate 100mbit &&
+             tc class add dev eth0 parent 1:1 classid 1:2 htb rate 10mbit ceil 20mbit; then
+              echo "== tc -j class show"; tc -j class show dev eth0; echo "(rc=$?)"
+              echo "== tc -j -s class show"; tc -j -s class show dev eth0
+              echo "== tc -j qdisc show"; tc -j qdisc show dev eth0
+          else
+              echo "== HTB not available"
+          fi
+          PROBE
+
   # ──────────────────────────────────────────────────────────────────────────
   # Upgrade — install previous GitHub release, then install current build.
   # Verifies pre-upgrade/post-upgrade hooks, config file preservation.
