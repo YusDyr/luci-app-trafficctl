@@ -22,18 +22,12 @@ jobs:
         run: sudo apt-get install -y --no-install-recommends busybox-static mawk
       - name: Shell unit tests
         run: bash tests/test_fw.sh
-      - name: nft bytes parser tests
-        run: bash tests/test_bytes_nft.sh
       - name: Port-forward control tests
         run: bash tests/test_portfw.sh
       - name: Netify (DPI) integration tests
         run: bash tests/test_netify.sh
       - name: Bidirectional limit/shape tests
         run: bash tests/test_direction.sh
-      - name: Cumulative byte counter tests
-        run: bash tests/test_totals.sh
-      - name: Prometheus exporter tests
-        run: bash tests/test_metrics.sh
       - name: Telegram unit tests
         run: bash tests/test_telegram.sh
       - name: Telegram mock tests
@@ -54,8 +48,6 @@ jobs:
         run: bash tests/test_macfilter.sh
       - name: Metrics CGI endpoint tests
         run: bash tests/test_metrics_cgi.sh
-      - name: Byte counter overflow tests
-        run: bash tests/test_byte_overflow.sh
       - name: New device default-limit tests
         run: bash tests/test_newdevice.sh
       - name: Subnet / aggregate limit tests
@@ -116,6 +108,11 @@ jobs:
         ucode: ["2022-12-02", "25.12"]
     steps:
       - uses: actions/checkout@v6
+      # test_byte_overflow.sh: metrics.sh reads the accumulator with awk, and
+      # the 32-bit %d it guards against is a busybox-awk behaviour (see the
+      # same step in the job above).
+      - name: Install extra awk implementations
+        run: sudo apt-get install -y --no-install-recommends busybox-static mawk
       - uses: actions/cache@v4
         with:
           path: ~/.cache/trafficctl-ucode/${{ matrix.ucode }}
@@ -128,6 +125,14 @@ jobs:
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_names.sh
       - name: Per-interface counter tests (global overview)
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_ifaces.sh
+      - name: nft bytes parser tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_bytes_nft.sh
+      - name: Cumulative byte counter tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_totals.sh
+      - name: Prometheus exporter tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_metrics.sh
+      - name: Byte counter overflow tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_byte_overflow.sh
       - name: Equivalence tests
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/equiv.sh
 

@@ -32,6 +32,21 @@ const commands = {
 		return 0;
 	},
 
+	bytes: () => {
+		out(net.bytes());
+		return 0;
+	},
+
+	'bytes-nft': () => {
+		out(net.bytes_nft());
+		return 0;
+	},
+
+	totals: (args) => {
+		out(net.totals(args[0] == '--all'));
+		return 0;
+	},
+
 	names: (args) => {
 		switch (args[0]) {
 		case 'list':
@@ -60,7 +75,8 @@ const commands = {
 
 // What a caller expecting this command's shape can still parse.
 function fallback(cmd, args, msg) {
-	if (cmd == 'subnets' || cmd == 'ifaces' || (cmd == 'names' && args[0] == 'list'))
+	if (index([ 'subnets', 'ifaces', 'bytes', 'bytes-nft', 'totals' ], cmd) >= 0 ||
+	    (cmd == 'names' && args[0] == 'list'))
 		return [];
 	if (cmd == 'rdns')
 		return { ip: args[0] ?? '', host: '' };

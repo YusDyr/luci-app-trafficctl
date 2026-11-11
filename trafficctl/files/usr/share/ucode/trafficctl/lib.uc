@@ -48,13 +48,26 @@
 // Files
 //   readfile(p)                   contents, or null
 //   file_lines(p)                 lines without the final empty one, [] if none
+//   each_line(p, fn)              fn(line) for every line, read in chunks so a
+//                                 large file (conntrack) is never held whole;
+//                                 false when p cannot be opened
 //   is_file(p)
 //   mkdir_p(dir)
 //   write_atomic(p, data, mode)   temp file in the same directory + rename;
 //                                 mode defaults to the current file's
-//   lock(dir, tries, max_age)     mkdir lock holding our pid: tries x 100 ms
+//   lock(dir, tries, max_age, bare)
+//                                 mkdir lock holding our pid: tries x 100 ms
 //                                 (0 = one attempt). Taken over only when its
-//                                 holder is gone or it is max_age seconds old
+//                                 holder is gone or it is max_age seconds old.
+//                                 bare: an empty directory, for a lock the
+//                                 shell scripts share (they rmdir it); stale
+//                                 by age only, ours by its inode. Steals
+//                                 take turns under <dir>.steal (a leftover
+//                                 older than 10 s is ignored); a steal
+//                                 renames the stale directory aside and
+//                                 removes it only if it is the inode judged
+//                                 stale, anything else goes back unless a
+//                                 new lock took the path meanwhile
 //   unlock(dir)                   only a lock this process holds
 //   field(line, n)                awk's $(n+1)
 // Activity log
@@ -325,6 +338,27 @@ function file_lines(p) {
 	return l;
 }
 
+// Chunked, so a 16k-entry conntrack table costs one chunk of memory and not
+// the whole file plus its split. A final line without '\n' still counts.
+const CHUNK = 65536;
+
+function each_line(p, fn) {
+	let f = open(path(p));
+	if (!f)
+		return false;
+	let rest = '', c;
+	while (length(c = f.read(CHUNK))) {
+		let l = split(rest + c, '\n');
+		rest = pop(l);
+		for (let x in l)
+			fn(x);
+	}
+	f.close();
+	if (rest != '')
+		fn(rest);
+	return true;
+}
+
 function is_file(p) {
 	return stat(path(p))?.type == 'file';
 }
@@ -379,47 +413,101 @@ function lock_owner(p) {
 	return trim(fs_readfile(p + '/pid') ?? '');
 }
 
-function lock_take(p) {
+// Bare locks this process holds: path -> inode of the directory it made.
+let held = {};
+
+function lock_take(p, bare) {
 	if (!mkdir(p))
 		return false;
-	writefile(p + '/pid', pid());
+	if (bare)
+		held[p] = stat(p)?.inode;
+	else
+		writefile(p + '/pid', pid());
 	return true;
 }
 
 // No signal() before 2023-07: a killed holder never cleans up. A lock is
 // stale when its holder is gone, or past max_age (pid reused, or a holder
-// that never wrote its pid).
+// that never wrote its pid). Returns the stat of the stale directory, so a
+// steal can tell it from one made since.
 function lock_stale(p, max_age) {
 	let st = stat(p), owner = lock_owner(p);
 	if (!st)
-		return false;
-	if (owner != '' && owner != pid() && !stat('/proc/' + owner))
-		return true;
-	return max_age > 0 && time() - st.mtime >= max_age;
+		return null;
+	if (owner != '' && owner != '' + pid() && !stat('/proc/' + owner))
+		return st;
+	return (max_age > 0 && time() - st.mtime >= max_age) ? st : null;
 }
 
-function lock_steal(p, max_age) {
-	// rename() is atomic, so of two processes stealing one stale lock only
-	// one moves it. Checked again once moved: it may be a fresh lock taken
-	// since we looked; then it goes back.
-	let aside = p + '.stale.' + pid();
-	if (!rename(p, aside))
-		return false;
-	if (!lock_stale(aside, max_age)) {
-		rename(aside, p);
-		return false;
+function lock_discard(d) {
+	unlink(d + '/pid');
+	rmdir(d);
+}
+
+// Aside directories left by a stealer that died between its two renames.
+function sweep_aside(p) {
+	let dir = dirname(p), pre = basename(p) + '.stale.';
+	for (let e in lsdir(dir) ?? []) {
+		if (substr(e, 0, length(pre)) != pre)
+			continue;
+		let owner = substr(e, length(pre));
+		if (owner != '' + pid() && !stat('/proc/' + owner))
+			lock_discard(dir + '/' + e);
 	}
-	unlink(aside + '/pid');
-	rmdir(aside);
-	return lock_take(p) && lock_owner(p) == pid();
 }
 
-function lock(dir, tries, max_age) {
+// A guard left by a stealer killed inside its steal, after this long.
+const STEAL_GUARD_AGE = 10;
+
+function steal_guard(g) {
+	if (mkdir(g))
+		return true;
+	let st = stat(g);
+	if (!st || time() - st.mtime < STEAL_GUARD_AGE)
+		return false;
+	rmdir(g);
+	return !!mkdir(g);
+}
+
+function lock_steal(p, max_age, bare) {
+	// One stealer at a time, and it judges the lock again once it is alone:
+	// another stealer may have replaced the stale lock with its own fresh one
+	// since we looked, and moving that aside would make two holders.
+	let guard = p + '.steal';
+	if (!steal_guard(guard))
+		return false;
+	let ok = false, st = lock_stale(p, max_age);
+	sweep_aside(p);
+	let aside = p + '.stale.' + pid();
+	if (st && rename(p, aside)) {
+		if (stat(aside)?.inode == st.inode) {
+			lock_discard(aside);
+			ok = lock_take(p, bare) && (bare || lock_owner(p) == '' + pid());
+		}
+		// Not the directory judged stale: its holder let go and a new lock
+		// was made in between. Put it back, but never over a lock made at p
+		// meanwhile: rename() replaces an empty directory without a word. A
+		// placeholder from mkdir() claims p first, so the only directory
+		// replaced is our own.
+		else if (!mkdir(p))
+			// p is someone else's now. The moved lock's holder cannot
+			// release it (unlock checks p), so nobody would remove it.
+			lock_discard(aside);
+		else if (!rename(aside, p)) {
+			rmdir(p);
+			lock_discard(aside);
+		}
+	}
+	rmdir(guard);
+	return ok;
+}
+
+function lock(dir, tries, max_age, bare) {
 	let p = path(dir), n = (tries > 0) ? tries : 1;
 	for (let i = 0; i < n; i++) {
 		if (i)
 			sleep(100);
-		if (lock_take(p) || (lock_stale(p, max_age) && lock_steal(p, max_age)))
+		if (lock_take(p, bare) || (lock_stale(p, max_age) && lock_steal(p, max_age, bare)))
 			return true;
 	}
 	return false;
@@ -427,6 +515,12 @@ function lock(dir, tries, max_age) {
 
 function unlock(dir) {
 	let p = path(dir);
+	if (exists(held, p)) {
+		// Stolen and taken again since: that directory is someone else's.
+		let ino = held[p];
+		delete held[p];
+		return ino != null && stat(p)?.inode == ino && !!rmdir(p);
+	}
 	if (lock_owner(p) != pid())
 		return false;
 	unlink(p + '/pid');
@@ -658,7 +752,7 @@ function seen_seed() {
 // 2022-12 needs a ';' after `export function f() {}`; one list avoids it.
 export { path, pid, reset, plain, cursor, uci_get, uci_words, uci_foreach, commit,
 	ubus_call, q, run, lines, sh, to_json, valid_ip, valid_int, norm_mac, ip2int,
-	int2ip, cidr_spec, valid_target, readfile, file_lines, is_file, mkdir_p,
+	int2ip, cidr_spec, valid_target, readfile, file_lines, each_line, is_file, mkdir_p,
 	write_atomic, lock, unlock, field, valid_log_file, log, sanitize_name,
 	names_list, names_map, names_set, names_remove, seen_ready, seen_count,
 	seen_known, seen_mark, seen_seed };

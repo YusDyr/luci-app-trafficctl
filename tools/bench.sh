@@ -1,13 +1,17 @@
 #!/bin/sh
 # SPDX-License-Identifier: Apache-2.0
 # Benchmark gate for the ucode port: wall time and peak RSS of the legacy
-# summary/totals scripts against `trafficctl summary|totals`, over synthetic
-# conntrack tables. Runs ON the router:
+# summary/totals/bytes scripts against `trafficctl summary|totals|bytes`, over
+# synthetic conntrack tables. Runs ON the router:
 #
 #   ssh root@192.168.0.1 sh -s -- 2000 8000 16000 < tools/bench.sh
 #
-# BENCH_RUNS (default 5) timed runs per cell. The ucode column is skipped
-# while /usr/sbin/trafficctl does not exist yet.
+# BENCH_RUNS (default 5) timed runs per cell. BENCH_LEGACY (default
+# /usr/libexec/trafficctl) is where the shell scripts are read from: once a
+# script is a wrapper for /usr/sbin/trafficctl it is no legacy baseline, so
+# point this at an unpacked older release (v1.30.0's usr/libexec/trafficctl).
+# A cell is skipped when its side does not have the command: a wrapper on the
+# legacy side, a command `trafficctl` does not know yet on the ucode side.
 #
 # Everything either side writes goes under /tmp/tctl-bench: the legacy copy has
 # its paths rewritten, the ucode side gets TCTL_ROOT. Live rules, /etc and the
@@ -16,6 +20,7 @@ set -u
 
 B=/tmp/tctl-bench
 RUNS="${BENCH_RUNS:-5}"
+LEGACY="${BENCH_LEGACY:-/usr/libexec/trafficctl}"
 NEW=/usr/sbin/trafficctl
 [ $# -gt 0 ] || set -- 2000 8000 16000
 
@@ -23,7 +28,7 @@ rm -rf "$B"
 mkdir -p "$B/legacy" "$B/root/proc/net" "$B/root/tmp" "$B/root/etc/trafficctl" "$B/root/var/run"
 trap 'rm -rf "$B"' EXIT INT TERM
 
-for f in /usr/libexec/trafficctl/*.sh; do
+for f in "$LEGACY"/*.sh; do
     sed -e "s|/usr/libexec/trafficctl/|$B/legacy/|g" \
         -e "s|/proc/net/nf_conntrack|$B/root/proc/net/nf_conntrack|g" \
         -e "s|/etc/trafficctl/|$B/root/etc/trafficctl/|g" \
@@ -41,8 +46,10 @@ for f in uptime loadavg sys; do ln -s "/proc/$f" "$B/root/proc/$f"; done
 
 # Synthetic table: real LAN clients when there are leases, so lookups hit.
 gen() {   # gen <entries>
+    leases=/tmp/dhcp.leases
+    [ -f "$leases" ] || leases=/dev/null
     awk -v n="$1" 'BEGIN { srand(1) }
-    FILENAME == "/tmp/dhcp.leases" { ip[k++] = $3; next }
+    FILENAME != "" { ip[k++] = $3; next }
     END {
         if (!k) for (i = 0; i < 50; i++) ip[k++] = "192.168.0." (100 + i)
         for (i = 0; i < n; i++) {
@@ -52,7 +59,7 @@ gen() {   # gen <entries>
                 pr, (i % 3) ? "ESTABLISHED" : "", s, d, sp, dp, 1 + i % 900, 64 + (i * 7919) % 4000000,
                 d, s, dp, sp, 1 + i % 1200, 64 + (i * 104729) % 90000000
         }
-    }' /tmp/dhcp.leases > "$B/root/proc/net/nf_conntrack"
+    }' "$leases" > "$B/root/proc/net/nf_conntrack"
 }
 
 now_cs() { cut -d' ' -f1 /proc/uptime | tr -d .; }
@@ -90,11 +97,15 @@ cell() {   # cell <label> <cmd...>
 
 new() { TCTL_ROOT="$B/root" "$NEW" "$@"; }
 
+# The usage line lists every command: "usage: trafficctl <a|b|c> [args]".
+new_has() { [ -x "$NEW" ] && "$NEW" 2>/dev/null | grep -q "[<|]$1[|>]"; }
+legacy_has() { [ -f "$B/legacy/trafficctl-$1.sh" ] && ! grep -q '^exec /usr/sbin/trafficctl' "$B/legacy/trafficctl-$1.sh"; }
+
 printf '%-8s %7s %-7s %8s %9s\n' case entries impl wall_ms peak_kB
 for n in "$@"; do
     gen "$n"
-    for case in summary totals; do
-        cell legacy sh "$B/legacy/trafficctl-$case.sh"
-        [ -x "$NEW" ] && cell ucode new "$case"
+    for case in summary totals bytes; do
+        legacy_has "$case" && cell legacy sh "$B/legacy/trafficctl-$case.sh"
+        new_has "$case" && cell ucode new "$case"
     done
 done
