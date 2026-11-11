@@ -40,6 +40,7 @@ The package contains no compiled code (all shell scripts and JavaScript), so it 
 | Package | Purpose | Size |
 |---------|---------|------|
 | `conntrack` | Connection tracking CLI (`conntrack -L`) | ~15 KB |
+| `kmod-nft-netdev` | nftables `netdev` family, which the limiter's table `netdev tm_ratelimit` needs (fw4). firewall4 does not pull it in. A declared dependency | ~10 KB |
 | `luci-base` | LuCI framework (provides `view`, `fs`, rpcd) | (part of LuCI) |
 
 ### For Traffic Shaping (optional)

@@ -4,20 +4,21 @@
 # Keeper for the global internet cut: enforces the auto-revert deadline and
 # re-asserts the rule if the table it lives in is ever taken out from under it.
 #
-# Not enabled at boot on purpose. The cut's engaged state lives in tmpfs, so
+# Not started at boot on purpose. The cut's engaged state lives in tmpfs, so
 # after a reboot there is normally nothing to keep; the one case that does
 # survive — an operator who ticked "keep after reboot" — is restored from the
-# ifup-lan hotplug, which starts this service itself.
+# ifup-lan hotplug, which starts this service itself. Hence no START/STOP:
+# default_postinst runs `enable` on every init script, and without them that
+# creates no rc.d link. A boot-time keeper could also race the restore and
+# remove the rule it was about to install.
 #
 # No respawn either: the loop is meant to end when the cut does, and a
 # respawning keeper would restart into an empty state forever. If it dies
 # anyway, `trafficctl-cut.sh status` notices and starts a fresh one, and it
 # enforces the deadline itself in the meantime.
 #
-# START/STOP/USE_PROCD are consumed by the sourced /etc/rc.common framework.
+# USE_PROCD is consumed by the sourced /etc/rc.common framework.
 # shellcheck disable=SC2034
-START=95
-STOP=10
 USE_PROCD=1
 
 start_service() {
