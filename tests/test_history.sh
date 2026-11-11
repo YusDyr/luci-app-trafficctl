@@ -89,7 +89,6 @@ sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$TMPDIR/fw.sh|g" \
     -e "s|ERRFILE=\"/tmp/trafficctl_history.err\"|ERRFILE=\"$TMPDIR/history.err\"|" \
     -e "s|STAMP=\"/tmp/trafficctl_history.stamp\"|STAMP=\"$TMPDIR/history.stamp\"|" \
     -e "s|LOCKD=\"/tmp/trafficctl_history.lock.d\"|LOCKD=\"$TMPDIR/history.lock.d\"|" \
-    -e "s|TOTALS_STATE=\"/tmp/trafficctl_totals.state\"|TOTALS_STATE=\"$TMPDIR/totals.state\"|" \
     "$BIN/trafficctl-history.sh" > "$TMPDIR/history.sh"
 chmod +x "$TMPDIR/history.sh"
 
@@ -98,7 +97,7 @@ chmod +x "$TMPDIR/history.sh"
 # reading and WRITING files this test does not own.
 for must in "$TMPDIR/fw.sh" "$MOCKBIN/totals" "$MOCKBIN/ifaces" "$CURSOR" \
             "$TMPDIR/history.err" "$TMPDIR/history.ifcursor" \
-            "$TMPDIR/history.stamp" "$TMPDIR/history.lock.d" "$TMPDIR/totals.state"; do
+            "$TMPDIR/history.stamp" "$TMPDIR/history.lock.d"; do
     assert_contains "redirected into the script under test: $must" \
         "$must" "$(cat "$TMPDIR/history.sh")"
 done

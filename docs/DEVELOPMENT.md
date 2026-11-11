@@ -84,7 +84,7 @@ luci-app-trafficctl/                     # repository
 │       │       ├── iface/99-trafficctl-shapes      # Restore tc rules on boot
 │       │       └── dhcp/99-trafficctl-newdevice    # New-device detection
 │       ├── lib/upgrade/keep.d/trafficctl          # /etc/trafficctl/ kept across sysupgrade
-│       ├── usr/sbin/trafficctl          # The CLI (ucode): subnets, names, rdns, rdns-refresh, ifaces, bytes, bytes-nft, totals
+│       ├── usr/sbin/trafficctl          # The CLI (ucode): subnets, names, rdns, rdns-refresh, ifaces, bytes, totals
 │       ├── usr/share/ucode/trafficctl/
 │       │   ├── lib.uc                   # Shared helpers: uci/ubus, commands, JSON, validation, files, log
 │       │   └── net.uc                   # Subnets, interface roles, reverse DNS, byte samples, totals
@@ -93,7 +93,6 @@ luci-app-trafficctl/                     # repository
 │       │   ├── trafficctl-summary.sh    # All-device summary
 │       │   ├── trafficctl-device.sh     # Per-device detail
 │       │   ├── trafficctl-bytes.sh      # Wrapper: `trafficctl bytes` (byte counters for speed)
-│       │   ├── trafficctl-bytes-nft.sh  # Wrapper: `trafficctl bytes-nft` (nft counter maps)
 │       │   ├── trafficctl-totals.sh     # Wrapper: `trafficctl totals` (lifetime totals, UI + exporter)
 │       │   ├── trafficctl-ifaces.sh     # Wrapper for `trafficctl ifaces`
 │       │   ├── trafficctl-block.sh      # Internet block
@@ -244,7 +243,6 @@ export UCODE_PREFIX=~/.cache/trafficctl-ucode/2022-12-02
 bash tests/test_ucode_lib.sh          # lib.uc helpers, subnets
 bash tests/test_names.sh              # Device aliases + reverse-DNS cache
 bash tests/test_ifaces.sh             # Per-interface counters and roles
-bash tests/test_bytes_nft.sh          # nft counter maps (-j and text listings)
 bash tests/test_totals.sh             # Byte samples and the lifetime accumulator
 bash tests/test_metrics.sh            # Prometheus exporter (runs the accumulator)
 bash tests/test_byte_overflow.sh      # Counters past 2^31 and 2^53

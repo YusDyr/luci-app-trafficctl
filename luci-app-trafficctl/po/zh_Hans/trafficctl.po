@@ -271,6 +271,9 @@ msgstr "切断互联网"
 msgid "Cutting…"
 msgstr "切断中…"
 
+msgid "Disable flow offload in LuCI → Network → Firewall → General Settings."
+msgstr "在 LuCI → 网络 → 防火墙 → 常规设置 中关闭流卸载。"
+
 msgid "DL Speed"
 msgstr "下载速度"
 
@@ -379,17 +382,22 @@ msgstr "外部（WAN）端口"
 msgid "Filter connections by protocol"
 msgstr "按协议筛选连接"
 
+msgid ""
+"flag (firewall4 on OpenWrt 22.03 does not set one), so offloaded connections are"
+" not counted at all: per-device speeds and totals are not shown."
+msgstr "标志（OpenWrt 22.03 的 firewall4 不设置），因此卸载连接完全不被计数：不显示每设备的速度和总计。"
+
 msgid "Flow Offload"
 msgstr "流卸载"
 
 msgid ""
-"Flow offload is active and the kernel does not support the nftables counter maps"
-" trafficctl uses in that mode, so byte counters stop updating for offloaded conn"
-"ections. Speeds and totals would be far too low, so they are not shown. Disablin"
-"g hardware offload in Settings → Flow Offload restores them."
+"Flow offload is active and the flowtable has no counter (firewall4 on OpenWrt 22"
+".03), so byte counters stop updating for offloaded connections. Speeds and total"
+"s would be far too low, so they are not shown. Turn flow offloading off in Setti"
+"ngs → Flow Offload, or upgrade to OpenWrt 23.05 or later, to restore them."
 msgstr ""
-"流卸载已启用，但内核不支持 trafficctl 在该模式下使用的 nftables 计数器映射，因此卸载连接的字节计数器停止更新。速度和总计会严重偏低，故不显"
-"示。在 设置 → 流卸载 中关闭硬件卸载可恢复。"
+"流卸载已启用，但 flowtable 没有计数器（OpenWrt 22.03 的 firewall4），因此卸载连接的字节计数器停止更新。速度和总计会严重偏低，"
+"故不显示。在 设置 → 流卸载 中关闭流卸载，或升级到 OpenWrt 23.05 及以上版本，即可恢复。"
 
 msgid "Flow: /devices → select device → inline keyboard with enabled actions above"
 msgstr "流程：/devices → 选择设备 → 使用上方启用的操作内联键盘"
@@ -456,10 +464,9 @@ msgid "IP address"
 msgstr "IP 地址"
 
 msgid ""
-"If your current firmware uses fw3 (iptables) or ships a kernel older than 5.7, a"
-" router with modern OpenWrt and fw4 support will have this working out of the bo"
-"x."
-msgstr "如果你当前固件使用 fw3（iptables）或内核版本低于 5.7，现代 OpenWrt 且支持 fw4 的路由器将开箱即用。"
+"firewall4 on OpenWrt 22.03 does not set this flag; from 23.05 on it does, so upg"
+"rading the firmware restores full functionality."
+msgstr "OpenWrt 22.03 的 firewall4 不设置该标志；23.05 起会设置，因此升级固件即可恢复全部功能。"
 
 msgid "Iface"
 msgstr "接口"
@@ -631,13 +638,10 @@ msgid "None (per-flow)"
 msgstr "无（每流）"
 
 msgid ""
-"Not counted: flow offload is active and this router cannot provide the nftables "
-"counters trafficctl uses in that mode, so the kernel byte counters stop updating"
-" for offloaded connections. Any total here would be far too low. See Settings → "
-"Flow Offload."
-msgstr ""
-"未计数：流卸载已启用，此路由器无法提供 trafficctl 在该模式下使用的 nftables 计数器，因此内核字节计数器停止更新。任何显示值都会严重偏低。参"
-"见 设置 → 流卸载。"
+"Not counted: flow offload is active and the flowtable has no counter, so the ker"
+"nel byte counters stop updating for offloaded connections. Any total here would "
+"be far too low. See Settings → Flow Offload."
+msgstr "未计数：流卸载已启用且 flowtable 没有计数器，因此卸载连接的内核字节计数器停止更新。任何显示值都会严重偏低。参见 设置 → 流卸载。"
 
 msgid "Not enough data yet"
 msgstr "数据不足"
@@ -694,6 +698,9 @@ msgstr "操作失败"
 
 msgid "Or disable all flow offload in LuCI → Network → Firewall → General Settings."
 msgstr "或在 LuCI → 网络 → 防火墙 → 常规设置 中关闭所有流卸载。"
+
+msgid "Or upgrade to OpenWrt 23.05 or later, whose firewall4 sets the flag."
+msgstr "或升级到 OpenWrt 23.05 及以上版本，其 firewall4 会设置该标志。"
 
 msgid "Other interfaces"
 msgstr "其他接口"
@@ -908,11 +915,6 @@ msgstr "速度限制"
 msgid "Speed graph. Window = avg time. Orange dashed line = speed limit"
 msgstr "速度图表。窗口 = 平均时间。橙色虚线 = 速度限制"
 
-msgid ""
-"Speed is measured via nftables counters installed at a higher priority (before t"
-"he flowtable), so graphs are accurate."
-msgstr "速度通过安装在更高优先级（flowtable 之前）的 nftables 计数器测量，因此图表准确。"
-
 msgid "Speed limit: <b style=\"color:var(--tc-warn)\">⚡ %s</b>"
 msgstr "速度限制：<b style=\"color:var(--tc-warn)\">⚡ %s</b>"
 
@@ -972,6 +974,9 @@ msgstr "自动恢复助手未运行；此页面在打开时会重新检查截止
 
 msgid "The flowtable"
 msgstr "flowtable"
+
+msgid "The flowtable has no"
+msgstr "flowtable 没有"
 
 msgid "The internet cut is switched on, but its firewall rule is missing."
 msgstr "互联网切断已开启，但其防火墙规则缺失。"
@@ -1187,13 +1192,8 @@ msgstr "每个设备"
 msgid "failed"
 msgstr "失败"
 
-msgid ""
-"flag (Linux 5.7+, set automatically by fw4/nftables) periodically syncs hardware"
-" byte counts back to conntrack — trafficctl detects this and all features work n"
-"ormally."
-msgstr ""
-" counter 标志（Linux 5.7+，由 fw4/nftables 自动设置）会定期将硬件字节数同步回 conntrack — trafficctl 检"
-"测到后所有功能均正常工作。"
+msgid "flag (Linux 5.7+) periodically syncs hardware byte counts back to conntrack — trafficctl detects this and all features work normally."
+msgstr " counter 标志（Linux 5.7+）会定期将硬件字节数同步回 conntrack — trafficctl 检测到后所有功能均正常工作。"
 
 msgid ""
 "flag should sync hardware byte counts back to conntrack, but on many platforms ("

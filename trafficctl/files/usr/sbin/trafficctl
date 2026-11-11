@@ -37,11 +37,6 @@ const commands = {
 		return 0;
 	},
 
-	'bytes-nft': () => {
-		out(net.bytes_nft());
-		return 0;
-	},
-
 	totals: (args) => {
 		out(net.totals(args[0] == '--all'));
 		return 0;
@@ -75,7 +70,7 @@ const commands = {
 
 // What a caller expecting this command's shape can still parse.
 function fallback(cmd, args, msg) {
-	if (index([ 'subnets', 'ifaces', 'bytes', 'bytes-nft', 'totals' ], cmd) >= 0 ||
+	if (index([ 'subnets', 'ifaces', 'bytes', 'totals' ], cmd) >= 0 ||
 	    (cmd == 'names' && args[0] == 'list'))
 		return [];
 	if (cmd == 'rdns')

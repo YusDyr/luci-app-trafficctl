@@ -1277,8 +1277,9 @@ tctl_get_offload_mode() {
     hw=$(uci -q get firewall.@defaults[0].flow_offloading_hw 2>/dev/null)
     if [ "$hw" = "1" ]; then
         # kernel 5.7+ supports counter sync on flowtables (docs.kernel.org/networking/nf_flowtable.html).
-        # OpenWrt 22.03+ fw4 sets the counter flag by default, syncing hardware
-        # byte counts back to conntrack — monitoring works.
+        # fw4 declares the flowtable with the counter flag from OpenWrt 23.05
+        # on, syncing hardware byte counts back to conntrack, so monitoring
+        # works; fw4 on 22.03 does not.
         if nft list flowtables 2>/dev/null | grep -q "counter"; then
             echo "hardware-counter"
         else
@@ -1286,9 +1287,9 @@ tctl_get_offload_mode() {
         fi
     elif [ "$sw" = "1" ]; then
         # A counter-flagged flowtable syncs offloaded byte counts back to
-        # conntrack, so conntrack accounting stays valid — worth
-        # distinguishing, because the nft-map fallback needs dynamic counter
-        # maps that many kernels don't support.
+        # conntrack, so conntrack accounting stays valid. Without the flag
+        # (fw4 on 22.03) offloaded flows are not counted at all: the
+        # flowtable hooks netdev ingress, ahead of every inet chain.
         if nft list flowtables 2>/dev/null | grep -q "counter"; then
             echo "software-counter"
         else

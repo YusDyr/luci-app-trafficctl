@@ -1,14 +1,15 @@
 #!/bin/bash
 # shellcheck shell=bash
-# A scratch router for the byte samplers (`trafficctl bytes`, `bytes-nft`,
-# `totals`). Source it after tests/lib/ucode.sh, then:
+# A scratch router for the byte sampler and the accumulator (`trafficctl
+# bytes`, `totals`). Source it after tests/lib/ucode.sh, then:
 #   BE_ROOT                 the TCTL_ROOT: etc/config/firewall, proc/net/nf_conntrack
 #   BE_CT                   that conntrack file
 #   BE_NFT                  directory of nft replies: a file named after the
-#                           arguments ("list map inet trafficctl_mon bytes_in")
-#                           is printed; none = exit 1, the way nft fails on a
-#                           missing map. add/delete always succeed.
+#                           arguments ("list flowtables") is printed; none =
+#                           exit 1, the way nft fails on a missing object.
+#                           add/delete always succeed.
 #   BE_NFTLOG               every nft call, one line each
+#   BE_LOGGER               every logger call, one line each
 #   be_offload <mode>       none, software, hardware, software-counter,
 #                           hardware-counter: uci defaults plus the flowtable
 #   be_run <cmd> [args]     the CLI with the root, the mocks and the ubus dump
@@ -21,12 +22,14 @@ BE_ROOT="$UC_TMP/root"
 BE_CT="$BE_ROOT/proc/net/nf_conntrack"
 BE_NFT="$UC_TMP/nft"
 BE_NFTLOG="$UC_TMP/nft.log"
+BE_LOGGER="$UC_TMP/logger.log"
 BE_BIN="$UC_TMP/bin"
 BE_UBUS="$UC_TMP/ubus"
 mkdir -p "$BE_ROOT/etc/config" "$BE_ROOT/tmp/.uci" "$BE_ROOT/proc/net" \
     "$BE_NFT" "$BE_BIN" "$BE_UBUS"
 : > "$BE_CT"
 : > "$BE_NFTLOG"
+: > "$BE_LOGGER"
 
 printf '{"interface":[{"interface":"lan","up":true,"l3_device":"br-lan","ipv4-address":[{"address":"192.168.1.1","mask":24}]},{"interface":"wan","up":true,"l3_device":"wan","ipv4-address":[{"address":"203.0.113.2","mask":24}]}]}\n' \
     > "$BE_UBUS/network.interface@dump.json"
@@ -48,7 +51,11 @@ f="$BE_NFT/\$*"
 [ -f "\$f" ] || exit 1
 cat "\$f"
 MOCK
-chmod +x "$BE_BIN/ip" "$BE_BIN/nft"
+cat > "$BE_BIN/logger" <<MOCK
+#!/bin/sh
+echo "\$*" >> "$BE_LOGGER"
+MOCK
+chmod +x "$BE_BIN/ip" "$BE_BIN/nft" "$BE_BIN/logger"
 
 be_offload() {   # be_offload <mode>
     local sw=0 hw=0

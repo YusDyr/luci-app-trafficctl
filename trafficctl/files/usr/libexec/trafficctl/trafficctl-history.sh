@@ -37,17 +37,17 @@
 #   restarted counter.
 #
 # HOW ACCURATE THE STORED NUMBERS ARE
-#   Three different answers, and the store has to say which one applies rather
-#   than present all three as "bytes used".
+#   Two different answers, and the store has to say which one applies rather
+#   than present both as "bytes used".
 #
 #   1. UNCOUNTERED OFFLOAD — "degraded". With flow offloading on and no
-#      counter-flagged flowtable, an offloaded flow's counters stop moving
-#      while traffic continues; if the nft-map fallback is also unavailable,
-#      there is nothing left that sees those packets. The total is then a LOWER
-#      BOUND that can be arbitrarily far below reality, not an approximation
-#      around it. trafficctl-bytes.sh flags this, totals keeps the flag STICKY
-#      per device, and it is stored per row here — a consumer must label such a
-#      row, never add it to a trustworthy sum.
+#      counter-flagged flowtable (fw4 on 22.03), an offloaded flow's counters
+#      stop moving while traffic continues, and nothing else sees those
+#      packets: the flowtable hooks netdev ingress, ahead of every inet chain.
+#      The total is then a LOWER BOUND that can be arbitrarily far below
+#      reality, not an approximation around it. `trafficctl bytes` flags this,
+#      totals keeps the flag STICKY per device, and it is stored per row here
+#      — a consumer must label such a row, never add it to a trustworthy sum.
 #
 #   2. CONNTRACK SOURCE — sampled, so short flows can be missed. Conntrack
 #      reports what its CURRENTLY TRACKED flows have carried, which means a
@@ -57,11 +57,7 @@
 #      subcommand of its own, driven at sample_interval (tmpfs only, no flash
 #      writes), and why the flush interval is NOT the sampling interval.
 #
-#   3. NFT COUNTER MAPS — cumulative since the table was built, so independent
-#      of sampling rate and exact. They cannot split TCP from UDP, which is why
-#      those columns report -1 rather than 0.
-#
-#   Common to all three: the counters are read BEFORE the shaper, so they
+#   Common to both: the counters are read BEFORE the shaper, so they
 #   describe what arrived for a device, not what was delivered to it.
 #
 # NEVER IN A REQUEST PATH
@@ -87,13 +83,12 @@
 # Named by absolute path, as they must be on the router; the tests sed these
 # lines into their scratch directory rather than have the shipped script carry
 # test-only overrides (same approach as trafficctl-totals.sh and the ledger
-# paths in trafficctl-fw.sh). All four are tmpfs: see DELTAS, NOT SNAPSHOTS
+# paths in trafficctl-fw.sh). All of them are tmpfs: see DELTAS, NOT SNAPSHOTS
 # above for why the cursor in particular must not survive a reboot.
 CURSOR="/tmp/trafficctl_history.cursor"
 ERRFILE="/tmp/trafficctl_history.err"
 STAMP="/tmp/trafficctl_history.stamp"
 LOCKD="/tmp/trafficctl_history.lock.d"
-TOTALS_STATE="/tmp/trafficctl_totals.state"
 IFCURSOR="/tmp/trafficctl_history.ifcursor"
 # Per-period, and suffixed with the period id so a period roll starts a fresh
 # one instead of needing to be cleared. tmpfs: it is rebuilt from the durable
@@ -941,23 +936,14 @@ hist_prune() {
 # the live offload mode. Reported so a consumer can label the view instead of
 # presenting a lower bound as a measurement.
 #
-#   degraded — uncountered offload, no nft fallback: a LOWER BOUND
-#   counter  — nft counter maps: exact, no protocol split
+#   degraded — uncountered offload: a LOWER BOUND
 #   sampled  — conntrack: exact to within flows shorter than sample_interval
+# The mode alone decides: conntrack is the only source, so the source a
+# totals state line records (a 1.30.x one can still say nft) says nothing.
 hist_accuracy() {
-    local mode src
-    mode=$(tctl_get_offload_mode 2>/dev/null)
-    # What the sampler actually settled on last time it ran, which is the
-    # authority on whether the nft fallback was available — the offload mode
-    # alone cannot tell us that.
-    src=$(awk '{ print $11; exit }' "$TOTALS_STATE" 2>/dev/null)
-    case "$mode" in
-        hardware|software)
-            if [ "$src" = "nft" ]; then printf 'counter\n'; else printf 'degraded\n'; fi
-            ;;
-        *)
-            if [ "$src" = "nft" ]; then printf 'counter\n'; else printf 'sampled\n'; fi
-            ;;
+    case "$(tctl_get_offload_mode 2>/dev/null)" in
+        hardware|software) printf 'degraded\n' ;;
+        *) printf 'sampled\n' ;;
     esac
 }
 

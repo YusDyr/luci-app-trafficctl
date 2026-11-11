@@ -48,16 +48,13 @@ RDNS='uci set trafficctl.main.rdns_server="192.168.0.254 192.168.0.253"; uci com
 LOGS='etc/trafficctl/names,tmp/trafficctl/activity.log,tmp/logger.log'
 
 # Byte counters. The fixture router runs hardware offload with a counter
-# flowtable, so it samples conntrack; these switch it to the other paths.
+# flowtable; these switch it to the other offload modes.
 NOOFFLOAD='uci set firewall.@defaults[0].flow_offloading=0; uci set firewall.@defaults[0].flow_offloading_hw=0; uci commit firewall'
-# Software offload without counter sync: the nft maps, or conntrack flagged
-# degraded when there are none (no fixture for them = "Not supported").
+# Software offload without a flowtable counter: conntrack flagged degraded.
+# The legacy side still tries its nft counter maps first; with no fixture for
+# them it meets what every kernel answered ("Not supported") and falls back to
+# the same conntrack sample, which is the only path the port keeps.
 SWOFFLOAD='uci set firewall.@defaults[0].flow_offloading_hw=0; uci commit firewall; printf "table inet fw4 {\n\tflowtable ft {\n\t\thook ingress priority filter\n\t\tdevices = { lan2, wan }\n\t}\n}\n" > "$W/cmd/nft list flowtables"'
-# The maps as the legacy text parser reads them (one element a line), and in
-# the nft -j form; .119 and .5 are past 2^32 and 2^53.
-MONCHAIN='printf "table inet trafficctl_mon {\n\tchain mon_forward {\n\t\ttype filter hook forward priority -200; policy accept;\n\t\tupdate @bytes_in { ip daddr counter }\n\t\tupdate @bytes_out { ip saddr counter }\n\t}\n}\n" > "$W/cmd/nft list chain inet trafficctl_mon mon_forward"'
-MONTEXT='printf "table inet trafficctl_mon {\n\tmap bytes_in {\n\t\ttype ipv4_addr : counter\n\t\tflags dynamic\n\t\telements = { 192.168.0.119 : counter packets 5 bytes 5368709120,\n\t\t\t     192.168.0.223 : counter packets 3 bytes 900,\n\t\t\t     10.0.5.7 : counter packets 1 bytes 64 }\n\t}\n}\n" > "$W/cmd/nft list map inet trafficctl_mon bytes_in"; printf "table inet trafficctl_mon {\n\tmap bytes_out {\n\t\ttype ipv4_addr : counter\n\t\tflags dynamic\n\t\telements = { 192.168.0.119 : counter packets 2 bytes 9007199254740992,\n\t\t\t     192.168.0.5 : counter packets 2 bytes 128 }\n\t}\n}\n" > "$W/cmd/nft list map inet trafficctl_mon bytes_out"'
-MONJSON='printf "%s\n" "{\"nftables\": [{\"metainfo\": {\"version\": \"1.1.6\", \"json_schema_version\": 1}}, {\"map\": {\"family\": \"inet\", \"name\": \"bytes_in\", \"table\": \"trafficctl_mon\", \"type\": \"ipv4_addr\", \"handle\": 2, \"map\": \"counter\", \"flags\": [\"dynamic\"], \"elem\": [{\"elem\": {\"val\": \"192.168.0.119\", \"counter\": {\"packets\": 5, \"bytes\": 5368709120}}}, {\"elem\": {\"val\": \"192.168.0.223\", \"counter\": {\"packets\": 3, \"bytes\": 900}}}, {\"elem\": {\"val\": \"10.0.5.7\", \"counter\": {\"packets\": 1, \"bytes\": 64}}}]}}]}" > "$W/cmd/nft -j list map inet trafficctl_mon bytes_in"; printf "%s\n" "{\"nftables\": [{\"metainfo\": {\"version\": \"1.0.2\", \"json_schema_version\": 1}}, {\"map\": {\"family\": \"inet\", \"name\": \"bytes_out\", \"table\": \"trafficctl_mon\", \"type\": \"ipv4_addr\", \"handle\": 3, \"map\": \"counter\", \"elem\": [[\"192.168.0.119\", {\"counter\": {\"packets\": 2, \"bytes\": 9007199254740992}}], [\"192.168.0.5\", {\"counter\": {\"packets\": 2, \"bytes\": 128}}]]}}]}" > "$W/cmd/nft -j list map inet trafficctl_mon bytes_out"'
 # Every state line form the legacy reader takes: 13 fields, 12, 10, 6, 5, a
 # duplicate (the later line wins field by field), one too short to read, a
 # degraded and an nft-sourced device, a total past 2^53, a zero total.
@@ -89,18 +86,13 @@ bytes | json-set:ip | router-24.10 | trafficctl-bytes.sh | tctl bytes
 bytes-routed | json-set:ip | router-24.10 | trafficctl-bytes.sh | tctl bytes | $ROUTED
 bytes-no-offload | json-set:ip | router-24.10 | trafficctl-bytes.sh | tctl bytes | $NOOFFLOAD
 bytes-degraded | json-set:ip | router-24.10 | trafficctl-bytes.sh | tctl bytes | $SWOFFLOAD
-bytes-forced | json-set:ip | router-24.10 | sh:TCTL_FORCE_CONNTRACK=1 sh \"\$LEXEC\"/trafficctl-bytes.sh | TCTL_FORCE_CONNTRACK=1 tctl bytes | $SWOFFLOAD
-bytes-nft | json-set:ip | router-24.10 | trafficctl-bytes.sh | tctl bytes | $SWOFFLOAD; $MONCHAIN; $MONTEXT; $MONJSON
-bytes-nft-text | json-set:ip | router-24.10 | trafficctl-bytes.sh | tctl bytes | $SWOFFLOAD; $MONCHAIN; $MONTEXT
-bytes-nft-direct | json-set:ip | router-24.10 | trafficctl-bytes-nft.sh | tctl bytes-nft | $MONCHAIN; $MONTEXT; $MONJSON
-bytes-nft-unsupported | json-set:ip | router-24.10 | trafficctl-bytes-nft.sh | tctl bytes-nft | $MONCHAIN
 totals | json-set:ip | router-24.10 | sh:masked legacy_tot | masked tctl totals
 totals-all | json-set:ip | router-24.10 | sh:masked legacy_tot --all | masked tctl totals --all
 totals-state | text-sorted+$TOTFILE | router-24.10 | sh:legacy_tot >/dev/null; echo ran | tctl totals >/dev/null; echo ran
 totals-fresh | json-set:ip | router-24.10 | sh:masked legacy_tot --all | masked tctl totals --all | rm -f \"\$W/root/$TOTFILE\"
+totals-degraded | json-set:ip | router-24.10 | sh:masked legacy_tot --all | masked tctl totals --all | $SWOFFLOAD
 totals-forms | json-set:ip | router-24.10 | sh:masked legacy_tot --all | masked tctl totals --all | $TOTSTATE
 totals-forms-state | text-sorted+$TOTFILE | router-24.10 | sh:legacy_tot >/dev/null; echo ran | tctl totals >/dev/null; echo ran | $TOTSTATE
-totals-nft-switch | json-set:ip | router-24.10 | sh:legacy_tot >/dev/null; $SWOFFLOAD; $MONCHAIN; $MONTEXT; $MONJSON; masked legacy_tot --all | tctl totals >/dev/null; $SWOFFLOAD; $MONCHAIN; $MONTEXT; $MONJSON; masked tctl totals --all
 totals-grow | json-set:ip | router-24.10 | sh:legacy_tot >/dev/null; $GROW; masked legacy_tot --all | tctl totals >/dev/null; $GROW; masked tctl totals --all
 totals-upgrade | json-set:ip | router-24.10 | sh:legacy_tot >/dev/null; $GROW; masked legacy_tot --all | legacy_tot >/dev/null; $GROW; masked tctl totals --all
 totals-upgrade-state | text-sorted+$TOTFILE | router-24.10 | sh:legacy_tot >/dev/null; $GROW; legacy_tot >/dev/null; echo ran | legacy_tot >/dev/null; $GROW; tctl totals >/dev/null; echo ran

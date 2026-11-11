@@ -130,6 +130,8 @@ if [ -z "${IPKG_INSTROOT}" ]; then
     if [ -f /etc/config/trafficctl ]; then
         rm -f /etc/config/trafficctl-opkg.backup
     fi
+    # The byte counter table of releases up to 1.30.x, often left half-built.
+    nft delete table inet trafficctl_mon 2>/dev/null || true
     # Each service follows its uci flag, so what runs now is what runs after
     # the next reboot: enabled in rc.d and started when the flag is 1, left
     # alone when it is 0.

@@ -328,6 +328,9 @@ msgstr ""
 msgid "Devices on the WiFi deny list that are still connected — those blocks are not in effect on the running radio."
 msgstr ""
 
+msgid "Disable flow offload in LuCI → Network → Firewall → General Settings."
+msgstr ""
+
 msgid "Disable hardware offload (keeps software offload):"
 msgstr ""
 
@@ -394,9 +397,6 @@ msgstr ""
 msgid "Every device this router forwards for"
 msgstr ""
 
-msgid "Exact. Byte counts come from cumulative nftables counters, so they do not depend on how often the sampler runs. The TCP/UDP split is unavailable from this source."
-msgstr ""
-
 msgid "Exact. These are the router's own interface counters, so flow offloading does not undercount them — with offloading on, this table is more trustworthy than the device table above. A link that goes down restarts its counter: the traffic it carried between the last sample and the restart is lost."
 msgstr ""
 
@@ -427,7 +427,7 @@ msgstr ""
 msgid "Flow Offload"
 msgstr ""
 
-msgid "Flow offload is active and the kernel does not support the nftables counter maps trafficctl uses in that mode, so byte counters stop updating for offloaded connections. Speeds and totals would be far too low, so they are not shown. Disabling hardware offload in Settings → Flow Offload restores them."
+msgid "Flow offload is active and the flowtable has no counter (firewall4 on OpenWrt 22.03), so byte counters stop updating for offloaded connections. Speeds and totals would be far too low, so they are not shown. Turn flow offloading off in Settings → Flow Offload, or upgrade to OpenWrt 23.05 or later, to restore them."
 msgstr ""
 
 msgid "Flow offloading is active."
@@ -518,9 +518,6 @@ msgid "IP address"
 msgstr ""
 
 msgid "IP-keyed"
-msgstr ""
-
-msgid "If your current firmware uses fw3 (iptables) or ships a kernel older than 5.7, a router with modern OpenWrt and fw4 support will have this working out of the box."
 msgstr ""
 
 msgid "Iface"
@@ -715,7 +712,7 @@ msgstr ""
 msgid "None (per-flow)"
 msgstr ""
 
-msgid "Not counted: flow offload is active and this router cannot provide the nftables counters trafficctl uses in that mode, so the kernel byte counters stop updating for offloaded connections. Any total here would be far too low. See Settings → Flow Offload."
+msgid "Not counted: flow offload is active and the flowtable has no counter, so the kernel byte counters stop updating for offloaded connections. Any total here would be far too low. See Settings → Flow Offload."
 msgstr ""
 
 msgid "Not enough data yet"
@@ -767,6 +764,9 @@ msgid "Operation failed"
 msgstr ""
 
 msgid "Or disable all flow offload in LuCI → Network → Firewall → General Settings."
+msgstr ""
+
+msgid "Or upgrade to OpenWrt 23.05 or later, whose firewall4 sets the flag."
 msgstr ""
 
 msgid "Other interfaces"
@@ -1054,9 +1054,6 @@ msgstr ""
 msgid "Speed graph. Window = avg time. Orange dashed line = speed limit"
 msgstr ""
 
-msgid "Speed is measured via nftables counters installed at a higher priority (before the flowtable), so graphs are accurate."
-msgstr ""
-
 msgid "Speed limit"
 msgstr ""
 
@@ -1145,6 +1142,9 @@ msgid "The flowtable"
 msgstr ""
 
 msgid "The flowtable carries the"
+msgstr ""
+
+msgid "The flowtable has no"
 msgstr ""
 
 msgid "The internet cut is switched on, but its firewall rule is missing."
@@ -1405,10 +1405,16 @@ msgstr ""
 msgid "failed"
 msgstr ""
 
-msgid "flag (Linux 5.7+, set automatically by fw4), so offloaded byte counts are synced back to conntrack. Speed and totals come from conntrack as usual and are accurate — the nftables counter fallback is not needed on this router."
+msgid "firewall4 on OpenWrt 22.03 does not set this flag; from 23.05 on it does, so upgrading the firmware restores full functionality."
 msgstr ""
 
-msgid "flag (Linux 5.7+, set automatically by fw4/nftables) periodically syncs hardware byte counts back to conntrack — trafficctl detects this and all features work normally."
+msgid "flag (Linux 5.7+, set automatically by fw4), so offloaded byte counts are synced back to conntrack. Speed and totals come from conntrack as usual and are accurate."
+msgstr ""
+
+msgid "flag (Linux 5.7+) periodically syncs hardware byte counts back to conntrack — trafficctl detects this and all features work normally."
+msgstr ""
+
+msgid "flag (firewall4 on OpenWrt 22.03 does not set one), so offloaded connections are not counted at all: per-device speeds and totals are not shown."
 msgstr ""
 
 msgid "flag should sync hardware byte counts back to conntrack, but on many platforms (e.g. Mediatek Filogic) the driver does not implement the stats callback, so conntrack counters remain frozen for active flows."
