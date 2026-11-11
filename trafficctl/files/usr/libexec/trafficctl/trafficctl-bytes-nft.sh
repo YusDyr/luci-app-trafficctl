@@ -1,7 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=dash
-# Per-device byte counters using nftables maps.
+# Per-device byte counters using nftables dynamic sets with per-element counters.
 # Works with software flow offload (hook priority -200, before flowtable at -150).
 # Output: JSON array
 #   [{"ip":"…","bytes_in":N,"bytes_out":N,"bytes_tcp":-1,"bytes_udp":-1,
@@ -15,69 +15,133 @@
 # The counters here are cumulative since the table was created, unlike the
 # conntrack sums trafficctl-bytes.sh returns, which cover live flows only.
 # "src" lets trafficctl-totals.sh notice the swap and rebaseline instead of
-# accumulating the whole map as a single enormous delta.
+# accumulating the whole set as a single enormous delta.
 #
-# The protocol split is -1, i.e. "unknown", not 0: a `type ipv4_addr : counter`
-# map is keyed by address alone, so there is nothing here to split TCP from UDP
-# with. Reporting 0 would render as a device that sent no TCP at all.
+# The protocol split is -1, i.e. "unknown", not 0: the sets are keyed by
+# address alone, so there is nothing here to split TCP from UDP with.
+# Reporting 0 would render as a device that sent no TCP at all.
 
 . /usr/libexec/trafficctl/trafficctl-fw.sh
 
 command -v nft >/dev/null 2>&1 || { echo '[]'; exit 0; }
 
-# Create table/maps/chain/rules if not already present (idempotent).
-#
-# The gate matches the CURRENT rule orientation, not merely "some rule exists".
-# Until 1.13.x the maps were keyed the other way round (bytes_in by saddr), so
-# a router upgrading from that version already has the chain: a looser check
-# would leave the old, inverted rules in place forever and the fix would only
-# ever reach fresh installs.
+# Why a plain dynamic SET with the counter in the rule, and not the
+# `type ipv4_addr : counter` map used up to 1.30.x: the kernel refuses that
+# map with "Not supported" (seen on 5.10, 5.15, 6.6 and 6.12, under nft 1.0.2
+# through 1.1.6), so the nft path never got past it and always fell back to
+# conntrack, reporting degraded. `update @set { ip daddr counter }` attaches
+# the counter through the dynset expression instead, and nft lists it per
+# element; that is verified on all four kernels.
 #
 # Direction convention, matching trafficctl-bytes.sh and docs/API.md:
 #   bytes_in  = traffic toward the device  (download) -> keyed by ip daddr
 #   bytes_out = traffic from the device    (upload)   -> keyed by ip saddr
-if ! nft list chain inet trafficctl_mon mon_forward 2>/dev/null | grep -q "bytes_in.*daddr"; then
-    # Drop the old table wholesale rather than appending to it — leaving the
-    # previous pair of rules in place would double-count every packet. This
-    # resets the counters once, on upgrade; they are only used for speed
-    # deltas, so a single discarded sample is the whole cost.
-    nft delete table inet trafficctl_mon 2>/dev/null
+#
+# One transaction: `add` then `delete` makes the delete safe when the table is
+# absent, and the whole table is rebuilt or nothing is. A half-built table
+# (sets created, rules refused) would pass for a working one, and two pollers
+# racing through separate `nft add rule` calls could each append a copy of the
+# rules and double-count every packet.
+tctl_mon_build() {
+    nft -f - 2>/dev/null <<'NFT'
+add table inet trafficctl_mon
+delete table inet trafficctl_mon
+table inet trafficctl_mon {
+	set bytes_in {
+		type ipv4_addr
+		flags dynamic
+	}
+	set bytes_out {
+		type ipv4_addr
+		flags dynamic
+	}
+	chain mon_forward {
+		type filter hook forward priority -200; policy accept;
+		update @bytes_in { ip daddr counter }
+		update @bytes_out { ip saddr counter }
+	}
+}
+NFT
+}
 
-    nft add table inet trafficctl_mon 2>/dev/null
-    nft add map inet trafficctl_mon bytes_in \
-        '{ type ipv4_addr : counter; flags dynamic; }' 2>/dev/null
-    nft add map inet trafficctl_mon bytes_out \
-        '{ type ipv4_addr : counter; flags dynamic; }' 2>/dev/null
-    nft add chain inet trafficctl_mon mon_forward \
-        '{ type filter hook forward priority -200; policy accept; }' 2>/dev/null
-    nft add rule inet trafficctl_mon mon_forward \
-        'update @bytes_in { ip daddr counter }' 2>/dev/null
-    nft add rule inet trafficctl_mon mon_forward \
-        'update @bytes_out { ip saddr counter }' 2>/dev/null
-fi
+# The gate accepts only the exact current layout: both names declared as sets
+# and exactly one rule per direction, in the current orientation. Anything
+# else is rebuilt, which covers every table an older version left behind:
+#   * up to 1.13.x the rules were keyed the other way round (bytes_in by saddr);
+#   * up to 1.30.x the table was meant to hold counter MAPS. The kernel
+#     refused them, which left a chain without rules; and should a map ever
+#     exist, its rules list exactly like the set rules, so the rule text alone
+#     cannot tell the two apart;
+#   * a duplicated rule, which would double-count.
+# The rebuild resets the counters once, on upgrade; trafficctl-totals.sh sees
+# the drop and rebaselines, so a single discarded sample is the whole cost.
+# -t leaves the elements out: this runs on every poll.
+tctl_mon_current() {
+    nft -t list table inet trafficctl_mon 2>/dev/null | awk '
+        /^[ \t]*set bytes_in \{/                      { si = 1 }
+        /^[ \t]*set bytes_out \{/                     { so = 1 }
+        /^[ \t]*map bytes_(in|out) /                  { bad = 1 }
+        /^[ \t]*update @bytes_in \{ ip daddr counter \}/  { ri++; next }
+        /^[ \t]*update @bytes_out \{ ip saddr counter \}/ { ro++; next }
+        /@bytes_(in|out)/                             { bad = 1 }
+        END { exit !(si && so && ri == 1 && ro == 1 && !bad) }'
+}
 
-# Dynamic counter maps are unsupported on some kernels ("Not supported").
-# Without this check the maps silently never exist, every rule fails, and the
-# script returns [] forever — per-device speed just stops working.
-if ! nft list map inet trafficctl_mon bytes_in >/dev/null 2>&1; then
+tctl_mon_current || tctl_mon_build
+
+# Some kernels or nft builds still cannot create the table; without this check
+# every read would return [] and per-device speed would just stop working.
+if ! tctl_mon_current; then
     TCTL_FORCE_CONNTRACK=1 exec /usr/libexec/trafficctl/trafficctl-bytes.sh
 fi
 
-IN=$(nft list map inet trafficctl_mon bytes_in 2>/dev/null)
-OUT=$(nft list map inet trafficctl_mon bytes_out 2>/dev/null)
+# JSON first, text second. OpenWrt ships both nftables-json and
+# nftables-nojson, and on the latter `nft -j` fails, so both forms have to
+# parse. The awk below tells them apart per line.
+tctl_mon_list() {
+    _l=$(nft -j list set inet trafficctl_mon "$1" 2>/dev/null)
+    case "$_l" in
+        *'"nftables"'*) printf '%s\n' "$_l" ;;
+        *) nft list set inet trafficctl_mon "$1" 2>/dev/null ;;
+    esac
+}
 
-# Parse: lines look like "192.168.0.100 : counter packets 584 bytes 892341[,]"
+IN=$(tctl_mon_list bytes_in)
+OUT=$(tctl_mon_list bytes_out)
+
+# Text: "elements = { 192.168.0.100 counter packets 584 bytes 892341, ... }",
+# several elements per line and wrapped across lines by nft 1.1.x. The old
+# map form ("192.168.0.100 : counter packets ...") reads the same way.
+# JSON: one line, {"elem": {"val": "192.168.0.100", "counter": {"packets":
+# 584, "bytes": 892341}}} per element.
 printf '%s\n__SEP__\n%s\n' "$IN" "$OUT" | awk '
+function add(ip, v) {
+    if (phase == 0) in_b[ip]  += v
+    else            out_b[ip] += v
+}
 /^__SEP__$/ { phase = 1; next }
-/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+ : counter/ {
-    ip = ""; val = 0
+/"nftables"/ {
+    n = split($0, part, /"val": */)
+    for (k = 2; k <= n; k++) {
+        p = part[k]
+        if (!match(p, /^"[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+"/)) continue
+        ip = substr(p, 2, RLENGTH - 2)
+        # Bounded by the next element, so an element without a counter cannot
+        # borrow the following one.
+        e = index(p, "{\"elem\"")
+        if (e > 0) p = substr(p, 1, e - 1)
+        if (!match(p, /"bytes": *[0-9]+/)) continue
+        v = substr(p, RSTART, RLENGTH)
+        sub(/^"bytes": */, "", v)
+        add(ip, v + 0)
+    }
+    next
+}
+{
+    gsub(/[{},]/, " ")
     for (i = 1; i <= NF; i++) {
         if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) ip = $i
-        if ($i == "bytes") val = $(i+1) + 0
-    }
-    if (ip != "") {
-        if (phase == 0) in_b[ip]  += val
-        else            out_b[ip] += val
+        else if ($i == "bytes" && ip != "") { add(ip, $(i+1) + 0); ip = "" }
     }
 }
 END {

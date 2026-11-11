@@ -1,0 +1,9 @@
+table inet trafficctl_mon {
+	set bytes_out {
+		type ipv4_addr
+		size 65535
+		flags dynamic
+		elements = { 10.250.123.201 counter packets 8 bytes 1824, 192.168.1.10 counter packets 6 bytes 504,
+			     192.168.100.234 counter packets 2 bytes 2856 }
+	}
+}

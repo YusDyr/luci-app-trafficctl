@@ -8,7 +8,7 @@
 #
 # "src" names the counter source. trafficctl-totals.sh accumulates these into
 # lifetime totals and the two sources have unrelated magnitudes (conntrack
-# reports only live flows, the nft maps count since the table was built), so it
+# reports only live flows, the nft sets count since the table was built), so it
 # has to be able to tell a source switch from a burst of traffic.
 #
 # "degraded" says whether the numbers can be believed AT ALL — see below. It is
@@ -17,7 +17,7 @@
 # in trust look like a change of counter and throw away a delta for nothing.
 #
 # bytes_tcp / bytes_udp carry both directions summed, and exist only on the
-# conntrack path — nft counter maps are keyed by address alone and cannot split
+# conntrack path — the nft counter sets are keyed by address alone and cannot split
 # by protocol, so trafficctl-bytes-nft.sh reports -1 there. -1 rather than 0:
 # "unknown" and "no TCP traffic" must not render as the same number.
 
@@ -29,8 +29,8 @@
 # Only pure "none" mode has accurate conntrack counters.
 # Modes whose counters ARE synced back to conntrack ("*-counter") keep the
 # conntrack path accurate; only the uncountered ones need the nft fallback.
-# TCTL_FORCE_CONNTRACK is set by that fallback when the kernel lacks dynamic
-# counter maps, so we don't bounce between the two.
+# TCTL_FORCE_CONNTRACK is set by that fallback when nft refuses its counter
+# table, so we don't bounce between the two.
 _offload=$(tctl_get_offload_mode)
 _uncountered=0
 case "$_offload" in
@@ -47,7 +47,8 @@ esac
 #
 # Two ways in, and the second is easy to miss:
 #   * TCTL_FORCE_CONNTRACK — bytes-nft.sh bounced back because the kernel has
-#     no dynamic counter map support. Observed on real hardware.
+#     refused the counter table. Observed on real hardware: up to 1.30.x
+#     the table used counter maps, which the kernel rejects.
 #   * fw3/iptables — there is no nft fallback to reach in the first place.
 #
 # The numbers that follow are not merely imprecise, they are FROZEN for every

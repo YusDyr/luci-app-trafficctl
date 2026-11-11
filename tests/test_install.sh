@@ -187,6 +187,66 @@ if [ "${PKG##*.}" = ipk ]; then
     done
 fi
 
+# The nft byte counters, against this image's real nft and the host kernel.
+# The unit tests replay listings; only here does the shipped script talk to a
+# real nft, so a table nft refuses, or a listing the parser cannot read, shows
+# up as the silent conntrack fallback it causes on a router. Needs
+# --cap-add NET_ADMIN; TCTL_EXPECT_NFT=1 (set by compat.yml for every fw4
+# release) turns "cannot run" into a failure instead of a skip. The kernel is
+# the CI runner's, not OpenWrt's: this proves the userspace half (syntax,
+# listing format, parser) per release, and the kernel half only for the
+# runner's kernel.
+nft_bytes_check() {
+    B=/usr/libexec/trafficctl/trafficctl-bytes-nft.sh
+    nft delete table inet trafficctl_mon 2>/dev/null || true
+    sh "$B" >/dev/null 2>&1 || true
+    if ! nft -t list table inet trafficctl_mon > "$TMPDIR/mon.txt" 2>&1; then
+        echo "NFT BYTES: the counter table was not built (the script fell back to conntrack)"
+        # The script discards nft's error; replay its batch to show it.
+        sed -n "/<<'NFT'/,/^NFT\$/p" "$B" | sed '1d;$d' | nft -f - || true
+        return 1
+    fi
+    cat "$TMPDIR/mon.txt"
+    if ! grep -q 'set bytes_in {' "$TMPDIR/mon.txt" || ! grep -q 'set bytes_out {' "$TMPDIR/mon.txt"; then
+        echo "NFT BYTES: bytes_in/bytes_out are not sets"
+        return 1
+    fi
+    # Count real packets through the same two rules on an output hook (a
+    # container forwards nothing), then read them back through the script.
+    nft add chain inet trafficctl_mon ci_out '{ type filter hook output priority 0; policy accept; }'
+    nft add rule inet trafficctl_mon ci_out 'update @bytes_in { ip daddr counter }'
+    nft add rule inet trafficctl_mon ci_out 'update @bytes_out { ip saddr counter }'
+    ping -c 3 -W 1 127.0.0.1 >/dev/null 2>&1 || true
+    nft delete chain inet trafficctl_mon ci_out
+    # Twice: as shipped (JSON where the image has it), and with `nft -j`
+    # refused, as on nftables-nojson, so the text parser meets real output too.
+    mkdir -p "$TMPDIR/nojson"
+    printf '#!/bin/sh\n[ "$1" = -j ] && exit 1\nexec %s "$@"\n' "$(command -v nft)" > "$TMPDIR/nojson/nft"
+    chmod +x "$TMPDIR/nojson/nft"
+    for mode in default nojson; do
+        if [ "$mode" = nojson ]; then
+            out=$(PATH="$TMPDIR/nojson:$PATH" sh "$B" 2>&1)
+        else
+            out=$(sh "$B" 2>&1)
+        fi
+        echo "bytes-nft ($mode): $out"
+        case "$out" in
+            *'"ip":"127.0.0.1","bytes_in":'[1-9]*'"src":"nft","degraded":false'*) ;;
+            *) echo "NFT BYTES ($mode): counted loopback traffic is missing or degraded"; return 1 ;;
+        esac
+    done
+    nft delete table inet trafficctl_mon
+}
+if command -v nft >/dev/null 2>&1 && nft list tables >/dev/null 2>&1; then
+    nft_bytes_check || exit 1
+    echo "nft byte counters verified."
+elif [ "${TCTL_EXPECT_NFT:-0}" = 1 ]; then
+    echo "NFT BYTES: nft is unusable here (missing, or no NET_ADMIN), but TCTL_EXPECT_NFT=1"
+    exit 1
+else
+    echo "SKIP: nft byte counters (no usable nft in this container)"
+fi
+
 echo "Install checks passed."
 
 # ── Removal test ─────────────────────────────────────────────────────────────

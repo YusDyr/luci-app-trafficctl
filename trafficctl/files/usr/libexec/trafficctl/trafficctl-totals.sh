@@ -8,7 +8,7 @@
 #   Neither byte source is a lifetime total. conntrack reports what its
 #   CURRENTLY TRACKED flows have carried, so a device's number collapses the
 #   moment its flows age out — which is why the columns were reported showing
-#   values like "2 bytes". The nft counter maps are cumulative, but only since
+#   values like "2 bytes". The nft counter sets are cumulative, but only since
 #   the table was created, and that table is rebuilt on upgrade and gone after
 #   a reboot. A lifetime total has to be accumulated from deltas and persisted.
 #
@@ -23,7 +23,7 @@
 #   so the total stays right on exactly the routers where the complaint arises.
 #   That switch can happen at RUNTIME (offload toggled in the firewall config,
 #   or trafficctl-bytes-nft.sh bouncing back to conntrack on a kernel without
-#   dynamic counter maps), and the two sources have unrelated magnitudes. The
+#   a usable counter table), and the two sources have unrelated magnitudes. The
 #   source is therefore recorded per device, and a change rebaselines instead
 #   of accumulating the difference as if it were traffic.
 #

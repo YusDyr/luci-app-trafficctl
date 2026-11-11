@@ -264,7 +264,7 @@ function fmtBytes(b) {
 // idle — that is issue #26.
 //
 // A negative total means the router cannot answer, which is not the same as
-// zero: under flow offload the byte source becomes nftables counter maps keyed
+// zero: under flow offload the byte source becomes nftables counter sets keyed
 // by address alone, which cannot split TCP from UDP. Printing 0 there would be
 // a confident wrong answer, i.e. the very failure this change removes.
 function renderTotalCell(cell, total, liveVal, since, pending, degraded) {

@@ -98,6 +98,7 @@ BusyBox `nslookup` (always available) is used as a fallback if rpcd-mod-rrdns is
 | WiFi MAC filtering | Full | Full | Uses uci/hostapd, not firewall |
 | Conntrack queries | Full | Full | Same `conntrack` binary |
 | Flowtable bypass | `nft flush flowtable` on block | N/A | Ensures block takes effect immediately |
+| Byte counters under flow offload | nft dynamic sets with per-element counters, ahead of the flowtable | conntrack only, flagged `degraded` | See below |
 
 ### Behavioral Differences
 
@@ -107,6 +108,10 @@ BusyBox `nslookup` (always available) is used as a fallback if rpcd-mod-rrdns is
 - Until [#123](https://github.com/YusDyr/luci-app-trafficctl/pull/123) the iptables path wrote `--hashlimit-above Xkbit/sec --hashlimit-burst Xkbit`. iptables rejects that burst (checked on 1.8.7, the 21.02 series, and 1.8.10), and the error was discarded, so **no limit was installed on fw3** while the UI reported success. Port forward limits used a plain-number burst, which is accepted, but `Xkbit/sec` is a *packet* rate to hashlimit, so they policed X packets per second instead of X kbit/s. Re-apply port forward limits made on fw3 before that fix: until then the UI shows them as unlimited.
 
 In practice, both achieve the same result (excess packets are dropped), but the measurement granularity differs slightly. nftables tends to be more accurate for bursty traffic.
+
+**Byte Counters Under Flow Offload:**
+- nftables: with plain `software`/`hardware` offload, conntrack stops counting offloaded flows, so `trafficctl-bytes-nft.sh` counts per device in table `inet trafficctl_mon`: two dynamic sets fed by `update @bytes_in { ip daddr counter }` and `update @bytes_out { ip saddr counter }` on the forward hook at priority -200. The counter is attached by the rule, verified on kernels 5.10 (22.03), 5.15 (23.05), 6.6 (24.10) and 6.12 (25.12). Up to 1.30.x these were `type ipv4_addr : counter` maps, which all of those kernels refuse ("Not supported"), so those releases always fell back to conntrack and reported degraded counters; the first poll after the upgrade replaces the leftover table.
+- iptables: conntrack only. Under uncountered offload the counters freeze, and the sample is flagged `degraded`.
 
 **Block Rule Placement:**
 - nftables: Rule inserted before the `ct state vmap` rule in `inet fw4 forward`, ensuring it catches traffic before connection tracking shortcuts it.

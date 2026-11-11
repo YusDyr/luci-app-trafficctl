@@ -315,7 +315,7 @@ not a lifetime total — see `trafficctl-totals.sh` below.
 | `bytes_out` | number | Bytes sent (upload = conntrack original direction) |
 | `bytes_tcp` | number | TCP bytes, both directions. `-1` when the source cannot split by protocol |
 | `bytes_udp` | number | UDP bytes, both directions. `-1` when the source cannot split by protocol |
-| `src` | string | `ct` = conntrack, `nft` = nftables counter maps |
+| `src` | string | `ct` = conntrack, `nft` = nftables per-device counter sets |
 | `degraded` | bool | `true` when these counters are **frozen** for offloaded flows — see below |
 
 `degraded` is about *trust*; `src` is about *magnitude*. They are separate
@@ -325,17 +325,30 @@ and throw away a real delta.
 
 `degraded` is `true` when the router has **uncountered** flow offload (plain
 `hardware` or `software`) *and* the nftables fallback is unavailable — either
-because the kernel has no dynamic counter map support (`trafficctl-bytes-nft.sh`
-re-execs with `TCTL_FORCE_CONNTRACK=1`), or because the router runs fw3/iptables
+because nft refuses the counter table (`trafficctl-bytes-nft.sh` re-execs
+with `TCTL_FORCE_CONNTRACK=1`), or because the router runs fw3/iptables
 and there is no fallback to reach. The counters then stop moving for every
 offloaded flow while traffic continues, so any total built from them is a lower
 bound that stalls. Consumers must refuse to present it as a total.
 
 Which source is used is decided per call: with flow offload active and no
 working `counter` flag, conntrack stops accounting for offloaded flows, so the
-script hands over to `trafficctl-bytes-nft.sh`, whose maps sit on the forward
-hook at priority `-200`, ahead of the flowtable at `-150`. Those maps are keyed
-by address alone, which is why `bytes_tcp` / `bytes_udp` are `-1` there.
+script hands over to `trafficctl-bytes-nft.sh`, whose rules sit on the forward
+hook at priority `-200`, ahead of the flowtable at `-150`. They count into two
+dynamic sets in table `inet trafficctl_mon`, with the counter attached by the
+rule (`update @bytes_in { ip daddr counter }`, `update @bytes_out { ip saddr
+counter }`), and the script reads the per-element counters from `nft -j list
+set`, or from the text listing where nft has no JSON (nftables-nojson). The
+sets are keyed by address alone, which is why `bytes_tcp` / `bytes_udp` are
+`-1` there.
+
+Up to 1.30.x these were `type ipv4_addr : counter` maps, which the kernel
+refuses with "Not supported" (5.10, 5.15, 6.6 and 6.12 alike), so under
+uncountered offload every sample came from conntrack and was flagged degraded.
+On upgrade the first call finds a table that is not exactly the current layout
+(old maps, inverted rules, a doubled rule) and replaces it in one `nft -f`
+transaction, so the counters restart once and `trafficctl-totals.sh`
+rebaselines.
 
 `-1` means "not measurable", never "zero". A consumer that renders it as 0 is
 claiming the device sent no TCP at all.
@@ -349,7 +362,7 @@ lifetime totals behind both the LuCI Bytes / TCP / UDP columns and the
 `trafficctl_device_bytes_total` metric. Neither raw source is a lifetime total:
 conntrack reports only flows that still exist (so a device's number collapses
 when they expire — [#26](https://github.com/YusDyr/luci-app-trafficctl/issues/26)),
-and the nft maps count only since the table was built.
+and the nft counter sets count only since the table was built.
 
 **Arguments:** `--all` (optional) — also emit devices that have left the sample
 but still carry a total. Used by the exporter so a Prometheus series does not
@@ -387,8 +400,8 @@ accumulated history and stay exact.
   expired; their bytes were accumulated while they lived, so the drop rebaselines
   and adds nothing.
 - **A source switch rebaselines.** conntrack and nft counters have unrelated
-  magnitudes, so toggling flow offload (or the nft path falling back on a kernel
-  without dynamic counter maps) must not be differenced. The source is stored
+  magnitudes, so toggling flow offload (or the nft path falling back where nft
+  refuses the counter table) must not be differenced. The source is stored
   per device and a change starts a fresh baseline.
 - **Totals reset on reboot.** The store is `/tmp/trafficctl_totals.state`, i.e.
   tmpfs. Deliberate: it is rewritten on every LuCI poll (2–10 s) and every

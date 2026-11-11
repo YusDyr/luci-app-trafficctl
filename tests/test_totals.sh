@@ -9,11 +9,11 @@
 #     rewind a counter that is documented as monotonic; ignoring the drop
 #     entirely (rather than resyncing) would double-count the next sample.
 #   * the byte source switches at runtime — trafficctl-bytes.sh hands over to
-#     the nft counter maps when flow offload stops conntrack from counting, and
-#     trafficctl-bytes-nft.sh hands back when the kernel has no dynamic maps.
+#     the nft counter sets when flow offload stops conntrack from counting, and
+#     trafficctl-bytes-nft.sh hands back when the kernel refuses them.
 #     The two counters have unrelated magnitudes (live flows vs. everything
 #     since the table was built), so a switch must rebaseline. Without that,
-#     enabling offload adds an entire nft map to the total in one tick.
+#     enabling offload adds an entire nft set to the total in one tick.
 #   * the nft path cannot split TCP from UDP at all. Those totals have to read
 #     "unavailable", not "zero" — issue #26 is precisely about a byte column
 #     that showed a number nobody could explain.
@@ -374,16 +374,16 @@ chmod +x "$MOCKBIN/bytes"
 
 # ── frozen conntrack counters must not masquerade as a total ────────────────
 # The combination is uncountered flow offload (plain "hardware"/"software") on
-# a kernel with NO nftables dynamic counter map support. trafficctl-bytes.sh
-# hands over to trafficctl-bytes-nft.sh, whose maps cannot be created, so it
-# bounces straight back with TCTL_FORCE_CONNTRACK=1 — and conntrack byte
-# counters are frozen for every offloaded flow.
+# a kernel that refuses the nft counter table. trafficctl-bytes.sh hands over
+# to trafficctl-bytes-nft.sh, whose table cannot be created, so it bounces
+# straight back with TCTL_FORCE_CONNTRACK=1 — and conntrack byte counters are
+# frozen for every offloaded flow.
 #
-# Such kernels are real: the maintainer's router supports no dynamic counter
-# maps at all and only escapes this because its mode is "hardware-counter",
-# where conntrack stays accurate. Flip that one setting and this is what you
-# get. Both conditions are mocked here because that router's firewall config is
-# off limits.
+# Such kernels are real: up to 1.30.x the table used `ipv4_addr : counter`
+# maps, which the kernel refuses, and the maintainer's router only escaped
+# this because its mode is "hardware-counter", where conntrack stays accurate.
+# Both conditions are mocked here because that router's firewall config is off
+# limits.
 #
 # Without the flag the accumulator faithfully adds deltas from a frozen counter
 # — i.e. almost nothing — and the column shows an authoritative-looking total
@@ -392,14 +392,15 @@ chmod +x "$MOCKBIN/bytes"
 DEG="$TMPDIR/degbin"
 mkdir -p "$DEG"
 
-# bytes-nft.sh's own guard: no dynamic counter map support, so it re-execs
-# bytes.sh with TCTL_FORCE_CONNTRACK=1. Reproduced rather than mocked away.
+# bytes-nft.sh's own guard: the kernel refuses the counter table, so it
+# re-execs bytes.sh with TCTL_FORCE_CONNTRACK=1. Reproduced rather than mocked
+# away.
 cat > "$MOCKBIN/nft" <<'MOCK'
 #!/bin/sh
 case "$*" in
     "list tables") echo "table inet fw4" ;;
-    "list map inet trafficctl_mon bytes_in") exit 1 ;;   # Not supported
-    *) exit 0 ;;
+    "-f -") echo "Error: Could not process rule: Not supported" >&2; exit 1 ;;
+    *) exit 1 ;;
 esac
 MOCK
 chmod +x "$MOCKBIN/nft"
@@ -428,7 +429,7 @@ assert_contains "the nft fallback can bounce back to bytes.sh" \
 for mode in hardware software; do
     mk_offload_stub "$mode"
     OUT=$(PATH="$MOCKBIN:$PATH" sh "$DEG/bytes.sh" 2>/dev/null)
-    assert_contains "$mode offload + no counter maps: sample is flagged degraded" \
+    assert_contains "$mode offload + no counter table: sample is flagged degraded" \
         '"degraded":true' "$OUT"
     # It still reports what conntrack has — a lower bound beats nothing — but
     # the flag is what stops it being presented as a total.
@@ -447,26 +448,28 @@ for mode in none hardware-counter; do
         '"degraded":true' "$OUT"
 done
 
-# And when the nft maps DO work, that path is the accurate one by design.
+# And when the nft counter sets DO work, that path is the accurate one by design.
 cat > "$MOCKBIN/nft" <<'MOCK'
 #!/bin/sh
 case "$*" in
     "list tables") echo "table inet fw4" ;;
-    "list chain inet trafficctl_mon mon_forward")
-        echo "update @bytes_in { ip daddr counter }" ;;
-    "list map inet trafficctl_mon bytes_in")
-        echo "elements = { 192.168.1.100 : counter packets 5 bytes 900 }" ;;
-    "list map inet trafficctl_mon bytes_out")
-        echo "elements = { 192.168.1.100 : counter packets 3 bytes 100 }" ;;
-    *) exit 0 ;;
+    "-t list table inet trafficctl_mon")
+        printf '%s\n' "set bytes_in {" "}" "set bytes_out {" "}" \
+            "update @bytes_in { ip daddr counter }" \
+            "update @bytes_out { ip saddr counter }" ;;
+    "list set inet trafficctl_mon bytes_in")
+        echo "elements = { 192.168.1.100 counter packets 5 bytes 900 }" ;;
+    "list set inet trafficctl_mon bytes_out")
+        echo "elements = { 192.168.1.100 counter packets 3 bytes 100 }" ;;
+    *) exit 1 ;;
 esac
 MOCK
 chmod +x "$MOCKBIN/nft"
 mk_offload_stub hardware
 OUT=$(PATH="$MOCKBIN:$PATH" sh "$DEG/bytes.sh" 2>/dev/null)
-assert_contains "working nft counter maps are the accurate path, not degraded" \
+assert_contains "working nft counter sets are the accurate path, not degraded" \
     '"degraded":false' "$OUT"
-assert_contains "working nft counter maps are used under offload" \
+assert_contains "working nft counter sets are used under offload" \
     '"src":"nft"' "$OUT"
 
 # ── the accumulator carries the flag, and keeps carrying it ─────────────────

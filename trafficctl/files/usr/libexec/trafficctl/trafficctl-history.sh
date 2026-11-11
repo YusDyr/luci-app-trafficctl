@@ -57,7 +57,7 @@
 #      subcommand of its own, driven at sample_interval (tmpfs only, no flash
 #      writes), and why the flush interval is NOT the sampling interval.
 #
-#   3. NFT COUNTER MAPS — cumulative since the table was built, so independent
+#   3. NFT COUNTER SETS — cumulative since the table was built, so independent
 #      of sampling rate and exact. They cannot split TCP from UDP, which is why
 #      those columns report -1 rather than 0.
 #
@@ -942,7 +942,7 @@ hist_prune() {
 # presenting a lower bound as a measurement.
 #
 #   degraded — uncountered offload, no nft fallback: a LOWER BOUND
-#   counter  — nft counter maps: exact, no protocol split
+#   counter  — nft counter sets: exact, no protocol split
 #   sampled  — conntrack: exact to within flows shorter than sample_interval
 hist_accuracy() {
     local mode src

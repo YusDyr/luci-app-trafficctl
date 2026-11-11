@@ -136,35 +136,36 @@ done
 MOCKBIN="$TMP/bin"
 mkdir -p "$MOCKBIN"
 
-# The chain listing satisfies the gate in both the pre- and post-#54 script:
-# it carries "saddr" (old gate) and "bytes_in ... daddr" (current gate), so
-# neither version tries to rebuild the table through the mock.
+# The terse table listing is the current layout, so the gate accepts it and
+# the script goes straight to the sets. bytes_in is served as JSON and
+# bytes_out as text (no JSON listing for it), so both parsers carry a
+# counter past 2 GiB.
 cat > "$MOCKBIN/nft" <<MOCK
 #!/bin/sh
 case "\$*" in
-    "list chain inet trafficctl_mon mon_forward")
+    "-t list table inet trafficctl_mon")
         echo "table inet trafficctl_mon {"
+        echo "  set bytes_in {"
+        echo "  }"
+        echo "  set bytes_out {"
+        echo "  }"
         echo "  chain mon_forward {"
         echo "    update @bytes_in { ip daddr counter }"
         echo "    update @bytes_out { ip saddr counter }"
         echo "  }"
         echo "}"
         ;;
-    "list map inet trafficctl_mon bytes_in")
+    "-j list set inet trafficctl_mon bytes_in")
+        echo '{"nftables": [{"set": {"name": "bytes_in", "elem": [{"elem": {"val": "192.168.0.50", "counter": {"packets": 4000000, "bytes": $BIG}}}]}}]}'
+        ;;
+    "list set inet trafficctl_mon bytes_out")
         echo "table inet trafficctl_mon {"
-        echo "  map bytes_in {"
-        echo "    elements = { 192.168.0.50 : counter packets 4000000 bytes $BIG }"
+        echo "  set bytes_out {"
+        echo "    elements = { 192.168.0.50 counter packets 3000000 bytes $HUGE }"
         echo "  }"
         echo "}"
         ;;
-    "list map inet trafficctl_mon bytes_out")
-        echo "table inet trafficctl_mon {"
-        echo "  map bytes_out {"
-        echo "    elements = { 192.168.0.50 : counter packets 3000000 bytes $HUGE }"
-        echo "  }"
-        echo "}"
-        ;;
-    *) exit 0 ;;
+    *) exit 1 ;;
 esac
 MOCK
 chmod +x "$MOCKBIN/nft"

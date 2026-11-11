@@ -121,7 +121,7 @@ sequenceDiagram
     loop Every N seconds (poll)
         B->>R: bytes()
         R->>BY: exec
-        BY->>BY: trafficctl-bytes.sh (conntrack, or nft maps under offload)
+        BY->>BY: trafficctl-bytes.sh (conntrack, or nft counter sets under offload)
         BY->>BY: accumulate positive deltas into /tmp/trafficctl_totals.state
         BY-->>B: [{ip, bytes_in, bytes_out, bytes_*_total, …}]
         B->>B: calculate speed = delta_bytes / delta_time
