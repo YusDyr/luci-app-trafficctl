@@ -193,7 +193,7 @@ The file `trafficctl-fw.sh` is sourced by all scripts and provides firewall func
 | `tctl_is_blocked` | grep nft forward chain |
 | `tctl_get_wan_device` | `uci get network.wan.device` (fallback to `.ifname`) |
 | `tctl_get_lan_device` | `uci get network.lan.device` (fallback to `.ifname`) |
-| `tctl_validate_ip` | regex + octet range check |
+| `tctl_validate_ip` | regex + octet range check, no leading zeros |
 | `tctl_get_wifi_interfaces` | `uci show wireless` parsing |
 
 ---

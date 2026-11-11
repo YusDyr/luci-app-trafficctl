@@ -77,6 +77,9 @@ for a in "" "-4 " "-6 "; do
         run ip $a$o
     done
 done
+# Asked for separately by the interface role map.
+run ip -4 route show default
+run ip -6 route show default
 run ip link show
 
 run nft list tables

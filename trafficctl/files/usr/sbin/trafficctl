@@ -1,0 +1,84 @@
+#!/usr/bin/env ucode
+// SPDX-License-Identifier: Apache-2.0
+'use strict';
+
+// trafficctl <command> [args]: the backend's single entry point, for users,
+// init scripts, hotplug, the metrics CGI and the rpcd plugin. Commands print
+// JSON on stdout. Ported commands run here; the rest are still the shell
+// scripts in /usr/libexec/trafficctl.
+
+import * as lib from 'trafficctl.lib';
+import * as net from 'trafficctl.net';
+
+function out(v) {
+	print(lib.to_json(v), '\n');
+}
+
+function result(r) {
+	out(r);
+	return r.ok ? 0 : 1;
+}
+
+const NAMES_USAGE = 'usage: trafficctl names list|set <ip> <name>|remove <ip>';
+
+const commands = {
+	subnets: () => {
+		out(net.subnets());
+		return 0;
+	},
+
+	ifaces: () => {
+		out(net.ifaces());
+		return 0;
+	},
+
+	names: (args) => {
+		switch (args[0]) {
+		case 'list':
+			out(lib.names_list());
+			return 0;
+		case 'set':
+			return result(lib.names_set(args[1], args[2]));
+		case 'remove':
+			return result(lib.names_remove(args[1]));
+		default:
+			return result({ ok: false, msg: NAMES_USAGE });
+		}
+	},
+
+	rdns: (args) => {
+		let r = net.rdns(args[0]);
+		out(r ?? { ip: args[0] ?? '', host: '' });
+		return r ? 0 : 1;
+	},
+
+	'rdns-refresh': (args) => {
+		net.rdns_refresh(args);
+		return 0;
+	},
+};
+
+// What a caller expecting this command's shape can still parse.
+function fallback(cmd, args, msg) {
+	if (cmd == 'subnets' || cmd == 'ifaces' || (cmd == 'names' && args[0] == 'list'))
+		return [];
+	if (cmd == 'rdns')
+		return { ip: args[0] ?? '', host: '' };
+	return { ok: false, msg };
+}
+
+let cmd = shift(ARGV);
+if (!exists(commands, cmd)) {
+	out({ ok: false, msg: 'usage: trafficctl <' + join('|', sort(keys(commands))) + '> [args]' });
+	exit(2);
+}
+let rc;
+try {
+	rc = commands[cmd](ARGV);
+}
+catch (e) {
+	warn(sprintf('trafficctl %s: %s\n%s\n', cmd, e.message, e.stacktrace?.[0]?.context ?? ''));
+	out(fallback(cmd, ARGV, 'internal error: ' + e.message));
+	rc = 1;
+}
+exit(rc);

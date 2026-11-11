@@ -15,7 +15,7 @@ BACKEND_SRC="$TCTL_ROOT/${BE_NAME}"
 # Runtime dependencies of the backend (DEPENDS in trafficctl/Makefile).
 # hostapd-utils is optional for the backend (wired-only builds) and is only
 # repeated on luci-app-trafficctl; see LUCI_DEPENDS in its Makefile.
-BE_DEPENDS="conntrack, curl, tc, iw, firewall4"
+BE_DEPENDS="conntrack, curl, tc, iw, firewall4, ucode, ucode-mod-fs, ucode-mod-uci, ucode-mod-ubus"
 FE_EXTRA_DEPENDS="hostapd-utils"
 
 # Overridable so tests can build without touching a developer's dist/.
@@ -69,7 +69,7 @@ mkdir -p "$BE_DATA"
 cp -a "$BACKEND_SRC/files/"* "$BE_DATA/"
 
 # Ensure scripts are executable
-chmod +x "$BE_DATA/usr/libexec/trafficctl/trafficctl-"*.sh
+chmod +x "$BE_DATA/usr/libexec/trafficctl/trafficctl-"*.sh "$BE_DATA/usr/sbin/trafficctl"
 chmod +x "$BE_DATA/www/cgi-bin/trafficctl-metrics"
 [ -d "$BE_DATA/etc/init.d" ] && chmod +x "$BE_DATA/etc/init.d/"*
 [ -d "$BE_DATA/etc/hotplug.d" ] && find "$BE_DATA/etc/hotplug.d" -type f -exec chmod +x {} +

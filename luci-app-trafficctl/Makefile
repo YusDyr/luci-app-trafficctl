@@ -28,7 +28,7 @@ LUCI_DESCRIPTION:=Per-device traffic monitoring, rate limiting (nftables), \
 # optional there, for wired-only builds), but it stays here so the upgrade from
 # 1.28.0 does not drop it and silently turn every WiFi block into a temporary
 # ban. trafficctl on its own does not need it.
-LUCI_DEPENDS:=+trafficctl +conntrack +curl +tc +iw +firewall4 +hostapd-utils +luci-base +rpcd
+LUCI_DEPENDS:=+trafficctl +conntrack +curl +tc +iw +firewall4 +ucode +ucode-mod-fs +ucode-mod-uci +ucode-mod-ubus +hostapd-utils +luci-base +rpcd
 LUCI_PKGARCH:=all
 
 include $(TOPDIR)/feeds/luci/luci.mk

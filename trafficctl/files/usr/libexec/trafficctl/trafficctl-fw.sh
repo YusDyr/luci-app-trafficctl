@@ -573,7 +573,7 @@ tctl_cidr_spec() {
     mask=${cidr#*/}
     [ "$mask" = "$cidr" ] && mask=32
     tctl_validate_ip "$addr" || return 1
-    case "$mask" in ''|*[!0-9]*) return 1 ;; esac
+    case "$mask" in ''|*[!0-9]*|0?*) return 1 ;; esac
     [ "$mask" -ge 1 ] && [ "$mask" -le 32 ] || return 1
     o1=${addr%%.*}; rest=${addr#*.}
     o2=${rest%%.*}; rest=${rest#*.}
@@ -652,7 +652,7 @@ tctl_validate_target() {
             addr=${t%%/*}
             mask=${t#*/}
             tctl_validate_ip "$addr" || return 1
-            case "$mask" in ''|*[!0-9]*) return 1 ;; esac
+            case "$mask" in ''|*[!0-9]*|0?*) return 1 ;; esac
             [ "$mask" -ge 0 ] && [ "$mask" -le 32 ] || return 1
             echo "$addr/$mask"
             ;;
@@ -681,8 +681,9 @@ tctl_ratelimit_comment() {
     echo "rl_ratelimit_$(tctl_target_slug "$1")"
 }
 
+# No leading zeros: $(( )) reads 010 as octal, and the ucode backend refuses it.
 tctl_validate_ip() {
-    echo "$1" | grep -qE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' || return 1
+    echo "$1" | grep -qE '^(0|[1-9][0-9]{0,2})(\.(0|[1-9][0-9]{0,2})){3}$' || return 1
     local IFS='.'
     # shellcheck disable=SC2086
     set -- $1

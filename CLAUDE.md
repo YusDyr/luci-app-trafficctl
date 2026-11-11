@@ -44,6 +44,10 @@ the WiFi block button.
 ```
 trafficctl/
   Makefile                                  — OpenWrt package Makefile (package.mk, explicit INSTALL_* per file)
+  files/usr/sbin/trafficctl                 — ucode CLI: subnets, names, rdns, rdns-refresh, ifaces (more move here)
+  files/usr/share/ucode/trafficctl/
+    lib.uc                                  — Shared ucode helpers; its header is the API doc
+    net.uc                                  — Subnets, interface roles, reverse DNS
   files/usr/libexec/trafficctl/
     trafficctl-fw.sh                        — Shared library (nft helpers, validation, persistence)
     trafficctl-summary.sh                   — All devices summary (JSON array)
@@ -53,8 +57,8 @@ trafficctl/
     trafficctl-cut.sh                       — Global internet cut (all devices), timed auto-revert
     trafficctl-macfilter-add.sh             — WiFi MAC deny (hostapd_cli, no wifi reload)
     trafficctl-macfilter-remove.sh          — WiFi MAC allow
-    trafficctl-names.sh                     — Manual device aliases (/etc/trafficctl/names)
-    trafficctl-rdns-refresh.sh              — Background PTR resolver → /tmp/trafficctl_rdns_cache
+    trafficctl-names.sh                     — Wrapper: `trafficctl names` (aliases in /etc/trafficctl/names)
+    trafficctl-rdns-refresh.sh              — Wrapper: `trafficctl rdns-refresh` (PTR cache /tmp/trafficctl_rdns_cache)
     trafficctl-metrics.sh                   — Prometheus/OpenMetrics exporter (stdout)
     trafficctl-netify.sh                    — Optional netifyd DPI app labels (status/collect/list/raw)
     trafficctl-portfw.sh                    — Port-forward/open-port list + inbound pause/limit
@@ -65,7 +69,7 @@ trafficctl/
     trafficctl-bytes.sh                     — Per-device byte counters (one sample, not a total)
     trafficctl-bytes-nft.sh                 — nftables counters for software flow offload
     trafficctl-totals.sh                    — Monotonic lifetime totals; the ONLY accumulator (UI + Prometheus share its store)
-    trafficctl-rdns.sh                      — Reverse DNS lookup
+    trafficctl-rdns.sh                      — Wrapper: `trafficctl rdns`
     trafficctl-rules.sh                     — Every restriction, online or not (live + saved state; "Rules" tab)
     trafficctl-telegram.sh                  — Telegram bot daemon (long polling)
     trafficctl-telegram-test.sh             — Send test message to Telegram
@@ -96,6 +100,24 @@ luci-app-trafficctl/
 docs/
   capture.js                                — Playwright screenshot/GIF automation (masks MACs & hostname)
 ```
+
+## ucode Conventions
+
+- Runs unchanged on ucode 2022-12-02 (OpenWrt 22.03) and later: CI tests both
+  ends (`ucode-tests` job). `'use strict';`, tabs, single quotes,
+  `import { a } from 'fs';`. Modules declare plain functions and end in one
+  `export { ... };` (2022-12 wants a `;` after `export function`); call
+  functions only after their declaration (no hoisting).
+- External commands go through `lib.run`/`lines`/`sh` with every value in
+  `lib.q()`; nothing else calls `popen`/`system` (`tests/lib/uc_cmd_lint.py`,
+  run by `tests/test_security.sh`).
+- `match()`/`replace()`/`lc()` stop at a NUL byte: validate with the lib
+  helpers, which refuse such strings, before matching untrusted input.
+- The modules cache the uci cursor, the ubus connection and the interface
+  dump for one run. A long-running caller calls `net.reset()` per request.
+- JSON output goes through `lib.to_json`, which keeps the shell backend's
+  bytes. File paths go through `lib.path()`/the file helpers, so `TCTL_ROOT`
+  can point a test at a scratch root.
 
 ## JavaScript Conventions
 

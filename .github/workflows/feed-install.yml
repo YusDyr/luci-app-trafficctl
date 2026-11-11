@@ -19,7 +19,7 @@ name: OpenWrt Feed Install
 
 on:
   pull_request:
-    branches: [main, 'feature/**']
+    branches: [main, 'feature/**', 'ucode/**']
   workflow_call:
 
 permissions:
