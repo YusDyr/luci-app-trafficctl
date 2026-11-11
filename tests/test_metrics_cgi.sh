@@ -79,7 +79,9 @@ assert_contains "disabled by default: 403 status line" "403 Forbidden" "$OUT"
 assert_contains "disabled by default: explanatory body" "trafficctl metrics disabled" "$OUT"
 assert_not_contains "disabled by default: exporter never runs" "EXPORTER_RAN" "$OUT"
 
-# ── enabled, no token configured: open (no auth required) ──────────────────
+# ── enabled, no token configured: refused ──────────────────────────────────
+# The shipped config has an empty token. Reading that as "no auth" made
+# enabling metrics publish every device name and MAC to anyone on the network.
 
 cat > "$MOCKBIN/uci" <<'MOCK'
 #!/bin/sh
@@ -92,8 +94,12 @@ MOCK
 chmod +x "$MOCKBIN/uci"
 
 OUT=$(run_cgi "")
-assert_contains "enabled, no token: exporter runs" "EXPORTER_RAN" "$OUT"
-assert_contains "enabled, no token: correct content-type header" "text/plain" "$OUT"
+assert_contains "enabled, no token: 403" "403 Forbidden" "$OUT"
+assert_contains "enabled, no token: says how to set one" "uci set trafficctl.metrics.token" "$OUT"
+assert_not_contains "enabled, no token: exporter never runs" "EXPORTER_RAN" "$OUT"
+OUT=$(run_cgi "token=")
+assert_contains "enabled, no token: an empty ?token= does not match it" "403 Forbidden" "$OUT"
+assert_not_contains "enabled, no token: exporter never runs for ?token=" "EXPORTER_RAN" "$OUT"
 
 # ── enabled with a token: correct token required ────────────────────────────
 
@@ -117,6 +123,7 @@ assert_not_contains "enabled with token, wrong value: exporter never runs" "EXPO
 
 OUT=$(run_cgi "token=supersecret123")
 assert_contains "enabled with token, correct value: exporter runs" "EXPORTER_RAN" "$OUT"
+assert_contains "enabled with token, correct value: correct content-type header" "text/plain; version=0.0.4" "$OUT"
 
 # The token check is anchored between & on both sides — a query string that
 # merely CONTAINS the right token as a substring of a longer value (or with

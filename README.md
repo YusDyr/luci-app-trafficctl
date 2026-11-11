@@ -192,6 +192,8 @@ I hope it turns out as useful for you as it has been for me.
 | Package | Required for | Notes |
 |---------|-------------|-------|
 | `conntrack` | Core monitoring | Always required |
+| `kmod-nft-netdev` | Rate limiter (fw4) | Installed as a dependency; firewall4 does not pull it in |
+| `iptables-mod-hashlimit` | Rate limiter (fw3, 21.02) | Not a dependency: install it yourself on fw3 |
 | `luci-base` | Web interface | Always required |
 | `rpcd` | Backend RPC | Always required |
 | `tc-full` + `kmod-sched-core` + `kmod-sched-htb` | Traffic shaping | For HTB/fq_codel queues |

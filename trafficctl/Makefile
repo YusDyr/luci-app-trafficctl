@@ -33,12 +33,20 @@ include $(INCLUDE_DIR)/package.mk
 # hostapd_cli at run time and fall back to a timed ubus ban
 # (tctl_hostapd_block_iface, tctl_wifi_filter_support in trafficctl-fw.sh).
 # iw stays: it is selectable on every target and only reads station lists.
+#
+# kmod-nft-netdev carries CONFIG_NF_TABLES_NETDEV, the nft family of the
+# limiter's table (netdev tm_ratelimit); firewall4 does not pull it in. It is
+# unconditional: build-ipk.sh cannot express a condition, and on a fw3 router
+# it only adds unused modules.
+# iptables-mod-hashlimit (the fw3 limiter) is not declared: a condition on
+# PACKAGE_firewall holds in any build that selects all packages, which would
+# pull iptables onto fw4 routers. fw3 reports and logs its absence instead.
 define Package/trafficctl
   SECTION:=net
   CATEGORY:=Network
   TITLE:=Per-device traffic monitoring and control
   URL:=https://github.com/YusDyr/luci-app-trafficctl
-  DEPENDS:=+conntrack +curl +tc +iw
+  DEPENDS:=+conntrack +curl +tc +iw +kmod-nft-netdev
   PKGARCH:=all
 endef
 
@@ -146,6 +154,9 @@ if [ -z "$${IPKG_INSTROOT}" ]; then
 	if [ -f /etc/config/trafficctl ]; then
 		rm -f /etc/config/trafficctl-opkg.backup
 	fi
+	# Releases up to 1.30.1 gave the cut keeper START=95, so rc.d may
+	# still link it for boot. It is started on demand only.
+	rm -f /etc/rc.d/S95trafficctl-cut /etc/rc.d/K10trafficctl-cut
 	if [ -x /etc/init.d/trafficctl-telegram ] && [ "$$(uci -q get trafficctl.telegram.enabled)" = "1" ]; then
 		/etc/init.d/trafficctl-telegram enable 2>/dev/null || true
 		/etc/init.d/trafficctl-telegram start 2>/dev/null || true

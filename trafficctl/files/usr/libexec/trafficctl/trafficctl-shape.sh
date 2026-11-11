@@ -365,6 +365,16 @@ case "$ACTION" in
             echo '{"ok":false,"msg":"invalid IP address"}'
             exit 1
         fi
+        # Shell arithmetic turns a non-number into 0, which tc would get as a
+        # near-zero class rate and report as success.
+        if ! tctl_validate_rate "$RATE"; then
+            echo "{\"ok\":false,\"msg\":\"invalid rate: expected whole kbit/s, 1 to $TCTL_RATE_MAX_KBIT\"}"
+            exit 1
+        fi
+        if ! tctl_validate_rate "$RATE_UP"; then
+            echo "{\"ok\":false,\"msg\":\"invalid upload rate: expected whole kbit/s, 1 to $TCTL_RATE_MAX_KBIT\"}"
+            exit 1
+        fi
         do_add
         ;;
     remove)
