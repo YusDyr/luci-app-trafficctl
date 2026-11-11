@@ -1,40 +1,42 @@
 #!/bin/bash
-# Tests for trafficctl-totals.sh — the shared monotonic byte accumulator that
-# backs both the LuCI Bytes/TCP/UDP columns and trafficctl_device_bytes_total.
+# Tests for `trafficctl totals` (net.totals in net.uc): the shared monotonic
+# byte accumulator that backs both the LuCI Bytes/TCP/UDP columns and
+# trafficctl_device_bytes_total.
 #
-# The interesting behaviour is all in what the script REFUSES to count, and
-# none of it is visible by eyeballing a single sample:
+# The interesting behaviour is all in what it REFUSES to count, and none of it
+# is visible by eyeballing a single sample:
 #
 #   * conntrack sums fall when flows expire. Counting that as movement would
 #     rewind a counter that is documented as monotonic; ignoring the drop
 #     entirely (rather than resyncing) would double-count the next sample.
-#   * the byte source switches at runtime — trafficctl-bytes.sh hands over to
-#     the nft counter maps when flow offload stops conntrack from counting, and
-#     trafficctl-bytes-nft.sh hands back when the kernel has no dynamic maps.
-#     The two counters have unrelated magnitudes (live flows vs. everything
-#     since the table was built), so a switch must rebaseline. Without that,
-#     enabling offload adds an entire nft map to the total in one tick.
+#   * the byte source switches at runtime: `trafficctl bytes` hands over to
+#     the nft counter maps when flow offload stops conntrack from counting,
+#     and back to conntrack when the kernel has no dynamic maps. The two
+#     counters have unrelated magnitudes (live flows vs. everything since the
+#     table was built), so a switch must rebaseline. Without that, enabling
+#     offload adds an entire nft map to the total in one tick.
 #   * the nft path cannot split TCP from UDP at all. Those totals have to read
-#     "unavailable", not "zero" — issue #26 is precisely about a byte column
+#     "unavailable", not "zero": issue #26 is precisely about a byte column
 #     that showed a number nobody could explain.
 #
-# The script is run for real; only trafficctl-bytes.sh and the state/lock paths
-# are substituted.
+# The accumulator runs for real against a scratch TCTL_ROOT. Most sections
+# feed it recorded samples through tests/lib/totals.uc; the end-to-end ones
+# run the CLI over a conntrack file and mocked nft (tests/lib/bytes_env.sh).
+
+# shellcheck source=tests/lib/ucode.sh
+. "$(dirname "$0")/lib/ucode.sh"
+# shellcheck source=tests/lib/bytes_env.sh
+. "$(dirname "$0")/lib/bytes_env.sh"
 
 PASS=0
 FAIL=0
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="$REPO_ROOT/trafficctl/files/usr/libexec/trafficctl"
-
-TMPDIR=$(mktemp -d)
-trap 'rm -rf "$TMPDIR"' EXIT
-
-STATUS_JS="$REPO_ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js"
-STATE="$TMPDIR/totals.state"
-SAMPLE="$TMPDIR/sample.json"
-MOCKBIN="$TMPDIR/bin"
-mkdir -p "$MOCKBIN"
+STATUS_JS="$UC_REPO/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js"
+METRICS_SH="$UC_REPO/trafficctl/files/usr/libexec/trafficctl/trafficctl-metrics.sh"
+NET_UC="$UC_LIB/trafficctl/net.uc"
+STATE="$BE_ROOT/tmp/trafficctl_totals.state"
+LOCKD="$BE_ROOT/tmp/trafficctl_totals.lock.d"
+SAMPLE="$UC_TMP/sample.json"
 
 assert_eq() {
     local desc="$1" expected="$2" actual="$3"
@@ -46,7 +48,7 @@ assert_eq() {
     fi
 }
 
-# The haystack is often a whole script, and `grep -q` exits at the first match,
+# The haystack is often a whole file, and `grep -q` exits at the first match,
 # so printf takes a SIGPIPE and bash prints "write error: Broken pipe". That is
 # noise, not a failure, but it buries real output in the CI log.
 assert_contains() {
@@ -69,42 +71,8 @@ assert_not_contains() {
     fi
 }
 
-sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" \
-    -e "s|STATE=\"/tmp/trafficctl_totals.state\"|STATE=\"$STATE\"|" \
-    -e "s|LOCKD=\"/tmp/trafficctl_totals.lock.d\"|LOCKD=\"$TMPDIR/lock.d\"|" \
-    -e "s|\"/tmp/\.trafficctl_totals\.|\"$TMPDIR/scratch.|" \
-    -e "s|/usr/libexec/trafficctl/trafficctl-bytes.sh|$MOCKBIN/bytes|" \
-    "$BIN/trafficctl-totals.sh" > "$TMPDIR/totals.sh"
-
-# Every substitution above must have landed: sed exits 0 on no-match, so a
-# renamed path would silently leave the script pointing at the REAL /tmp state
-# file and the tests would pass while measuring the wrong thing. The scratch
-# files matter as much as the state file: left pointing at /tmp, the leak check
-# further down would be scanning a directory this test does not own, where a
-# stale file from anything else fails it and a never-exercised path passes it.
-for must in "$STATE" "$TMPDIR/lock.d" "$TMPDIR/scratch." "$MOCKBIN/bytes"; do
-    assert_contains "rewrote path into the script under test: $must" \
-        "$must" "$(cat "$TMPDIR/totals.sh")"
-done
-# Matched against the PRODUCTION path names, not against "/tmp" — on Linux
-# mktemp -d hands back /tmp/tmp.XXXX, so the correctly rewritten paths live
-# under /tmp too and a bare "/tmp" test fails there while passing on a macOS
-# /var/folders temp dir.
-assert_eq "no production path survives the rewrite" "" \
-    "$(grep -nE '/tmp/(\.)?trafficctl_totals' "$TMPDIR/totals.sh")"
-
-cat > "$MOCKBIN/bytes" <<MOCK
-#!/bin/sh
-cat "$SAMPLE"
-MOCK
-cat > "$MOCKBIN/uci" <<'MOCK'
-#!/bin/sh
-exit 1
-MOCK
-chmod +x "$MOCKBIN"/*
-
-run()    { PATH="$MOCKBIN:$PATH" sh "$TMPDIR/totals.sh" 2>/dev/null; }
-runall() { PATH="$MOCKBIN:$PATH" sh "$TMPDIR/totals.sh" --all 2>/dev/null; }
+run()    { be_totals "$SAMPLE"; }
+runall() { be_totals "$SAMPLE" --all; }
 sample() { printf '%s\n' "$1" > "$SAMPLE"; }
 
 IP='10.0.20.11'
@@ -142,7 +110,7 @@ assert_contains "growth after an expiry resumes from the new baseline" \
     '"bytes_in_total":2000' "$OUT"
 
 # ── the byte source switching must not fabricate traffic ────────────────────
-# Enabling hardware flow offload moves trafficctl-bytes.sh onto the nft counter
+# Enabling hardware flow offload moves `trafficctl bytes` onto the nft counter
 # maps, which are cumulative since the table was created — here 900 MB of it.
 # Differencing that against the conntrack baseline would add 900 MB to this
 # device's lifetime total in a single tick.
@@ -243,90 +211,55 @@ assert_not_contains "never claims the device sent zero TCP" \
 assert_not_contains "never claims the device sent zero UDP" \
     '"bytes_udp_total":0' "$OUT"
 
-# ── 64-bit safety: totals past 2 GiB must survive the state round-trip ──────
-# The accumulator is the one place the 32-bit %d bug could not heal itself: the
+# ── 64-bit safety: totals past 2 GiB and 2^53 survive the state round trip ──
+# The accumulator is the one place a narrow integer could not heal itself: the
 # clamped value goes to disk and is read back clamped forever (see #56 and
-# tests/test_byte_overflow.sh).
+# tests/test_byte_overflow.sh). ucode integers are int64, so unlike the awk
+# writer (doubles, exact to 2^53) the state keeps every byte up to 2^63.
 rm -f "$STATE"
-sample '[{"ip":"10.0.20.90","bytes_in":5368709120,"bytes_out":9007199254740991,"bytes_tcp":5368709120,"bytes_udp":0,"src":"ct"}]'
+sample '[{"ip":"10.0.20.90","bytes_in":5368709120,"bytes_out":9007199254740991,"bytes_tcp":5368709120,"bytes_udp":9007199254740993,"src":"ct"}]'
 OUT=$(run)
 assert_contains "5 GiB download total survives"    '"bytes_in_total":5368709120' "$OUT"
 assert_contains "2^53-1 upload total survives"     '"bytes_out_total":9007199254740991' "$OUT"
+assert_contains "2^53+1 UDP total is exact"        '"bytes_udp_total":9007199254740993' "$OUT"
 assert_not_contains "nothing pinned at 2^31-1"     "2147483647" "$OUT"
 assert_not_contains "no wrapped negative total"    "-2147483648" "$OUT"
+assert_contains "the state keeps 2^53+1 exactly" " 9007199254740993 " "$(cat "$STATE")"
 OUT=$(run)
 assert_contains "and survives a re-seed from the state file" \
     '"bytes_in_total":5368709120' "$OUT"
+sample '[{"ip":"10.0.20.90","bytes_in":5368709120,"bytes_out":9007199254740995,"bytes_tcp":5368709120,"bytes_udp":9007199254740997,"src":"ct"}]'
+OUT=$(run)
+assert_contains "a 4-byte delta past 2^53 is counted, not rounded away" \
+    '"bytes_udp_total":9007199254740997' "$OUT"
+assert_contains "upload past 2^53 moves by its delta" \
+    '"bytes_out_total":9007199254740995' "$OUT"
 
-# ── static guards ───────────────────────────────────────────────────────────
-# Same rule as tests/test_byte_overflow.sh: every byte-valued field goes
-# through %.0f. The persisted line is positional, so the generic scan there
-# cannot see it and it is pinned here instead.
-assert_contains "totals.sh: persisted accumulator uses %.0f" \
-    'printf "%s %.0f %.0f %.0f %.0f %d %.0f %.0f %.0f %.0f %s %d %s\n", \' \
-    "$(cat "$BIN/trafficctl-totals.sh")"
-assert_eq "totals.sh prints no byte field with %d" "" \
-    "$(grep -nE '"[a-z_]*bytes[a-z_]*\\?":%d' "$BIN/trafficctl-totals.sh")"
-
-# The protocol split only exists on the conntrack path. If trafficctl-bytes.sh
-# ever stops emitting it, or the nft path starts reporting 0 instead of -1, the
-# UI silently goes back to showing an unexplainable number.
-assert_contains "bytes.sh emits the protocol split" \
-    '\"bytes_tcp\":%.0f,\"bytes_udp\":%.0f,\"src\":\"ct\"' \
-    "$(cat "$BIN/trafficctl-bytes.sh")"
-assert_contains "bytes-nft.sh reports the split as unavailable, not zero" \
-    '\"bytes_tcp\":-1,\"bytes_udp\":-1,\"src\":\"nft\"' \
-    "$(cat "$BIN/trafficctl-bytes-nft.sh")"
-
-# One accumulator, one store: the exporter must consume this script rather
-# than keep a private copy, or the UI column and the metric can disagree.
-# Pinned to the invocation, not just a mention: the script name also appears in
-# the comments there, so a looser check would keep passing after the call was
-# swapped back to the raw sampler.
+# One accumulator, one store: the exporter must consume the accumulator
+# rather than keep a private copy, or the UI column and the metric can
+# disagree. Pinned to the invocation, not just a mention: the script name also
+# appears in the comments there, so a looser check would keep passing after
+# the call was swapped back to the raw sampler.
 assert_contains "metrics.sh consumes the shared accumulator" \
     '/usr/libexec/trafficctl/trafficctl-totals.sh --all 2>/dev/null \' \
-    "$(cat "$BIN/trafficctl-metrics.sh")"
+    "$(cat "$METRICS_SH")"
 assert_eq "metrics.sh keeps no state file of its own" "" \
-    "$(grep -n 'trafficctl_metrics.state' "$BIN/trafficctl-metrics.sh")"
+    "$(grep -n 'trafficctl_metrics.state' "$METRICS_SH")"
 
 # ── end to end, against real /proc/net/nf_conntrack text ────────────────────
 # Everything above feeds the accumulator hand-written JSON, which cannot catch
-# a mistake in the thing that PRODUCES that JSON. The protocol split is new
-# parsing in trafficctl-bytes.sh, and a tidy mock would never have exercised
-# it, so the real script runs here over real conntrack lines: a TCP flow, a UDP
-# flow, and — the case an all-TCP fixture would silently miss — an ICMP flow,
-# whose bytes belong in the total but in neither protocol bucket.
-CT="$TMPDIR/nf_conntrack"
-cat > "$CT" <<'EOF'
+# a mistake in the thing that PRODUCES that JSON. So the real sampler runs
+# here over real conntrack lines: a TCP flow, a UDP flow, and (the case an
+# all-TCP fixture would silently miss) an ICMP flow, whose bytes belong in the
+# total but in neither protocol bucket.
+cat > "$BE_CT" <<'EOF'
 ipv4     2 tcp      6 431999 ESTABLISHED src=192.168.1.100 dst=142.250.185.78 sport=52134 dport=443 packets=142 bytes=15234 src=142.250.185.78 dst=192.168.1.100 sport=443 dport=52134 packets=198 bytes=245678 [ASSURED] mark=0 zone=0 use=2
 ipv4     2 udp      17 29 src=192.168.1.100 dst=192.168.1.1 sport=51234 dport=53 packets=1 bytes=68 src=192.168.1.1 dst=192.168.1.100 sport=53 dport=51234 packets=1 bytes=124 mark=0 zone=0 use=2
 ipv4     2 icmp     1 29 src=192.168.1.101 dst=8.8.8.8 type=8 code=0 id=1234 packets=5 bytes=420 src=8.8.8.8 dst=192.168.1.101 type=0 code=0 id=1234 packets=5 bytes=420 mark=0 zone=0 use=2
 ipv4     2 tcp      6 120 TIME_WAIT src=192.168.1.101 dst=93.184.216.34 sport=44556 dport=80 packets=10 bytes=1024 src=93.184.216.34 dst=192.168.1.101 sport=80 dport=44556 packets=12 bytes=8192 [ASSURED] mark=0 zone=0 use=2
 EOF
-
-# A stub fw lib rather than mocks for uci/ubus/jsonfilter: subnet discovery has
-# its own coverage in test_fw.sh, and reproducing it here would test that
-# instead of the conntrack parser this section is about.
-# 192.168.1.0/24 => netbase 3232235776, block 256, router 192.168.1.1.
-cat > "$TMPDIR/fw-stub.sh" <<'STUB'
-TCTL_FW="nft"
-tctl_get_offload_mode() { echo "none"; }
-tctl_monitored_subnets() { echo "br-lan 3232235776 256 3232235777"; }
-STUB
-
-cat > "$MOCKBIN/ip" <<'MOCK'
-#!/bin/sh
-echo "    inet 192.168.1.1/24 brd 192.168.1.255 scope global br-lan"
-MOCK
-chmod +x "$MOCKBIN/ip"
-
-sed -e "s|\. /usr/libexec/trafficctl/trafficctl-fw.sh|. $TMPDIR/fw-stub.sh|" \
-    -e "s|/proc/net/nf_conntrack|$CT|" \
-    "$BIN/trafficctl-bytes.sh" > "$TMPDIR/bytes-real.sh"
-assert_contains "the real sampler is pointed at the conntrack fixture" \
-    "$CT" "$(cat "$TMPDIR/bytes-real.sh")"
-
-REAL=$(PATH="$MOCKBIN:$PATH" sh "$TMPDIR/bytes-real.sh" 2>/dev/null)
+be_offload none
+REAL=$(be_run bytes)
 
 # .100: TCP 15234 up / 245678 down, UDP 68 up / 124 down.
 assert_contains "real conntrack: download is the reply direction" \
@@ -340,7 +273,7 @@ assert_contains "real conntrack: UDP split counts both directions" \
 assert_contains "real conntrack: the source is tagged" '"src":"ct"' "$REAL"
 
 # .101: ICMP 420/420 plus TCP 1024 up / 8192 down. The ICMP bytes must land in
-# the totals and in NEITHER protocol bucket — if the split silently absorbed
+# the totals and in NEITHER protocol bucket: if the split silently absorbed
 # non-TCP/UDP traffic, tcp+udp would equal the total and nobody would notice.
 assert_contains "real conntrack: ICMP bytes are in the device total" \
     '"bytes_in":8612' "$REAL"
@@ -348,126 +281,84 @@ assert_contains "real conntrack: ICMP is not counted as TCP" \
     '"bytes_tcp":9216' "$REAL"
 assert_contains "real conntrack: a device with no UDP reports zero, not -1" \
     '"bytes_udp":0' "$REAL"
+assert_eq "real conntrack: devices come out in address order" \
+    "192.168.1.100 192.168.1.101" "$(printf '%s' "$REAL" | jq -r 'map(.ip) | join(" ")')"
 
-# And the accumulator on top of that real output.
+# And the accumulator on top of that real output, through the CLI.
 rm -f "$STATE"
-cat > "$MOCKBIN/bytes" <<MOCK
-#!/bin/sh
-PATH="$MOCKBIN:\$PATH" sh "$TMPDIR/bytes-real.sh"
-MOCK
-chmod +x "$MOCKBIN/bytes"
-OUT=$(run)
+OUT=$(be_run totals)
 assert_contains "end to end: totals seed from the real sampler" \
     '"bytes_in_total":245802' "$OUT"
 assert_contains "end to end: the protocol split survives the accumulator" \
     '"bytes_tcp_total":260912' "$OUT"
-OUT=$(run)
+OUT=$(be_run totals)
 assert_contains "end to end: a second identical read adds nothing" \
     '"bytes_in_total":245802' "$OUT"
-
-# Restore the JSON mock for the sections below.
-cat > "$MOCKBIN/bytes" <<MOCK
-#!/bin/sh
-cat "$SAMPLE"
-MOCK
-chmod +x "$MOCKBIN/bytes"
+OUT=$(be_run totals --all)
+assert_contains "end to end: --all reaches the accumulator through the CLI" \
+    '"live":true' "$OUT"
 
 # ── frozen conntrack counters must not masquerade as a total ────────────────
 # The combination is uncountered flow offload (plain "hardware"/"software") on
-# a kernel with NO nftables dynamic counter map support. trafficctl-bytes.sh
-# hands over to trafficctl-bytes-nft.sh, whose maps cannot be created, so it
-# bounces straight back with TCTL_FORCE_CONNTRACK=1 — and conntrack byte
-# counters are frozen for every offloaded flow.
+# a kernel with NO nftables dynamic counter map support: the sampler hands
+# over to the nft maps, which cannot be created, so it falls back to conntrack,
+# whose byte counters are frozen for every offloaded flow.
 #
 # Such kernels are real: the maintainer's router supports no dynamic counter
 # maps at all and only escapes this because its mode is "hardware-counter",
 # where conntrack stays accurate. Flip that one setting and this is what you
-# get. Both conditions are mocked here because that router's firewall config is
-# off limits.
+# get.
 #
 # Without the flag the accumulator faithfully adds deltas from a frozen counter
-# — i.e. almost nothing — and the column shows an authoritative-looking total
-# that silently stops growing. That is strictly worse than what issue #26
-# reported: an implausibly small number gets noticed, a plausible one does not.
-DEG="$TMPDIR/degbin"
-mkdir -p "$DEG"
-
-# bytes-nft.sh's own guard: no dynamic counter map support, so it re-execs
-# bytes.sh with TCTL_FORCE_CONNTRACK=1. Reproduced rather than mocked away.
-cat > "$MOCKBIN/nft" <<'MOCK'
-#!/bin/sh
-case "$*" in
-    "list tables") echo "table inet fw4" ;;
-    "list map inet trafficctl_mon bytes_in") exit 1 ;;   # Not supported
-    *) exit 0 ;;
-esac
-MOCK
-chmod +x "$MOCKBIN/nft"
-
-mk_offload_stub() {   # mk_offload_stub <mode>
-    cat > "$TMPDIR/fw-offload.sh" <<STUB
-TCTL_FW="nft"
-tctl_get_offload_mode() { echo "$1"; }
-tctl_monitored_subnets() { echo "br-lan 3232235776 256 3232235777"; }
-STUB
-}
-
-sed -e "s|\. /usr/libexec/trafficctl/trafficctl-fw.sh|. $TMPDIR/fw-offload.sh|" \
-    -e "s|/proc/net/nf_conntrack|$CT|" \
-    -e "s|/usr/libexec/trafficctl/trafficctl-bytes-nft.sh|$DEG/bytes-nft.sh|" \
-    "$BIN/trafficctl-bytes.sh" > "$DEG/bytes.sh"
-sed -e "s|\. /usr/libexec/trafficctl/trafficctl-fw.sh|. $TMPDIR/fw-offload.sh|" \
-    -e "s|/usr/libexec/trafficctl/trafficctl-bytes.sh|$DEG/bytes.sh|" \
-    "$BIN/trafficctl-bytes-nft.sh" > "$DEG/bytes-nft.sh"
-chmod +x "$DEG/bytes.sh" "$DEG/bytes-nft.sh"
-assert_contains "the degraded harness wires bytes.sh to the nft fallback" \
-    "$DEG/bytes-nft.sh" "$(cat "$DEG/bytes.sh")"
-assert_contains "the nft fallback can bounce back to bytes.sh" \
-    "$DEG/bytes.sh" "$(cat "$DEG/bytes-nft.sh")"
-
+# (almost nothing) and the column shows an authoritative-looking total that
+# silently stops growing. That is strictly worse than what issue #26 reported:
+# an implausibly small number gets noticed, a plausible one does not.
+#
+# No reply file for the maps: nft fails on them, as on such a kernel.
 for mode in hardware software; do
-    mk_offload_stub "$mode"
-    OUT=$(PATH="$MOCKBIN:$PATH" sh "$DEG/bytes.sh" 2>/dev/null)
+    be_offload "$mode"
+    OUT=$(be_run bytes)
     assert_contains "$mode offload + no counter maps: sample is flagged degraded" \
         '"degraded":true' "$OUT"
-    # It still reports what conntrack has — a lower bound beats nothing — but
+    # It still reports what conntrack has (a lower bound beats nothing), but
     # the flag is what stops it being presented as a total.
-    assert_contains "$mode offload: the bounce still returns conntrack data" \
+    assert_contains "$mode offload: the fallback still returns conntrack data" \
         '"src":"ct"' "$OUT"
+    OUT=$(TCTL_FORCE_CONNTRACK=1 be_run bytes)
+    assert_contains "$mode offload, conntrack forced: still flagged degraded" \
+        '"degraded":true' "$OUT"
 done
 
 # The modes where conntrack IS trustworthy must not be flagged, or the warning
 # becomes noise everyone learns to ignore.
-for mode in none hardware-counter; do
-    mk_offload_stub "$mode"
-    OUT=$(PATH="$MOCKBIN:$PATH" sh "$DEG/bytes.sh" 2>/dev/null)
+for mode in none hardware-counter software-counter; do
+    be_offload "$mode"
+    OUT=$(be_run bytes)
     assert_contains "$mode: conntrack is accurate, not flagged" \
         '"degraded":false' "$OUT"
     assert_not_contains "$mode: no spurious degraded flag" \
         '"degraded":true' "$OUT"
+    assert_not_contains "$mode: the nft maps are not read" '"src":"nft"' "$OUT"
 done
 
 # And when the nft maps DO work, that path is the accurate one by design.
-cat > "$MOCKBIN/nft" <<'MOCK'
-#!/bin/sh
-case "$*" in
-    "list tables") echo "table inet fw4" ;;
-    "list chain inet trafficctl_mon mon_forward")
-        echo "update @bytes_in { ip daddr counter }" ;;
-    "list map inet trafficctl_mon bytes_in")
-        echo "elements = { 192.168.1.100 : counter packets 5 bytes 900 }" ;;
-    "list map inet trafficctl_mon bytes_out")
-        echo "elements = { 192.168.1.100 : counter packets 3 bytes 100 }" ;;
-    *) exit 0 ;;
-esac
-MOCK
-chmod +x "$MOCKBIN/nft"
-mk_offload_stub hardware
-OUT=$(PATH="$MOCKBIN:$PATH" sh "$DEG/bytes.sh" 2>/dev/null)
+printf 'table inet trafficctl_mon {\n\tchain mon_forward {\n\t\tupdate @bytes_in { ip daddr counter }\n\t\tupdate @bytes_out { ip saddr counter }\n\t}\n}\n' \
+    > "$BE_NFT/list chain inet trafficctl_mon mon_forward"
+echo "elements = { 192.168.1.100 : counter packets 5 bytes 900 }" \
+    > "$BE_NFT/list map inet trafficctl_mon bytes_in"
+echo "elements = { 192.168.1.100 : counter packets 3 bytes 100 }" \
+    > "$BE_NFT/list map inet trafficctl_mon bytes_out"
+be_offload hardware
+OUT=$(be_run bytes)
 assert_contains "working nft counter maps are the accurate path, not degraded" \
     '"degraded":false' "$OUT"
 assert_contains "working nft counter maps are used under offload" \
     '"src":"nft"' "$OUT"
+assert_contains "the nft path reports the protocol split as unavailable, not zero" \
+    '"bytes_tcp":-1,"bytes_udp":-1,"src":"nft"' "$OUT"
+rm -f "$BE_NFT/list chain inet trafficctl_mon mon_forward" \
+    "$BE_NFT/list map inet trafficctl_mon bytes_in" "$BE_NFT/list map inet trafficctl_mon bytes_out"
+be_offload none
 
 # ── the accumulator carries the flag, and keeps carrying it ─────────────────
 rm -f "$STATE"
@@ -500,10 +391,10 @@ assert_contains "status.js refuses to render a total it knows is unreliable" \
     'if (degraded) {' "$(cat "$STATUS_JS")"
 
 # ── a state file written by an older version still loads ────────────────────
-# The script documents that the first six fields match the layout the exporter
-# used before the accumulator moved out of it. Nothing tested that claim, and
-# the failure would be silent: the protocol totals of every pre-existing device
-# would come back as 0 — "sent no TCP" — instead of -1, "never measured".
+# The first six fields match the layout the exporter used before the
+# accumulator moved out of it. The failure would be silent: the protocol
+# totals of every pre-existing device would come back as 0 ("sent no TCP")
+# instead of -1 ("never measured").
 rm -f "$STATE"
 printf '192.168.1.100 5000 900 5000 900 1700000000\n' > "$STATE"
 sample '[{"ip":"192.168.1.100","bytes_in":6000,"bytes_out":900,"bytes_tcp":-1,"bytes_udp":-1,"src":"ct"}]'
@@ -513,8 +404,7 @@ assert_contains "legacy six-field state line still seeds the byte total" \
 
 # Read back WITHOUT a fresh sample, which is the only path where the protocol
 # baseline loaded from the file is what gets reported. With a live sample the
-# incoming value overwrites it, so seeding it as 0 instead of -1 is invisible —
-# that is exactly how this would have shipped unnoticed.
+# incoming value overwrites it, so seeding it as 0 instead of -1 is invisible.
 rm -f "$STATE"
 printf '192.168.1.100 5000 900 5000 900 1700000000\n' > "$STATE"
 sample '[]'
@@ -527,6 +417,24 @@ assert_not_contains "legacy state line does not claim zero TCP" \
     '"bytes_tcp_total":0' "$OUT"
 assert_not_contains "legacy state line does not claim zero UDP" \
     '"bytes_udp_total":0' "$OUT"
+assert_eq "the line is rewritten in the current 13-field form" "13" \
+    "$(awk '{ print NF }' "$STATE")"
+
+# Every line length an older writer produced: 5, 6, 10, 12, 13 fields.
+rm -f "$STATE"
+printf '%s\n' '10.0.0.5 50 5 50 5' '10.0.0.6 60 6 60 6 1700000000' \
+    '10.0.0.10 100 10 100 10 1700000000 70 30 70 30' \
+    '10.0.0.12 120 12 120 12 1700000000 80 40 80 40 nft 1690000000' \
+    '10.0.0.13 130 13 130 13 1700000000 90 50 90 50 ct 1690000000 true' > "$STATE"
+OUT=$(runall)
+assert_eq "every legacy line length loads" "10.0.0.5 10.0.0.6 10.0.0.10 10.0.0.12 10.0.0.13" \
+    "$(printf '%s' "$OUT" | jq -r 'map(.ip) | join(" ")')"
+assert_eq "10 fields bring the protocol totals" "70 30" \
+    "$(printf '%s' "$OUT" | jq -r '.[] | select(.ip == "10.0.0.10") | "\(.bytes_tcp_total) \(.bytes_udp_total)"')"
+assert_eq "12 fields bring the source and the start" "nft 1690000000" \
+    "$(printf '%s' "$OUT" | jq -r '.[] | select(.ip == "10.0.0.12") | "\(.src) \(.total_since)"')"
+assert_eq "13 fields bring the degraded flag" "true" \
+    "$(printf '%s' "$OUT" | jq -r '.[] | select(.ip == "10.0.0.13") | .degraded')"
 
 # A truncated line is skipped rather than read as a device with junk totals.
 rm -f "$STATE"
@@ -539,64 +447,126 @@ assert_contains "a truncated state line is ignored, not half-trusted" \
 # ── concurrent samplers must not corrupt the store ──────────────────────────
 # A LuCI poll and a metrics scrape land together routinely. The lock serialises
 # the read-modify-write, but it can be STOLEN after a timeout, so two writers
-# coexisting is reachable rather than impossible — which is why each writes to
-# its own scratch file. With one shared name they interleave lines into it and
-# whichever rename lands last publishes garbage.
+# coexisting is reachable rather than impossible, which is why each stages its
+# write in its own scratch file and renames it.
 #
-# This asserts the invariant, not the interleaving: a race that only sometimes
-# reproduces would make this test flaky rather than useful, so the property
-# checked is "the state file is always well-formed and monotonic", which holds
-# no matter how the processes interleave.
+# Each racer brings a device of its own on top of a shared one, so a lost
+# update is visible: a writer that read the store before another wrote it
+# drops that one's device. The shared device grows with every racer, and the
+# order the racers run in is arbitrary, so its total is only bounded: every
+# rise counts once, a fall resyncs. Without the lock several of the 12 read
+# the same store, and their devices go missing.
 rm -f "$STATE"
 sample '[{"ip":"10.0.20.99","bytes_in":1000,"bytes_out":0,"bytes_tcp":-1,"bytes_udp":-1,"src":"ct"}]'
 run >/dev/null
-RACERS=0
-while [ "$RACERS" -lt 12 ]; do
-    RACERS=$((RACERS + 1))
-    PATH="$MOCKBIN:$PATH" sh "$TMPDIR/totals.sh" >/dev/null 2>&1 &
+for round in 1 2 3; do
+    for i in $(seq 12); do
+        printf '[{"ip":"10.0.20.99","bytes_in":%d,"bytes_out":0,"bytes_tcp":-1,"bytes_udp":-1,"src":"ct"},{"ip":"10.0.%d.%d","bytes_in":%d,"bytes_out":0,"bytes_tcp":-1,"bytes_udp":-1,"src":"ct"}]\n' \
+            $((1000 + round * 12 + i)) "$((30 + round))" "$i" "$i" > "$UC_TMP/race.$i.json"
+    done
+    for i in $(seq 12); do
+        be_totals "$UC_TMP/race.$i.json" >/dev/null 2>&1 &
+    done
+    wait
 done
-wait
-assert_eq "concurrent samplers leave exactly one line per device" "1" \
+assert_eq "concurrent samplers lose no update (36 racer devices + the shared one)" "37" \
     "$(wc -l < "$STATE" | tr -d ' ')"
+assert_eq "every racer's own total is there" "234" \
+    "$(awk '$1 != "10.0.20.99" { s += $2 } END { print s }' "$STATE")"
 assert_eq "every state line still has all 13 fields" "" \
     "$(awk 'NF != 13 { print NR": "NF" fields" }' "$STATE")"
-assert_eq "the accumulated total is not corrupted" "1000" \
-    "$(awk '{print $2}' "$STATE")"
-OUT=$(run)
-assert_contains "the store still reads back cleanly afterwards" \
-    '"bytes_in_total":1000' "$OUT"
+SHARED=$(awk '$1 == "10.0.20.99" { print $2 }' "$STATE")
+assert_eq "the shared total reaches the highest reading" "1" "$([ "$SHARED" -ge 1048 ] && echo 1 || echo 0)"
+OUT=$(be_totals "$UC_TMP/none.json" --all)
+assert_eq "the store still reads back cleanly afterwards" "37 $SHARED" \
+    "$(printf '%s' "$OUT" | jq -r '"\(length) \(.[] | select(.ip == "10.0.20.99") | .bytes_in_total)"')"
 
 # The lock must be released, not leaked: a directory left behind would make
 # every later sampler wait out the steal timeout before it could accumulate.
 assert_eq "the lock directory is released" "1" \
-    "$([ -d "$TMPDIR/lock.d" ] && echo 0 || echo 1)"
-
-# Each writer needs its OWN scratch file. A shared "$STATE.tmp" is the shape
-# that breaks once the lock is stolen, and it is invisible to any test that
-# does not happen to interleave, so it is pinned statically.
-assert_contains "the state is staged through a per-process scratch file" \
-    'TMPF="/tmp/.trafficctl_totals.write.$$"' "$(cat "$BIN/trafficctl-totals.sh")"
-assert_eq "no shared scratch filename remains" "" \
-    "$(grep -n 'state ".tmp"' "$BIN/trafficctl-totals.sh")"
+    "$([ -d "$LOCKD" ] && echo 0 || echo 1)"
 assert_eq "no scratch file is left behind" "" \
-    "$(find "$TMPDIR" -maxdepth 1 -name 'scratch.*' 2>/dev/null)"
+    "$(find "$BE_ROOT/tmp" -maxdepth 1 -name 'trafficctl_totals.state.*' 2>/dev/null)"
 
 # Sampling happens before the lock is taken, so the slow conntrack read is not
 # inside the critical section. If that order is reversed, every poll queues
-# behind a full conntrack parse and the steal-on-timeout path — which exists
-# for a killed sampler — starts firing under ordinary load.
-assert_contains "the byte source is sampled before the lock is taken" \
-    "$MOCKBIN/bytes" "$(sed -n '1,/^while ! mkdir/p' "$TMPDIR/totals.sh")"
+# behind a full conntrack parse and the steal-on-timeout path (which exists
+# for a killed sampler) starts firing under ordinary load.
+assert_eq "the byte source is sampled before the lock is taken" "sample lock" \
+    "$(sed -n '/^function totals(all, sample)/,/^}/p' "$NET_UC" |
+       awk '/sample = bytes\(\)/ { printf "sample " } /lib\.lock\(TOTALS_LOCK/ { printf "lock" }')"
 
-# ── the shell ↔ frontend field contract ─────────────────────────────────────
+# ── the lock is the shell's, so either writer can take it from the other ────
+# During an upgrade the shell writer of 1.30.x and this one run side by side,
+# and after a downgrade the shell one must be able to steal a lock this one
+# left behind when it was killed. The shell's lock is an empty directory it
+# removes with rmdir; a pid file inside would make that rmdir fail for good.
+TCTL_ROOT="$BE_ROOT" tcall trafficctl.lib lock '"/tmp/trafficctl_totals.lock.d"' 1 3 true >/dev/null
+assert_eq "a lock held by a killed sampler is an empty directory" "" \
+    "$([ -d "$LOCKD" ] && ls -A "$LOCKD" || echo missing)"
+assert_eq "so the shell writer can rmdir it" "0" \
+    "$(rmdir "$LOCKD" 2>/dev/null; echo $?)"
+
+# A lock the shell writer left behind (killed while holding it) is stolen once
+# it is old enough, and the sample is still accumulated.
+mkdir "$LOCKD"
+touch -t 202001010000 "$LOCKD"
+sample '[{"ip":"10.0.20.98","bytes_in":42,"bytes_out":0,"bytes_tcp":0,"bytes_udp":0,"src":"ct"}]'
+OUT=$(run)
+assert_contains "a stale shell lock does not stop accumulation" '"bytes_in_total":42' "$OUT"
+assert_eq "the stolen lock is released afterwards" "1" \
+    "$([ -d "$LOCKD" ] && echo 0 || echo 1)"
+
+# A live holder is waited for (the shell waited 30 x 100 ms), then the sample
+# is accumulated anyway, as the shell did, rather than dropped.
+mkdir "$LOCKD"
+T0=$(date +%s)
+sample '[{"ip":"10.0.20.98","bytes_in":50,"bytes_out":0,"bytes_tcp":0,"bytes_udp":0,"src":"ct"}]'
+OUT=$(run)
+T1=$(date +%s)
+assert_contains "a held lock delays the write but does not drop it" '"bytes_in_total":50' "$OUT"
+assert_eq "the wait is bounded (under 6 s)" "1" "$([ $((T1 - T0)) -lt 6 ] && echo 1 || echo 0)"
+rmdir "$LOCKD" 2>/dev/null
+
+# An exception inside the locked section releases the lock. The bare lock
+# carries no pid, so a leaked one is never seen as dead: every later sampler
+# would wait the full 3 s for it to age into a steal.
+rm -f "$STATE"
+sample '[{"ip":"10.0.20.97","bytes_in":70,"bytes_out":0,"bytes_tcp":0,"bytes_udp":0,"src":"ct"}]'
+run >/dev/null
+BEFORE=$(cat "$STATE")
+sample '[{"ip":"10.0.20.97","bytes_in":90,"bytes_out":0,"bytes_tcp":0,"bytes_udp":0,"src":"ct"}]'
+OUT=$(export TCTL_TEST_FAIL=write; be_totals "$SAMPLE")
+assert_eq "a failing state write is reported" "test: the state write fails" \
+    "$(printf '%s' "$OUT" | jq -r '.error' | sed 's/^.*\(test: \)/\1/')"
+assert_eq "an exception in the locked section releases the lock" "1" \
+    "$([ -d "$LOCKD" ] && echo 0 || echo 1)"
+assert_eq "and leaves the store as it was" "$BEFORE" "$(cat "$STATE")"
+
+# A sample that fails is an empty one, as the shell's empty pipe was: --all
+# still lists every stored device, so no Prometheus series vanishes for a
+# scrape, and nothing is accumulated.
+rm -f "$STATE"
+sample '[{"ip":"10.0.20.95","bytes_in":5,"bytes_out":1,"bytes_tcp":6,"bytes_udp":0,"src":"ct"},{"ip":"10.0.20.96","bytes_in":7,"bytes_out":2,"bytes_tcp":9,"bytes_udp":0,"src":"ct"}]'
+run >/dev/null
+be_offload software
+OUT=$(export TCTL_TEST_FAIL=sample; be_totals "$SAMPLE" --all)
+be_offload none
+assert_eq "totals --all lists the stored devices when bytes() fails" \
+    "10.0.20.95:5:false:-1 10.0.20.96:7:false:-1" \
+    "$(printf '%s' "$OUT" | jq -r 'map("\(.ip):\(.bytes_in_total):\(.live):\(.bytes_in)") | join(" ")')"
+assert_eq "and the lock is released" "1" "$([ -d "$LOCKD" ] && echo 0 || echo 1)"
+
+# ── the backend <-> frontend field contract ─────────────────────────────────
 # These names cross a process boundary with nothing to typecheck them. Renaming
-# a field on the shell side leaves status.js reading `undefined`, which
-# fmtBytes() renders as an em dash — the column just goes blank and no test
+# a field on the backend side leaves status.js reading `undefined`, which
+# fmtBytes() renders as an em dash: the column just goes blank and no test
 # anywhere else notices.
+sample '[{"ip":"10.0.20.11","bytes_in":1,"bytes_out":1,"bytes_tcp":1,"bytes_udp":1,"src":"ct"}]'
+OUT=$(runall)
 for field in bytes_in_total bytes_out_total bytes_tcp_total bytes_udp_total total_since; do
     assert_contains "status.js reads $field" "$field" "$(cat "$STATUS_JS")"
-    assert_contains "totals.sh emits $field" "\\\"$field\\\":" \
-        "$(cat "$BIN/trafficctl-totals.sh")"
+    assert_contains "totals emits $field" "\"$field\":" "$OUT"
 done
 
 # The sentinel has to survive the trip: Number(-1) must not be flattened to 0

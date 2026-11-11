@@ -12,7 +12,10 @@
 # Case lines: name | mode | fixture | legacy | new [| setup]
 #   legacy  a script under usr/libexec/trafficctl and its arguments, or
 #           fw:<shell> to run <shell> after sourcing the CURRENT trafficctl-fw.sh
-#           (whose shell helpers must stay equal to the ucode ones)
+#           (whose shell helpers must stay equal to the ucode ones), or
+#           sh:<shell> to run <shell> as it is (legacy_tot is the legacy
+#           totals script, masked prints a command's JSON with fresh epochs
+#           masked)
 #   new     a shell command; tctl and tcall come from tests/lib/ucode.sh
 #   setup   run in the fresh root before each side; $W/cmd is that side's
 #           writable copy of cmd/, uci writes to the root
@@ -44,6 +47,25 @@ RESOLV='printf "Server:\t127.0.0.1\n\n101.0.168.192.in-addr.arpa\tname = host-12
 RDNS='uci set trafficctl.main.rdns_server="192.168.0.254 192.168.0.253"; uci commit trafficctl'
 LOGS='etc/trafficctl/names,tmp/trafficctl/activity.log,tmp/logger.log'
 
+# Byte counters. The fixture router runs hardware offload with a counter
+# flowtable, so it samples conntrack; these switch it to the other paths.
+NOOFFLOAD='uci set firewall.@defaults[0].flow_offloading=0; uci set firewall.@defaults[0].flow_offloading_hw=0; uci commit firewall'
+# Software offload without counter sync: the nft maps, or conntrack flagged
+# degraded when there are none (no fixture for them = "Not supported").
+SWOFFLOAD='uci set firewall.@defaults[0].flow_offloading_hw=0; uci commit firewall; printf "table inet fw4 {\n\tflowtable ft {\n\t\thook ingress priority filter\n\t\tdevices = { lan2, wan }\n\t}\n}\n" > "$W/cmd/nft list flowtables"'
+# The maps as the legacy text parser reads them (one element a line), and in
+# the nft -j form; .119 and .5 are past 2^32 and 2^53.
+MONCHAIN='printf "table inet trafficctl_mon {\n\tchain mon_forward {\n\t\ttype filter hook forward priority -200; policy accept;\n\t\tupdate @bytes_in { ip daddr counter }\n\t\tupdate @bytes_out { ip saddr counter }\n\t}\n}\n" > "$W/cmd/nft list chain inet trafficctl_mon mon_forward"'
+MONTEXT='printf "table inet trafficctl_mon {\n\tmap bytes_in {\n\t\ttype ipv4_addr : counter\n\t\tflags dynamic\n\t\telements = { 192.168.0.119 : counter packets 5 bytes 5368709120,\n\t\t\t     192.168.0.223 : counter packets 3 bytes 900,\n\t\t\t     10.0.5.7 : counter packets 1 bytes 64 }\n\t}\n}\n" > "$W/cmd/nft list map inet trafficctl_mon bytes_in"; printf "table inet trafficctl_mon {\n\tmap bytes_out {\n\t\ttype ipv4_addr : counter\n\t\tflags dynamic\n\t\telements = { 192.168.0.119 : counter packets 2 bytes 9007199254740992,\n\t\t\t     192.168.0.5 : counter packets 2 bytes 128 }\n\t}\n}\n" > "$W/cmd/nft list map inet trafficctl_mon bytes_out"'
+MONJSON='printf "%s\n" "{\"nftables\": [{\"metainfo\": {\"version\": \"1.1.6\", \"json_schema_version\": 1}}, {\"map\": {\"family\": \"inet\", \"name\": \"bytes_in\", \"table\": \"trafficctl_mon\", \"type\": \"ipv4_addr\", \"handle\": 2, \"map\": \"counter\", \"flags\": [\"dynamic\"], \"elem\": [{\"elem\": {\"val\": \"192.168.0.119\", \"counter\": {\"packets\": 5, \"bytes\": 5368709120}}}, {\"elem\": {\"val\": \"192.168.0.223\", \"counter\": {\"packets\": 3, \"bytes\": 900}}}, {\"elem\": {\"val\": \"10.0.5.7\", \"counter\": {\"packets\": 1, \"bytes\": 64}}}]}}]}" > "$W/cmd/nft -j list map inet trafficctl_mon bytes_in"; printf "%s\n" "{\"nftables\": [{\"metainfo\": {\"version\": \"1.0.2\", \"json_schema_version\": 1}}, {\"map\": {\"family\": \"inet\", \"name\": \"bytes_out\", \"table\": \"trafficctl_mon\", \"type\": \"ipv4_addr\", \"handle\": 3, \"map\": \"counter\", \"elem\": [[\"192.168.0.119\", {\"counter\": {\"packets\": 2, \"bytes\": 9007199254740992}}], [\"192.168.0.5\", {\"counter\": {\"packets\": 2, \"bytes\": 128}}]]}}]}" > "$W/cmd/nft -j list map inet trafficctl_mon bytes_out"'
+# Every state line form the legacy reader takes: 13 fields, 12, 10, 6, 5, a
+# duplicate (the later line wins field by field), one too short to read, a
+# degraded and an nft-sourced device, a total past 2^53, a zero total.
+TOTSTATE='printf "192.168.0.119 1503032 819121 97829 103518 1794298352 2142119 176192 201347 0 ct 1794257886 false\n192.168.0.223 6368 7086 224 432 1794298352 4592 9404 656 0 ct 1794257886\n192.168.0.224 1009 880 76 76 1794298352 0 1889 0 152\n192.168.0.240 1474356 379065 157926 48918 1794298352\n192.168.0.251 323186755 18433361 17174710 613781\n192.168.0.251 5 6 7 8 1794298000 9 10 11 12 ct 1794257000 true\n192.168.0.99 77\n10.0.5.9 9007199254740992 3 1 1 1794298352 -1 -1 -1 -1 nft 1794257886 true\n10.0.5.10 0 0 0 0 1794298352 0 0 0 0 ct 1794257886 false\n" > "$W/root/tmp/trafficctl_totals.state"'
+# Traffic between two samples: the first 40 entries expire, the rest grow.
+GROW='sed -i -e "1,40d" -e "s/ bytes=\([0-9]*\)/ bytes=\11/g" "$W/root/proc/net/nf_conntrack"'
+TOTFILE='tmp/trafficctl_totals.state'
+
 CASES="
 subnets | json | router-24.10 | trafficctl-subnets.sh | tctl subnets
 subnets-routed | json | router-24.10 | trafficctl-subnets.sh | tctl subnets | $ROUTED
@@ -63,6 +85,28 @@ rdns | json | router-24.10 | trafficctl-rdns.sh 192.168.0.101 | tctl rdns 192.16
 rdns-none | json | router-24.10 | trafficctl-rdns.sh 192.168.0.102 | tctl rdns 192.168.0.102 | $RESOLV
 rdns-refresh | text+tmp/trafficctl_rdns_cache | router-24.10 | trafficctl-rdns-refresh.sh 192.168.0.101 192.168.0.102 192.168.0.220 198.18.0.7 bad | tctl rdns-refresh 192.168.0.101 192.168.0.102 192.168.0.220 198.18.0.7 bad | $RESOLV
 rdns-refresh-servers | text+tmp/trafficctl_rdns_cache | router-24.10 | trafficctl-rdns-refresh.sh 192.168.0.101 192.168.0.102 192.168.0.220 | tctl rdns-refresh 192.168.0.101 192.168.0.102 192.168.0.220 | $RESOLV; $RDNS
+bytes | json-set:ip | router-24.10 | trafficctl-bytes.sh | tctl bytes
+bytes-routed | json-set:ip | router-24.10 | trafficctl-bytes.sh | tctl bytes | $ROUTED
+bytes-no-offload | json-set:ip | router-24.10 | trafficctl-bytes.sh | tctl bytes | $NOOFFLOAD
+bytes-degraded | json-set:ip | router-24.10 | trafficctl-bytes.sh | tctl bytes | $SWOFFLOAD
+bytes-forced | json-set:ip | router-24.10 | sh:TCTL_FORCE_CONNTRACK=1 sh \"\$LEXEC\"/trafficctl-bytes.sh | TCTL_FORCE_CONNTRACK=1 tctl bytes | $SWOFFLOAD
+bytes-nft | json-set:ip | router-24.10 | trafficctl-bytes.sh | tctl bytes | $SWOFFLOAD; $MONCHAIN; $MONTEXT; $MONJSON
+bytes-nft-text | json-set:ip | router-24.10 | trafficctl-bytes.sh | tctl bytes | $SWOFFLOAD; $MONCHAIN; $MONTEXT
+bytes-nft-direct | json-set:ip | router-24.10 | trafficctl-bytes-nft.sh | tctl bytes-nft | $MONCHAIN; $MONTEXT; $MONJSON
+bytes-nft-unsupported | json-set:ip | router-24.10 | trafficctl-bytes-nft.sh | tctl bytes-nft | $MONCHAIN
+totals | json-set:ip | router-24.10 | sh:masked legacy_tot | masked tctl totals
+totals-all | json-set:ip | router-24.10 | sh:masked legacy_tot --all | masked tctl totals --all
+totals-state | text-sorted+$TOTFILE | router-24.10 | sh:legacy_tot >/dev/null; echo ran | tctl totals >/dev/null; echo ran
+totals-fresh | json-set:ip | router-24.10 | sh:masked legacy_tot --all | masked tctl totals --all | rm -f \"\$W/root/$TOTFILE\"
+totals-forms | json-set:ip | router-24.10 | sh:masked legacy_tot --all | masked tctl totals --all | $TOTSTATE
+totals-forms-state | text-sorted+$TOTFILE | router-24.10 | sh:legacy_tot >/dev/null; echo ran | tctl totals >/dev/null; echo ran | $TOTSTATE
+totals-nft-switch | json-set:ip | router-24.10 | sh:legacy_tot >/dev/null; $SWOFFLOAD; $MONCHAIN; $MONTEXT; $MONJSON; masked legacy_tot --all | tctl totals >/dev/null; $SWOFFLOAD; $MONCHAIN; $MONTEXT; $MONJSON; masked tctl totals --all
+totals-grow | json-set:ip | router-24.10 | sh:legacy_tot >/dev/null; $GROW; masked legacy_tot --all | tctl totals >/dev/null; $GROW; masked tctl totals --all
+totals-upgrade | json-set:ip | router-24.10 | sh:legacy_tot >/dev/null; $GROW; masked legacy_tot --all | legacy_tot >/dev/null; $GROW; masked tctl totals --all
+totals-upgrade-state | text-sorted+$TOTFILE | router-24.10 | sh:legacy_tot >/dev/null; $GROW; legacy_tot >/dev/null; echo ran | legacy_tot >/dev/null; $GROW; tctl totals >/dev/null; echo ran
+totals-downgrade | json-set:ip | router-24.10 | sh:legacy_tot >/dev/null; $GROW; masked legacy_tot --all | tctl totals >/dev/null; $GROW; masked legacy_tot --all
+totals-downgrade-state | text-sorted+$TOTFILE | router-24.10 | sh:legacy_tot >/dev/null; $GROW; legacy_tot >/dev/null; echo ran | tctl totals >/dev/null; $GROW; legacy_tot >/dev/null; echo ran
+totals-stale-lock | text-sorted+$TOTFILE | router-24.10 | sh:legacy_tot >/dev/null; [ -d \"\$W/root/tmp/trafficctl_totals.lock.d\" ] && echo held; echo ran | tctl totals >/dev/null; [ -d \"\$W/root/tmp/trafficctl_totals.lock.d\" ] && echo held; echo ran | mkdir \"\$W/root/tmp/trafficctl_totals.lock.d\"
 "
 
 command -v jq >/dev/null || { echo "FAIL: jq is required" >&2; exit 1; }
@@ -144,12 +188,22 @@ with_files() {   # with_files <out> <comma list>: append root files, masked
     for f in ${2//,/ }; do
         echo "--- $f" >> "$1"
         [ -f "$W/root/$f" ] || { echo "(missing)" >> "$1"; continue; }
+        # Epochs twice: two of them in a row share the space between them.
         sed -E -e 's/[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}/<time>/g' \
+               -e 's/(^|[^0-9])1[0-9]{9}([^0-9]|$)/\1<epoch>\2/g' \
                -e 's/(^|[^0-9])1[0-9]{9}([^0-9]|$)/\1<epoch>\2/g' "$W/root/$f" >> "$1"
     done
 }
 
 trim() { printf '%s' "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
+
+# For sh: cases. total_since is "now" for a device first seen in this run,
+# and the two sides do not run in the same second.
+legacy_tot() { sh "$LEXEC/trafficctl-totals.sh" "$@"; }
+masked() {
+    "$@" > "$W/masked.json"
+    jq -c 'map(if (.total_since | type) == "number" and .total_since > now - 3600 then .total_since = "<now>" else . end)' "$W/masked.json"
+}
 
 # The comparison itself has to be able to fail, or every case passes.
 printf '[1,2]' > "$W/a"; printf '[2,1]' > "$W/b"
@@ -174,6 +228,7 @@ while IFS='|' read -r name mode fixture legacy new setup; do
     sed -i "s|'/tmp/trafficctl/|'$W/root/tmp/trafficctl/|" "$W/root/etc/config/trafficctl"
     case "$legacy" in
         fw:*) PATH="$W/bin:$PATH" sh -c ". '$CEXEC/trafficctl-fw.sh'; ${legacy#fw:}" ;;
+        sh:*) (export PATH="$W/bin:$PATH"; eval "${legacy#sh:}") ;;
         *) (export PATH="$W/bin:$PATH"; eval "sh \"\$LEXEC\"/$legacy") ;;
     esac > "$W/legacy.out" 2> "$W/legacy.err"
     [ -z "$files" ] || with_files "$W/legacy.out" "$files"

@@ -223,6 +223,47 @@ for round in 1 2 3; do
 done
 assert_eq "lock: nothing left aside" "" "$(find "$R/tmp" -maxdepth 1 -name 't.lock.stale.*')"
 
+# The bare form (the shell's empty directory) the same way: it has no pid to
+# find dead, so only age makes it stale.
+for round in 1 2 3; do
+    rm -rf "$LK"; mkdir "$LK"; old "$LK"
+    for i in $(seq 8); do
+        uc "if (lib.lock('/tmp/t.lock', 0, 300, true)) { print('got\n'); sleep(1500); lib.unlock('/tmp/t.lock'); }" > "$UC_TMP/race.$i" &
+    done
+    wait
+    assert_eq "lock: one winner of eight on a stale bare lock (round $round)" "1" "$(cat "$UC_TMP"/race.* | grep -c got)"
+    rm -f "$UC_TMP"/race.*
+done
+assert_eq "lock: a bare lock is released and nothing left aside" "" \
+    "$(find "$R/tmp" -maxdepth 1 -name 't.lock*')"
+
+# A bare lock stolen and taken again while we held it is no longer ours: the
+# directory at the path is a different one, and unlock must not remove it.
+# Done the way a steal does it, moved aside first: removed before the new one
+# is made, ext4 hands the new directory the same inode at once.
+assert_eq "unlock: after a steal, the new holder's directory stays" "true false yes" \
+    "$(uc "import { rename, rmdir, mkdir } from 'fs'; let p = getenv('TCTL_ROOT') + '/tmp/t.lock'; let a = lib.lock('/tmp/t.lock', 0, 300, true); rename(p, p + '.x'); mkdir(p); rmdir(p + '.x'); print(a, ' ', lib.unlock('/tmp/t.lock'));") $([ -d "$LK" ] && echo yes || echo no)"
+rmdir "$LK"
+
+# A stealer killed between its two renames leaves its aside directory behind;
+# the next steal sweeps it, but never one whose stealer still runs.
+mkdir "$LK"; old "$LK"
+mkdir "$LK.stale.999999" "$LK.stale.$$"
+assert_eq "lock: a stale lock is still taken over with a dead stealer's leftovers" "true" \
+    "$(lib lock '"/tmp/t.lock"' 0 300 true)"
+assert_eq "lock: a dead stealer's aside directory is swept, a live one's kept" "t.lock t.lock.stale.$$" \
+    "$(find "$R/tmp" -maxdepth 1 -name 't.lock*' -printf '%f\n' | sort | paste -sd ' ')"
+rmdir "$LK" "$LK.stale.$$"
+
+# Steals take turns under <lock>.steal. One in progress makes the next wait;
+# one left by a killed stealer is ignored once it is 10 s old.
+mkdir "$LK" "$LK.steal"; old "$LK"
+assert_eq "lock: no steal while another one is in progress" "false" "$(lib lock '"/tmp/t.lock"' 0 300 true)"
+old "$LK.steal"
+assert_eq "lock: a killed stealer's guard is ignored once old" "true" "$(lib lock '"/tmp/t.lock"' 0 300 true)"
+assert_eq "lock: the guard is released after the steal" "no" "$([ -d "$LK.steal" ] && echo yes || echo no)"
+rmdir "$LK"
+
 # ── activity log (tctl_log) ─────────────────────────────────────────────────
 
 cat > "$R/etc/config/trafficctl" <<'EOF'

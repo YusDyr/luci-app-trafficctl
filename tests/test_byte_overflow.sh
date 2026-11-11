@@ -18,26 +18,35 @@
 #
 # TWO KINDS OF TEST LIVE HERE, and the split is the point:
 #
-#   * The behavioural tests only fail under a 32-bit awk. GitHub runners have
+#   * The awk behavioural tests only fail under a 32-bit awk. GitHub runners have
 #     gawk, whose %d is 64-bit clean, so on CI they pass EVEN WITH THE BUG
 #     PRESENT. They are real coverage on a router (or any box with busybox)
 #     and are reported as inconclusive elsewhere.
 #   * The static assertions do not depend on the local awk at all and are what
 #     actually holds the line in CI.
 #
+# The byte samplers and the accumulator are ucode now (int64, no awk), so
+# sections 2 and 3 test them directly, values past 2^53 included; the awk
+# loop remains for metrics.sh, which still reads the accumulator with awk.
+#
 # Nothing here needs %.0f on values that are not 64-bit kernel counters, and
 # %.0f emits no decimal point, so the consumers that re-parse this output with
 # /"bytes":[0-9]+/ keep working.
 
+# shellcheck source=tests/lib/ucode.sh
+. "$(dirname "$0")/lib/ucode.sh"
+# shellcheck source=tests/lib/bytes_env.sh
+. "$(dirname "$0")/lib/bytes_env.sh"
+
 PASS=0
 FAIL=0
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_ROOT="$UC_REPO"
 BIN="$REPO_ROOT/trafficctl/files/usr/libexec/trafficctl"
 FWLIB="$BIN/trafficctl-fw.sh"
 
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
+TMP="$UC_TMP/overflow"
+mkdir -p "$TMP"
 
 # The two values a broken 32-bit %d has been observed to produce; neither may
 # appear in output. Detection never relies on them — it compares against the
@@ -46,6 +55,7 @@ CLAMP=2147483647
 WRAPPED=-2147483648
 BIG=5368709120          # 5 GiB, comfortably past the clamp
 HUGE=9007199254740991   # 2^53-1, the largest integer a double holds exactly
+PAST53=9007199254740994 # 2^53+2: a double holds it, but not 2^53+3 next to it
 
 assert_eq() {
     local desc="$1" expected="$2" actual="$3"
@@ -129,84 +139,50 @@ for a in $AWKS; do
 done
 
 # ════════════════════════════════════════════════════════════════════════════
-# 2. trafficctl-bytes-nft.sh reports a counter past 2 GiB intact.
-#    Runs the REAL script with nft mocked, once per awk implementation.
+# 2. `trafficctl bytes-nft` reports a counter past 2 GiB, and past 2^53,
+#    intact. The ucode port has no awk in the path (int64 throughout), so this
+#    runs once; the 2^53+2 upload is exact there, where a double would round.
 # ════════════════════════════════════════════════════════════════════════════
 
-MOCKBIN="$TMP/bin"
-mkdir -p "$MOCKBIN"
+printf 'table inet trafficctl_mon {\n  chain mon_forward {\n    update @bytes_in { ip daddr counter }\n    update @bytes_out { ip saddr counter }\n  }\n}\n' \
+    > "$BE_NFT/list chain inet trafficctl_mon mon_forward"
+printf 'table inet trafficctl_mon {\n  map bytes_in {\n    elements = { 192.168.0.50 : counter packets 4000000 bytes %s }\n  }\n}\n' "$BIG" \
+    > "$BE_NFT/list map inet trafficctl_mon bytes_in"
+printf 'table inet trafficctl_mon {\n  map bytes_out {\n    elements = { 192.168.0.50 : counter packets 3000000 bytes %s, 192.168.0.51 : counter packets 1 bytes %s }\n  }\n}\n' "$HUGE" "$PAST53" \
+    > "$BE_NFT/list map inet trafficctl_mon bytes_out"
 
-# The chain listing satisfies the gate in both the pre- and post-#54 script:
-# it carries "saddr" (old gate) and "bytes_in ... daddr" (current gate), so
-# neither version tries to rebuild the table through the mock.
-cat > "$MOCKBIN/nft" <<MOCK
-#!/bin/sh
-case "\$*" in
-    "list chain inet trafficctl_mon mon_forward")
-        echo "table inet trafficctl_mon {"
-        echo "  chain mon_forward {"
-        echo "    update @bytes_in { ip daddr counter }"
-        echo "    update @bytes_out { ip saddr counter }"
-        echo "  }"
-        echo "}"
-        ;;
-    "list map inet trafficctl_mon bytes_in")
-        echo "table inet trafficctl_mon {"
-        echo "  map bytes_in {"
-        echo "    elements = { 192.168.0.50 : counter packets 4000000 bytes $BIG }"
-        echo "  }"
-        echo "}"
-        ;;
-    "list map inet trafficctl_mon bytes_out")
-        echo "table inet trafficctl_mon {"
-        echo "  map bytes_out {"
-        echo "    elements = { 192.168.0.50 : counter packets 3000000 bytes $HUGE }"
-        echo "  }"
-        echo "}"
-        ;;
-    *) exit 0 ;;
-esac
-MOCK
-chmod +x "$MOCKBIN/nft"
+out=$(be_run bytes-nft)
+assert_contains "bytes-nft: 5 GiB download survives" "\"bytes_in\":$BIG" "$out"
+assert_contains "bytes-nft: 2^53-1 upload survives" "\"bytes_out\":$HUGE" "$out"
+assert_contains "bytes-nft: 2^53+2 upload is exact" "\"bytes_out\":$PAST53" "$out"
+assert_not_contains "bytes-nft: nothing pinned at 2^31-1" "$CLAMP" "$out"
+assert_not_contains "bytes-nft: no wrapped negative byte count" "$WRAPPED" "$out"
 
-sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FWLIB|" \
-    "$BIN/trafficctl-bytes-nft.sh" > "$TMP/bytes-nft.sh"
-chmod +x "$TMP/bytes-nft.sh"
-
-for a in $AWKS; do
-    shim="$TMP/shim-$a"
-    mkdir -p "$shim"
-    case "$a" in
-        busybox-awk) printf '#!/bin/sh\nexec busybox awk "$@"\n' > "$shim/awk" ;;
-        *) printf '#!/bin/sh\nexec %s "$@"\n' "$(command -v "$a")" > "$shim/awk" ;;
-    esac
-    chmod +x "$shim/awk"
-
-    out=$(PATH="$shim:$MOCKBIN:$PATH" sh "$TMP/bytes-nft.sh" 2>/dev/null)
-    assert_contains "bytes-nft ($a): 5 GiB download survives" "\"bytes_in\":$BIG" "$out"
-    assert_contains "bytes-nft ($a): 2^53-1 upload survives" "\"bytes_out\":$HUGE" "$out"
-    assert_not_contains "bytes-nft ($a): nothing pinned at 2^31-1" "$CLAMP" "$out"
-    assert_not_contains "bytes-nft ($a): no wrapped negative byte count" "$WRAPPED" "$out"
-done
+# The same through nft -j.
+printf '{"nftables": [{"map": {"name": "bytes_in", "elem": [["192.168.0.50", {"counter": {"packets": 1, "bytes": %s}}]]}}]}\n' "$PAST53" \
+    > "$BE_NFT/-j list map inet trafficctl_mon bytes_in"
+out=$(be_run bytes-nft)
+assert_contains "bytes-nft -j: 2^53+2 download is exact" "\"bytes_in\":$PAST53" "$out"
 
 # ════════════════════════════════════════════════════════════════════════════
 # 3. The shared accumulator is not permanently pinned.
 #
 #    This is the worst instance of the bug and the only one that does not heal
-#    itself once the format is fixed: trafficctl-totals.sh writes the running
-#    total to a state file and seeds from it on the next sample. Written
-#    through a 32-bit %d the stored value saturates, is read back saturated,
-#    saturates again — so trafficctl_device_bytes_total, declared a monotonic
-#    counter, stops at 2147483647 and never moves again. Since 1.14 the same
-#    store also feeds the LuCI Bytes column, so a pinned value is visible in
-#    two places at once.
+#    itself once the format is fixed: the accumulator writes the running total
+#    to a state file and seeds from it on the next sample. Written through a
+#    32-bit %d the stored value saturates, is read back saturated, saturates
+#    again, so trafficctl_device_bytes_total, declared a monotonic counter,
+#    stops at 2147483647 and never moves again. Since 1.14 the same store also
+#    feeds the LuCI Bytes column, so a pinned value is visible in two places.
 #
-#    The exporter is driven end to end here (metrics.sh -> totals.sh -> a
-#    mocked byte source) because the round trip through the state file is
-#    exactly what has to survive.
+#    The exporter is driven end to end here (metrics.sh -> `trafficctl
+#    totals --all` -> a recorded byte sample) because the round trip through
+#    the state file is exactly what has to survive. The accumulator is ucode
+#    now; metrics.sh still reads its output with awk, so that part runs once
+#    per awk implementation.
 # ════════════════════════════════════════════════════════════════════════════
 
-STATE="$TMP/totals.state"
+STATE="$BE_ROOT/tmp/trafficctl_totals.state"
 METRICS_MOCK="$TMP/mbin"
 mkdir -p "$METRICS_MOCK"
 
@@ -217,23 +193,17 @@ sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FWLIB|" \
     -e "s|/usr/libexec/trafficctl/trafficctl-netify.sh|$METRICS_MOCK/netify|" \
     "$BIN/trafficctl-metrics.sh" > "$TMP/metrics.sh"
 
-sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FWLIB|" \
-    -e "s|STATE=\"/tmp/trafficctl_totals.state\"|STATE=\"$STATE\"|" \
-    -e "s|LOCKD=\"/tmp/trafficctl_totals.lock.d\"|LOCKD=\"$TMP/lock.d\"|" \
-    -e "s|/usr/libexec/trafficctl/trafficctl-bytes.sh|$METRICS_MOCK/bytes|" \
-    "$BIN/trafficctl-totals.sh" > "$TMP/totals.sh"
-chmod +x "$TMP/totals.sh"
-
 # sed exits 0 on no match. If these paths are ever renamed, the rewrites would
 # silently no-op and this section would test the production scripts against the
-# real /tmp state file — or nothing at all.
+# real /tmp state file, or nothing at all.
 assert_contains "metrics.sh is redirected at the accumulator under test" \
     "$TMP/totals.sh" "$(cat "$TMP/metrics.sh")"
-assert_contains "the accumulator is redirected at the temp state file" \
-    "$STATE" "$(cat "$TMP/totals.sh")"
-assert_contains "the accumulator is redirected at the mocked byte source" \
-    "$METRICS_MOCK/bytes" "$(cat "$TMP/totals.sh")"
 
+BYTES_FILE="$TMP/bytes.json"
+cat > "$TMP/totals.sh" <<MOCK
+#!/bin/sh
+TCTL_ROOT="$BE_ROOT" exec "$UCODE" -S -L "$UC_LIB" -- "$UC_TESTLIB/totals.uc" "$BYTES_FILE" "\$@"
+MOCK
 cat > "$METRICS_MOCK/uci" <<'MOCK'
 #!/bin/sh
 case "$3" in
@@ -241,19 +211,19 @@ case "$3" in
     *) exit 1 ;;
 esac
 MOCK
-
-BYTES_FILE="$TMP/bytes.json"
-cat > "$METRICS_MOCK/bytes" <<MOCK
-#!/bin/sh
-cat "$BYTES_FILE"
-MOCK
 for m in summary portfw netify; do
     printf '#!/bin/sh\nprintf "[]\\n"\n' > "$METRICS_MOCK/$m"
 done
-chmod +x "$METRICS_MOCK"/*
+chmod +x "$METRICS_MOCK"/* "$TMP/totals.sh"
 
 for a in $AWKS; do
     shim="$TMP/shim-$a"
+    mkdir -p "$shim"
+    case "$a" in
+        busybox-awk) printf '#!/bin/sh\nexec busybox awk "$@"\n' > "$shim/awk" ;;
+        *) printf '#!/bin/sh\nexec %s "$@"\n' "$(command -v "$a")" > "$shim/awk" ;;
+    esac
+    chmod +x "$shim/awk"
 
     # Prior state: a device sitting just under the clamp. Fields are
     # ip rx_acc tx_acc rx_last tx_last seen tcp_acc udp_acc tcp_last udp_last
@@ -281,6 +251,15 @@ for a in $AWKS; do
         'trafficctl_device_bytes_total{ip="192.168.0.50",direction="rx"} 2300000000' "$out2"
 done
 
+# Past 2^53 the state file stays exact even though the awk reading it in
+# metrics.sh would round: the store is the one place a lost byte never comes
+# back.
+printf '192.168.0.52 %s 0 %s 0 1700000000 0 0 -1 -1 ct 1700000000 false\n' "$HUGE" "$HUGE" > "$STATE"
+printf '[{"ip":"192.168.0.52","bytes_in":%s,"bytes_out":0,"bytes_tcp":-1,"bytes_udp":-1,"src":"ct"}]\n' "$PAST53" > "$BYTES_FILE"
+"$TMP/totals.sh" >/dev/null
+assert_contains "accumulator: a 3-byte delta past 2^53 lands in the store" \
+    "192.168.0.52 $PAST53 " "$(cat "$STATE")"
+
 # ════════════════════════════════════════════════════════════════════════════
 # 4. Static guard — the part that works on gawk, i.e. in CI.
 #
@@ -305,7 +284,6 @@ assert_eq "no byte-named field is printed with %d" "" "$offenders"
 #   summary.sh  : total/tcp/udp accumulate conntrack BYTES (conns is a count)
 #   device.sh   : total accumulates bytes; n_tcp/est/... are counts
 #   netify.sh   : per-app byte totals (flows is a count)
-#   totals.sh   : the persisted accumulator line
 assert_contains "summary.sh: conntrack byte sums use %.0f" \
     'printf "%s %.0f %.0f %.0f %d %s\n", ip, total[ip]+0, tcp[ip]+0, udp[ip]+0, conns[ip], kind[ip]' \
     "$(cat "$BIN/trafficctl-summary.sh")"
@@ -315,14 +293,6 @@ assert_contains "device.sh: conntrack byte total uses %.0f" \
 assert_contains "netify.sh: per-app byte total uses %.0f" \
     'printf "%s %s %.0f %d\n", p[1], p[2], total[k], flows[k]' \
     "$(cat "$BIN/trafficctl-netify.sh")"
-assert_contains "totals.sh: persisted accumulator uses %.0f" \
-    'printf "%s %.0f %.0f %.0f %.0f %d %.0f %.0f %.0f %.0f %s %d %s\n", \' \
-    "$(cat "$BIN/trafficctl-totals.sh")"
-# The accumulated totals are re-emitted into JSON as well; a %d there would
-# clamp the number the Bytes column shows even while the store stayed intact.
-assert_contains "totals.sh: emitted totals use %.0f" \
-    '\"bytes_in_total\":%.0f,\"bytes_out_total\":%.0f,\"bytes_tcp_total\":%.0f,\"bytes_udp_total\":%.0f' \
-    "$(cat "$BIN/trafficctl-totals.sh")"
 # shape-stats reports tc's cumulative counters: bytes and packets, but also
 # drops/overlimits/requeues/lended/borrowed/ecn_mark, which climb for the life
 # of the qdisc and overflow the same way. Only "bytes" is byte-named, so the
@@ -336,10 +306,10 @@ assert_contains "shape-stats.sh: cumulative tc counters use %.0f" \
 
 if [ -z "$NARROW" ]; then
     echo
-    echo "NOTE: no 32-bit awk is installed here, so sections 2 and 3 could not"
-    echo "fail even with the bug present — they passed vacuously. Install"
-    echo "busybox to exercise them. Section 4 is interpreter-independent and"
-    echo "is what guards this in CI."
+    echo "NOTE: no 32-bit awk is installed here, so the metrics.sh part of"
+    echo "section 3 could not fail even with the bug present: it passed"
+    echo "vacuously. Install busybox to exercise it. Sections 2 and 4 are"
+    echo "interpreter-independent."
 fi
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"

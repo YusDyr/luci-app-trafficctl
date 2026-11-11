@@ -35,7 +35,8 @@ ubus_stop() {
 trap 'ubus_stop; rm -rf "$UC_TMP"' EXIT
 
 tctl() {
-    "$UCODE" -S -L "$UC_LIB" "$UC_REPO/trafficctl/files/usr/sbin/trafficctl" "$@"
+    # "--": glibc's getopt would take a command's own --all for ucode's.
+    "$UCODE" -S -L "$UC_LIB" -- "$UC_REPO/trafficctl/files/usr/sbin/trafficctl" "$@"
 }
 
 tcall() {

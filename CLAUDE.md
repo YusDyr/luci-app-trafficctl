@@ -44,10 +44,10 @@ the WiFi block button.
 ```
 trafficctl/
   Makefile                                  — OpenWrt package Makefile (package.mk, explicit INSTALL_* per file)
-  files/usr/sbin/trafficctl                 — ucode CLI: subnets, names, rdns, rdns-refresh, ifaces (more move here)
+  files/usr/sbin/trafficctl                 — ucode CLI: subnets, names, rdns, rdns-refresh, ifaces, bytes, bytes-nft, totals (more move here)
   files/usr/share/ucode/trafficctl/
     lib.uc                                  — Shared ucode helpers; its header is the API doc
-    net.uc                                  — Subnets, interface roles, reverse DNS
+    net.uc                                  — Subnets, interface roles, reverse DNS, byte samples, lifetime totals
   files/usr/libexec/trafficctl/
     trafficctl-fw.sh                        — Shared library (nft helpers, validation, persistence)
     trafficctl-summary.sh                   — All devices summary (JSON array)
@@ -66,9 +66,9 @@ trafficctl/
     trafficctl-ratelimit-stats.sh           — Limiter counters
     trafficctl-shape.sh                     — tc/HTB shaping (queue-based)
     trafficctl-shape-stats.sh               — Shaper counters
-    trafficctl-bytes.sh                     — Per-device byte counters (one sample, not a total)
-    trafficctl-bytes-nft.sh                 — nftables counters for software flow offload
-    trafficctl-totals.sh                    — Monotonic lifetime totals; the ONLY accumulator (UI + Prometheus share its store)
+    trafficctl-bytes.sh                     — Wrapper: `trafficctl bytes` (per-device byte counters, one sample, not a total)
+    trafficctl-bytes-nft.sh                 — Wrapper: `trafficctl bytes-nft` (nftables counters for flow offload)
+    trafficctl-totals.sh                    — Wrapper: `trafficctl totals` (monotonic lifetime totals; the ONLY accumulator, UI + Prometheus share its store)
     trafficctl-rdns.sh                      — Wrapper: `trafficctl rdns`
     trafficctl-rules.sh                     — Every restriction, online or not (live + saved state; "Rules" tab)
     trafficctl-telegram.sh                  — Telegram bot daemon (long polling)

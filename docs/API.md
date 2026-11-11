@@ -163,9 +163,12 @@ the router a conntrack read.
 ## Query Scripts
 
 `trafficctl-subnets.sh`, `trafficctl-names.sh`, `trafficctl-rdns.sh`,
-`trafficctl-rdns-refresh.sh` and `trafficctl-ifaces.sh` are two-line wrappers
-for the ucode CLI: `/usr/sbin/trafficctl subnets|names|rdns|rdns-refresh|ifaces`
-takes the same arguments and prints the same bytes.
+`trafficctl-rdns-refresh.sh`, `trafficctl-ifaces.sh`, `trafficctl-bytes.sh`,
+`trafficctl-bytes-nft.sh` and `trafficctl-totals.sh` are two-line wrappers for
+the ucode CLI: `/usr/sbin/trafficctl
+subnets|names|rdns|rdns-refresh|ifaces|bytes|bytes-nft|totals` takes the same
+arguments and prints the same bytes. The byte commands print their arrays
+sorted by address, where the shell printed awk hash order.
 
 ### trafficctl-summary.sh
 
@@ -294,7 +297,7 @@ both fields. The table shows the device next to the name only when they differ.
 
 ---
 
-### trafficctl-bytes.sh
+### trafficctl-bytes.sh (`trafficctl bytes`)
 
 Returns raw byte counters for bandwidth speed calculation. These are a *sample*,
 not a lifetime total — see `trafficctl-totals.sh` below.
@@ -327,25 +330,35 @@ and throw away a real delta.
 
 `degraded` is `true` when the router has **uncountered** flow offload (plain
 `hardware` or `software`) *and* the nftables fallback is unavailable because the
-kernel has no dynamic counter map support (`trafficctl-bytes-nft.sh` re-execs
-with `TCTL_FORCE_CONNTRACK=1`). The counters then stop moving for every offloaded
+kernel has no dynamic counter map support (`trafficctl bytes-nft` then reads
+conntrack instead). Kernel 6.12 is one: it refuses `type ipv4_addr : counter;
+flags dynamic` with "Not supported", whichever nftables (1.0.2 and 1.1.6
+tried). `TCTL_FORCE_CONNTRACK=1` in the environment skips the nft maps and
+gives the same flagged conntrack sample. The counters then stop moving for every offloaded
 flow while traffic continues, so any total built from them is a lower bound that
 stalls. Consumers must refuse to present it as a total.
 
 Which source is used is decided per call: with flow offload active and no
 working `counter` flag, conntrack stops accounting for offloaded flows, so the
-script hands over to `trafficctl-bytes-nft.sh`, whose maps sit on the forward
+sampler hands over to `trafficctl bytes-nft`, whose maps sit on the forward
 hook at priority `-200`, ahead of the flowtable at `-150`. Those maps are keyed
-by address alone, which is why `bytes_tcp` / `bytes_udp` are `-1` there.
+by address alone, which is why `bytes_tcp` / `bytes_udp` are `-1` there. They
+are read with `nft -j list map`, which accepts both element shapes:
+`[ key, { counter } ]` pairs from nftables 1.0.2 and
+`{ elem: { val, counter } }` from 1.1.6. The text listing is the fallback for
+an nftables built without JSON, and for JSON whose elements none of those
+shapes match.
+
+Counters are 64-bit integers end to end: a value past 2^53 comes out exact.
 
 `-1` means "not measurable", never "zero". A consumer that renders it as 0 is
 claiming the device sent no TCP at all.
 
 ---
 
-### trafficctl-totals.sh
+### trafficctl-totals.sh (`trafficctl totals`)
 
-Wraps `trafficctl-bytes.sh` with a **monotonic per-device accumulator** — the
+Wraps `trafficctl bytes` with a **monotonic per-device accumulator** — the
 lifetime totals behind both the LuCI Bytes / TCP / UDP columns and the
 `trafficctl_device_bytes_total` metric. Neither raw source is a lifetime total:
 conntrack reports only flows that still exist (so a device's number collapses
@@ -356,7 +369,7 @@ and the nft maps count only since the table was built.
 but still carry a total. Used by the exporter so a Prometheus series does not
 vanish and reappear every time an idle device's last flow expires.
 
-**Output:** the `trafficctl-bytes.sh` array, extended per element:
+**Output:** the `trafficctl bytes` array, extended per element:
 
 ```json
 [
@@ -400,7 +413,20 @@ accumulated history and stay exact.
   Prometheus scrape, is what drives accumulation. With the page closed and no
   scraper configured, the counters stand still. There is no background tick.
 - **Concurrent samplers are serialised** with an atomic `mkdir` lock, so a LuCI
-  poll and a scrape landing together cannot discard one another's delta.
+  poll and a scrape landing together cannot discard one another's delta. The
+  lock is `/tmp/trafficctl_totals.lock.d`, an empty directory, as the 1.30.x
+  shell writer held it: either writer takes it over from the other after about
+  3 s, so an upgrade or a downgrade with a sampler running loses nothing. A
+  holder that does not let go is waited for about 3 s; then the sample is
+  accumulated anyway. The lock is released on an error inside the locked
+  section too.
+- **A failed sample is an empty one**, as the shell's empty pipe was: nothing
+  is accumulated, and `totals --all` still lists every stored device with
+  `live: false`, so no Prometheus series vanishes for that scrape.
+- **The store format is the shell's**, one line per device:
+  `ip rx_acc tx_acc rx_last tx_last seen tcp_acc udp_acc tcp_last udp_last src
+  since degraded`. Lines of 5, 6, 10 and 12 fields from older versions load
+  too, and 1.30.x reads what this one writes.
 - **`degraded` is sticky per device.** A total accumulated from frozen counters
   stays understated for the rest of its life, so one tainted sample marks it
   until the counter resets. Clearing the flag as soon as a later sample looked
