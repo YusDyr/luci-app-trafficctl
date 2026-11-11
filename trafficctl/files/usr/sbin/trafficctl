@@ -58,6 +58,29 @@ const commands = {
 	},
 };
 
+// Commands the shell scripts still serve: run with our arguments, stdin,
+// stdout and exit status, so a port only moves an entry up into commands.
+const LEGACY = {
+	block: 'trafficctl-block.sh',
+	bytes: 'trafficctl-bytes.sh',
+	cut: 'trafficctl-cut.sh',
+	device: 'trafficctl-device.sh',
+	history: 'trafficctl-history.sh',
+	'macfilter-add': 'trafficctl-macfilter-add.sh',
+	'macfilter-remove': 'trafficctl-macfilter-remove.sh',
+	netify: 'trafficctl-netify.sh',
+	portfw: 'trafficctl-portfw.sh',
+	ratelimit: 'trafficctl-ratelimit.sh',
+	'ratelimit-stats': 'trafficctl-ratelimit-stats.sh',
+	rules: 'trafficctl-rules.sh',
+	shape: 'trafficctl-shape.sh',
+	'shape-stats': 'trafficctl-shape-stats.sh',
+	summary: 'trafficctl-summary.sh',
+	'telegram-test': 'trafficctl-telegram-test.sh',
+	totals: 'trafficctl-totals.sh',
+	unblock: 'trafficctl-unblock.sh',
+};
+
 // What a caller expecting this command's shape can still parse.
 function fallback(cmd, args, msg) {
 	if (cmd == 'subnets' || cmd == 'ifaces' || (cmd == 'names' && args[0] == 'list'))
@@ -68,8 +91,10 @@ function fallback(cmd, args, msg) {
 }
 
 let cmd = shift(ARGV);
+if (!exists(commands, cmd) && exists(LEGACY, cmd))
+	exit(lib.passthru([ lib.path('/usr/libexec/trafficctl/' + LEGACY[cmd]), ...ARGV ]));
 if (!exists(commands, cmd)) {
-	out({ ok: false, msg: 'usage: trafficctl <' + join('|', sort(keys(commands))) + '> [args]' });
+	out({ ok: false, msg: 'usage: trafficctl <' + join('|', sort(uniq([ ...keys(commands), ...keys(LEGACY) ]))) + '> [args]' });
 	exit(2);
 }
 let rc;

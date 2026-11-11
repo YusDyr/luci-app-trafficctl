@@ -20,7 +20,14 @@
 scp trafficctl/files/usr/libexec/trafficctl/trafficctl-*.sh root@192.168.0.1:/usr/libexec/trafficctl/
 ssh root@192.168.0.1 'chmod +x /usr/libexec/trafficctl/trafficctl-*.sh'
 
-# Deploy rpcd backend
+# Deploy the ucode modules and the CLI: the rpcd plugin imports lib.uc and
+# runs /usr/sbin/trafficctl for every delegated method
+ssh root@192.168.0.1 'mkdir -p /usr/share/ucode/trafficctl'
+scp trafficctl/files/usr/share/ucode/trafficctl/*.uc root@192.168.0.1:/usr/share/ucode/trafficctl/
+scp trafficctl/files/usr/sbin/trafficctl root@192.168.0.1:/usr/sbin/
+ssh root@192.168.0.1 'chmod +x /usr/sbin/trafficctl'
+
+# Deploy the rpcd plugin
 scp luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl root@192.168.0.1:/usr/libexec/rpcd/
 ssh root@192.168.0.1 'chmod +x /usr/libexec/rpcd/luci.trafficctl && /etc/init.d/rpcd restart'
 
@@ -116,7 +123,7 @@ luci-app-trafficctl/                     # repository
 │   │   ├── portfw.js                    # "Port Forwards" tab
 │   │   └── status.css                   # Frontend styles
 │   ├── root/usr/
-│   │   ├── libexec/rpcd/luci.trafficctl # rpcd backend (JSON-RPC dispatch)
+│   │   ├── libexec/rpcd/luci.trafficctl # rpcd plugin (ucode): settings in process, the rest via the CLI
 │   │   └── share/
 │   │       ├── luci/menu.d/luci-app-trafficctl.json
 │   │       └── rpcd/acl.d/luci-app-trafficctl.json
@@ -224,7 +231,6 @@ bash tests/test_metrics.sh            # Prometheus exporter
 bash tests/test_bytes_nft.sh          # nftables byte-counter parsing
 bash tests/test_openwrt_compat.sh     # BusyBox ash compatibility / no bashisms
 bash tests/test_security.sh           # Input validation and injection resistance
-bash tests/test_rpcd.sh               # rpcd/ubus backend — every method, dispatch, ACL
 bash tests/test_rules.sh              # Rules tab backend: restrictions of offline devices
 bash tests/test_block.sh              # Internet block/unblock
 bash tests/test_macfilter.sh          # WiFi MAC deny/allow
@@ -246,7 +252,9 @@ export UCODE_PREFIX=~/.cache/trafficctl-ucode/2022-12-02
 bash tests/test_ucode_lib.sh          # lib.uc helpers, subnets
 bash tests/test_names.sh              # Device aliases + reverse-DNS cache
 bash tests/test_ifaces.sh             # Per-interface counters and roles
-bash tests/equiv.sh                   # ucode output == the v1.30.0 shell output
+bash tests/test_rpcd.sh               # rpcd plugin: every method, dispatch, uci commits, 0600
+bash tests/test_rpcd_contract.sh      # every rpc.declare in the views against the plugin's list
+bash tests/equiv.sh                   # ucode output == the v1.30.0 shell output, rpcd methods included
 ```
 
 Four further tests only run inside the OpenWrt rootfs containers that

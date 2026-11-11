@@ -29,10 +29,17 @@
 // call popen() or system() (tests/test_security.sh enforces this).
 //   q(s)                          single-quoted for /bin/sh; dies on
 //                                 anything but a string or an int
+//   qv(argv)                      q() of each element, joined by spaces
 //   run(cmd, ms)                  stdout as a string, stderr dropped, no stdin;
 //                                 with ms, cmd is one program, killed after ms
+//   run_rc(cmd, ms)               run() with a timeout: { out, rc }, rc the
+//                                 exit status, -9 when it was killed
 //   lines(cmd, ms)                run() split into lines
 //   sh(cmd, ms)                   exit status, all output dropped
+//   pipe(cmd, input)              run() with input on cmd's stdin, so a
+//                                 secret need not be in anybody's argv
+//   passthru(argv)                argv[0] run directly (no shell) on our
+//                                 stdin/stdout/stderr: its exit status
 // JSON
 //   to_json(v)                    compact: no spaces, keys in insertion
 //                                 order, integers only, '/' not escaped
@@ -59,6 +66,9 @@
 //   field(line, n)                awk's $(n+1)
 // Activity log
 //   log(action, target, detail, via, src)   port of tctl_log
+//   set_context({ via, src, user })   what log() records when its caller
+//                                 passes no via/src (and instead of
+//                                 TCTL_USER): the rpcd plugin's caller
 // Stores (same formats as the shell backend)
 //   names_list(), names_map(), names_set(ip, name), names_remove(ip),
 //   sanitize_name(s)              /etc/trafficctl/names, "IP NAME" lines
@@ -119,18 +129,6 @@ function uci_foreach(conf, stype, fn) {
 		ucimod.error();
 }
 
-function commit(conf) {
-	// commit() without a name was broken before 2023-04.
-	if (!cursor().commit(conf)) {
-		ucimod.error();
-		return false;
-	}
-	// The file holds the bot and metrics tokens; uci rewrites it 0644.
-	if (conf == 'trafficctl')
-		chmod(path('/etc/config/trafficctl'), 0o600);
-	return true;
-}
-
 let bus;
 function ubus_call(obj, method, args) {
 	bus ??= ubusmod.connect(getenv('TCTL_UBUS_SOCKET'));
@@ -161,6 +159,12 @@ function q(s) {
 	return "'" + replace(s, "'", "'\\''") + "'";
 }
 
+function qv(argv) {
+	if (type(argv) != 'array')
+		die('qv(): not an array: ' + type(argv));
+	return join(' ', map(argv, q));
+}
+
 function run(cmd, ms) {
 	if (ms) {
 		// system() is the only call with a timeout; exec so the kill reaches
@@ -182,6 +186,22 @@ function run(cmd, ms) {
 	return out ?? '';
 }
 
+// run() with a timeout and the exit status: the rpcd plugin has to answer
+// before rpcd kills it, and has to tell a timeout from an empty reply.
+function run_rc(cmd, ms) {
+	// Created here and exclusively, as in pipe().
+	let tmp = path('/tmp/.trafficctl_run.' + pid());
+	unlink(tmp);
+	let f = open(tmp, 'wx', 0o600);
+	if (!f)
+		return { out: '', rc: -1 };
+	f.close();
+	let rc = system('exec >' + q(tmp) + ' 2>/dev/null </dev/null; exec ' + cmd, ms);
+	let out = fs_readfile(tmp);
+	unlink(tmp);
+	return { out: out ?? '', rc };
+}
+
 function lines(cmd, ms) {
 	let l = split(run(cmd, ms), '\n');
 	if (l[-1] == '')
@@ -193,6 +213,61 @@ function sh(cmd, ms) {
 	if (ms)
 		return system('exec >/dev/null 2>&1 </dev/null; exec ' + cmd, ms);
 	return system('{ ' + cmd + '\n} >/dev/null 2>&1 </dev/null');
+}
+
+function commit(conf) {
+	// After the command helpers: it needs sh() and q().
+	let c = cursor();
+	if (!c.commit(conf)) {
+		ucimod.error();
+		// Before 2023 commit() and save() refuse a name (EINVAL), and a bare
+		// commit() rewrites every loaded file, comments lost. A bare save()
+		// writes only the changed packages' deltas; the uci CLI then commits
+		// this one, and the cursor reloads it on the next read.
+		if (!c.save()) {
+			ucimod.error();
+			return false;
+		}
+		if (sh('uci ' + ((ROOT != '') ? '-c ' + q(ROOT + '/etc/config') + ' -t ' + q(ROOT + '/tmp/.uci') + ' ' : '') +
+				'commit ' + q(conf)) != 0) {
+			// Not left staged, or the next reader would take it for saved:
+			// what `uci revert <conf>` does, without having to rewrite a
+			// delta file that inherited a read-only config's mode.
+			unlink(path('/tmp/.uci/' + conf));
+			c.unload(conf);
+			return false;
+		}
+		c.unload(conf);
+	}
+	// The file holds the bot and metrics tokens; uci rewrites it 0644.
+	if (conf == 'trafficctl')
+		chmod(path('/etc/config/trafficctl'), 0o600);
+	return true;
+}
+
+function pipe(cmd, input) {
+	// Created here and exclusively, so the redirect below cannot follow a
+	// planted symlink and the output is never readable by anybody else.
+	let tmp = path('/tmp/.trafficctl_pipe.' + pid());
+	unlink(tmp);
+	let f = open(tmp, 'wx', 0o600);
+	if (!f)
+		return '';
+	f.close();
+	let p = popen('{ ' + cmd + '\n} >' + q(tmp) + ' 2>/dev/null', 'w');
+	if (p) {
+		p.write('' + (input ?? ''));
+		p.close();
+	}
+	let out = fs_readfile(tmp);
+	unlink(tmp);
+	return out ?? '';
+}
+
+function passthru(argv) {
+	if (type(argv) != 'array' || !length(argv) || !plain(argv[0]))
+		die('passthru(): no program');
+	return system(map(argv, (a) => '' + a));
 }
 
 // ── JSON ────────────────────────────────────────────────────────────────────
@@ -450,6 +525,11 @@ function append(p, data) {
 
 const LOG_DEFAULT = '/tmp/trafficctl/activity.log';
 
+let ctx = {};
+function set_context(c) {
+	ctx = (type(c) == 'object') ? c : {};
+}
+
 // Writable through the LuCI write ACL and used as an append and a rewrite
 // target, so only dedicated log locations with plain characters are taken.
 function valid_log_file(f) {
@@ -529,14 +609,14 @@ function log(action, target, detail, via, src) {
 
 	let t = localtime();
 	let ts = sprintf('%04d-%02d-%02d %02d:%02d:%02d', t.year, t.mon, t.mday, t.hour, t.min, t.sec);
-	let user = env_or('TCTL_USER', null) ?? (trim(run('id -un')) || 'unknown');
+	let user = one_line(ctx.user ?? env_or('TCTL_USER', null) ?? (trim(run('id -un')) || 'unknown'));
 	let file = uci_get('trafficctl', 'logging', 'log_file');
 	if (!file || !valid_log_file(file))
 		file = LOG_DEFAULT;
 	let max = log_max_lines();
 	let msg = sprintf('%s src=%s user=%s via=%s action=%s target=%s%s', ts,
-		(src == null || src == '') ? 'local' : src, user,
-		(via == null || via == '') ? 'cli' : via, action, one_line(target),
+		one_line((src == null || src == '') ? (ctx.src || 'local') : src), user,
+		(via == null || via == '') ? (ctx.via || 'cli') : via, action, one_line(target),
 		(detail != null && detail != '') ? ' detail=' + one_line(detail) : '');
 
 	mkdir_p(dirname(file));
@@ -662,3 +742,5 @@ export { path, pid, reset, plain, cursor, uci_get, uci_words, uci_foreach, commi
 	write_atomic, lock, unlock, field, valid_log_file, log, sanitize_name,
 	names_list, names_map, names_set, names_remove, seen_ready, seen_count,
 	seen_known, seen_mark, seen_seed };
+// What the rpcd plugin and the CLI's legacy commands need.
+export { qv, pipe, passthru, set_context, run_rc };

@@ -92,7 +92,7 @@ luci-app-trafficctl/
     portfw.js                               — "Port Forwards" tab (inbound traffic control)
     status.css                              — Frontend styles (shared by both views)
   root/usr/libexec/rpcd/
-    luci.trafficctl                         — rpcd/ubus backend (JSON object output, not arrays)
+    luci.trafficctl                         — rpcd exec plugin (ucode): settings, names, activity log in process; the rest via /usr/sbin/trafficctl
   root/usr/share/luci/menu.d/, root/usr/share/rpcd/acl.d/ — menu entry and ACL
   po/templates/trafficctl.pot               — i18n template, named after the domain `trafficctl` (regenerate: `python3 tools/genpot.py`)
   po/<lang>/trafficctl.po                   — translations; built into usr/lib/lua/luci/i18n/trafficctl.<code>.lmo
@@ -108,9 +108,10 @@ docs/
   `import { a } from 'fs';`. Modules declare plain functions and end in one
   `export { ... };` (2022-12 wants a `;` after `export function`); call
   functions only after their declaration (no hoisting).
-- External commands go through `lib.run`/`lines`/`sh` with every value in
-  `lib.q()`; nothing else calls `popen`/`system` (`tests/lib/uc_cmd_lint.py`,
-  run by `tests/test_security.sh`).
+- External commands go through `lib.run`/`lines`/`sh`/`pipe` with every
+  value in `lib.q()` (an argument list in `lib.qv()`); nothing else calls
+  `popen`/`system` (`tests/lib/uc_cmd_lint.py`, run by
+  `tests/test_security.sh`, which covers the rpcd plugin too).
 - `match()`/`replace()`/`lc()` stop at a NUL byte: validate with the lib
   helpers, which refuse such strings, before matching untrusted input.
 - The modules cache the uci cursor, the ubus connection and the interface
@@ -118,6 +119,9 @@ docs/
 - JSON output goes through `lib.to_json`, which keeps the shell backend's
   bytes. File paths go through `lib.path()`/the file helpers, so `TCTL_ROOT`
   can point a test at a scratch root.
+- The rpcd plugin must reply with a JSON **object** (rpcd refuses a bare
+  array): wrap with `{"result": ...}`. Each method's reply equals the v1.30.0
+  shell plugin's (`tests/equiv.sh`).
 
 ## JavaScript Conventions
 
@@ -132,7 +136,6 @@ docs/
 
 - Shebang: `#!/bin/sh`
 - All scripts output JSON to stdout
-- rpcd scripts (`luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl`) must output JSON **objects** (not bare arrays) — wrap with `{"result": ...}`
 - Validate IPs with `tctl_validate_ip` from trafficctl-fw.sh
 - Use `2>/dev/null` on commands that may fail (nft, tc)
 - Filter `dig` output: `grep -v '^;;'` to remove error messages
@@ -195,7 +198,7 @@ ssh root@192.168.0.1 sh -c '"cat > /www/luci-static/resources/view/trafficctl/st
 - Persistent shapes stored in `/etc/trafficctl/shapes.json`
 - Persistent blocks/ratelimits stored in `/etc/trafficctl/rules.json` (when `persist_rules` enabled)
 - Note: Only `/etc/config/trafficctl` is tracked as a conffile for package upgrades. The runtime state under `/etc/trafficctl/` (names, shapes.json, rules.json, telegram_known.json) is not a conffile but IS listed in `trafficctl/files/lib/upgrade/keep.d/trafficctl`, because default sysupgrade preserves `/etc/config/*` only — without that file every device alias and shaping rule was lost on a firmware upgrade
-- The config file holds the Telegram bot token and the metrics token, so it is kept at mode 0600. `uci` rewrites the file at the default mode on every commit, hence the single `tctl_commit` helper in the rpcd backend that re-applies the mode after each one
+- The config file holds the Telegram bot token and the metrics token, so it is kept at mode 0600. `uci` rewrites the file at the default mode on every commit, hence the single `lib.commit()` (`trafficctl/files/usr/share/ucode/trafficctl/lib.uc`) that re-applies the mode after each one. On ucode 2022-12 a named `cursor.commit()` fails with EINVAL, so it saves the deltas and commits that one config with the uci CLI. A commit that fails drops what it staged and returns false; every rpcd setter then replies `ok:false` instead of claiming the change
 - Activity logging: `trafficctl.logging.log_file` is constrained to `/tmp/trafficctl/*` or `/var/log/*` and `max_lines` to 20..100000 (`tctl_validate_log_file` / `tctl_log_max_lines`). The path is both an append target and a `tail`+`mv` rotation target, so an unconstrained value gave the write ACL an arbitrary root file read (via `activity_log`) and truncate — `max_lines=1` rounded the rotation keep-count to zero and emptied whatever the path pointed at. `activity_log` is a **write** method for that reason
 - Global internet cut (all devices at once): own nft table `inet tctl_cut` with TWO chains, loaded as one atomic `nft -f` transaction. Own table because fw4 rebuilds `inet fw4` on every reload and the `ifup lan` restore hook does not fire for that — a rule placed there lapses silently while the UI still reads ON, which for this control is the worst failure. **The primary chain is at `prerouting` priority -300, not `forward`**: a forward rule only sees traffic the router FORWARDS, and on a router running a transparent proxy (podkop/sing-box, passwall, homeproxy) TPROXY intercepts at prerouting and delivers the packet LOCALLY — client→router is `input`, router→internet is `output`, neither leg is forwarded, so a forward-only cut misses the bulk of the traffic while reporting success. -300 (`raw`) is ahead of conntrack (-200), `mangle` (-150) and `dstnat` (-100) where those proxies hook. The forward chain at -190 is kept as a second layer. Locally-originated traffic never traverses prerouting, so the proxy's own outbound path, the router's tunnels and its DNS are untouched. **Rule order is a safety property**: `fib daddr type { local, broadcast, multicast } accept` comes FIRST, before anything that trusts the LAN device list, so LuCI/SSH/DNS/DHCP survive even if that list is wrong — a prerouting drop without that escape hatch is a total LAN lockout, which is also why the install must be atomic (rule-by-rule would apply the accepts that parse plus the drop). Interface matching rather than addresses so IPv4 **and** IPv6 are cut by the same rules (the per-device block is `ip saddr` and v4-only); at prerouting there is no `oifname` yet, so `fib daddr . iif oifname` asks the FIB the same question. Inbound port forwards are deliberately left alone. **Refuses to engage when no LAN device can be resolved** — the drop-all it would otherwise build black-holes the LAN too. `cut_coverage` reports `full`/`forward` from live kernel state; on a kernel without `nft_fib` the forward-only fallback is taken, and if a `tproxy` rule is detected in the ruleset that fallback **refuses** rather than installing a cut that misses proxied traffic. Engaged state lives in tmpfs (`/var/run/trafficctl/cut.state`): it is the one control that can lock out its own operator, so a reboot must clear it. "Keep after reboot" is its **own** opt-in writing `/etc/trafficctl/cut.state`, never the global `persist_rules` flag, restored on `ifup lan` at the original absolute deadline; deliberately not in `keep.d`. Auto-revert is enforced both by the procd keeper (`/etc/init.d/trafficctl-cut`, 5s tick, also re-asserts the rule) and independently by `cut_status`, which is why that is a **write** method
 - Port-forward control: own nft table `inet tctl_pfw`, chains at forward/input priority -190 (post-DNAT, before the flowtable offload rule); pause = drop rule + conntrack flush, limit = `limit rate over` drop. Rule comments `tctl_pfw_<pause|limit>_<proto>_<ip|local>_<port>` are the source of truth for state

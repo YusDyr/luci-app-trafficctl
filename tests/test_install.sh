@@ -139,7 +139,6 @@ done
 # Verify syntax for all shell scripts
 for s in \
   /usr/libexec/trafficctl/trafficctl-*.sh \
-  /usr/libexec/rpcd/luci.trafficctl \
   /etc/hotplug.d/dhcp/99-trafficctl-newdevice \
   /etc/hotplug.d/iface/99-trafficctl-shapes \
   /etc/init.d/trafficctl-telegram; do
@@ -168,6 +167,48 @@ for c in subnets ifaces; do
 done
 if /usr/sbin/trafficctl bogus >/dev/null 2>&1; then
     echo "CLI FAILED: an unknown command exited 0"; exit 1
+fi
+
+# The rpcd plugin is ucode too: its signature table, a read that needs only
+# uci, and the version, read from this package manager's database (never
+# "dev" once installed, never by running opkg).
+RPCD=/usr/libexec/rpcd/luci.trafficctl
+case "$($RPCD list 2>&1)" in *'"version":{}'*) ;; *) echo "RPCD FAILED: list printed: $($RPCD list 2>&1)"; exit 1 ;; esac
+out=$(echo '{}' | $RPCD call config_get 2>&1)
+case "$out" in '{"enabled":'*) ;; *) echo "RPCD FAILED: config_get printed: $out"; exit 1 ;; esac
+out=$(echo '{}' | $RPCD call version 2>&1)
+case "$out" in '{"version":"dev"}'|'{"version":""}'|*error*) echo "RPCD FAILED: version printed: $out"; exit 1 ;;
+    '{"version":"'*) echo "rpcd plugin: $out" ;;
+    *) echo "RPCD FAILED: version printed: $out"; exit 1 ;; esac
+
+# The same plugin behind this release's own rpcd. rpcd writes a call's
+# arguments to the plugin's stdin and closes it; the plugin reads to the end,
+# so a call with arguments returning at all (well inside rpcd's 30 s exec
+# timeout) is what proves the close.
+if [ -x /sbin/rpcd ] && [ -x /sbin/ubusd ]; then
+    mkdir -p /var/run
+    /sbin/ubusd & UBUSD_PID=$!
+    sleep 1
+    /sbin/rpcd & RPCD_PID=$!
+    i=0
+    until ubus list luci.trafficctl >/dev/null 2>&1; do
+        i=$((i + 1))
+        [ "$i" -lt 20 ] || { echo "RPCD FAILED: rpcd never registered luci.trafficctl"; exit 1; }
+        sleep 1
+    done
+    t0=$(date +%s)
+    out=$(ubus -t 10 call luci.trafficctl name_set '{"ip":"192.168.77.5","name":"ci-probe"}' 2>&1) || {
+        echo "RPCD FAILED: name_set through rpcd: $out"; exit 1; }
+    case "$out" in *'"ok": true'*) ;; *) echo "RPCD FAILED: name_set through rpcd printed: $out"; exit 1 ;; esac
+    out=$(ubus -t 10 call luci.trafficctl names_list 2>&1)
+    case "$out" in *ci-probe*) ;; *) echo "RPCD FAILED: names_list through rpcd printed: $out"; exit 1 ;; esac
+    out=$(ubus -t 10 call luci.trafficctl name_clear '{"ip":"192.168.77.5"}' 2>&1) || {
+        echo "RPCD FAILED: name_clear through rpcd: $out"; exit 1; }
+    echo "rpcd: calls with arguments returned in $(( $(date +%s) - t0 )) s"
+    kill "$RPCD_PID" "$UBUSD_PID" 2>/dev/null || true
+    wait "$RPCD_PID" "$UBUSD_PID" 2>/dev/null || true
+else
+    echo "rpcd: not in this image, skipped the call through rpcd"
 fi
 
 # Each file belongs to the package that is meant to ship it: the backend to

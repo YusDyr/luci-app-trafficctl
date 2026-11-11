@@ -42,8 +42,6 @@ jobs:
         run: bash tests/test_telegram_e2e.sh
       - name: Security tests
         run: bash tests/test_security.sh
-      - name: rpcd backend tests
-        run: bash tests/test_rpcd.sh
       - name: Block/unblock tests
         run: bash tests/test_block.sh
       - name: Rules tab backend tests
@@ -116,6 +114,10 @@ jobs:
         ucode: ["2022-12-02", "25.12"]
     steps:
       - uses: actions/checkout@v6
+      # equiv.sh runs the shell rpcd plugin under busybox ash, as on the
+      # router, where its printf %d differs from dash's.
+      - name: Install busybox
+        run: sudo apt-get install -y --no-install-recommends busybox-static
       - uses: actions/cache@v4
         with:
           path: ~/.cache/trafficctl-ucode/${{ matrix.ucode }}
@@ -128,6 +130,11 @@ jobs:
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_names.sh
       - name: Per-interface counter tests (global overview)
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_ifaces.sh
+      - name: rpcd plugin tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_rpcd.sh
+      # Every rpc.declare in the views against the plugin's list.
+      - name: rpcd contract tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_rpcd_contract.sh
       - name: Equivalence tests
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/equiv.sh
 

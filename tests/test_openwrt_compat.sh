@@ -69,8 +69,6 @@ for script in "$REPO_ROOT"/trafficctl/files/usr/libexec/trafficctl/trafficctl-*.
 done
 
 # shellcheck disable=SC2086
-assert_ok "syntax: rpcd/trafficctl" $SHELL_CMD -n "$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
-# shellcheck disable=SC2086
 assert_ok "syntax: hotplug" $SHELL_CMD -n "$REPO_ROOT/trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes"
 # shellcheck disable=SC2086
 assert_ok "syntax: init.d/trafficctl-telegram" $SHELL_CMD -n "$REPO_ROOT/trafficctl/files/etc/init.d/trafficctl-telegram"
@@ -104,7 +102,7 @@ check_bashism() {
 for script in "$REPO_ROOT"/trafficctl/files/usr/libexec/trafficctl/trafficctl-*.sh; do
     check_bashism "$script"
 done
-check_bashism "$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
+# The rpcd plugin is ucode, not a shell script: tests/test_rpcd.sh runs it.
 
 # ── IPK build and structure ────────────────────────────────────────────────
 

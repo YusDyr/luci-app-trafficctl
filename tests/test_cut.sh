@@ -678,12 +678,12 @@ assert_eq "orphaned rule: a tick with no state removes it" "no" \
 # Wiring — a method rpcd does not list is a method that does not exist
 # ════════════════════════════════════════════════════════════════════════════
 
-RPCD_SH="$TMP/rpcd"
-sed "s|\\. /usr/libexec/trafficctl/trafficctl-fw.sh|. $BIN/trafficctl-fw.sh|" "$RPCD" > "$RPCD_SH"
-LIST=$(PATH="$MOCKBIN:$PATH" sh "$RPCD_SH" list 2>/dev/null)
-assert_contains "rpcd: cut_status is advertised by the list case" '"cut_status"' "$LIST"
-assert_contains "rpcd: cut_set is advertised with its parameters" \
-    '"cut_set":{"active":"bool","duration":"int","persist":"bool"}' "$LIST"
+# Read from the plugin's signature table; tests/test_rpcd.sh checks what its
+# `list` prints.
+SIGS=$(cat "$RPCD")
+assert_contains "rpcd: cut_status is in the signature table" 'cut_status: {},' "$SIGS"
+assert_contains "rpcd: cut_set is declared with its parameters" \
+    "cut_set: { active: 'bool', duration: 'int', persist: 'bool' }," "$SIGS"
 
 ACLTXT=$(cat "$ACL")
 assert_contains "acl: cut_status is granted" '"cut_status"' "$ACLTXT"
