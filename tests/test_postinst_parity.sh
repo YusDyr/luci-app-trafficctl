@@ -189,6 +189,19 @@ assert_contains "trafficctl Makefile prerm releases the cut" "$CUT" "$BE_MK_PRER
 assert_contains "trafficctl build-ipk.sh prerm releases the cut" "$CUT" "$BE_IPK_PRERM"
 assert_contains "trafficctl build-apk.sh pre-deinstall releases the cut" "$CUT" "$BE_APK_PREDEL"
 
+# 8. The cut keeper is never started at boot. default_postinst runs `enable` on
+#    every init script, and rc.common's enable links S<START>/K<STOP>, so the
+#    script must carry neither. A boot-time keeper finds no cut and removes any
+#    rule it sees, which can race the ifup restore of a persisted cut.
+CUT_INIT="$REPO_ROOT/trafficctl/files/etc/init.d/trafficctl-cut"
+assert_eq "trafficctl-cut sets no START or STOP, so enable links nothing" "" \
+    "$(grep -E '^[[:space:]]*(START|STOP)=' "$CUT_INIT")"
+# Installs from 1.30.1 and older already have the links.
+LINK="/etc/rc.d/S95trafficctl-cut"
+assert_contains "trafficctl Makefile postinst removes the old boot link" "$LINK" "$BE_MK_POSTINST"
+assert_contains "trafficctl build-ipk.sh postinst removes the old boot link" "$LINK" "$BE_IPK_POSTINST"
+assert_contains "trafficctl build-apk.sh post-install removes the old boot link" "$LINK" "$BE_APK_POSTINST"
+
 # ── Syntax ────────────────────────────────────────────────────────────────
 # The scripts run under the router's ash. A syntax error there fails the
 # install on the device, where it is least convenient to debug.
@@ -262,7 +275,10 @@ case "\$*" in
 esac
 FAKEUCI
     chmod +x "$FAKE/bin/uci"
-    sed -e "s|/etc/init.d/|$FAKE/etc/init.d/|g" -e "s|/etc/config/|$FAKE/etc/config/|g" "$1" > "$FAKE/postinst"
+    # A boot link for the cut keeper, as releases up to 1.30.1 left behind.
+    : > "$FAKE/rc.d/S95trafficctl-cut"
+    sed -e "s|/etc/init.d/|$FAKE/etc/init.d/|g" -e "s|/etc/config/|$FAKE/etc/config/|g" \
+        -e "s|/etc/rc.d/|$FAKE/rc.d/|g" "$1" > "$FAKE/postinst"
     # shellcheck disable=SC2086 # SHELL_CMD may be "busybox ash"
     IPKG_INSTROOT="${5:-}" PATH="$FAKE/bin:$PATH" ${SHELL_CMD:-sh} "$FAKE/postinst" >/dev/null 2>&1
 }
@@ -275,6 +291,7 @@ for f in "$TMP/trafficctl.postinst" "$TMP/ipk.postinst" "$TMP/apk.postinst"; do
     n=$(basename "$f")
 
     run_postinst "$f" 1 1 0
+    assert_eq "$n: the old boot link of the cut keeper is removed" no "$(in_rcd S95trafficctl-cut)"
     assert_eq "$n, telegram.enabled=1: the bot is enabled in rc.d" yes "$(in_rcd trafficctl-telegram)"
     assert_eq "$n, telegram.enabled=1: the bot is started" 1 "$(calls 'trafficctl-telegram start')"
     assert_eq "$n, history.enabled=1: the sampler is enabled in rc.d" yes "$(in_rcd trafficctl-history)"

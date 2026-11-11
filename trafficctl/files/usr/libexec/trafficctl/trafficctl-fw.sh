@@ -187,7 +187,19 @@ tctl_ratelimit_add() {
     fi
 
     if [ "$TCTL_FW" = "nft" ]; then
-        nft add table netdev tm_ratelimit 2>/dev/null
+        # Fails when the kernel lacks the netdev family (kmod-nft-netdev).
+        # Every chain below would then fail too, so stop and say why.
+        local nft_err
+        if ! nft_err=$(nft add table netdev tm_ratelimit 2>&1); then
+            logger -t trafficctl "rate limit: cannot create nft table netdev tm_ratelimit (kmod-nft-netdev missing?): $nft_err" 2>/dev/null
+            # shellcheck disable=SC2034
+            TCTL_RL_NETDEV_FAILED=1
+            # shellcheck disable=SC2034
+            TCTL_RL_DOWNLOAD_FAILED=1
+            # shellcheck disable=SC2034
+            TCTL_RL_UPLOAD_FAILED=1
+            return 1
+        fi
         # The set has to exist before any rule that names it. Without it the
         # v6 download half is skipped and reported as such, never half-built.
         if [ -n "$dl6_expr" ] && ! nft add set netdev tm_ratelimit "$v6set" \
@@ -284,12 +296,19 @@ tctl_ratelimit_add() {
         iptables -t mangle -A FORWARD -d "$ip" -m hashlimit \
             $(tctl_ipt_limit_args "$rate_kbit") \
             --hashlimit-mode dstip --hashlimit-name "rl_${comment}" \
-            -j DROP -m comment --comment "$comment" 2>/dev/null
+            -j DROP -m comment --comment "$comment" 2>/dev/null \
+            || TCTL_RL_DOWNLOAD_FAILED=1
         # shellcheck disable=SC2046 # deliberate split into the option words
         iptables -t mangle -A FORWARD -s "$ip" -m hashlimit \
             $(tctl_ipt_limit_args "$rate_kbit_up") \
             --hashlimit-mode srcip --hashlimit-name "rl_${comment}_ul" \
-            -j DROP -m comment --comment "${comment}_ul" 2>/dev/null
+            -j DROP -m comment --comment "${comment}_ul" 2>/dev/null \
+            || TCTL_RL_UPLOAD_FAILED=1
+        # Without iptables-mod-hashlimit both rules fail to load.
+        if [ "${TCTL_RL_DOWNLOAD_FAILED:-0}" = "1" ] && [ "${TCTL_RL_UPLOAD_FAILED:-0}" = "1" ]; then
+            logger -t trafficctl "rate limit: iptables hashlimit rules for $ip failed to load (iptables-mod-hashlimit missing?)" 2>/dev/null
+            return 1
+        fi
     fi
 }
 
@@ -373,6 +392,18 @@ tctl_rate_bytes() {
     local b=$(( $1 * 125 ))
     [ "$b" -lt 1 ] && b=1
     echo "$b"
+}
+
+# A ceiling in kbit/s: a whole number from 1 to 100 Gbit/s. Shell arithmetic
+# reads "abc" as 0 and "010" as octal, so anything else became a 1 byte/s
+# limit, i.e. a block reported as success. Leading zeros are refused for that
+# reason; the length check keeps the comparison inside 64 bits.
+TCTL_RATE_MAX_KBIT=100000000
+tctl_validate_rate() {
+    case "$1" in
+        ''|*[!0-9]*|0*) return 1 ;;
+    esac
+    [ "${#1}" -le 9 ] && [ "$1" -le "$TCTL_RATE_MAX_KBIT" ]
 }
 
 # awk function shared by every reader of an nft rate: tctl_rate_kbit(n, unit)

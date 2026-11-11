@@ -95,6 +95,14 @@ for d in $BE_DEPS; do
         *) FAIL=$((FAIL + 1)); printf "FAIL: LUCI_DEPENDS lacks the backend dependency %s\n" "$d" ;;
     esac
 done
+# The limiter's table is in the nft netdev family, which only kmod-nft-netdev
+# enables; firewall4 and kmod-nft-offload do not pull it in.
+assert_eq "trafficctl depends on kmod-nft-netdev" "1" \
+    "$(printf '%s\n' "$BE_DEPS" | tr ' ' '\n' | grep -cx '+kmod-nft-netdev')"
+for b in build-ipk.sh build-apk.sh; do
+    assert_eq "$b repeats kmod-nft-netdev in BE_DEPENDS" "1" \
+        "$(grep -c '^BE_DEPENDS=.*kmod-nft-netdev' "$REPO_ROOT/$b")"
+done
 assert_eq "trafficctl does not depend on LuCI" "" \
     "$(printf '%s\n' "$BE_DEPS" | tr ' ' '\n' | grep -E 'luci|rpcd')"
 

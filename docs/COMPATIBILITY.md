@@ -50,6 +50,7 @@ The package contains no compiled code (all shell scripts and JavaScript), so it 
 | Package | Purpose | Size |
 |---------|---------|------|
 | `conntrack` | Connection tracking CLI (`conntrack -L`) | ~15 KB |
+| `kmod-nft-netdev` | nftables `netdev` family, which the limiter's table `netdev tm_ratelimit` needs (fw4). firewall4 does not pull it in. A declared dependency | ~10 KB |
 | `luci-base` | LuCI framework (provides `view`, `fs`, rpcd) | (part of LuCI) |
 
 ### For Traffic Shaping (optional)
@@ -130,6 +131,8 @@ In practice, both achieve the same result (excess packets are dropped), but the 
 5. **Rate limiter units** -- a ceiling in kbit/s is SI (1000 bits), as in the UI and in tc, and is written to nft as exact bytes/second (kbit × 125). nft's own `kbytes` is 1024 bytes, so limits set by earlier versions as `rate_kbit / 8 kbytes` police 2.4% above the ceiling (5000 kbit/s → 5120) and are reported at that real rate until re-applied; persisted limits are re-written in the new form on the next boot. nft lists a rate in its largest whole unit, stepping by 1024, and every reader converts it back with that factor.
 
 ### OpenWrt 21.02 Specific
+
+The fw3 limiter needs `iptables-mod-hashlimit` (`opkg install iptables-mod-hashlimit`). It is not a declared dependency, because that would install iptables on fw4 routers too. Without it a rate limit is refused with `"ok":false` and a line in the system log.
 
 6. **No flowtable flush** -- When blocking a device on fw3, existing established connections may continue until they time out naturally. On fw4, the flowtable is flushed to force immediate enforcement.
 
