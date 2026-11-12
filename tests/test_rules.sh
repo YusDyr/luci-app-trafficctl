@@ -207,6 +207,8 @@ table inet fw4 {
 ${TAB}chain forward {
 ${TAB}${TAB}meta nfproto ipv6 ether saddr aa:aa:aa:aa:aa:50 counter packets 0 bytes 0 drop comment "tctl_block_192_168_1_50_mac" # handle 41
 ${TAB}${TAB}ip saddr 192.168.1.50 counter packets 3 bytes 180 drop comment "tctl_block_192_168_1_50" # handle 40
+${TAB}${TAB}ip saddr 192.168.1.51 counter packets 0 bytes 0 drop comment "tctl_block_tg" # handle 42
+${TAB}${TAB}ip saddr 192.168.1.52 counter packets 0 bytes 0 drop comment "tctl_block_block_192.168.1.52" # handle 43
 ${TAB}${TAB}ip saddr 192.168.1.33 counter packets 0 bytes 0 drop comment "someone_else" # handle 39
 ${TAB}}
 }
@@ -258,6 +260,11 @@ assert_eq "offline block: MAC" "aa:aa:aa:aa:aa:50" "$(rec "$OUT" block 192.168.1
 assert_eq "offline block: v4 and v6 halves are one record" "1" \
     "$(python3 -c 'import json,sys; print(sum(1 for r in json.loads(sys.argv[1])["rules"] if r["type"]=="block" and r["target"]=="192.168.1.50"))' "$OUT")"
 assert_eq "a drop rule this app did not write is not listed" "<none>" "$(rec "$OUT" block 192.168.1.33 ip)"
+# Blocks written before v1.13.2 carry the caller's label in the comment
+# (Telegram's tg, LuCI's block_<ip>); they are listed by address, and the
+# Rules tab's unblock removes them (test_block.sh).
+assert_eq "pre-1.13.2 block from Telegram: listed" "192.168.1.51" "$(rec "$OUT" block 192.168.1.51 target)"
+assert_eq "pre-1.13.2 block from LuCI: listed" "192.168.1.52" "$(rec "$OUT" block 192.168.1.52 target)"
 
 # Saved but missing from the kernel: shown, and shown as not applied.
 assert_eq "saved-only block: listed" "192.168.1.90" "$(rec "$OUT" block 192.168.1.90 target)"
@@ -302,7 +309,7 @@ assert_eq "wifi deny: in the running ACL" "acl" "$(rec "$OUT" wifi aa:aa:aa:aa:a
 assert_eq "wifi deny: applied" "true" "$(rec "$OUT" wifi aa:aa:aa:aa:aa:50 applied)"
 assert_eq "wifi deny without a lease: listed, MAC lowercased" "" "$(rec "$OUT" wifi aa:aa:aa:aa:aa:99 ip)"
 assert_eq "wifi deny missing from the radio: not applied" "false" "$(rec "$OUT" wifi aa:aa:aa:aa:aa:99 applied)"
-assert_eq "everything above and nothing else" "9" "$(count "$OUT")"
+assert_eq "everything above and nothing else" "11" "$(count "$OUT")"
 
 # ── persist_rules off: rules.json restricts nothing ────────────────────────
 # The restore hook skips the file then, so its records are not restrictions.
