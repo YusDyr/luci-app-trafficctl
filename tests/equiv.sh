@@ -67,19 +67,18 @@ TOTFILE='tmp/trafficctl_totals.state'
 # The reports. A detached refresh the summary starts lands in tmp/spawn.log on
 # both sides (see spawn below), so what it would have started is compared too.
 SPAWNF='tmp/spawn.log,tmp/trafficctl_conn_cache'
-# Blocks (both halves, a near-miss address, a v6 half alone), limits in every
-# unit form, shapes on both directions.
-LIMITS='printf "\t\tip saddr 192.168.0.140 counter packets 12 bytes 3456 drop comment \"tctl_block_192_168_0_140\"\n\t\tmeta nfproto ipv6 ether saddr 02:00:00:00:00:12 counter packets 3 bytes 240 drop comment \"tctl_block_192_168_0_140_mac\"\n\t\tmeta nfproto ipv6 ether saddr 02:00:00:00:00:08 counter packets 2 bytes 160 drop comment \"tctl_block_192_168_0_109_mac\"\n" >> "$W/cmd/nft list chain inet fw4 forward"; printf "table netdev tm_ratelimit {\n\tchain dl_br-lan {\n\t\tip daddr 192.168.0.140 limit rate over 625000 bytes/second counter packets 0 bytes 0 drop comment \"rl_ratelimit_192_168_0_140\"\n\t\tip daddr 192.168.0.109/32 limit rate over 1000 kbytes/second counter packets 0 bytes 0 drop comment \"rl_ratelimit_192_168_0_109\"\n\t\tip daddr 192.168.0.113 meter tctl_d_192_168_0_113 { ip daddr limit rate over 2 mbytes/second } counter packets 0 bytes 0 drop\n\t}\n\tchain ul_lan2 {\n\t\tip saddr 192.168.0.140 limit rate over 125 kbytes/second counter packets 0 bytes 0 drop comment \"rl_ratelimit_192_168_0_140_ul\"\n\t\tip saddr 192.168.0.210 limit rate over 7 tbytes/second drop\n\t}\n}\n" > "$W/cmd/nft list table netdev tm_ratelimit"; printf "class htb 1:1 root rate 1Gbit ceil 1Gbit burst 125000b cburst 125000b\nclass htb 1:4 parent 1:1 leaf 8004: prio 0 rate 500Kbit ceil 500Kbit burst 1600b cburst 1600b\n" > "$W/cmd/tc class show dev tctl-ifb0"'
+# Blocks (both halves, a v6 half alone) and limits in each unit form, from
+# tests/fixtures/nft-src/summary.nft as each nftables release lists it, and
+# shapes on both directions.
+TCIFB='printf "class htb 1:1 root rate 1Gbit ceil 1Gbit burst 125000b cburst 125000b\nclass htb 1:4 parent 1:1 leaf 8004: prio 0 rate 500Kbit ceil 500Kbit burst 1600b cburst 1600b\n" > "$W/cmd/tc class show dev tctl-ifb0"'
+LIMITS10="nftfix 1.0.2 summary; $TCIFB"
+LIMITS11="nftfix 1.1.6 summary; $TCIFB"
 # Sources the fixture lacks: a client of a routed subnet, one this router
 # NATs, an inbound flow whose LAN end is the reply source, policy-routed
 # (marked) flows, and a dozen unnamed devices for the reverse-DNS cap.
 CTADD='ct() { printf "ipv4     2 tcp      6 300 ESTABLISHED src=%s dst=%s sport=40000 dport=%s packets=1 bytes=%s src=%s dst=%s sport=%s dport=40000 packets=1 bytes=%s [ASSURED] mark=%s zone=0 use=2\n" "$@" >> "$W/root/proc/net/nf_conntrack"; }; ct 10.0.5.9 198.18.0.3 443 1000 198.18.0.3 10.0.5.9 443 2000 0; ct 172.30.0.5 8.8.8.8 53 300 8.8.8.8 203.0.113.2 53 400 0; ct 198.51.100.7 203.0.113.2 8443 50 192.168.0.140 198.51.100.7 8443 70 0; ct 192.168.0.140 1.1.1.1 443 5 1.1.1.1 192.168.0.140 443 6 256; ct 192.168.0.140 9.9.9.9 853 7 9.9.9.9 192.168.0.140 853 8 512; ct 192.168.0.140 1.0.0.1 443 9 1.0.0.1 192.168.0.140 443 10 768; for i in 60 61 62 63 64 65 66 67 68 69 70 71; do ct 192.168.0.$i 198.18.0.3 443 1 198.18.0.3 192.168.0.$i 443 1 0; done; printf "1.1.1.1 dev awg3 table 100 src 10.8.0.2 uid 0\n    cache\n" > "$W/cmd/ip route get 1.1.1.1 mark 256"; printf "local 9.9.9.9 dev lo table local src 127.0.0.1\n" > "$W/cmd/ip route get 9.9.9.9 mark 512"; printf "1.0.0.1 via 10.128.28.1 dev wan src 10.128.28.73\n" > "$W/cmd/ip route get 1.0.0.1 mark 768"'
 IFROLES='printf "# 9999999999\nawg3 vpn 0 0 0 0 Finland\nwan wan 0 0 0 0 -\n" > "$W/root/tmp/trafficctl_ifroles"'
 DSTRESOLV='printf "3.0.18.198.in-addr.arpa\tname = cdn.example.\n" > "$W/cmd/nslookup 198.18.0.3"; printf "1.0.168.192.in-addr.arpa\tname = router.lan.\n" > "$W/cmd/nslookup 192.168.0.1"; printf "x\tname = bad host;rm.\n" > "$W/cmd/nslookup 198.18.0.36"'
-# A block on an address that extends another one. The legacy device report
-# counted it for 192.168.0.140 too ("ip saddr $IP.*drop"); the port does not
-# (an intentional fix, tests/test_report.sh), so only the summary sees it here.
-NEARMISS='printf "\t\tip saddr 192.168.0.1400 counter packets 1 bytes 7 drop\n" >> "$W/cmd/nft list chain inet fw4 forward"'
 WIFI_ALLOW='uci set wireless.default_radio1.macfilter=allow; uci add_list wireless.default_radio1.maclist=02:00:00:00:00:12; uci commit wireless'
 NORESOLVE='uci set trafficctl.main.resolve_names=0; uci commit trafficctl'
 RDNSC='printf "192.168.0.210 tv.lan 1794229581\n192.168.0.110 - 9999999999\n10.32.55.195 vpn-peer.lan 9999999999\n" >> "$W/root/tmp/trafficctl_rdns_cache"; uci set trafficctl.main.rdns_ttl=x; uci commit trafficctl'
@@ -175,7 +174,8 @@ summary | text+$SPAWNF | router-24.10 | trafficctl-summary.sh; sleep 0.3 | tctl 
 summary-routed | text+$SPAWNF | router-24.10 | trafficctl-summary.sh; sleep 0.3 | tctl summary; sleep 0.3 | $ROUTED
 summary-names | text+$SPAWNF | router-24.10 | trafficctl-summary.sh; sleep 0.3 | tctl summary; sleep 0.3 | $NAMES; $RDNSC; $CONNC
 summary-noresolve | text+$SPAWNF | router-24.10 | trafficctl-summary.sh; sleep 0.3 | tctl summary; sleep 0.3 | $NAMES; $RDNSC; $NORESOLVE
-summary-limits | text+$SPAWNF | router-24.10 | trafficctl-summary.sh; sleep 0.3 | tctl summary; sleep 0.3 | $LIMITS; $WIFI_ALLOW; $NEARMISS
+summary-limits-1.0 | text+$SPAWNF | router-24.10 | trafficctl-summary.sh; sleep 0.3 | tctl summary; sleep 0.3 | $LIMITS10; $WIFI_ALLOW
+summary-limits-1.1 | text+$SPAWNF | router-24.10 | trafficctl-summary.sh; sleep 0.3 | tctl summary; sleep 0.3 | $LIMITS11; $WIFI_ALLOW
 summary-sources | text+$SPAWNF | router-24.10 | trafficctl-summary.sh; sleep 0.3 | tctl summary; sleep 0.3 | $ROUTED; $CTADD
 summary-no-offload | text | router-24.10 | trafficctl-summary.sh | tctl summary | $NOOFFLOAD
 summary-degraded | text | router-24.10 | trafficctl-summary.sh | tctl summary | $SWOFFLOAD
@@ -187,8 +187,10 @@ device | text+tmp/trafficctl_conn_cache | router-24.10 | sh:rmask sh \"\$LEXEC/t
 device-tcp | text | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" --proto tcp 192.168.0.109 | rmask tctl device --proto tcp 192.168.0.109
 device-udp | text | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" 192.168.0.210 --proto udp | rmask tctl device 192.168.0.210 --proto udp
 device-rdns | text | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" 192.168.0.101 --rdns | rmask tctl device 192.168.0.101 --rdns | $RESOLV; $NAMES
-device-limits | text | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" 192.168.0.140 | rmask tctl device 192.168.0.140 | $LIMITS; $WIFI_ALLOW
-device-v6-block | text | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" 192.168.0.109 | rmask tctl device 192.168.0.109 | $LIMITS
+device-limits-1.0 | text | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" 192.168.0.140 | rmask tctl device 192.168.0.140 | $LIMITS10; $WIFI_ALLOW
+device-limits-1.1 | text | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" 192.168.0.140 | rmask tctl device 192.168.0.140 | $LIMITS11; $WIFI_ALLOW
+device-v6-block-1.0 | text | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" 192.168.0.109 | rmask tctl device 192.168.0.109 | $LIMITS10
+device-v6-block-1.1 | text | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" 192.168.0.109 | rmask tctl device 192.168.0.109 | $LIMITS11
 device-routed | text+tmp/trafficctl_conn_cache | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" 10.32.55.195 | rmask tctl device 10.32.55.195 | $ROUTED; $RDNSC
 device-offline | text+tmp/trafficctl_conn_cache | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" 192.168.0.104 | rmask tctl device 192.168.0.104 | $CONNC
 device-wifi | text+tmp/trafficctl_conn_cache | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" 192.168.0.102 | rmask tctl device 192.168.0.102
@@ -200,8 +202,10 @@ device-bad | text | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" 
 device-none | text | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" --rdns | rmask tctl device --rdns
 metrics-off | text | router-24.10 | trafficctl-metrics.sh | tctl metrics
 metrics | text-sorted+$SPAWNF,$TOTFILE | router-24.10 | trafficctl-metrics.sh; sleep 0.3 | tctl metrics; sleep 0.3 | $METRICS
-metrics-limits | text-sorted | router-24.10 | trafficctl-metrics.sh | tctl metrics | $METRICS; $LIMITS; $NAMES; $RDNSC
-metrics-sources | text-sorted+$TOTFILE | router-24.10 | trafficctl-metrics.sh | tctl metrics | $METRICS; $ROUTED; $CTADD; $LIMITS
+metrics-limits-1.0 | text-sorted | router-24.10 | trafficctl-metrics.sh | tctl metrics | $METRICS; $LIMITS10; $NAMES; $RDNSC
+metrics-limits-1.1 | text-sorted | router-24.10 | trafficctl-metrics.sh | tctl metrics | $METRICS; $LIMITS11; $NAMES; $RDNSC
+metrics-sources-1.0 | text-sorted+$TOTFILE | router-24.10 | trafficctl-metrics.sh | tctl metrics | $METRICS; $ROUTED; $CTADD; $LIMITS10
+metrics-sources-1.1 | text-sorted+$TOTFILE | router-24.10 | trafficctl-metrics.sh | tctl metrics | $METRICS; $ROUTED; $CTADD; $LIMITS11
 metrics-apps | text-sorted | router-24.10 | trafficctl-metrics.sh | tctl metrics | $MAPPS
 metrics-bare | text-sorted | router-24.10 | trafficctl-metrics.sh | tctl metrics | $MBARE
 netify-status | text | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-netify.sh\" status | rmask tctl netify status

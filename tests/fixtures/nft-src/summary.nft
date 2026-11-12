@@ -1,0 +1,21 @@
+# tests/equiv.sh, the summary and device cases on router-24.10: both halves
+# of a block (.140), the IPv6 half alone (.109), download limits in each
+# unit nft lists, a per-address meter, upload limits with and without a counter.
+table inet fw4 {
+	chain forward {
+		ip saddr 192.168.0.140 counter packets 12 bytes 3456 drop comment "tctl_block_192_168_0_140"
+		meta nfproto ipv6 ether saddr 02:00:00:00:00:12 counter packets 3 bytes 240 drop comment "tctl_block_192_168_0_140_mac"
+		meta nfproto ipv6 ether saddr 02:00:00:00:00:08 counter packets 2 bytes 160 drop comment "tctl_block_192_168_0_109_mac"
+	}
+}
+table netdev tm_ratelimit {
+	chain dl_br_lan {
+		ip daddr 192.168.0.140 limit rate over 625000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_0_140"
+		ip daddr 192.168.0.109/32 limit rate over 1000 kbytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_0_109"
+		ip daddr 192.168.0.113 meter tctl_d_192_168_0_113 { ip daddr limit rate over 2 mbytes/second } counter packets 0 bytes 0 drop
+	}
+	chain ul_lan2 {
+		ip saddr 192.168.0.140 limit rate over 125 kbytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_0_140_ul"
+		ip saddr 192.168.0.210 limit rate over 3 mbytes/second drop
+	}
+}

@@ -1,0 +1,24 @@
+# test_report.sh: both halves of a block on .140 (whose address extends
+# .14's), the IPv6 half alone (.50), limits in every unit nft lists them in,
+# a per-address meter, an upload-only limit.
+table inet fw4 {
+	chain forward {
+		ip saddr 192.168.1.140 counter packets 12 bytes 3456 drop comment "tctl_block_192_168_1_140"
+		meta nfproto ipv6 ether saddr aa:bb:cc:dd:ee:8c counter packets 3 bytes 240 drop comment "tctl_block_192_168_1_140_mac"
+		meta nfproto ipv6 ether saddr aa:bb:cc:dd:ee:32 counter packets 3 bytes 300 drop comment "tctl_block_192_168_1_50_mac"
+	}
+}
+table netdev tm_ratelimit {
+	chain dl_br_lan {
+		ip daddr 192.168.1.5 limit rate over 625000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_5"
+		ip daddr 192.168.1.7/32 limit rate over 1000 kbytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_7"
+		ip daddr 192.168.1.8 meter tctl_d_192_168_1_8 { ip daddr limit rate over 2000 kbytes/second } counter packets 0 bytes 0 drop
+		ip daddr 192.168.1.4 limit rate over 1 mbytes/second counter packets 0 bytes 0 drop
+		ip daddr 192.168.1.9 limit rate over 512 bytes/second counter packets 0 bytes 0 drop
+	}
+	chain ul_lan1 {
+		ip saddr 192.168.1.5 limit rate over 125000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_5_ul"
+		ip saddr 192.168.1.8 meter tctl_u_192_168_1_8 { ip saddr limit rate over 250000 bytes/second } counter packets 0 bytes 0 drop
+		ip saddr 192.168.1.60 limit rate over 128000 bytes/second counter packets 0 bytes 0 drop
+	}
+}

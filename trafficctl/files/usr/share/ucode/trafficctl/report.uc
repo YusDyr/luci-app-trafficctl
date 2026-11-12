@@ -21,10 +21,10 @@
 
 import * as lib from 'trafficctl.lib';
 import * as net from 'trafficctl.net';
+import * as ctl from 'trafficctl.ctl';
 import { stat, lsdir, writefile, readfile } from 'fs';
 
 const CLI = '/usr/sbin/trafficctl';
-const FWLIB = '/usr/libexec/trafficctl/trafficctl-fw.sh';
 const PORTFW = '/usr/libexec/trafficctl/trafficctl-portfw.sh';
 const LEASES = '/tmp/dhcp.leases';
 const NAMES = '/etc/trafficctl/names';
@@ -132,13 +132,6 @@ function sections(text) {
 	return out;
 }
 
-function section(secs, name) {
-	for (let s in secs)
-		if (s.name == name)
-			return s.lines;
-	return [];
-}
-
 // First line per key (awk's `$1 == ip { ...; exit }`), keyed on field n.
 function first_by(ls, n, fn) {
 	let m = {};
@@ -167,86 +160,58 @@ function spawn(argv) {
 
 // ── firewall and shaper state ───────────────────────────────────────────────
 
-// The nft and tc state the summary and the device report read, in one run of
-// the fw.sh readers the shell used.
-// PR5a: switch to the ctl.uc readers (ratelimit-stats, shape-stats) once they
-// have merged; the parsers below take the same dumps.
+// The nft and tc state the summary and the device report read, from the
+// trafficctl.ctl readers: nft rules as `nft -j` records, so an address is
+// compared whole and never found inside a longer one.
 function limits(lan_dev) {
-	let secs = sections(lib.run('. ' + lib.q(lib.path(FWLIB)) + '\n' +
-		'echo @@tctl:fwd; nft list chain inet fw4 forward\n' +
-		'echo @@tctl:rl; nft list table netdev tm_ratelimit\n' +
-		'echo @@tctl:tc; tctl_tc_class_rates ' + lib.q(lan_dev) + '\n' +
-		'echo @@tctl:tcup; tctl_tc_class_rates "$(tctl_shape_ifb_dev)"\n' +
-		'echo @@tctl:shape; tctl_shape_classmap'));
-	let rl = [];
-	for (let l in section(secs, 'rl'))
-		if (index(l, 'limit rate over') >= 0)
-			push(rl, fields(l));
 	return {
-		fwd: filter(section(secs, 'fwd'), (l) => index(l, 'ip saddr ') >= 0 || index(l, 'comment "tctl_block_') >= 0),
-		rl,
-		tc: first_by(section(secs, 'tc'), 0, (l, f) => f[1] ?? ''),
-		tcup: first_by(section(secs, 'tcup'), 0, (l, f) => f[1] ?? ''),
-		shape: first_by(section(secs, 'shape'), 0, (l, f) => f[1] ?? '')
+		fwd: ctl.nft_rules([ 'chain', 'inet', 'fw4', 'forward' ]),
+		rl: ctl.rl_rules(),
+		tc: ctl.tc_class_rates(lan_dev),
+		tcup: ctl.tc_class_rates(ctl.ifb_dev()),
+		shape: ctl.shape_classmap()
 	};
 }
 
 // tctl_block_comment + '_mac': the IPv6 half of a block names a MAC, not the
 // address, so its full comment is the only handle on it.
 function block_mac_comment(ip) {
-	return 'comment "tctl_block_' + replace(ip, /[.\/]/g, '_') + '_mac"';
+	return 'tctl_block_' + replace(ip, /[.\/]/g, '_') + '_mac';
 }
 
-// "ip saddr IP " followed by drop, or the IPv6 half's comment.
-function is_block_line(l, needle, mac) {
-	let i = index(l, needle);
-	return (i >= 0 && index(substr(l, i + length(needle)), 'drop') >= 0) || index(l, mac) >= 0;
+// A rule naming the device: its address as the source, or the IPv6 half.
+function names_device(r, ip, mac) {
+	return r.saddr == ip || r.comment == mac;
 }
 
-function counter_sum(ls, word) {
-	let re = regexp(word + ' ([0-9]+)', 'g'), t = 0;
-	for (let l in ls)
-		for (let m in match(l, re) ?? [])
-			t += +substr(m[0], length(word) + 1);
+// The shell's "ip saddr IP .*drop", or the IPv6 half's comment.
+function is_block(r, ip, mac) {
+	return (r.saddr == ip && r.verdict == 'drop') || r.comment == mac;
+}
+
+function counter_sum(rules, key) {
+	let t = 0;
+	for (let r in rules)
+		t += r[key];
 	return t;
 }
 
-// The summary's two lookups: blocked, and the bytes on every line naming the
+// The summary's two lookups: blocked, and the bytes on every rule naming the
 // device (either half of the block).
 function summary_block(lim, ip) {
-	let needle = 'ip saddr ' + ip + ' ', mac = block_mac_comment(ip), blocked = false, hits = [];
-	for (let l in lim.fwd) {
-		if (!blocked && is_block_line(l, needle, mac))
+	let mac = block_mac_comment(ip), blocked = false, hits = [];
+	for (let r in lim.fwd) {
+		if (!blocked && is_block(r, ip, mac))
 			blocked = true;
-		if (index(l, needle) >= 0 || index(l, mac) >= 0)
-			push(hits, l);
+		if (names_device(r, ip, mac))
+			push(hits, r);
 	}
 	return { blocked, bytes: counter_sum(hits, 'bytes') };
 }
 
-// tctl_rl_rate_kbit: the first limit rule whose fld field is followed by the
-// address (or address/32), read back to SI kbit/s.
-function nft_rate_kbit(n, u) {
-	let b = anum(n), m = match(u ?? '', /^(bytes|kbytes|mbytes|gbytes)/);
-	if (!m)
-		return 0;
-	let f = { bytes: 1, kbytes: 1024, mbytes: 1048576, gbytes: 1073741824 }[m[1]];
-	return int(b * f * 8 / 1000.0 + 0.5);
-}
-
+// The ceiling of the first `ip <fld> <ip>` limit, 0 without one.
 function rl_kbit(lim, ip, fld) {
-	let ip32 = ip + '/32';
-	for (let f in lim.rl) {
-		let n = length(f), i = 0;
-		while (i < n - 1 && !(f[i] == fld && (f[i + 1] == ip || f[i + 1] == ip32)))
-			i++;
-		if (i >= n - 1)
-			continue;
-		for (let j = i; j < n - 2; j++)
-			if (f[j] == 'over')
-				return nft_rate_kbit(f[j + 1], f[j + 2]);
-	}
-	return 0;
+	return ctl.rl_rate_kbit(lim.rl, ip, fld) ?? 0;
 }
 
 // The shaped rate as tc printed it, or null: the classid is looked up in
@@ -861,8 +826,8 @@ function device(args) {
 	}
 
 	let lim = limits(net.lan_device());
-	let needle = 'ip saddr ' + ip + ' ', macc = block_mac_comment(ip);
-	let blk = filter(lim.fwd, (l) => is_block_line(l, needle, macc));
+	let macc = block_mac_comment(ip);
+	let blk = filter(lim.fwd, (r) => is_block(r, ip, macc));
 	let blocked = length(blk) > 0;
 
 	let wifs = wifi_ifaces(), wifi_blocked = false;
