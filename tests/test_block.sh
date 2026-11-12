@@ -168,5 +168,122 @@ assert_eq "unblock: 192.168.1.1 no longer present as its own exact entry" "" "$E
 OUT=$(run_unblock 'bad;ip')
 assert_contains "unblock: invalid ip rejected" '"ok":false' "$OUT"
 
+
+# ── fw4-reload restore hook ────────────────────────────────────────────────
+# Blocks live in inet fw4 forward, so a firewall reload drops them while
+# rules.json and the UI still say blocked. The include script must put only
+# the block records back, leave already-present rules alone, and do nothing
+# when persist_rules is off.
+
+RESTORE_SRC="$BIN/trafficctl-fw-restore.sh"
+assert_eq "the restore hook ships in the package tree" "1" \
+    "$([ -x "$RESTORE_SRC" ] && echo 1 || echo 0)"
+assert_contains "the restore hook sources the firewall helpers" \
+    ". /usr/libexec/trafficctl/trafficctl-fw.sh" "$(cat "$RESTORE_SRC")"
+assert_contains "the restore hook is gated on persist_rules" \
+    "tctl_persist_enabled" "$(cat "$RESTORE_SRC")"
+assert_contains "the restore hook uses tctl_block_add, not the block script" \
+    "tctl_block_add" "$(cat "$RESTORE_SRC")"
+assert_not_contains "the restore hook does not invoke trafficctl-block.sh" \
+    "/usr/libexec/trafficctl/trafficctl-block.sh" "$(cat "$RESTORE_SRC")"
+assert_not_contains "the restore hook does not replay rate limits" \
+    "tctl_ratelimit_add" "$(cat "$RESTORE_SRC")"
+assert_not_contains "the restore hook does not replay port-forward pauses" \
+    "trafficctl-portfw.sh" "$(cat "$RESTORE_SRC")"
+
+RULES="$TMPDIR/rules.json"
+FW="$TMPDIR/trafficctl-fw.sh"
+RESTORE="$TMPDIR/trafficctl-fw-restore.sh"
+sed -e "s|TCTL_RULES_FILE=\"/etc/trafficctl/rules.json\"|TCTL_RULES_FILE=\"$RULES\"|" \
+    "$BIN/trafficctl-fw.sh" > "$FW"
+sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FW|" \
+    "$RESTORE_SRC" > "$RESTORE"
+chmod +x "$RESTORE"
+
+# jsonfilter: emit the ip of every type=block record, one per line.
+cat > "$MOCKBIN/jsonfilter" <<'MOCK'
+#!/bin/sh
+file=""; expr=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -i) file="$2"; shift 2 ;;
+        -e) expr="$2"; shift 2 ;;
+        *)  shift ;;
+    esac
+done
+[ "$expr" = '@[@.type="block"].ip' ] || exit 0
+[ -f "$file" ] || exit 1
+# The production file is a single-line array of objects; split on "},{"
+# the same way a JSON-aware reader would isolate records.
+tr '}' '\n' < "$file" | while read -r rec; do
+    case "$rec" in
+        *'"type":"block"'*)
+            printf '%s\n' "$rec" | sed -n 's/.*"ip":"\([^"]*\)".*/\1/p'
+            ;;
+    esac
+done
+MOCK
+chmod +x "$MOCKBIN/jsonfilter"
+
+printf '%s' > "$TMPDIR/persist" '1'
+cat > "$MOCKBIN/uci" <<MOCK
+#!/bin/sh
+case "\$*" in
+    *trafficctl.main.persist_rules*) cat "$TMPDIR/persist" ;;
+    *) exit 1 ;;
+esac
+MOCK
+chmod +x "$MOCKBIN/uci"
+
+LOGGER_LOG="$TMPDIR/logger.log"
+: > "$LOGGER_LOG"
+cat > "$MOCKBIN/logger" <<MOCK
+#!/bin/sh
+echo "\$*" >> "$LOGGER_LOG"
+MOCK
+chmod +x "$MOCKBIN/logger"
+
+# A mixed file: two blocks, one rate limit, one garbage address, one pfw pause.
+# Only the two valid blocks must be restored.
+printf '%s\n' '[{"type":"block","ip":"192.0.2.10","param":"lab"},{"type":"ratelimit","ip":"192.0.2.20","param":"1000"},{"type":"block","ip":"not-an-ip","param":"x"},{"type":"block","ip":"192.0.2.11","param":"lab"},{"type":"pfw_pause","ip":"wan/tcp/192.0.2.30/80","param":"1"}]' > "$RULES"
+
+: > "$NFT_LOG"
+: > "$BLOCKED_STATE"
+: > "$LOGGER_LOG"
+out=$(PATH="$MOCKBIN:$PATH" sh "$RESTORE" 2>&1)
+assert_eq "restore: writes nothing to stdout" "" "$out"
+assert_contains "restore: inserts the first block" "saddr 192.0.2.10" "$(cat "$NFT_LOG")"
+assert_contains "restore: inserts the second block" "saddr 192.0.2.11" "$(cat "$NFT_LOG")"
+assert_not_contains "restore: does not insert the rate-limited address" "192.0.2.20" "$(cat "$NFT_LOG")"
+assert_not_contains "restore: does not insert an invalid address" "not-an-ip" "$(cat "$NFT_LOG")"
+assert_not_contains "restore: does not insert a port-forward target" "192.0.2.30" "$(cat "$NFT_LOG")"
+assert_eq "restore: both valid blocks are now in the nft state" "2" \
+    "$(wc -l < "$BLOCKED_STATE" | tr -d ' ')"
+
+# Idempotent: a second run must not insert again.
+: > "$NFT_LOG"
+PATH="$MOCKBIN:$PATH" sh "$RESTORE" >/dev/null 2>&1
+assert_not_contains "restore: a second run does not insert an already-blocked address" \
+    "insert rule" "$(cat "$NFT_LOG")"
+assert_eq "restore: still exactly two blocked addresses after a second run" "2" \
+    "$(wc -l < "$BLOCKED_STATE" | tr -d ' ')"
+
+# persist_rules off: touch nothing.
+printf '%s' > "$TMPDIR/persist" '0'
+: > "$NFT_LOG"
+: > "$BLOCKED_STATE"
+PATH="$MOCKBIN:$PATH" sh "$RESTORE" >/dev/null 2>&1
+assert_not_contains "restore: persist_rules=0 inserts no rules" "insert rule" "$(cat "$NFT_LOG")"
+
+# Missing or empty rules file: also a no-op, even with persist on.
+printf '%s' > "$TMPDIR/persist" '1'
+rm -f "$RULES"
+: > "$NFT_LOG"
+PATH="$MOCKBIN:$PATH" sh "$RESTORE" >/dev/null 2>&1
+assert_not_contains "restore: a missing rules.json inserts no rules" "insert rule" "$(cat "$NFT_LOG")"
+: > "$RULES"
+PATH="$MOCKBIN:$PATH" sh "$RESTORE" >/dev/null 2>&1
+assert_not_contains "restore: an empty rules.json inserts no rules" "insert rule" "$(cat "$NFT_LOG")"
+
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
