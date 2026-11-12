@@ -161,7 +161,7 @@ for c in "/usr/sbin/trafficctl names list" "/usr/libexec/trafficctl/trafficctl-n
     out=$($c 2>&1)
     [ "$out" = "[]" ] || { echo "CLI FAILED: $c printed: $out"; exit 1; }
 done
-for c in subnets ifaces bytes totals "totals --all" bytes-nft; do
+for c in subnets ifaces bytes totals "totals --all"; do
     out=$(/usr/sbin/trafficctl $c 2>&1)
     case "$out" in "["*"]") ;; *) echo "CLI FAILED: trafficctl $c printed: $out"; exit 1 ;; esac
 done

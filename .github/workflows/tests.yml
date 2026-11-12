@@ -124,8 +124,6 @@ jobs:
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_names.sh
       - name: Per-interface counter tests (global overview)
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_ifaces.sh
-      - name: nft bytes parser tests
-        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_bytes_nft.sh
       - name: Cumulative byte counter tests
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_totals.sh
       - name: Prometheus exporter tests

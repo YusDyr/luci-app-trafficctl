@@ -20,9 +20,7 @@
 //                        the original direction and r the reply; bytes are 0
 //                        without accounting, rsrc/rdst null when missing
 //   bytes()              the `bytes` command: one sample per device, from
-//                        conntrack or, under uncountered offload, the nft maps
-//   bytes_nft(mode)      the `bytes-nft` command: the nft counter maps; mode
-//                        is offload_mode(), looked up when not given
+//                        conntrack, flagged degraded under uncountered offload
 //   totals(all, sample)  the `totals [--all]` command: lifetime totals
 //                        accumulated from bytes() (from sample in tests)
 //   reset()              drop the cached interface dump and LAN subnets, and
@@ -504,19 +502,22 @@ function ct_each(fn) {
 //
 // [{ ip, bytes_in, bytes_out, bytes_tcp, bytes_udp, src, degraded }]
 //
-// src names the counter source, 'ct' or 'nft'. totals() accumulates these, and
-// the two have unrelated magnitudes (conntrack covers live flows only, the nft
-// maps count since the table was built), so it has to tell a source switch
-// from a burst of traffic.
+// src names the counter source, always 'ct' now. Up to 1.30.x it could also be
+// 'nft' (per-address counter maps, counting since their table was built), and
+// totals() still meets that in old state files: the magnitudes are unrelated,
+// so it rebaselines on a source change instead of reading it as traffic.
 //
-// degraded says whether the numbers can be believed at all. It is separate
-// from src on purpose: src is about magnitude (and drives the rebaseline),
-// degraded is about trust; folding them together would make a change in trust
-// look like a change of counter and throw a delta away for nothing.
+// degraded says whether the numbers can be believed at all: true only under
+// offload whose flowtable has no counter (fw4 on 22.03, or a custom one). An
+// offloaded flow then bypasses conntrack accounting, and nothing else can
+// count it: the flowtable hooks netdev ingress, so its packets never reach an
+// inet forward chain at any priority, and counting downloads on the way out
+// would need a netdev egress hook (kernel 5.16+). It is separate from src on
+// purpose: src is about magnitude (and drives the rebaseline), degraded is
+// about trust; folding them together would make a change in trust look like a
+// change of counter and throw a delta away for nothing.
 //
-// bytes_tcp/bytes_udp are both directions summed, conntrack only: the nft maps
-// are keyed by address alone, so that path reports -1, "unknown", which must
-// not render as "no TCP traffic".
+// bytes_tcp/bytes_udp are both directions summed.
 //
 // Arrays are sorted by address; the shell printed awk hash order.
 
@@ -530,9 +531,12 @@ function offload_mode() {
 	if (hw != '1' && sw != '1')
 		return 'none';
 	// A counter-flagged flowtable syncs offloaded byte counts back to
-	// conntrack (kernel 5.7+; fw4 sets it by default), so conntrack stays
-	// accurate: worth telling apart, because the nft-map fallback needs
-	// dynamic counter maps that many kernels lack.
+	// conntrack (kernel 5.7+; fw4 declares it from 23.05 on), so conntrack
+	// stays accurate under software offload. Hardware offload also needs the
+	// driver to report its byte counts, and some (Mediatek Filogic) do not,
+	// so the counts can freeze even with the flag; nothing here can see that,
+	// and the UI warns about it. fw4 on 22.03 declares no flag at all: the
+	// counts of every offloaded flow freeze, which is what degraded flags.
 	let counted = index(lib.run('nft list flowtables'), 'counter') >= 0;
 	return ((hw == '1') ? 'hardware' : 'software') + (counted ? '-counter' : '');
 }
@@ -619,155 +623,41 @@ function bytes_ct(degraded) {
 	}));
 }
 
-// ── nft counter maps (flow offload) ─────────────────────────────────────────
-//
-// Hooked at forward priority -200, ahead of the flowtable at -150, so they
-// keep counting where conntrack freezes; hence degraded is always false here,
-// and when this path is unavailable bytes() says degraded instead of quietly
-// handing back frozen numbers.
-//
-// Direction, as in bytes_ct() and docs/API.md:
-//   bytes_in  = toward the device (download), keyed by ip daddr
-//   bytes_out = from the device (upload),    keyed by ip saddr
+// Logged once per offload mode, not per sample: bytes() runs on every poll.
+// One marker per uncountered mode, created exclusively, so of two samplers
+// running at once only one logs, and the log follows a successful write: a
+// full tmpfs costs the warning, never a warning per poll. tmpfs, so a reboot
+// says it again; the markers go once offload is countered again, so turning
+// it back off later is reported too.
+const OFFLOAD_HINT = '/tmp/trafficctl_offload_hint';
+const UNCOUNTERED = ['software', 'hardware'];
 
-function mon_setup() {
-	// The gate matches the current rule orientation, not just "a rule
-	// exists": until 1.13.x the maps were keyed the other way round, and a
-	// looser check would leave those inverted rules in place for good.
-	for (let l in lib.lines('nft list chain inet trafficctl_mon mon_forward')) {
-		let i = index(l, 'bytes_in');
-		if (i >= 0 && index(substr(l, i), 'daddr') >= 0)
-			return;
-	}
-	// Drop the old table rather than append to it: the previous pair of
-	// rules would double-count every packet. That resets the counters once,
-	// which costs one speed sample.
-	lib.sh('nft delete table inet trafficctl_mon');
-	lib.sh('nft add table inet trafficctl_mon');
-	lib.sh('nft add map inet trafficctl_mon bytes_in ' + lib.q('{ type ipv4_addr : counter; flags dynamic; }'));
-	lib.sh('nft add map inet trafficctl_mon bytes_out ' + lib.q('{ type ipv4_addr : counter; flags dynamic; }'));
-	lib.sh('nft add chain inet trafficctl_mon mon_forward ' +
-		lib.q('{ type filter hook forward priority -200; policy accept; }'));
-	lib.sh('nft add rule inet trafficctl_mon mon_forward ' + lib.q('update @bytes_in { ip daddr counter }'));
-	lib.sh('nft add rule inet trafficctl_mon mon_forward ' + lib.q('update @bytes_out { ip saddr counter }'));
+function offload_hint(mode) {
+	for (let m in UNCOUNTERED)
+		if (m != mode)
+			lib.remove(OFFLOAD_HINT + '.' + m);
+	if (!uncountered(mode) || !lib.create_once(OFFLOAD_HINT + '.' + mode, mode + '\n'))
+		return;
+	lib.sh('logger -t trafficctl -p daemon.warn ' + lib.q('flow offload (' + mode +
+		') has no flowtable counter, so offloaded connections are not counted ' +
+		'and device speeds and totals are reported as degraded. Disable flow ' +
+		'offloading, or upgrade to OpenWrt 23.05 or later, whose firewall counts them.'));
 }
 
-function add_bytes(m, ip, b) {
-	if (type(ip) != 'string' || !lib.valid_ip(ip) || type(b) != 'int')
-		return false;
-	m[ip] = (m[ip] ?? 0) + b;
-	return true;
-}
-
-// nft -j: an element is [ key, value ] in a map and the key alone in a set; a
-// key carrying a counter is { elem: { val, counter } }. nftables 1.0.2 puts
-// the counter in the value ([ key, { counter } ]), 1.1.6 in the key
-// ({ elem: { val, counter } }); taken whichever side holds it. False, for the
-// text listing to try, when no element was understood: a shape of a later
-// nftables must not read as an empty map.
-function map_json(text, m) {
-	let j;
-	try {
-		j = json(text);
-	}
-	catch (e) {
-		return false;
-	}
-	if (type(j?.nftables) != 'array')
-		return false;
-	let seen = 0, read = 0;
-	for (let o in j.nftables) {
-		let elems = o?.map?.elem ?? o?.set?.elem;
-		for (let e in (type(elems) == 'array') ? elems : []) {
-			seen++;
-			let pair = (type(e) == 'array');
-			let k = pair ? e[0] : e, v = pair ? e[1] : null;
-			// No ?. chain across ??: ucode 25.12 lets a null in the first
-			// operand short-circuit the whole expression.
-			let ke = (type(k) == 'object') ? k.elem : null;
-			let ve = (type(v) == 'object') ? v : null;
-			let c = ke?.counter;
-			if (c == null && ve)
-				c = ve.counter ?? ve.elem?.counter;
-			if (add_bytes(m, (type(k) == 'string') ? k : ke?.val, c?.bytes))
-				read++;
-		}
-	}
-	return seen == 0 || read > 0;
-}
-
-// The text listing, for an nftables built without JSON. Elements can share a
-// line ("elements = { a : counter packets 1 bytes 2, b : ... }"), so it is cut
-// at the separators first.
-function map_text(text, m) {
-	for (let el in split(text, /[{},\n]/)) {
-		let f = split(trim(el), /[ \t]+/), ip = null, b = null;
-		for (let i = 0; i < length(f); i++) {
-			if (lib.valid_ip(f[i]))
-				ip = f[i];
-			else if (f[i] == 'bytes' && i + 1 < length(f))
-				b = count(f[i + 1]);
-		}
-		if (ip != null && b != null)
-			add_bytes(m, ip, b);
-	}
-}
-
-// { ip: bytes }, or null when the map does not exist: kernels without dynamic
-// counter maps refuse to create it ("Not supported").
-function mon_map(name) {
-	let m = {};
-	let j = lib.run('nft -j list map inet trafficctl_mon ' + lib.q(name));
-	if (j != '' && map_json(j, m))
-		return m;
-	let t = lib.run('nft list map inet trafficctl_mon ' + lib.q(name));
-	if (t == '')
-		return null;
-	map_text(t, m);
-	return m;
-}
-
-function force_ct() {
-	return (getenv('TCTL_FORCE_CONNTRACK') ?? '') != '';
-}
-
-function bytes_nft(mode) {
-	if (lib.sh('command -v nft') != 0)
-		return [];
-	mon_setup();
-	let bin = mon_map('bytes_in');
-	// Without the maps every rule fails and this would return [] for good:
-	// per-device speed would just stop. Conntrack instead, flagged.
-	if (bin == null)
-		return bytes_ct(uncountered(mode ?? offload_mode()));
-	let bout = mon_map('bytes_out') ?? {}, all = {};
-	for (let ip in bin)
-		all[ip] = true;
-	for (let ip in bout)
-		all[ip] = true;
-	return map(sorted_ips(all), (ip) => ({
-		ip, bytes_in: bin[ip] ?? 0, bytes_out: bout[ip] ?? 0, bytes_tcp: -1,
-		bytes_udp: -1, src: 'nft', degraded: false
-	}));
-}
-
-// Offload without counter sync bypasses the conntrack counters for fast-path
-// packets, so those modes read the nft maps. TCTL_FORCE_CONNTRACK keeps
-// conntrack; the numbers are then not just imprecise but frozen for every
-// offloaded flow, and a total built from them would stall while looking
-// authoritative, hence degraded.
+// Offload without a flowtable counter keeps conntrack's counters frozen for
+// every offloaded flow, so the sample is a lower bound that stalls while
+// traffic continues: a total built from it would look authoritative, hence
+// degraded, which the UI and the exporter refuse to present as a total.
 function bytes() {
 	let mode = offload_mode();
-	if (uncountered(mode) && !force_ct())
-		return bytes_nft(mode);
+	offload_hint(mode);
 	return bytes_ct(uncountered(mode));
 }
 
 // ── lifetime totals ─────────────────────────────────────────────────────────
 //
-// Neither byte source is a lifetime total (issue #26): conntrack forgets a
-// flow's bytes when it expires, and the nft maps restart with their table. So
-// positive deltas are accumulated here, the one store behind both the LuCI
+// Conntrack is no lifetime total (issue #26): it forgets a flow's bytes when
+// the flow expires. So positive deltas are accumulated here, the one store behind both the LuCI
 // Bytes/TCP/UDP columns and trafficctl_device_bytes_total.
 //
 // The store is tmpfs, rewritten on every poll and scrape: totals reset on
@@ -780,8 +670,9 @@ function bytes() {
 // own store before this one), 10 (protocol split), 12 (source and start).
 //
 // Output: the bytes() array plus bytes_in_total, bytes_out_total,
-// bytes_tcp_total, bytes_udp_total (-1 while the source cannot split by
-// protocol), total_since and live. With all, also devices no longer sampled
+// bytes_tcp_total, bytes_udp_total (-1 while there is no protocol baseline:
+// a state line from before the split, or from 1.30.x on the nft maps, which
+// could not split), total_since and live. With all, also devices no longer sampled
 // that carry a total, so a Prometheus series does not vanish whenever a quiet
 // device's last flow expires; their current readings are -1.
 //
@@ -844,8 +735,8 @@ function reading(v) {
 // One protocol counter: [ acc, last ] after reading v.
 function proto_step(acc, last, v, switched) {
 	if (v < 0)
-		// Gone unavailable (offload turned on): forget the baseline, or hours
-		// of frozen counter land as one fake delta when it returns.
+		// No split in this sample: forget the baseline, or whatever moved
+		// meanwhile lands as one fake delta when the split returns.
 		return [ acc, -1 ];
 	if (!switched)
 		acc += (last < 0) ? v : (v > last) ? v - last : 0;
@@ -867,9 +758,10 @@ function totals_apply(st, sample, now) {
 			tx = 0;
 
 		let r = st[ip], known = (r != null);
-		// A source switch swaps "bytes of live flows" for "bytes since the
-		// table was built", or back: the jump is not traffic, so this tick
-		// only takes a new baseline. Trust (degraded) is no part of it:
+		// A source switch (a 1.30.x state line on the nft maps, which
+		// counted since their table was built, meeting conntrack's live
+		// flows) is a jump that is not traffic, so this tick only takes a
+		// new baseline. Trust (degraded) is no part of it:
 		// conntrack counters are continuous across a change in trust.
 		let switched = known && r.src != '?' && s != '?' && r.src != s;
 		if (!known)
@@ -989,4 +881,4 @@ function totals(all, sample) {
 // 2022-12 needs a ';' after `export function f() {}`; one list avoids it.
 export { lan_subnets, lan_devices, lan_device, routed_subnets,
 	monitored_subnets, subnets, ifaces, rdns, rdns_refresh, offload_mode, ct_each,
-	bytes, bytes_nft, totals, reset };
+	bytes, totals, reset };

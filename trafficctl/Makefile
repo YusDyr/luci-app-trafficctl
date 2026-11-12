@@ -78,7 +78,6 @@ define Package/trafficctl/install
 	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/net.uc $(1)/usr/share/ucode/trafficctl/
 	$(INSTALL_DIR) $(1)/usr/libexec/trafficctl
 	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-block.sh $(1)/usr/libexec/trafficctl/
-	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-bytes-nft.sh $(1)/usr/libexec/trafficctl/
 	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-bytes.sh $(1)/usr/libexec/trafficctl/
 	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-cut.sh $(1)/usr/libexec/trafficctl/
 	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-device.sh $(1)/usr/libexec/trafficctl/
@@ -141,6 +140,11 @@ endef
 # removed and records nothing until the next reboot. Restarting it picks up
 # the new init script.
 #
+# trafficctl_mon: releases up to 1.30.x built this nft table for a per-device
+# byte counter under flow offload. No kernel accepted its dynamic counter maps,
+# so it was often left half-built, a forward chain with nothing reading it.
+# Byte counts come from conntrack now; the table is dropped if it is there.
+#
 # trafficctl-opkg.backup: when /etc/config/trafficctl moves here from the
 # single luci-app-trafficctl package of releases up to 1.28.x, opkg saves the
 # user's modified copy under that name as it drops the old owner's conffile.
@@ -156,6 +160,7 @@ if [ -z "$${IPKG_INSTROOT}" ]; then
 	if [ -f /etc/config/trafficctl ]; then
 		rm -f /etc/config/trafficctl-opkg.backup
 	fi
+	nft delete table inet trafficctl_mon 2>/dev/null || true
 	# Releases up to 1.30.1 gave the cut keeper START=95, so rc.d may
 	# still link it for boot. It is started on demand only.
 	rm -f /etc/rc.d/S95trafficctl-cut /etc/rc.d/K10trafficctl-cut

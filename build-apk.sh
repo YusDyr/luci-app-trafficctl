@@ -119,6 +119,8 @@ cat > "$BE_SCRIPTS/post-install" <<'SCRIPT'
 # be world-readable before the first save from the UI applies the same mode.
 chmod 0600 "${IPKG_INSTROOT}/etc/config/trafficctl" 2>/dev/null || true
 if [ -z "${IPKG_INSTROOT}" ]; then
+    # The byte counter table of releases up to 1.30.x, often left half-built.
+    nft delete table inet trafficctl_mon 2>/dev/null || true
     # Releases up to 1.30.1 gave the cut keeper START=95, so rc.d may
     # still link it for boot. It is started on demand only.
     rm -f /etc/rc.d/S95trafficctl-cut /etc/rc.d/K10trafficctl-cut

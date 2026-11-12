@@ -9,7 +9,7 @@ This document covers OpenWrt version support, firewall behaviour, required packa
 | OpenWrt Version | Release Date | Firewall | Backend | Status |
 |-----------------|-------------|----------|---------|--------|
 | 23.05.x         | Oct 2023    | fw4      | nftables | Fully supported (primary target) |
-| 22.03.x         | Sep 2022    | fw4      | nftables | Fully supported |
+| 22.03.x         | Sep 2022    | fw4      | nftables | Supported; no byte counts under flow offload (see [Flow Offload](#flow-offload)) |
 | 21.02.x         | Sep 2021    | fw3      | iptables | Not supported; use 1.30.x |
 | Snapshots        | Rolling     | fw4      | nftables | Supported |
 
@@ -113,6 +113,16 @@ BusyBox `nslookup` (always available) is used as a fallback if rpcd-mod-rrdns is
 9. **Both ACL modes supported** -- The package adapts to whichever `macfilter` policy each wifi-iface already uses and never changes it. On a `deny` (blacklist) radio, blocking adds the MAC to `maclist`; on an `allow` (whitelist) radio, blocking *removes* it, since there being listed is what grants access. Only when a radio has no `macfilter` set at all does the package create one, using `deny`. Mixed-mode setups are handled per radio: a device counts as wifi-blocked if it is blocked on any radio.
 
 10. **WiFi deauth** -- MAC filter changes are applied via `hostapd_cli deny_acl` + `deauthenticate`. Only the target client is disconnected; other clients are unaffected. Disconnection is near-instant (no wifi reload). `hostapd-utils` is optional for the `trafficctl` backend (it cannot be selected on wired-only builds): without `hostapd_cli` a block is a temporary ubus ban, and on a router with no wifi-iface the WiFi block is not offered.
+
+### Flow Offload
+
+11. **Byte counts under flow offload need a flowtable counter** -- per-device speeds and totals come from conntrack. Once fw4's `flow add @ft` offloads a flow, its packets take the flowtable's fast path, which hooks netdev ingress: they never reach an inet forward chain at any priority, so no nft rule can count them. What keeps conntrack accurate is the flowtable's `counter` flag (Linux 5.7+), which syncs offloaded byte counts back to conntrack. fw4 declares its flowtable with `counter` from OpenWrt 23.05 on, so software and hardware offload are both counted there (offload modes `software-counter` and `hardware-counter`).
+
+    **OpenWrt 22.03 is the exception.** Its fw4 declares the flowtable without `counter`, so with flow offloading on (modes `software` and `hardware`) the byte counters of every offloaded connection freeze. trafficctl reports every sample from such a router as `degraded: true`; the Devices page then shows ⚠ instead of speeds and totals, the History tab labels its rows as a lower bound, and the router logs one warning to syslog (`logread -e trafficctl`). The fix is on the router: disable flow offloading (LuCI → Network → Firewall → General Settings, or Settings → Flow Offload), or upgrade to OpenWrt 23.05 or later. A custom flowtable declared without `counter` behaves the same on any release.
+
+    There is no nft workaround. Counting downloads where they leave the router would need a netdev egress hook, which needs kernel 5.16 (22.03 ships 5.10). Releases up to 1.30.x tried per-device counter maps on a forward chain at priority -200; no OpenWrt kernel (5.10 to 6.12) accepts their `ipv4_addr : counter; flags dynamic` map type, and offloaded packets would have bypassed that chain anyway. Upgrading removes the table (`inet trafficctl_mon`) those releases left behind.
+
+    Hardware offload with the `counter` flag still depends on the driver: on some platforms (e.g. Mediatek Filogic) the driver does not report hardware byte counts, so they stay frozen even though the flag is set.
 
 ---
 

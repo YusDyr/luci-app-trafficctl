@@ -9,19 +9,19 @@
 #   * conntrack sums fall when flows expire. Counting that as movement would
 #     rewind a counter that is documented as monotonic; ignoring the drop
 #     entirely (rather than resyncing) would double-count the next sample.
-#   * the byte source switches at runtime: `trafficctl bytes` hands over to
-#     the nft counter maps when flow offload stops conntrack from counting,
-#     and back to conntrack when the kernel has no dynamic maps. The two
-#     counters have unrelated magnitudes (live flows vs. everything since the
-#     table was built), so a switch must rebaseline. Without that, enabling
-#     offload adds an entire nft map to the total in one tick.
-#   * the nft path cannot split TCP from UDP at all. Those totals have to read
+#   * a source change must rebaseline. The sampler reads conntrack only, but
+#     a state file written by 1.30.x can record source "nft": per-address
+#     counter maps that counted since their table was built, a magnitude
+#     unrelated to conntrack's live flows. Differencing across that would add
+#     the whole map to the total in one tick.
+#   * those nft-era lines carry no TCP/UDP split. Such totals have to read
 #     "unavailable", not "zero": issue #26 is precisely about a byte column
 #     that showed a number nobody could explain.
 #
 # The accumulator runs for real against a scratch TCTL_ROOT. Most sections
 # feed it recorded samples through tests/lib/totals.uc; the end-to-end ones
-# run the CLI over a conntrack file and mocked nft (tests/lib/bytes_env.sh).
+# run the CLI over a conntrack file and a mocked flowtable listing
+# (tests/lib/bytes_env.sh).
 
 # shellcheck source=tests/lib/ucode.sh
 . "$(dirname "$0")/lib/ucode.sh"
@@ -109,40 +109,45 @@ OUT=$(run)
 assert_contains "growth after an expiry resumes from the new baseline" \
     '"bytes_in_total":2000' "$OUT"
 
-# ── the byte source switching must not fabricate traffic ────────────────────
-# Enabling hardware flow offload moves `trafficctl bytes` onto the nft counter
-# maps, which are cumulative since the table was created — here 900 MB of it.
-# Differencing that against the conntrack baseline would add 900 MB to this
-# device's lifetime total in a single tick.
-sample '[{"ip":"10.0.20.11","bytes_in":900000000,"bytes_out":100,"bytes_tcp":-1,"bytes_udp":-1,"src":"nft"}]'
-OUT=$(run)
-assert_contains "source switch rebaselines instead of counting the whole map" \
-    '"bytes_in_total":2000' "$OUT"
-assert_not_contains "no 900 MB phantom delta on the switch" \
-    '"bytes_in_total":900000000' "$OUT"
-assert_contains "the switch is recorded in the state file" " nft " "$(cat "$STATE")"
-
-# Traffic AFTER the switch is still counted, from the nft baseline.
-sample '[{"ip":"10.0.20.11","bytes_in":900001000,"bytes_out":100,"bytes_tcp":-1,"bytes_udp":-1,"src":"nft"}]'
-OUT=$(run)
-assert_contains "growth on the new source accumulates normally" \
+# ── a total left by 1.30.x on the nft counter maps ──────────────────────────
+# Under uncountered offload 1.30.x read nft counter maps, cumulative since
+# their table was built (here 900 MB), with no protocol split. The line it
+# leaves after a stretch on them: src nft, protocol baselines -1, and 1000
+# bytes more accumulated on the maps.
+awk '{ $2 = 3000; $4 = 900001000; $9 = -1; $10 = -1; $11 = "nft"; print }' "$STATE" > "$STATE.new"
+mv "$STATE.new" "$STATE"
+sample '[]'
+OUT=$(runall)
+assert_contains "an nft-sourced state line loads with its total" \
     '"bytes_in_total":3000' "$OUT"
-
-# ── the protocol split is "unavailable", not zero, on the nft path ──────────
-assert_contains "TCP total reports unavailable under offload" \
+assert_contains "an nft-sourced state line keeps its source until resampled" \
+    '"src":"nft"' "$OUT"
+assert_contains "its TCP total reads unavailable, not zero" \
     '"bytes_tcp_total":-1' "$OUT"
-assert_contains "UDP total reports unavailable under offload" \
+assert_contains "its UDP total reads unavailable, not zero" \
     '"bytes_udp_total":-1' "$OUT"
 
-# ── coming back from offload must not dump the frozen gap into the total ────
-# tcp was last seen at 50 before offload hid it. Differencing the returning
-# sample against that stale value would invent the entire intervening window.
+# The first conntrack sample after the upgrade is a source change. Its
+# readings are not traffic since the nft baseline (900 MB of map against live
+# flows), and its TCP figure is not traffic since the last split either, so
+# the tick only rebaselines.
 sample '[{"ip":"10.0.20.11","bytes_in":900002000,"bytes_out":100,"bytes_tcp":800000,"bytes_udp":30,"src":"ct"}]'
 OUT=$(run)
-assert_contains "returning from offload rebaselines the whole sample" \
+assert_contains "the switch to conntrack adds no download" \
+    '"bytes_in_total":3000' "$OUT"
+assert_contains "the switch to conntrack rebaselines the protocol split" \
     '"bytes_tcp_total":2000' "$OUT"
-assert_not_contains "stale pre-offload TCP baseline is not differenced" \
+assert_not_contains "the stale pre-nft TCP baseline is not differenced" \
     '"bytes_tcp_total":801950' "$OUT"
+assert_not_contains "nor is the whole conntrack TCP reading added" \
+    '"bytes_tcp_total":802000' "$OUT"
+assert_eq "the state line now records conntrack" "ct" "$(awk '{ print $11 }' "$STATE")"
+
+# And from there conntrack accumulates as usual.
+sample '[{"ip":"10.0.20.11","bytes_in":900002000,"bytes_out":100,"bytes_tcp":800500,"bytes_udp":30,"src":"ct"}]'
+OUT=$(run)
+assert_contains "growth after the switch accumulates normally" \
+    '"bytes_tcp_total":2500' "$OUT"
 
 # ── quiet devices: dropped from the default view, kept for the exporter ─────
 # A device whose last flow expired is gone from conntrack entirely. The UI has
@@ -194,17 +199,18 @@ assert_contains "new device total is its first sample" '"bytes_in_total":77' "$O
 assert_contains "existing device is untouched by the newcomer" \
     '"bytes_in_total":3000' "$OUT"
 
-# ── a device first seen while offload is already on ─────────────────────────
+# ── a device 1.30.x only ever saw on the nft maps ───────────────────────────
 # It has NO accumulated protocol history at all, so "unavailable" and "zero"
 # are the two answers that look identical unless the sentinel is honoured. The
-# device above cannot test this: it carries 2000 TCP bytes from before the
-# switch, so a stale total there would never read as a zero.
+# device above cannot test this: it carries TCP bytes from before the maps, so
+# a stale total there would never read as a zero.
 rm -f "$STATE"
-sample '[{"ip":"10.0.20.44","bytes_in":4096,"bytes_out":128,"bytes_tcp":-1,"bytes_udp":-1,"src":"nft"}]'
-OUT=$(run)
-assert_contains "offload-only device still gets a byte total" \
+printf '10.0.20.44 4096 128 4096 128 1700000000 0 0 -1 -1 nft 1700000000 false\n' > "$STATE"
+sample '[]'
+OUT=$(runall)
+assert_contains "nft-only device still gets a byte total" \
     '"bytes_in_total":4096' "$OUT"
-assert_contains "offload-only device reports TCP as unavailable" \
+assert_contains "nft-only device reports TCP as unavailable" \
     '"bytes_tcp_total":-1' "$OUT"
 assert_not_contains "never claims the device sent zero TCP" \
     '"bytes_tcp_total":0' "$OUT"
@@ -299,34 +305,28 @@ assert_contains "end to end: --all reaches the accumulator through the CLI" \
     '"live":true' "$OUT"
 
 # ── frozen conntrack counters must not masquerade as a total ────────────────
-# The combination is uncountered flow offload (plain "hardware"/"software") on
-# a kernel with NO nftables dynamic counter map support: the sampler hands
-# over to the nft maps, which cannot be created, so it falls back to conntrack,
-# whose byte counters are frozen for every offloaded flow.
-#
-# Such kernels are real: the maintainer's router supports no dynamic counter
-# maps at all and only escapes this because its mode is "hardware-counter",
-# where conntrack stays accurate. Flip that one setting and this is what you
-# get.
+# Uncountered flow offload (plain "hardware"/"software": fw4 on 22.03, whose
+# flowtable has no counter, or a custom flowtable without one) keeps
+# conntrack's byte counters frozen for every offloaded flow. Nothing else can
+# count those packets: the flowtable hooks netdev ingress, so they never reach
+# an inet forward chain at any priority.
 #
 # Without the flag the accumulator faithfully adds deltas from a frozen counter
 # (almost nothing) and the column shows an authoritative-looking total that
 # silently stops growing. That is strictly worse than what issue #26 reported:
 # an implausibly small number gets noticed, a plausible one does not.
-#
-# No reply file for the maps: nft fails on them, as on such a kernel.
 for mode in hardware software; do
     be_offload "$mode"
+    : > "$BE_NFTLOG"
     OUT=$(be_run bytes)
-    assert_contains "$mode offload + no counter maps: sample is flagged degraded" \
+    assert_contains "$mode offload without a flowtable counter: sample is flagged degraded" \
         '"degraded":true' "$OUT"
     # It still reports what conntrack has (a lower bound beats nothing), but
     # the flag is what stops it being presented as a total.
-    assert_contains "$mode offload: the fallback still returns conntrack data" \
+    assert_contains "$mode offload: the sample is still conntrack data" \
         '"src":"ct"' "$OUT"
-    OUT=$(TCTL_FORCE_CONNTRACK=1 be_run bytes)
-    assert_contains "$mode offload, conntrack forced: still flagged degraded" \
-        '"degraded":true' "$OUT"
+    assert_eq "$mode offload: nft is only asked about the flowtable" "list flowtables" \
+        "$(sort -u "$BE_NFTLOG" | tr '\n' ' ' | sed 's/ $//')"
 done
 
 # The modes where conntrack IS trustworthy must not be flagged, or the warning
@@ -338,26 +338,65 @@ for mode in none hardware-counter software-counter; do
         '"degraded":false' "$OUT"
     assert_not_contains "$mode: no spurious degraded flag" \
         '"degraded":true' "$OUT"
-    assert_not_contains "$mode: the nft maps are not read" '"src":"nft"' "$OUT"
+    assert_contains "$mode: conntrack is the source" '"src":"ct"' "$OUT"
 done
+be_offload none
 
-# And when the nft maps DO work, that path is the accurate one by design.
-printf 'table inet trafficctl_mon {\n\tchain mon_forward {\n\t\tupdate @bytes_in { ip daddr counter }\n\t\tupdate @bytes_out { ip saddr counter }\n\t}\n}\n' \
-    > "$BE_NFT/list chain inet trafficctl_mon mon_forward"
-echo "elements = { 192.168.1.100 : counter packets 5 bytes 900 }" \
-    > "$BE_NFT/list map inet trafficctl_mon bytes_in"
-echo "elements = { 192.168.1.100 : counter packets 3 bytes 100 }" \
-    > "$BE_NFT/list map inet trafficctl_mon bytes_out"
+# ── the operator is told why, once ──────────────────────────────────────────
+# fw4 on 22.03 declares its flowtable without a counter, and no nft rule can
+# count the offloaded packets instead, so the only fix is on the operator's
+# side. The syslog says which, once per mode rather than on every poll.
+HINT="$BE_ROOT/tmp/trafficctl_offload_hint"
+: > "$BE_LOGGER"
+be_offload none
+be_run bytes >/dev/null
+assert_eq "no offload: nothing is logged" "0" "$(grep -c . "$BE_LOGGER")"
+be_offload software
+be_run bytes >/dev/null
+be_run bytes >/dev/null
+assert_eq "uncountered offload: one warning over two samples" "1" "$(grep -c . "$BE_LOGGER")"
+assert_contains "the warning names the mode" "flow offload (software)" "$(cat "$BE_LOGGER")"
+assert_contains "the warning says to disable flow offloading" "Disable flow offloading" "$(cat "$BE_LOGGER")"
+assert_contains "the warning names the release that fixes it" "OpenWrt 23.05" "$(cat "$BE_LOGGER")"
+assert_contains "the warning goes out as a warning" "-p daemon.warn" "$(cat "$BE_LOGGER")"
 be_offload hardware
-OUT=$(be_run bytes)
-assert_contains "working nft counter maps are the accurate path, not degraded" \
-    '"degraded":false' "$OUT"
-assert_contains "working nft counter maps are used under offload" \
-    '"src":"nft"' "$OUT"
-assert_contains "the nft path reports the protocol split as unavailable, not zero" \
-    '"bytes_tcp":-1,"bytes_udp":-1,"src":"nft"' "$OUT"
-rm -f "$BE_NFT/list chain inet trafficctl_mon mon_forward" \
-    "$BE_NFT/list map inet trafficctl_mon bytes_in" "$BE_NFT/list map inet trafficctl_mon bytes_out"
+be_run bytes >/dev/null
+assert_eq "a different uncountered mode warns again" "2" "$(grep -c . "$BE_LOGGER")"
+be_offload hardware-counter
+be_run bytes >/dev/null
+assert_eq "countered offload: no warning, and the markers are gone" "2 0" \
+    "$(grep -c . "$BE_LOGGER") $(find "$BE_ROOT/tmp" -name 'trafficctl_offload_hint*' | wc -l | tr -d ' ')"
+be_offload hardware
+be_run bytes >/dev/null
+assert_eq "uncountered again after a countered spell: warned again" "3" "$(grep -c . "$BE_LOGGER")"
+# A marker that cannot be written (full tmpfs) must not turn the one warning
+# into one per poll. A directory in its place fails every write the same way,
+# whoever runs the test.
+be_offload hardware-counter
+be_run bytes >/dev/null
+: > "$BE_LOGGER"
+rm -f "$HINT" "$HINT".*
+mkdir "$HINT" "$HINT.software"
+be_offload software
+be_run bytes >/dev/null
+be_run bytes >/dev/null
+assert_eq "an unwritable marker: nothing is logged" "0" "$(grep -c . "$BE_LOGGER")"
+rmdir "$HINT" "$HINT.software"
+# Samplers racing on a fresh marker (UI poll, exporter, history at once):
+# the exclusive create lets exactly one of them log.
+: > "$BE_LOGGER"
+be_offload hardware
+ubus_start "$BE_UBUS"
+racers=""
+for _ in 1 2 3 4 5 6; do
+    TCTL_ROOT="$BE_ROOT" PATH="$BE_BIN:$PATH" tctl bytes >/dev/null 2>&1 &
+    racers="$racers $!"
+done
+# Only the samplers: a bare wait would also wait for ubusd.
+# shellcheck disable=SC2086
+wait $racers
+ubus_stop
+assert_eq "concurrent samplers: one warning between them" "1" "$(grep -c . "$BE_LOGGER")"
 be_offload none
 
 # ── the accumulator carries the flag, and keeps carrying it ─────────────────
