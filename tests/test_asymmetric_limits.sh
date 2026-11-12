@@ -689,5 +689,121 @@ hook '[{"type":"ratelimit","ip":"192.168.1.98","param":"5000"}]'
 assert_not_contains "restore: a limit that loaded logs nothing" 'Failed to restore' "$(cat "$LOGGER_LOG")"
 assert_contains "restore: and its rule is there" 'ip daddr 192.168.1.98' "$(cat "$NFT_LOG")"
 
+# ── BusyBox awk must not wipe rules.json ──────────────────────────────────
+# tctl_persist_save and tctl_persist_remove split the file on "},{". POSIX
+# awk (and BusyBox awk) treat that third argument as an ERE, and BusyBox
+# rejects the string as "Invalid contents of {}". awk then prints nothing,
+# the output redirect produces an empty .tmp, and a bare mv replaces
+# rules.json with an empty file. GNU awk and mawk often accept the same
+# string, so a suite running only on those would stay green with the bug
+# still present. The tests below run the real functions (via the already
+# rewritten $FW), once per awk on the box, including BusyBox when it is
+# installed (CI installs busybox-static).
+
+# Static: both functions must use the regex literal, not the string. This
+# is the part that does not depend on which awk the runner has.
+sep_hits=$(grep -cF -- 'n=split($0, items, /\},\{/)' "$BIN/trafficctl-fw.sh" || true)
+assert_eq "both persist rewrite functions split on the regex literal /\\},\\{/" "2" "$sep_hits"
+string_hits=$(grep -cF -- 'split($0, items, "},{"' "$BIN/trafficctl-fw.sh" || true)
+assert_eq "neither persist rewrite function splits on the string },{" "0" "$string_hits"
+
+# Both functions must refuse to mv an empty tmp over the saved file.
+guard_hits=$(grep -cF -- '[ -s "$tmp" ]' "$BIN/trafficctl-fw.sh" || true)
+assert_eq "both persist rewrite functions keep the file unless awk wrote something" "2" "$guard_hits"
+
+AWKS=""
+for cand in gawk mawk awk; do
+    command -v "$cand" >/dev/null 2>&1 && AWKS="$AWKS $cand"
+done
+if command -v busybox >/dev/null 2>&1 && busybox awk 'BEGIN{}' 2>/dev/null; then
+    AWKS="$AWKS busybox-awk"
+fi
+echo "awk implementations under test:$AWKS"
+
+run_persist() { # <awk-impl> <shell snippet>
+    local impl="$1" shim="$TMP/persist-awk"
+    mkdir -p "$shim"
+    case "$impl" in
+        busybox-awk) printf '#!/bin/sh\nexec busybox awk "$@"\n' > "$shim/awk" ;;
+        *) printf '#!/bin/sh\nexec %s "$@"\n' "$(command -v "$impl")" > "$shim/awk" ;;
+    esac
+    chmod +x "$shim/awk"
+    PATH="$shim:$MOCKBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; $2"
+}
+
+persist_count() {
+    grep -o '"type":"block"' | wc -l | tr -d ' '
+}
+
+for a in $AWKS; do
+    printf '[]\n' > "$RULES"
+    run_persist "$a" 'tctl_persist_save block 192.0.2.10 lab && tctl_persist_save block 192.0.2.11 lab && tctl_persist_save block 192.0.2.10 other'
+    rc=$?
+    rules=$(cat "$RULES")
+    assert_eq "$a: saving a new block and replacing an existing one leaves two records" "2" "$(printf '%s' "$rules" | persist_count)"
+    assert_eq "$a: persist_save exits 0" "0" "$rc"
+    case "$rules" in
+        *'"ip":"192.0.2.10"'*'"param":"other"'*|*'"param":"other"'*'"ip":"192.0.2.10"'*) PASS=$((PASS + 1)) ;;
+        *) FAIL=$((FAIL + 1)); printf "FAIL: %s: replaced record should carry the new param\n  in: %s\n" "$a" "$rules" ;;
+    esac
+    case "$rules" in
+        *'"ip":"192.0.2.11"'*) PASS=$((PASS + 1)) ;;
+        *) FAIL=$((FAIL + 1)); printf "FAIL: %s: neighbour record was lost\n  in: %s\n" "$a" "$rules" ;;
+    esac
+
+    run_persist "$a" 'tctl_persist_remove block 192.0.2.10'
+    rc=$?
+    rules=$(cat "$RULES")
+    assert_eq "$a: removing one block leaves its neighbour" "1" "$(printf '%s' "$rules" | persist_count)"
+    assert_eq "$a: persist_remove exits 0" "0" "$rc"
+    case "$rules" in
+        *'"ip":"192.0.2.11"'*) PASS=$((PASS + 1)) ;;
+        *) FAIL=$((FAIL + 1)); printf "FAIL: %s: neighbour was dropped with the removed record\n  in: %s\n" "$a" "$rules" ;;
+    esac
+    case "$rules" in
+        *'"ip":"192.0.2.10"'*) FAIL=$((FAIL + 1)); printf "FAIL: %s: removed record is still present\n  in: %s\n" "$a" "$rules" ;;
+        *) PASS=$((PASS + 1)) ;;
+    esac
+
+    # Removing the last record must write [] , not an empty file.
+    run_persist "$a" 'tctl_persist_remove block 192.0.2.11'
+    rules=$(cat "$RULES")
+    assert_eq "$a: removing the last record leaves an empty array, not an empty file" "[]" "$rules"
+
+    # A previously clobbered (zero-length) file must be recoverable.
+    : > "$RULES"
+    run_persist "$a" 'tctl_persist_save block 192.0.2.12 lab'
+    rc=$?
+    rules=$(cat "$RULES")
+    assert_eq "$a: persist_save recovers a zero-length rules.json" "0" "$rc"
+    assert_eq "$a: the recovered file has the new record" "1" "$(printf '%s' "$rules" | persist_count)"
+done
+
+# The mv guard: a failing awk must not replace a populated file. PATH is
+# set so `awk` is a stub that exits 1 and prints nothing.
+printf '[{"type":"block","ip":"192.0.2.10","param":"lab"}]\n' > "$RULES"
+before=$(cat "$RULES")
+shim="$TMP/awkfail"
+mkdir -p "$shim"
+printf '#!/bin/sh\nexit 1\n' > "$shim/awk"
+chmod +x "$shim/awk"
+PATH="$shim:$MOCKBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; tctl_persist_save block 192.0.2.99 lab" >/dev/null 2>&1
+rc=$?
+after=$(cat "$RULES")
+assert_eq "a failing awk leaves persist_save unsuccessful" "1" "$rc"
+assert_eq "a failing awk does not replace a populated rules.json" "$before" "$after"
+if [ -f "${RULES}.tmp" ]; then
+    FAIL=$((FAIL + 1))
+    printf "FAIL: persist_save left a .tmp behind after awk failed\n"
+else
+    PASS=$((PASS + 1))
+fi
+
+PATH="$shim:$MOCKBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; tctl_persist_remove block 192.0.2.10" >/dev/null 2>&1
+rc=$?
+after=$(cat "$RULES")
+assert_eq "a failing awk leaves persist_remove unsuccessful" "1" "$rc"
+assert_eq "a failing awk does not empty rules.json on remove" "$before" "$after"
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

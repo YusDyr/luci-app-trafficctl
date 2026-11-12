@@ -961,7 +961,10 @@ tctl_persist_enabled() {
 tctl_persist_save() {
     local type="$1" ip="$2" param="$3" mode="$4" param_up="$5"
     [ -d "$(dirname "$TCTL_RULES_FILE")" ] || mkdir -p "$(dirname "$TCTL_RULES_FILE")"
-    [ -f "$TCTL_RULES_FILE" ] || echo '[]' > "$TCTL_RULES_FILE"
+    # [ -s ], not [ -f ]: a previous failed save can leave a zero-length file,
+    # and awk on an empty file prints nothing. Seeding [] lets this call still
+    # write the new record instead of refusing to replace the empty file below.
+    [ -s "$TCTL_RULES_FILE" ] || echo '[]' > "$TCTL_RULES_FILE"
     local tmp="${TCTL_RULES_FILE}.tmp"
     # The mode field is written only when the caller has one, so records for
     # rule types that have no bucket layout (blocks, port forwards) keep their
@@ -971,11 +974,29 @@ tctl_persist_save() {
     local extra=""
     [ -n "$mode" ] && extra=",\"mode\":\"$mode\""
     [ -n "$param_up" ] && extra="$extra,\"param_up\":\"$param_up\""
-    # Remove existing entry for same ip+type, append new one
-    awk -v ip="$ip" -v t="$type" -v p="$param" -v x="$extra" '
+    # Remove existing entry for same ip+type, append new one.
+    #
+    # split()'s third argument is an ERE on BusyBox awk (and on POSIX awk).
+    # The string "},{" is therefore read as "a '}' followed by an interval
+    # expression", and BusyBox rejects it:
+    #
+    #     awk: bad regex '},{': Invalid contents of {}
+    #
+    # awk then prints nothing, the redirect creates an empty .tmp, and a bare
+    # mv would replace rules.json with an empty file — so every block, unblock,
+    # rate limit or port-forward change wiped persistence while the UI still
+    # claimed the rules were saved. GNU awk and mawk often accept the same
+    # string, which is why a suite running on those interpreters did not catch
+    # this. The regex literal \},\{ is a pair of literal braces, and splits
+    # the same records on every awk we have to care about.
+    #
+    # Only replace the file if awk succeeded and wrote something. [] is
+    # non-empty, so removing the last record is fine; an empty .tmp is the
+    # failure this is guarding against.
+    if awk -v ip="$ip" -v t="$type" -v p="$param" -v x="$extra" '
     {
         gsub(/^\[/,""); gsub(/\]$/,"")
-        n=split($0, items, "},{")
+        n=split($0, items, /\},\{/)
         printf "["
         first=1
         for (i=1; i<=n; i++) {
@@ -994,18 +1015,24 @@ tctl_persist_save() {
         }
         if (!first) printf ","
         printf "{\"type\":\"%s\",\"ip\":\"%s\",\"param\":\"%s\"%s}]", t, ip, p, x
-    }' "$TCTL_RULES_FILE" > "$tmp"
-    mv "$tmp" "$TCTL_RULES_FILE"
+    }' "$TCTL_RULES_FILE" > "$tmp" && [ -s "$tmp" ]; then
+        mv "$tmp" "$TCTL_RULES_FILE"
+    else
+        rm -f "$tmp"
+        return 1
+    fi
 }
 
 tctl_persist_remove() {
     local type="$1" ip="$2"
-    [ -f "$TCTL_RULES_FILE" ] || return 0
+    [ -s "$TCTL_RULES_FILE" ] || return 0
     local tmp="${TCTL_RULES_FILE}.tmp"
-    awk -v ip="$ip" -v t="$type" '
+    # See tctl_persist_save for why the separator is a regex literal and why
+    # the file is replaced only when awk writes a non-empty result.
+    if awk -v ip="$ip" -v t="$type" '
     {
         gsub(/^\[/,""); gsub(/\]$/,"")
-        n=split($0, items, "},{")
+        n=split($0, items, /\},\{/)
         printf "["
         first=1
         for (i=1; i<=n; i++) {
@@ -1023,8 +1050,12 @@ tctl_persist_remove() {
             first=0
         }
         printf "]"
-    }' "$TCTL_RULES_FILE" > "$tmp"
-    mv "$tmp" "$TCTL_RULES_FILE"
+    }' "$TCTL_RULES_FILE" > "$tmp" && [ -s "$tmp" ]; then
+        mv "$tmp" "$TCTL_RULES_FILE"
+    else
+        rm -f "$tmp"
+        return 1
+    fi
 }
 
 # ── New-device ledger ─────────────────────────────────────────────────────
