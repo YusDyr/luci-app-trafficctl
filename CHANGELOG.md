@@ -4,6 +4,18 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.30.3] - 2026-11-12
+
+### Bug Fixes
+- stop BusyBox awk from wiping rules.json on every persist rewrite ([#147](https://github.com/YusDyr/luci-app-trafficctl/issues/147)) ([04e6ef4](https://github.com/YusDyr/luci-app-trafficctl/commit/04e6ef49f80609f834afd4d86d4069f18be6d814))
+  tctl_persist_save and tctl_persist_remove split the saved file on "},{".
+  POSIX awk, and BusyBox awk in particular, treat that third argument as
+  an ERE, and BusyBox rejects it:
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.30.2...v1.30.3
+
+---
+
 ## [1.30.2] - 2026-11-11
 
 ### Bug Fixes
