@@ -5,8 +5,8 @@
 
 Prints one line per finding, nothing when clean:
 - popen or system named anywhere but lib.uc (import aliases included);
-- a run()/lines()/sh() command built from anything but string literals and
-  q(...) calls (a ternary is fine when both branches are).
+- a run()/run_rc()/lines()/sh()/pipe() command built from anything but string
+  literals and q(...)/qv(...) calls (a ternary is fine when both branches are).
 """
 import re
 import sys
@@ -117,7 +117,7 @@ def wrapped(e):
 
 
 STRING = re.compile(r'''^('([^'\\]|\\.)*'|"([^"\\]|\\.)*")$''', re.S)
-QCALL = re.compile(r'^(lib\.)?q\(')
+QCALL = re.compile(r'^(lib\.)?qv?\(')
 
 
 # lib.uc's lines() hands its own parameter on to run().
@@ -163,7 +163,7 @@ def first_arg(code, i):
     return code[i + 1:]
 
 
-CALL = re.compile(r'(?<![\w.])(lib\.)?(run|lines|sh)\s*\(')
+CALL = re.compile(r'(?<![\w.])(lib\.)?(run|run_rc|lines|sh|pipe)\s*\(')
 DEF = re.compile(r'function\s+$')
 EXEC = re.compile(r'\b(popen|system)\b')
 

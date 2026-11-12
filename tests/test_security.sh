@@ -227,7 +227,7 @@ assert_contains "bot token reaches curl via stdin instead" "$(cat "$TMPDIR/curl.
 # lib.uc's run()/lines()/sh() are the only callers of popen() and system(),
 # and every value in their command goes through q(): tests/lib/uc_cmd_lint.py.
 UC_DIR="$BIN/../../share/ucode/trafficctl"
-UC_FILES="$UC_DIR/*.uc $BIN/../../sbin/trafficctl"
+UC_FILES="$UC_DIR/*.uc $BIN/../../sbin/trafficctl $(dirname "$0")/../luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
 LINT="$(dirname "$0")/lib/uc_cmd_lint.py"
 # shellcheck disable=SC2086 # a glob on purpose
 assert_eq "ucode: commands quoted, popen/system only in lib.uc" "" \
@@ -245,6 +245,8 @@ lib.run('ip link show ' + dev);
 lib.lines('nslookup ' + (srv ? srv : ''));
 lib.sh(cmd, 100);
 lib.run('ip ' + lib.q(dev) + (v6 ? ' -6' : '') + ' route');
+lib.pipe('read -r x; ' + lib.qv([ 'a', b ]), secret);
+lib.pipe('cat ' + file, '');
 // lib.run('commented ' + out);
 UC
 OUT=$(python3 "$LINT" "$UC_DIR/lib.uc" "$TMPDIR/bad.uc")
@@ -253,7 +255,8 @@ assert_contains "lint: system through a namespace import" "$OUT" "bad.uc:4: syst
 assert_contains "lint: a concatenated variable" "$OUT" "bad.uc:7: unquoted"
 assert_contains "lint: a variable in a ternary branch" "$OUT" "bad.uc:8: unquoted"
 assert_contains "lint: a bare variable" "$OUT" "bad.uc:9: unquoted"
-assert_eq "lint: nothing else (strings, regexes, q(), comments)" "5" "$(printf '%s\n' "$OUT" | grep -c .)"
+assert_contains "lint: a variable in a pipe() command" "$OUT" "bad.uc:12: unquoted"
+assert_eq "lint: nothing else (strings, regexes, q(), qv(), comments)" "6" "$(printf '%s\n' "$OUT" | grep -c .)"
 # shellcheck disable=SC2086
 assert_eq "ucode: every file starts strict" "" \
     "$(for f in $UC_FILES; do grep -q "^'use strict';$" "$f" || echo "$f"; done)"

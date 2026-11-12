@@ -1,6 +1,6 @@
 # API Reference
 
-All backend functionality is exposed through shell scripts in `/usr/libexec/trafficctl/trafficctl-*.sh`. The LuCI frontend calls them via JSON-RPC through the rpcd backend at `/usr/libexec/rpcd/luci.trafficctl`.
+All backend functionality is exposed through the `/usr/sbin/trafficctl` CLI and the shell scripts in `/usr/libexec/trafficctl/trafficctl-*.sh` it runs for the commands not yet ported to ucode. The LuCI frontend calls them via JSON-RPC through the rpcd plugin at `/usr/libexec/rpcd/luci.trafficctl`, an exec plugin written in ucode: it handles the settings, their validation, the activity log and the device names itself, and runs `trafficctl <command>` for everything else, with every argument quoted and the caller (`TCTL_VIA`, `TCTL_SRC`, `TCTL_USER`) in the environment.
 
 ---
 
@@ -95,27 +95,29 @@ Every method is listed here. The ACL group is `luci-app-trafficctl`
 `read`, everything that changes state under `write`. `activity_log` is a **write**
 method because it returns the contents of the configured log file.
 
+"Script" is what `trafficctl <command>` runs; "(in plugin)" methods run inside the plugin.
+
 | Method | Script | Params | ACL |
 |--------|--------|--------|-----|
 | `summary` | `trafficctl-summary.sh` | (none) | read |
 | `device` | `trafficctl-device.sh` | `ip`, `proto` | read |
 | `bytes` | `trafficctl-totals.sh` | (none) | read |
-| `ifaces` | `trafficctl-ifaces.sh` | (none) | read |
-| `rdns` | `trafficctl-rdns.sh` | `ip` | read |
+| `ifaces` | `trafficctl ifaces` (ucode) | (none) | read |
+| `rdns` | `trafficctl rdns` (ucode) | `ip` | read |
 | `ratelimit_stats` | `trafficctl-ratelimit-stats.sh` | (none) | read |
-| `subnets` | `trafficctl-subnets.sh` | (none) | read |
+| `subnets` | `trafficctl subnets` (ucode) | (none) | read |
 | `shape_stats` | `trafficctl-shape-stats.sh` | (none) | read |
 | `shape_status` | `trafficctl-shape.sh status` | `ip` | read |
-| `names_list` | `trafficctl-names.sh list` | (none) | read |
+| `names_list` | (in plugin) | (none) | read |
 | `portfw_list` | `trafficctl-portfw.sh list` | (none) | read |
 | `rules_list` | `trafficctl-rules.sh list` | (none) | read |
 | `netify_status` | `trafficctl-netify.sh status` | (none) | read |
 | `netify_list` | `trafficctl-netify.sh list` | (none) | read |
-| `config_get` | (inline) | (none) — returns `enabled`, `default_mode`, `offload_mode`, `sw`, `hw`, `poll_interval`, `avg_window` | read |
-| `telegram_config_get` | (inline) | (none) — `bot_token` is masked as `***` | read |
-| `logging_config_get` | (inline) | (none) | read |
-| `newdevice_config_get` | (inline) | (none) — returns `enabled`, `limit_kbit`, `limit_mode`, plus `seeded` and `seen_count` describing the seen-MAC ledger | read |
-| `version` | (inline) | (none) | read |
+| `config_get` | (in plugin) | (none) — returns `enabled`, `default_mode`, `offload_mode`, `sw`, `hw`, `poll_interval`, `avg_window` | read |
+| `telegram_config_get` | (in plugin) | (none) — `bot_token` is masked as `***`; `bot_running` comes from procd (`ubus call service list`) | read |
+| `logging_config_get` | (in plugin) | (none) | read |
+| `newdevice_config_get` | (in plugin) | (none) — returns `enabled`, `limit_kbit`, `limit_mode`, plus `seeded` and `seen_count` describing the seen-MAC ledger | read |
+| `version` | (in plugin) | (none) — the installed `luci-app-trafficctl` version, read from the opkg status file or the apk database; `dev` when neither lists it | read |
 | `cut_status` | `trafficctl-cut.sh status` | (none) | **write** — see below |
 | `cut_set` | `trafficctl-cut.sh engage`/`release` | `active` (bool), `duration` (seconds, `0` = indefinite), `persist` (bool) | write |
 | `block` | `trafficctl-block.sh` | `ip`, `label` | write |
@@ -125,16 +127,16 @@ method because it returns the contents of the configured log file.
 | `shape_remove` | `trafficctl-shape.sh remove` | `ip`, `label` | write |
 | `macfilter_add` | `trafficctl-macfilter-add.sh` | `ip` | write |
 | `macfilter_remove` | `trafficctl-macfilter-remove.sh` | `ip` or `mac` (`mac` wins when both are sent) | write |
-| `name_set` | `trafficctl-names.sh set` | `ip`, `name` (empty `name` clears the alias) | write |
-| `name_clear` | `trafficctl-names.sh remove` | `ip` | write |
+| `name_set` | (in plugin) | `ip`, `name` (empty `name` clears the alias) | write |
+| `name_clear` | (in plugin) | `ip` | write |
 | `portfw_ctl` | `trafficctl-portfw.sh` | `action`, `scope`, `proto`, `ip`, `port`, `rate_kbit` | write |
-| `netify_collect` | `trafficctl-netify.sh collect` | `secs` | write |
-| `config_set` | (inline) | `enabled`, `default_mode`, `sw`, `hw`, `poll_interval`, `avg_window` (all optional) | write |
-| `telegram_config_set` | (inline) | `enabled`, `bot_token`, `chat_id`, `poll_interval`, `notify_new_device`, `notify_known_device`, `control_enabled`, `notify_template`, `btn_block_inet`, `btn_block_wifi`, `btn_limiter`, `btn_shaper` | write |
-| `telegram_test` | `trafficctl-telegram-test.sh` | `bot_token`, `chat_id`, `message` | write |
-| `logging_config_set` | (inline) | `enabled`, `log_file`, `max_lines`, `syslog`, `log_blocks`, `log_ratelimits`, `log_shapes`, `log_telegram`, `log_config` | write |
-| `newdevice_config_set` | (inline) | `enabled`, `limit_kbit`, `limit_mode` (`limiter`\|`shaper`) | write |
-| `activity_log` | (inline) | `lines` (default 50, capped at 1000) | write |
+| `netify_collect` | `trafficctl-netify.sh collect` | `secs` (1–30, default 3) | write |
+| `config_set` | (in plugin) | `enabled`, `default_mode`, `sw`, `hw`, `poll_interval`, `avg_window` (all optional) | write |
+| `telegram_config_set` | (in plugin) | `enabled`, `bot_token`, `chat_id`, `poll_interval`, `notify_new_device`, `notify_known_device`, `control_enabled`, `notify_template`, `btn_block_inet`, `btn_block_wifi`, `btn_limiter`, `btn_shaper` | write |
+| `telegram_test` | `trafficctl-telegram-test.sh` | `bot_token`, `chat_id`, `message` — the token goes to the plugin's wrapping shell on stdin, which exports it as `TCTL_TG_TOKEN` for the script; it is never in an argument list | write |
+| `logging_config_set` | (in plugin) | `enabled`, `log_file`, `max_lines`, `syslog`, `log_blocks`, `log_ratelimits`, `log_shapes`, `log_telegram`, `log_config`, `persist_rules` (stored as `main.persist_rules`) | write |
+| `newdevice_config_set` | (in plugin) | `enabled`, `limit_kbit`, `limit_mode` (`limiter`\|`shaper`) | write |
+| `activity_log` | (in plugin) | `lines` (default 50, capped at 1000) | write |
 
 `telegram_config_set` keeps `/etc/init.d/trafficctl-telegram` enabled in rc.d
 while `telegram.enabled` is 1 and disabled while it is 0, then reloads the bot.
@@ -157,6 +159,29 @@ is how many samples every open browser keeps *per device*, and each poll costs
 the router a conntrack read.
 
 `port` accepts a single port or a `lo-hi` range.
+
+`history_config_set` takes a `dir` below `/etc/trafficctl`, `/mnt`, `/media`,
+`/srv` or `/tmp`, at least one level down, and every component a name: no
+empty, `.` or `..` component. `/mnt/.` or `/mnt//` would otherwise pass the
+prefix check and make a mount root the store, whose prune deletes inside it.
+The sampler's own check (`hist_validate_dir`) applies the same rule to the
+stored value.
+
+**Failures.** A setter whose commit fails (a read-only or full overlay)
+replies `{"ok":false,"msg":"could not save the trafficctl settings"}` (or
+`firewall`), logs nothing and leaves nothing staged in `/tmp/.uci`; `cut_set`
+then engages nothing. A delegated command still running after 60 s is killed
+and the reply is `{"ok":false,"msg":"trafficctl <command> did not finish within
+60 s"}`; rpcd itself gives an exec plugin 120 s. Only the CLI process is
+killed: on 22.03 nothing can give it a process group of its own (busybox has
+no `setsid`, ash no job control without a terminal), so what it started runs
+to its end. A method that answers `{"result": ...}` keeps that key on an error
+(`{"result":null,"ok":false,"msg":...}`), an internal one included.
+
+The plugin reads the whole of its stdin: rpcd writes the arguments and closes
+the pipe (checked against rpcd on 22.03 by `tests/test_install.sh`). It asks
+rpcd's session for the login name, for the activity log, only on the `write`
+methods; the `read` methods are the dashboard's polls.
 
 ---
 

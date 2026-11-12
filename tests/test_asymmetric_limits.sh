@@ -384,14 +384,14 @@ assert_contains "shape restore re-applies the upload ceiling" "rate 2000kbit" "$
 # Read statically: the handlers shell out, and what matters is that a missing
 # or zero field is normalised to "symmetric" before it gets there.
 
+# tests/test_rpcd.sh checks what reaches the command; this is the source.
 rpcd_src=$(cat "$RPCD")
-assert_contains "ratelimit accepts an upload rate" '"rate_kbit_up":"int"' "$rpcd_src"
-assert_contains "ratelimit passes it to the script" \
-    '"$ip" "${rate:-0}" "$label" "$mode" "$rate_up"' "$rpcd_src"
-assert_contains "shape_add passes it to the script" \
-    'add "$ip" "$rate" "$label" "$rate_up"' "$rpcd_src"
+assert_contains "ratelimit accepts an upload rate" \
+    "ratelimit: { ip: 'str', rate_kbit: 'int', label: 'str', mode: 'str', rate_kbit_up: 'int' }" "$rpcd_src"
+assert_contains "shape_add accepts an upload rate" \
+    "shape_add: { ip: 'str', rate_kbit: 'int', label: 'str', rate_kbit_up: 'int' }" "$rpcd_src"
 assert_eq "both handlers normalise a zero upload rate away" "2" \
-    "$(grep -c '\[ "\$rate_up" = "0" \] && rate_up=""' "$RPCD")"
+    "$(grep -c "if (up == '0')" "$RPCD")"
 
 # ════════════════════════════════════════════════════════════════════════════
 # 6. The frontend

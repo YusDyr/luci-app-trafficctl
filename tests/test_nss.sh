@@ -184,8 +184,9 @@ assert_contains "and says the toggles beside it do not control NSS" \
 
 # The dashboard needs it without applying anything.
 RPCD="$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
-assert_contains "config_get reports the NSS status" '"nss":"%s"' "$(cat "$RPCD")"
-assert_contains "config_get fills it from the detector" 'tctl_nss_status' "$(cat "$RPCD")"
+# The plugin reads the same ECM knobs itself; tests/test_rpcd.sh drives it.
+assert_contains "config_get reports the NSS status" 'nss: nss_status(),' "$(cat "$RPCD")"
+assert_contains "the plugin reads the ECM debugfs directory" "'/sys/kernel/debug/ecm'" "$(cat "$RPCD")"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

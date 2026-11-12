@@ -19,6 +19,7 @@ const ARGS = {
 	'network.rrdns.lookup': { addrs: [], timeout: 0, limit: 0, server: [] },
 	'hostapd.*.del_client': { addr: '', reason: 0, deauth: true, ban_time: 0 },
 	'session.info': { ubus_rpc_session: '' },
+	'session.get': { ubus_rpc_session: '', keys: [] },
 };
 
 function argspec(obj, method) {
