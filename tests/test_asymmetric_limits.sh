@@ -577,5 +577,117 @@ assert_eq "removing the shorter of two prefixed addresses leaves the longer" "1"
     "$(printf '%s' "$rules" | grep -o '"type":"ratelimit"' | wc -l | tr -d ' ')"
 assert_contains "and the one left is the longer address" '"ip":"192.168.1.100","param":"5000"' "$rules"
 
+LOGGER_LOG="$TMP/logger.log"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Rates are whole numbers
+# ════════════════════════════════════════════════════════════════════════════
+#
+# Shell arithmetic reads "abc" as 0 and "010" as octal. tctl_rate_bytes then
+# clamped the 0 to 1 byte/s, so a typo became a persisted near-total block
+# reported as {"ok":true}.
+
+printf '#!/bin/sh\necho "$*" >> "%s"\nexit 0\n' "$LOGGER_LOG" > "$MOCKBIN/logger"
+chmod +x "$MOCKBIN/logger"
+: > "$TCTL_TEST_PERSIST"
+
+for r in 1 5000 100000000; do
+    assert_eq "tctl_validate_rate accepts $r" "0" \
+        "$(PATH="$MOCKBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; tctl_validate_rate '$r'; echo \$?")"
+done
+for r in '' 0 abc 1.5 010 -5 1e3 ' 5' 100000001 999999999999999999999; do
+    assert_eq "tctl_validate_rate refuses '$r'" "1" \
+        "$(PATH="$MOCKBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; tctl_validate_rate '$r'; echo \$?")"
+done
+
+printf '[]' > "$RULES"
+for r in abc 1.5 010 -5 100000001; do
+    : > "$NFT_LOG"
+    out=$(run "$TMP/ratelimit.sh" 192.168.1.90 "$r")
+    assert_contains "ratelimit: rate '$r' is refused" '"ok":false' "$out"
+    assert_not_contains "ratelimit: rate '$r' writes no rule" 'limit rate over' "$(cat "$NFT_LOG")"
+done
+out=$(run "$TMP/ratelimit.sh" 192.168.1.90 5000 rl_test each abc)
+assert_contains "ratelimit: an invalid upload rate is refused" '"ok":false' "$out"
+assert_not_contains "ratelimit: nothing invalid was persisted" '192.168.1.90' "$(cat "$RULES")"
+out=$(run "$TMP/ratelimit.sh" 192.168.1.90 0)
+assert_contains "ratelimit: 0 still removes" '"ok":true' "$out"
+
+: > "$SHAPES"
+for r in abc 1.5 010 0; do
+    : > "$TC_LOG"
+    out=$(run "$TMP/shape.sh" add 192.168.1.91 "$r")
+    assert_contains "shape: rate '$r' is refused" '"ok":false' "$out"
+    assert_not_contains "shape: rate '$r' builds no class" '192.168.1.91' "$(cat "$TC_LOG")"
+done
+out=$(run "$TMP/shape.sh" add 192.168.1.91 5000 shape_test abc)
+assert_contains "shape: an invalid upload rate is refused" '"ok":false' "$out"
+assert_not_contains "shape: nothing invalid was persisted" '192.168.1.91' "$(cat "$SHAPES")"
+
+# ════════════════════════════════════════════════════════════════════════════
+# The limiter's netdev table
+# ════════════════════════════════════════════════════════════════════════════
+#
+# Without kmod-nft-netdev the kernel has no netdev family. The table creation
+# failed into /dev/null and the result still read as applied.
+
+cat > "$MOCKBIN/nft" <<MOCK
+#!/bin/sh
+printf '%s\n' "\$*" >> "$NFT_LOG"
+case "\$*" in
+    "list tables") echo "table inet fw4" ;;
+    "add table netdev tm_ratelimit")
+        if [ -f "$TMP/no_netdev" ]; then
+            echo "Error: Could not process rule: Operation not supported" >&2
+            exit 1
+        fi
+        ;;
+esac
+exit 0
+MOCK
+chmod +x "$MOCKBIN/nft"
+
+: > "$TMP/no_netdev"
+: > "$LOGGER_LOG"
+out=$(run "$TMP/ratelimit.sh" 192.168.1.92 5000)
+assert_contains "no netdev family: the limit is refused" '"ok":false' "$out"
+assert_contains "no netdev family: the reply names kmod-nft-netdev" 'kmod-nft-netdev' "$out"
+assert_contains "no netdev family: the failure is logged with nft's error" \
+    'Operation not supported' "$(cat "$LOGGER_LOG")"
+rm -f "$TMP/no_netdev"
+
+# ════════════════════════════════════════════════════════════════════════════
+# The restore hook logs real failures only
+# ════════════════════════════════════════════════════════════════════════════
+#
+# `a && b && c || logger` logged "Failed to restore" for every record with no
+# rate, where nothing was attempted, and never for a real failure: the nft
+# path of tctl_ratelimit_add returns 0 whatever happened.
+
+hook() {
+    printf '%s' "$1" > "$RULES"
+    : > "$NFT_LOG"
+    : > "$LOGGER_LOG"
+    PATH="$MOCKBIN:$PATH" ACTION=ifup INTERFACE=lan sh "$TMP/hotplug" >/dev/null 2>&1
+}
+
+hook '[{"type":"ratelimit","ip":"192.168.1.93","param":"0"},{"type":"ratelimit","ip":"192.168.1.95","param":""},{"type":"pfw_limit","ip":"forward/tcp/192.168.1.94/8080","param":"0"}]'
+assert_not_contains "restore: records with no rate log no failure" 'Failed to restore' "$(cat "$LOGGER_LOG")"
+
+hook '[{"type":"ratelimit","ip":"192.168.1.96","param":"abc"}]'
+assert_contains "restore: an invalid persisted rate is skipped and logged" \
+    'Not restoring ratelimit for 192.168.1.96' "$(cat "$LOGGER_LOG")"
+assert_not_contains "restore: and no rule is written for it" '192.168.1.96' "$(cat "$NFT_LOG")"
+
+: > "$TMP/no_netdev"
+hook '[{"type":"ratelimit","ip":"192.168.1.97","param":"5000"}]'
+assert_contains "restore: a limit that failed to load is logged" \
+    'Failed to restore ratelimit for 192.168.1.97' "$(cat "$LOGGER_LOG")"
+rm -f "$TMP/no_netdev"
+
+hook '[{"type":"ratelimit","ip":"192.168.1.98","param":"5000"}]'
+assert_not_contains "restore: a limit that loaded logs nothing" 'Failed to restore' "$(cat "$LOGGER_LOG")"
+assert_contains "restore: and its rule is there" 'ip daddr 192.168.1.98' "$(cat "$NFT_LOG")"
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

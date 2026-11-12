@@ -198,6 +198,14 @@ assert_contains "limit: rate-over drop rule (8000 kbit = 1000000 bytes)" \
 OUT=$(run_portfw limit forward tcp 192.168.0.10 80 0)
 assert_contains "limit 0: removes" '"ok":true' "$OUT"
 
+# "08" is all digits, but shell arithmetic reads it as (invalid) octal.
+for bad in 08 0800 999999999999; do
+    : > "$NFT_LOG"
+    OUT=$(run_portfw limit forward tcp 192.168.0.10 80 "$bad")
+    assert_contains "limit $bad: rejected" '"ok":false' "$OUT"
+    assert_not_contains "limit $bad: no rule written" 'limit rate over' "$(cat "$NFT_LOG")"
+done
+
 # ── validation ───────────────────────────────────────────────────────────────
 
 OUT=$(run_portfw pause forward tcp 192.168.0.10 99999)
