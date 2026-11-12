@@ -264,9 +264,9 @@ function fmtBytes(b) {
 // idle — that is issue #26.
 //
 // A negative total means the router cannot answer, which is not the same as
-// zero: under flow offload the byte source becomes nftables counter maps keyed
-// by address alone, which cannot split TCP from UDP. Printing 0 there would be
-// a confident wrong answer, i.e. the very failure this change removes.
+// zero: a total carried over from a release that read nftables counter maps
+// keyed by address alone has no TCP/UDP split. Printing 0 there would be a
+// confident wrong answer, i.e. the very failure this change removes.
 function renderTotalCell(cell, total, liveVal, since, pending, degraded) {
 	while (cell.firstChild) {
 		cell.removeChild(cell.firstChild);
@@ -283,7 +283,7 @@ function renderTotalCell(cell, total, liveVal, since, pending, degraded) {
 	// than the implausibly small live values that prompted issue #26.
 	if (degraded) {
 		cell.appendChild(E('span', { 'class': 'tc-c-err tc-fw-bold' }, '⚠'));
-		cell.title = _('Not counted: flow offload is active and this router cannot provide the nftables counters trafficctl uses in that mode, so the kernel byte counters stop updating for offloaded connections. Any total here would be far too low. See Settings → Flow Offload.');
+		cell.title = _('Not counted: flow offload is active and the flowtable has no counter, so the kernel byte counters stop updating for offloaded connections. Any total here would be far too low. See Settings → Flow Offload.');
 		return;
 	}
 	if (total == null || total < 0) {
@@ -3080,9 +3080,9 @@ return view.extend({
 					};
 
 					// Lifetime totals, accumulated by trafficctl-totals.sh.
-					// The proto fields arrive as -1 when the router cannot
-					// measure them (nft counters under flow offload), and that
-					// -1 is carried through untouched so the cell can say so
+					// The proto fields arrive as -1 when the router has no
+					// split for them (a total from the old nft counter maps),
+					// and that -1 is carried through untouched so the cell can say so
 					// instead of printing a zero nobody can explain.
 					var tcpT = (d.bytes_tcp_total == null) ? -1 : Number(d.bytes_tcp_total);
 					var udpT = (d.bytes_udp_total == null) ? -1 : Number(d.bytes_udp_total);
@@ -3424,17 +3424,17 @@ return view.extend({
 				statsDiv.lastChild.addEventListener('click', function() { self._tableFilter = null; renderSummary(rows); });
 			}
 
-			// Says once, in words, what the ⚠ in every byte cell means. The
-			// Flow Offload banner above already explains the mode, but on this
-			// hardware its reassurance — that trafficctl switches to nftables
-			// counters — is exactly what does not hold.
+			// Says once, in words, what the ⚠ in every byte cell means, and
+			// what to do about it: on fw4 without a flowtable counter (22.03)
+			// no nft rule can count offloaded packets, so the fix is on the
+			// operator's side.
 			if (rows.some(function(r) { return r._total_degraded; })) {
 				statsDiv.appendChild(E('div', {
 					'style': 'margin-top:8px;padding:6px 8px;border-left:3px solid var(--tc-err);' +
 						'background:rgba(211,84,0,0.10);font-size:11px'
 				}, [
 					E('strong', {}, '⚠ ' + _('Byte totals unavailable on this router.')),
-					document.createTextNode(' ' + _('Flow offload is active and the kernel does not support the nftables counter maps trafficctl uses in that mode, so byte counters stop updating for offloaded connections. Speeds and totals would be far too low, so they are not shown. Disabling hardware offload in Settings → Flow Offload restores them.'))
+					document.createTextNode(' ' + _('Flow offload is active and the flowtable has no counter (firewall4 on OpenWrt 22.03), so byte counters stop updating for offloaded connections. Speeds and totals would be far too low, so they are not shown. Turn flow offloading off in Settings → Flow Offload, or upgrade to OpenWrt 23.05 or later, to restore them.'))
 				]));
 			}
 
@@ -3922,10 +3922,10 @@ return view.extend({
 					para(bold(_('How to get full functionality without disabling offload:'))),
 					para([_('The flowtable') + ' ',
 						E('code', {}, 'counter'),
-						' ' + _('flag (Linux 5.7+, set automatically by fw4/nftables) periodically syncs ' +
+						' ' + _('flag (Linux 5.7+) periodically syncs ' +
 						  'hardware byte counts back to conntrack — trafficctl detects this and all features work normally.')]),
-					para(_('If your current firmware uses fw3 (iptables) or ships a kernel older than 5.7, ' +
-						  'a router with modern OpenWrt and fw4 support will have this working out of the box.')),
+					para(_('firewall4 on OpenWrt 22.03 does not set this flag; from 23.05 on it does, ' +
+						  'so upgrading the firmware restores full functionality.')),
 					docLinks,
 				]);
 			} else if (mode === 'software-counter') {
@@ -3933,11 +3933,9 @@ return view.extend({
 				// accurate graphs, which is why this was cosmetic rather than
 				// misleading — but it is a different mechanism, and the
 				// counter flag is exactly the detail someone opens this banner
-				// to understand. Saying "measured via nftables counters" here
-				// describes a path that is NOT producing the numbers on this
-				// router: with the flag set, the flowtable syncs offloaded
-				// byte counts back to conntrack and tctl_pick_byte_source
-				// stays on conntrack.
+				// to understand: with the flag set, the flowtable syncs
+				// offloaded byte counts back to conntrack, which is why the
+				// numbers are accurate here and frozen in plain 'software'.
 				bg     = 'rgba(243,156,18,0.10)';
 				border = '#f39c12';
 				icon   = 'ℹ️';
@@ -3949,7 +3947,7 @@ return view.extend({
 						E('code', {}, 'counter'),
 						' ' + _('flag (Linux 5.7+, set automatically by fw4), so offloaded byte counts are ' +
 						  'synced back to conntrack. Speed and totals come from conntrack as usual and ' +
-						  'are accurate — the nftables counter fallback is not needed on this router.')]),
+						  'are accurate.')]),
 					para(_('Traffic shaping and blocking are not affected.')),
 					docLinks,
 				]);
@@ -3961,8 +3959,15 @@ return view.extend({
 					para(bold(_('Software flow offloading is active.'))),
 					para(_('The kernel fast-paths established connections through a flowtable, ' +
 						  'bypassing conntrack byte updates for higher throughput.')),
-					para(_('Speed is measured via nftables counters installed at a higher priority ' +
-						  '(before the flowtable), so graphs are accurate.')),
+					para([_('The flowtable has no') + ' ',
+						E('code', {}, 'counter'),
+						' ' + _('flag (firewall4 on OpenWrt 22.03 does not set one), so offloaded connections ' +
+						  'are not counted at all: per-device speeds and totals are not shown.')]),
+					para(bold(_('To restore speed monitoring:'))),
+					E('ul', {'class': 'tc-offload-ul'}, [
+						E('li', {}, _('Disable flow offload in LuCI → Network → Firewall → General Settings.')),
+						E('li', {}, _('Or upgrade to OpenWrt 23.05 or later, whose firewall4 sets the flag.')),
+					]),
 					para(_('Traffic shaping and blocking are not affected.')),
 					docLinks,
 				]);

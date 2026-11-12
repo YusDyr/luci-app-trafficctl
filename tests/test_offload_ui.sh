@@ -123,9 +123,24 @@ case "$sc_branch" in
         ;;
     *) PASS=$((PASS + 1)) ;;
 esac
+# Plain software offload is fw4 on 22.03: no counter flag, and nothing else
+# counts offloaded packets (the flowtable sits at netdev ingress, ahead of
+# every inet chain). An earlier text promised accurate graphs from nftables
+# counters "before the flowtable", which no priority can deliver.
 case "$sw_branch" in
-    *'nftables counters installed at a higher priority'*) PASS=$((PASS + 1)) ;;
-    *) FAIL=$((FAIL + 1)); printf "FAIL: the plain-software branch no longer describes the nftables counter path\n" ;;
+    *'nftables counters'*)
+        FAIL=$((FAIL + 1))
+        printf "FAIL: the plain-software branch promises nftables counters, which cannot see offloaded packets\n"
+        ;;
+    *) PASS=$((PASS + 1)) ;;
+esac
+case "$sw_branch" in
+    *'are not counted at all'*) PASS=$((PASS + 1)) ;;
+    *) FAIL=$((FAIL + 1)); printf "FAIL: the plain-software branch does not say offloaded connections go uncounted\n" ;;
+esac
+case "$sw_branch" in
+    *'OpenWrt 23.05'*) PASS=$((PASS + 1)) ;;
+    *) FAIL=$((FAIL + 1)); printf "FAIL: the plain-software branch does not point at the upgrade that fixes it\n" ;;
 esac
 case "$sw_branch" in
     *'synced back to conntrack'*)

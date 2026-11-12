@@ -88,7 +88,7 @@ run nft -j list ruleset
 run nft list flowtables
 run nft list chain inet fw4 forward
 run nft -j list chain inet fw4 forward
-for t in "netdev tm_ratelimit" "inet trafficctl_mon" "inet tctl_cut" "inet tctl_pfw"; do
+for t in "netdev tm_ratelimit" "inet tctl_cut" "inet tctl_pfw"; do
     # shellcheck disable=SC2086
     nft list table $t >/dev/null 2>&1 || continue
     # shellcheck disable=SC2086

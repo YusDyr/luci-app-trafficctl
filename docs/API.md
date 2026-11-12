@@ -188,11 +188,11 @@ methods; the `read` methods are the dashboard's polls.
 ## Query Scripts
 
 `trafficctl-subnets.sh`, `trafficctl-names.sh`, `trafficctl-rdns.sh`,
-`trafficctl-rdns-refresh.sh`, `trafficctl-ifaces.sh`, `trafficctl-bytes.sh`,
-`trafficctl-bytes-nft.sh` and `trafficctl-totals.sh` are two-line wrappers for
-the ucode CLI: `/usr/sbin/trafficctl
-subnets|names|rdns|rdns-refresh|ifaces|bytes|bytes-nft|totals` takes the same
-arguments and prints the same bytes. The byte commands print their arrays
+`trafficctl-rdns-refresh.sh`, `trafficctl-ifaces.sh`, `trafficctl-bytes.sh`
+and `trafficctl-totals.sh` are two-line wrappers for the ucode CLI:
+`/usr/sbin/trafficctl subnets|names|rdns|rdns-refresh|ifaces|bytes|totals`
+takes the same arguments and prints the same bytes. `bytes-nft` and its wrapper
+are gone (see `trafficctl-bytes.sh` below). The byte commands print their arrays
 sorted by address, where the shell printed awk hash order.
 
 ### trafficctl-summary.sh
@@ -343,9 +343,9 @@ not a lifetime total — see `trafficctl-totals.sh` below.
 | `ip` | string | Device IP |
 | `bytes_in` | number | Bytes received (download = conntrack reply direction) |
 | `bytes_out` | number | Bytes sent (upload = conntrack original direction) |
-| `bytes_tcp` | number | TCP bytes, both directions. `-1` when the source cannot split by protocol |
-| `bytes_udp` | number | UDP bytes, both directions. `-1` when the source cannot split by protocol |
-| `src` | string | `ct` = conntrack, `nft` = nftables counter maps |
+| `bytes_tcp` | number | TCP bytes, both directions |
+| `bytes_udp` | number | UDP bytes, both directions |
+| `src` | string | Always `ct` (conntrack). Releases up to 1.30.x could also report `nft` |
 | `degraded` | bool | `true` when these counters are **frozen** for offloaded flows — see below |
 
 `degraded` is about *trust*; `src` is about *magnitude*. They are separate
@@ -354,30 +354,29 @@ folding the two together would make a trust change look like a source change
 and throw away a real delta.
 
 `degraded` is `true` when the router has **uncountered** flow offload (plain
-`hardware` or `software`) *and* the nftables fallback is unavailable because the
-kernel has no dynamic counter map support (`trafficctl bytes-nft` then reads
-conntrack instead). Kernel 6.12 is one: it refuses `type ipv4_addr : counter;
-flags dynamic` with "Not supported", whichever nftables (1.0.2 and 1.1.6
-tried). `TCTL_FORCE_CONNTRACK=1` in the environment skips the nft maps and
-gives the same flagged conntrack sample. The counters then stop moving for every offloaded
-flow while traffic continues, so any total built from them is a lower bound that
-stalls. Consumers must refuse to present it as a total.
+`hardware` or `software`: fw4 on OpenWrt 22.03, or a custom flowtable declared
+without `counter`). The counters then stop moving for every offloaded flow while
+traffic continues, so any total built from them is a lower bound that stalls.
+Consumers must refuse to present it as a total. The first such sample per
+offload mode also logs a warning to syslog (tag `trafficctl`) that says to
+disable flow offloading or upgrade to 23.05 or later.
 
-Which source is used is decided per call: with flow offload active and no
-working `counter` flag, conntrack stops accounting for offloaded flows, so the
-sampler hands over to `trafficctl bytes-nft`, whose maps sit on the forward
-hook at priority `-200`, ahead of the flowtable at `-150`. Those maps are keyed
-by address alone, which is why `bytes_tcp` / `bytes_udp` are `-1` there. They
-are read with `nft -j list map`, which accepts both element shapes:
-`[ key, { counter } ]` pairs from nftables 1.0.2 and
-`{ elem: { val, counter } }` from 1.1.6. The text listing is the fallback for
-an nftables built without JSON, and for JSON whose elements none of those
-shapes match.
+The sample always comes from conntrack. With a counter-flagged flowtable (fw4
+from 23.05 on, modes `software-counter` and `hardware-counter`) offloaded byte
+counts are synced back to conntrack, so it stays accurate. Without the flag
+nothing else can count offloaded packets: the flowtable hooks netdev ingress,
+so they never reach an inet forward chain at any priority, and counting
+downloads where they leave the router would need a netdev egress hook (kernel
+5.16+). Releases up to 1.30.x tried nftables counter maps on a forward chain
+at priority `-200` (`trafficctl bytes-nft`); no OpenWrt kernel accepted their
+map type, offloaded packets would have bypassed the chain anyway, and the path
+was removed.
 
 Counters are 64-bit integers end to end: a value past 2^53 comes out exact.
 
-`-1` means "not measurable", never "zero". A consumer that renders it as 0 is
-claiming the device sent no TCP at all.
+`-1` in a protocol field means "not measurable", never "zero". A consumer that
+renders it as 0 is claiming the device sent no TCP at all. A sample from
+conntrack always has the split; `-1` comes from `totals` (below).
 
 ---
 
@@ -387,8 +386,7 @@ Wraps `trafficctl bytes` with a **monotonic per-device accumulator** — the
 lifetime totals behind both the LuCI Bytes / TCP / UDP columns and the
 `trafficctl_device_bytes_total` metric. Neither raw source is a lifetime total:
 conntrack reports only flows that still exist (so a device's number collapses
-when they expire — [#26](https://github.com/YusDyr/luci-app-trafficctl/issues/26)),
-and the nft maps count only since the table was built.
+when they expire — [#26](https://github.com/YusDyr/luci-app-trafficctl/issues/26)).
 
 **Arguments:** `--all` (optional) — also emit devices that have left the sample
 but still carry a total. Used by the exporter so a Prometheus series does not
@@ -410,8 +408,8 @@ vanish and reappear every time an idle device's last flow expires.
 |-------|------|-------------|
 | `bytes_in_total` | number | Lifetime bytes received |
 | `bytes_out_total` | number | Lifetime bytes sent |
-| `bytes_tcp_total` | number | Lifetime TCP bytes, or `-1` if not measurable |
-| `bytes_udp_total` | number | Lifetime UDP bytes, or `-1` if not measurable |
+| `bytes_tcp_total` | number | Lifetime TCP bytes, or `-1` without a protocol baseline (a state line from before the split, or from 1.30.x on its nft maps) |
+| `bytes_udp_total` | number | Lifetime UDP bytes, or `-1` likewise |
 | `total_since` | number | Unix time accumulation began for this device |
 | `live` | bool | Whether the device was in this sample (always `true` without `--all`) |
 
@@ -425,10 +423,11 @@ accumulated history and stay exact.
 - **Only positive movement counts.** A drop in the raw counter means flows
   expired; their bytes were accumulated while they lived, so the drop rebaselines
   and adds nothing.
-- **A source switch rebaselines.** conntrack and nft counters have unrelated
-  magnitudes, so toggling flow offload (or the nft path falling back on a kernel
-  without dynamic counter maps) must not be differenced. The source is stored
-  per device and a change starts a fresh baseline.
+- **A source switch rebaselines.** The source is stored per device and a
+  change starts a fresh baseline. The sampler only reads conntrack now, but a
+  state file written by 1.30.x can record `nft` (counter maps, cumulative since
+  their table was built, a magnitude unrelated to conntrack): the first sample
+  after the upgrade rebaselines that device instead of adding the difference.
 - **Totals reset on reboot.** The store is `/tmp/trafficctl_totals.state`, i.e.
   tmpfs. Deliberate: it is rewritten on every LuCI poll (2–10 s) and every
   scrape, and that write volume into flash would wear the router out. Surviving

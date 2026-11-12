@@ -62,6 +62,10 @@
 //   mkdir_p(dir)
 //   write_atomic(p, data, mode)   temp file in the same directory + rename;
 //                                 mode defaults to the current file's
+//   create_once(p, data)          exclusive create + write: true for exactly one
+//                                 of several racing callers, false if p exists
+//                                 or the write came up short
+//   remove(p)                     unlink; false if p was not there
 //   lock(dir, tries, max_age, bare)
 //                                 mkdir lock holding our pid: tries x 100 ms
 //                                 (0 = one attempt). Taken over only when its
@@ -484,6 +488,29 @@ function write_atomic(p, data, mode) {
 	return true;
 }
 
+// O_EXCL, so of several runs racing for the same p exactly one gets true:
+// the one-off action it guards (a log line) happens once. A short write
+// (full disk) is undone and reported as false, so the caller tries again later
+// instead of acting without a record of it.
+function create_once(p, data) {
+	let dst = path(p);
+	data = '' + data;
+	let f = open(dst, 'wx', 0o644);
+	if (!f)
+		return false;
+	f.write(data);
+	f.close();
+	if (stat(dst)?.size != length(data)) {
+		unlink(dst);
+		return false;
+	}
+	return true;
+}
+
+function remove(p) {
+	return !!unlink(path(p));
+}
+
 function lock_owner(p) {
 	return trim(fs_readfile(p + '/pid') ?? '');
 }
@@ -833,7 +860,7 @@ function seen_seed() {
 export { path, pid, reset, plain, cursor, uci_get, uci_words, uci_foreach, commit,
 	ubus_call, q, run, lines, sh, to_json, valid_ip, valid_int, norm_mac, ip2int,
 	int2ip, cidr_spec, valid_target, readfile, file_lines, each_line, is_file, mkdir_p,
-	write_atomic, lock, unlock, field, valid_log_file, log, sanitize_name,
+	write_atomic, create_once, remove, lock, unlock, field, valid_log_file, log, sanitize_name,
 	names_list, names_map, names_set, names_remove, seen_ready, seen_count,
 	seen_known, seen_mark, seen_seed };
 // What the rpcd plugin and the CLI's legacy commands need.

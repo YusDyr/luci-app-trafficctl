@@ -71,17 +71,12 @@ function fmtAgo(ts) {
 	return Math.round(d / 86400) + ' ' + _('days ago');
 }
 
-// The three verdicts trafficctl-history.sh can report, and what each one means
+// The two verdicts trafficctl-history.sh can report, and what each one means
 // for a number on this page. Keyed on exactly the strings hist_accuracy emits;
 // an unknown value must fall through to a warning rather than to silence,
 // because the dangerous direction is presenting an unverified number as a
 // measurement.
 var ACCURACY = {
-	'counter': {
-		cls: 'tc-c-ok',
-		icon: '●',
-		text: _('Exact. Byte counts come from cumulative nftables counters, so they do not depend on how often the sampler runs. The TCP/UDP split is unavailable from this source.')
-	},
 	'sampled': {
 		cls: 'tc-c-muted',
 		icon: '○',

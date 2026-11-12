@@ -63,8 +63,8 @@ awk "/^var ACCURACY = \{/ { inl = 1; next }
      inl" "$JS" \
     | grep -oE "^\s*'[a-z]+'" | sed "s/^[[:space:]]*'//; s/'\$//" | sort -u > "$TMP/known"
 
-assert_eq "the backend emits exactly the three accuracy verdicts" \
-    "counter degraded sampled" \
+assert_eq "the backend emits exactly the two accuracy verdicts" \
+    "degraded sampled" \
     "$(tr '\n' ' ' < "$TMP/verdicts" | sed 's/ $//')"
 
 missing=$(awk 'NR == FNR { have[$0] = 1; next } !($0 in have)' "$TMP/known" "$TMP/verdicts" \

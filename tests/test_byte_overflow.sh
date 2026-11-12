@@ -25,7 +25,7 @@
 #   * The static assertions do not depend on the local awk at all and are what
 #     actually holds the line in CI.
 #
-# The byte samplers and the accumulator are ucode now (int64, no awk), so
+# The byte sampler and the accumulator are ucode now (int64, no awk), so
 # sections 2 and 3 test them directly, values past 2^53 included; the awk
 # loop remains for metrics.sh, which still reads the accumulator with awk.
 #
@@ -139,30 +139,22 @@ for a in $AWKS; do
 done
 
 # ════════════════════════════════════════════════════════════════════════════
-# 2. `trafficctl bytes-nft` reports a counter past 2 GiB, and past 2^53,
+# 2. `trafficctl bytes` reports a conntrack counter past 2 GiB, and past 2^53,
 #    intact. The ucode port has no awk in the path (int64 throughout), so this
 #    runs once; the 2^53+2 upload is exact there, where a double would round.
 # ════════════════════════════════════════════════════════════════════════════
 
-printf 'table inet trafficctl_mon {\n  chain mon_forward {\n    update @bytes_in { ip daddr counter }\n    update @bytes_out { ip saddr counter }\n  }\n}\n' \
-    > "$BE_NFT/list chain inet trafficctl_mon mon_forward"
-printf 'table inet trafficctl_mon {\n  map bytes_in {\n    elements = { 192.168.0.50 : counter packets 4000000 bytes %s }\n  }\n}\n' "$BIG" \
-    > "$BE_NFT/list map inet trafficctl_mon bytes_in"
-printf 'table inet trafficctl_mon {\n  map bytes_out {\n    elements = { 192.168.0.50 : counter packets 3000000 bytes %s, 192.168.0.51 : counter packets 1 bytes %s }\n  }\n}\n' "$HUGE" "$PAST53" \
-    > "$BE_NFT/list map inet trafficctl_mon bytes_out"
+be_offload none
+printf 'ipv4     2 tcp      6 431999 ESTABLISHED src=192.168.1.50 dst=203.0.113.9 sport=40000 dport=443 packets=3000000 bytes=%s src=203.0.113.9 dst=192.168.1.50 sport=443 dport=40000 packets=4000000 bytes=%s [ASSURED] mark=0 use=2\n' "$HUGE" "$BIG" > "$BE_CT"
+printf 'ipv4     2 udp      17 29 src=192.168.1.51 dst=203.0.113.9 sport=40001 dport=443 packets=1 bytes=%s src=203.0.113.9 dst=192.168.1.51 sport=443 dport=40001 packets=1 bytes=%s mark=0 use=2\n' "$PAST53" "$PAST53" >> "$BE_CT"
 
-out=$(be_run bytes-nft)
-assert_contains "bytes-nft: 5 GiB download survives" "\"bytes_in\":$BIG" "$out"
-assert_contains "bytes-nft: 2^53-1 upload survives" "\"bytes_out\":$HUGE" "$out"
-assert_contains "bytes-nft: 2^53+2 upload is exact" "\"bytes_out\":$PAST53" "$out"
-assert_not_contains "bytes-nft: nothing pinned at 2^31-1" "$CLAMP" "$out"
-assert_not_contains "bytes-nft: no wrapped negative byte count" "$WRAPPED" "$out"
-
-# The same through nft -j.
-printf '{"nftables": [{"map": {"name": "bytes_in", "elem": [["192.168.0.50", {"counter": {"packets": 1, "bytes": %s}}]]}}]}\n' "$PAST53" \
-    > "$BE_NFT/-j list map inet trafficctl_mon bytes_in"
-out=$(be_run bytes-nft)
-assert_contains "bytes-nft -j: 2^53+2 download is exact" "\"bytes_in\":$PAST53" "$out"
+out=$(be_run bytes)
+assert_contains "bytes: 5 GiB download survives" "\"bytes_in\":$BIG" "$out"
+assert_contains "bytes: 2^53-1 upload survives" "\"bytes_out\":$HUGE" "$out"
+assert_contains "bytes: 2^53+2 upload is exact" "\"bytes_out\":$PAST53" "$out"
+assert_not_contains "bytes: nothing pinned at 2^31-1" "$CLAMP" "$out"
+assert_not_contains "bytes: no wrapped negative byte count" "$WRAPPED" "$out"
+: > "$BE_CT"
 
 # ════════════════════════════════════════════════════════════════════════════
 # 3. The shared accumulator is not permanently pinned.

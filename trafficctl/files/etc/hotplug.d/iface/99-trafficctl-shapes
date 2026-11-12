@@ -5,12 +5,6 @@
 
 . /usr/libexec/trafficctl/trafficctl-fw.sh
 
-# Clean up nft monitor table on lan ifdown to avoid stale counters
-if [ "$ACTION" = "ifdown" ] && [ "$INTERFACE" = "lan" ]; then
-    nft delete table inet trafficctl_mon 2>/dev/null
-    exit 0
-fi
-
 [ "$ACTION" = "ifup" ] && [ "$INTERFACE" = "lan" ] || exit 0
 
 SHAPES_FILE="/etc/trafficctl/shapes.json"
@@ -137,9 +131,4 @@ fi
 if [ -f /etc/trafficctl/cut.state ]; then
     /usr/libexec/trafficctl/trafficctl-cut.sh restore >/dev/null 2>&1 || \
         logger -t trafficctl "Failed to restore the global internet cut"
-fi
-
-# Pre-create nft monitor table if software offload is active
-if [ "$(tctl_get_offload_mode)" = "software" ]; then
-    /usr/libexec/trafficctl/trafficctl-bytes-nft.sh >/dev/null 2>&1 &
 fi

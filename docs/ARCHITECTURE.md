@@ -33,7 +33,6 @@ graph TD
             DEV["trafficctl-device.sh<br/>(per-device connections)"]
             TOT["trafficctl-totals.sh = trafficctl totals<br/>(monotonic lifetime totals, ucode)"]
             BYT["trafficctl-bytes.sh = trafficctl bytes<br/>(conntrack byte counters, ucode)"]
-            BYTNFT["trafficctl-bytes-nft.sh = trafficctl bytes-nft<br/>(nft counter maps, ucode)"]
             IFA["trafficctl-ifaces.sh<br/>(per-interface counters + role map)"]
             RLS["trafficctl-ratelimit-stats.sh<br/>(nft drop counters)"]
             SHS["trafficctl-shape-stats.sh<br/>(tc class stats)"]
@@ -74,7 +73,6 @@ graph TD
     DEV --> IW
     TOT --> BYT
     BYT --> CTMOD
-    BYT -->|"offload active"| BYTNFT
 
     BLK & UBK --> NFT
     RL --> NFT
@@ -113,7 +111,7 @@ sequenceDiagram
     loop Every N seconds (poll)
         B->>R: bytes()
         R->>BY: exec
-        BY->>BY: trafficctl bytes (conntrack, or nft maps under offload)
+        BY->>BY: trafficctl bytes (conntrack; degraded under uncountered offload)
         BY->>BY: accumulate positive deltas into /tmp/trafficctl_totals.state
         BY-->>B: [{ip, bytes_in, bytes_out, bytes_*_total, …}]
         B->>B: calculate speed = delta_bytes / delta_time
