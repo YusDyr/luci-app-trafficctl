@@ -11,10 +11,13 @@
 //           its offload check; needs an uncountered offload mode
 //   write   formatting a state line dies, inside the locked section; prints
 //           {"error": msg} instead of the result
+// TCTL_TEST_FRESH_LOCK makes the shell's bare lock just after a second
+// boundary and calls totals at once: the lock is as young as it can be at the
+// first try, and its whole-second age is the lowest it can read at the last.
 
 import * as lib from 'trafficctl.lib';
 import * as net from 'trafficctl.net';
-import { readfile } from 'fs';
+import { readfile, mkdir } from 'fs';
 
 let fail = getenv('TCTL_TEST_FAIL') ?? '';
 let all = (ARGV[1] == '--all');
@@ -45,6 +48,12 @@ try {
 }
 catch (e) {
 	sample = [];
+}
+if (getenv('TCTL_TEST_FRESH_LOCK')) {
+	let s = time();
+	while (time() == s)
+		sleep(1);
+	mkdir(lib.path('/tmp/trafficctl_totals.lock.d'));
 }
 try {
 	print(lib.to_json(net.totals(all, sample)), '\n');
