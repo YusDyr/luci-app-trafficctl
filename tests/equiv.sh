@@ -274,8 +274,12 @@ done <<< "$CASES"
 # JSON on stdin. Case lines: name | mode | scripts | method | json [| setup]
 #   scripts  stub: every backend script is a stub that logs its arguments and
 #            the caller variables to tmp/dispatch.log, so a delegated method is
-#            compared on what it hands on (the ucode side reaches the stubs
-#            through the real CLI); real: the legacy scripts themselves
+#            compared on what it hands on. The ucode side reaches the stubs
+#            through the real CLI for the commands it still passes to a
+#            script; a command the CLI has ported goes to the stub of the
+#            script it replaced, with the plugin's arguments and environment
+#            (the port itself is compared in the CLI cases above).
+#            real: the legacy scripts themselves
 #   mode     json[+files]: the reply semantically (jq -S, or as text when it
 #            is not JSON), then the files; the root prefix is masked
 LPLUGIN="$L/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
@@ -295,6 +299,15 @@ for f in "$LEXEC"/trafficctl-*.sh; do
 done
 # The stubbed plugin still sources the real library.
 ln -sf "$LEXEC/trafficctl-fw.sh" "$STUBS/trafficctl-fw.sh"
+
+# The CLI's ported commands: the keys of its `commands` table.
+PORTED=$(awk '/^const commands = \{/ { f = 1; next } f && /^\};/ { f = 0 }
+    f && match($0, /^\t'"'"'?[a-z-]+'"'"'?: /) { c = substr($0, 2, RLENGTH - 3); gsub(/'"'"'/, "", c); print c }' \
+    "$UC_REPO/trafficctl/files/usr/sbin/trafficctl" | tr '\n' ' ')
+case " $PORTED " in *" totals "*) ;; *) echo "FAIL: no ported commands found in the CLI ($PORTED)"; exit 1 ;; esac
+for c in $PORTED; do
+    [ -e "$STUBS/trafficctl-$c.sh" ] || { echo "FAIL: ported command $c has no legacy script to stub"; exit 1; }
+done
 
 # Mock init scripts for the services the plugin restarts; reload runs in the
 # background, hence the pause after each call.
@@ -323,6 +336,7 @@ device-proto-bad | json+$LOGF | stub | device | {\"ip\":\"192.168.0.101\",\"prot
 device-no-ip | json+$LOGF | stub | device | {}
 bytes | json+$LOGF | stub | bytes | {}
 ifaces | json | real | ifaces | {}
+ifaces-stub | json+$LOGF | stub | ifaces | {}
 block | json+$LOGF | stub | block | {\"ip\":\"192.168.0.9\",\"label\":\"my label; reboot\"}
 block-no-ip | json+$LOGF | stub | block | {\"label\":\"x\"}
 unblock | json+$LOGF | stub | unblock | {\"ip\":\"192.168.0.9\",\"label\":\"block_192.168.0.9\"}
@@ -340,6 +354,7 @@ ratelimit-no-rate | json+$LOGF | stub | ratelimit | {\"ip\":\"192.168.0.9\"}
 ratelimit-no-ip | json+$LOGF | stub | ratelimit | {\"rate_kbit\":5000}
 ratelimit-stats | json+$LOGF | stub | ratelimit_stats | {}
 subnets | json | real | subnets | {}
+subnets-stub | json+$LOGF | stub | subnets | {}
 shape-add | json+$LOGF | stub | shape_add | {\"ip\":\"192.168.0.9\",\"rate_kbit\":8000,\"label\":\"x y\",\"rate_kbit_up\":1000}
 shape-add-up0 | json+$LOGF | stub | shape_add | {\"ip\":\"192.168.0.9\",\"rate_kbit\":8000,\"rate_kbit_up\":0}
 shape-add-no-rate | json+$LOGF | stub | shape_add | {\"ip\":\"192.168.0.9\"}
@@ -351,6 +366,7 @@ shape-stats | json+$LOGF | stub | shape_stats | {}
 rules-list | json+$LOGF | stub | rules_list | {}
 rdns | json | real | rdns | {\"ip\":\"192.168.0.101\"} | $RESOLV
 rdns-no-ip | json | real | rdns | {}
+rdns-stub | json+$LOGF | stub | rdns | {\"ip\":\"192.168.0.101; reboot\"}
 netify-status | json+$LOGF | stub | netify_status | {}
 netify-list | json+$LOGF | stub | netify_list | {}
 netify-collect | json+$LOGF | stub | netify_collect | {\"secs\":5}
@@ -474,8 +490,18 @@ rpcd_side() {   # rpcd_side <legacy|new> <stub|real> <method> <json>
         ln -sfn "$dir" "$W/root/usr/libexec/trafficctl"
         # glibc's getopt would take the CLI's own --proto for a ucode option;
         # musl's, on the router, stops at the script name.
-        printf '#!/bin/sh\nPOSIXLY_CORRECT=1 exec "%s" -S -L "%s" "%s" "$@"\n' "$UCODE" "$UC_LIB" \
-            "$UC_REPO/trafficctl/files/usr/sbin/trafficctl" > "$W/root/usr/sbin/trafficctl"
+        {
+            echo '#!/bin/sh'
+            if [ "$2" = stub ]; then
+                printf 'case "$1" in\n'
+                for c in $PORTED; do
+                    printf '%s) c=$1; shift; exec "%s/trafficctl-$c.sh" "$@" ;;\n' "$c" "$STUBS"
+                done
+                printf 'esac\n'
+            fi
+            printf 'POSIXLY_CORRECT=1 exec "%s" -S -L "%s" "%s" "$@"\n' "$UCODE" "$UC_LIB" \
+                "$UC_REPO/trafficctl/files/usr/sbin/trafficctl"
+        } > "$W/root/usr/sbin/trafficctl"
         chmod +x "$W/root/usr/sbin/trafficctl"
         printf '%s\n' "$4" |
             (export TCTL_ROOT="$W/root" PATH="$W/bin:$PATH"; "$UCODE" -S -L "$UC_LIB" "$NPLUGIN" call "$3")
