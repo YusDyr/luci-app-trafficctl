@@ -204,8 +204,8 @@ else:
 
 | Function | nft implementation | iptables implementation |
 |----------|-------------------|------------------------|
-| `tctl_ratelimit_add` | `nft add rule netdev tm_ratelimit dl ip daddr ... limit rate over ... drop` | `iptables -t mangle -A FORWARD ... -m hashlimit ... -j DROP` |
-| `tctl_ratelimit_remove` | Delete rules by handle from `netdev tm_ratelimit dl` | `iptables -t mangle -D FORWARD ... -m comment --comment ...` |
+| `tctl_ratelimit_add` | `netdev tm_ratelimit`: `ip daddr ... limit rate over ... drop` on every LAN device's egress chain `dl_<dev>` (WAN ingress chain `dl` on kernels without egress), `ip saddr ...` on every bridge port's ingress chain `ul_<port>`; in `each` mode one meter per chain (`tctl_rl_meter_name`). A device that refuses its rule is logged and reported (`partial`); the rules on the other devices stay | `iptables -t mangle -A FORWARD ... -m hashlimit ... -j DROP` |
+| `tctl_ratelimit_remove` | `tctl_rl_delete_rules`: rules by exact comment and handle across all chains, then the meter sets those rules named (nftables 1.1 keeps them) | `iptables -t mangle -D FORWARD ... -m comment --comment ...` |
 | `tctl_block_add` | `nft add rule inet fw4 forward ip saddr ... drop` | `iptables -I FORWARD -s ... -j DROP` |
 | `tctl_block_remove` | Delete rules by handle from `inet fw4 forward` | `iptables -D FORWARD -s ... -j DROP` (loop until gone) |
 | `tctl_is_blocked` | grep nft forward chain | grep iptables FORWARD chain |
