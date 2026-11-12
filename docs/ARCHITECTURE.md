@@ -390,6 +390,8 @@ This approach disconnects only the target client. All other WiFi clients remain 
 
 The hotplug script triggers on `ACTION=ifup` and `INTERFACE=lan`, with a readiness loop (waits up to 10s for tc to be available on the bridge device). When `persist_rules` is enabled, blocks and ratelimits are saved/removed from `/etc/trafficctl/rules.json` alongside shape operations.
 
+Blocks are also restored after every firewall reload by `/usr/libexec/trafficctl/trafficctl-fw-restore.sh`, registered as a `firewall` include (`type=script`, `fw4_compatible=1`). `tctl_block_add` inserts drop rules into `inet fw4 forward`, and fw4 rebuilds that table from `/etc/config/firewall`, so a mid-session reload (an `https-dns-proxy` restart, a LuCI firewall edit, ...) would otherwise drop every block while `rules.json` and the UI still said the device was blocked. The lan-ifup hook does not fire for those reloads. Rate limits (`netdev tm_ratelimit`) and port-forward pauses (`inet tctl_pfw`) live in their own tables and survive a fw4 reload, so they are not replayed by this include.
+
 ---
 
 ## Telegram Bot

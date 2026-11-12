@@ -173,7 +173,7 @@ I hope it turns out as useful for you as it has been for me.
 - **New Device Detection** -- Discovers new devices via three sources: ARP table, DHCP leases, Wi-Fi station list. Instant DHCP hotplug trigger for near-realtime alerts.
 - **Activity Logging** -- Configurable logging of all actions (blocks, ratelimits, shapes, config changes) to a local file and/or syslog. Includes source IP, username, and trigger (LuCI/Telegram/CLI).
 - **Default Limit for New Devices** -- Optionally rate-limit or shape a device the first time it appears on the network (Settings > New Device Defaults). Off by default. Switching it on records the devices already present, so only genuinely new ones are affected, and a device that already carries a limit is never overridden.
-- **Reboot Persistence** -- Shaping, block, and rate-limit rules optionally survive reboot via hotplug restore. Configurable per UCI option `persist_rules`. A rate limit keeps its bucket layout across the restore, so a subnet limited "5 Mbit each" does not come back as 5 Mbit for the whole subnet.
+- **Reboot Persistence** -- Shaping, block, and rate-limit rules optionally survive reboot via hotplug restore. Configurable per UCI option `persist_rules`. A rate limit keeps its bucket layout across the restore, so a subnet limited "5 Mbit each" does not come back as 5 Mbit for the whole subnet. Blocks are also restored after a firewall reload, because they live in `inet fw4 forward` which fw4 rebuilds.
 
 ---
 
@@ -579,6 +579,7 @@ opkg install curl
 - Shaping rules are always saved to `/etc/trafficctl/shapes.json` and restored on boot.
 - Block and rate-limit rules are optionally persistent when `persist_rules` is enabled in Settings > Logging & Persistence (saved to `/etc/trafficctl/rules.json`).
 - On reboot, the hotplug script at `/etc/hotplug.d/iface/99-trafficctl-shapes` restores all saved rules (shapes, blocks, ratelimits) when the LAN interface comes up.
+- Blocks are also restored after every firewall reload by `/usr/libexec/trafficctl/trafficctl-fw-restore.sh` (a `firewall` include). They live in `inet fw4 forward`, which fw4 rebuilds on reload; rate limits and port-forward pauses live in their own tables and do not need this.
 
 ### Activity Logging
 
@@ -658,6 +659,7 @@ The frontend talks to a thin rpcd dispatcher over ubus. The Telegram bot provide
 | `trafficctl/files/usr/libexec/trafficctl/trafficctl-telegram.sh` | Telegram bot daemon (long polling) |
 | `trafficctl/files/etc/init.d/trafficctl-telegram` | procd init script for the bot |
 | `trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes` | Boot persistence for tc + block + ratelimit rules |
+| `trafficctl/files/usr/libexec/trafficctl/trafficctl-fw-restore.sh` | Restore inet fw4 blocks after a firewall reload |
 | `trafficctl/files/etc/hotplug.d/dhcp/99-trafficctl-newdevice` | Instant new-device detection via DHCP events |
 | `trafficctl/files/www/cgi-bin/trafficctl-metrics` | Prometheus scrape endpoint (CGI) |
 | `Makefile` | OpenWrt package build |

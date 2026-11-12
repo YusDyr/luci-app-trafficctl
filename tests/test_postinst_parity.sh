@@ -239,6 +239,28 @@ else
     echo "NOTE: no POSIX shell found to syntax-check the Makefile scripts with."
 fi
 
+# The firewall include that restores inet fw4 blocks after a reload must be
+# registered by every postinst and removed by every prerm / pre-deinstall.
+INCLUDE_SET="firewall.trafficctl_restore=include"
+INCLUDE_PATH="path=/usr/libexec/trafficctl/trafficctl-fw-restore.sh"
+INCLUDE_COMPAT="fw4_compatible=1"
+INCLUDE_DEL="delete firewall.trafficctl_restore"
+assert_contains "trafficctl Makefile postinst registers the restore include" "$INCLUDE_SET" "$BE_MK_POSTINST"
+assert_contains "trafficctl Makefile postinst points the include at the restore script" "$INCLUDE_PATH" "$BE_MK_POSTINST"
+assert_contains "trafficctl Makefile postinst marks the include fw4-compatible" "$INCLUDE_COMPAT" "$BE_MK_POSTINST"
+assert_contains "trafficctl Makefile postinst is idempotent (deletes the include first)" "$INCLUDE_DEL" "$BE_MK_POSTINST"
+assert_contains "trafficctl build-ipk.sh postinst registers the restore include" "$INCLUDE_SET" "$BE_IPK_POSTINST"
+assert_contains "trafficctl build-ipk.sh postinst points the include at the restore script" "$INCLUDE_PATH" "$BE_IPK_POSTINST"
+assert_contains "trafficctl build-ipk.sh postinst marks the include fw4-compatible" "$INCLUDE_COMPAT" "$BE_IPK_POSTINST"
+assert_contains "trafficctl build-ipk.sh postinst is idempotent (deletes the include first)" "$INCLUDE_DEL" "$BE_IPK_POSTINST"
+assert_contains "trafficctl build-apk.sh post-install registers the restore include" "$INCLUDE_SET" "$BE_APK_POSTINST"
+assert_contains "trafficctl build-apk.sh post-install points the include at the restore script" "$INCLUDE_PATH" "$BE_APK_POSTINST"
+assert_contains "trafficctl build-apk.sh post-install marks the include fw4-compatible" "$INCLUDE_COMPAT" "$BE_APK_POSTINST"
+assert_contains "trafficctl build-apk.sh post-install is idempotent (deletes the include first)" "$INCLUDE_DEL" "$BE_APK_POSTINST"
+assert_contains "trafficctl Makefile prerm removes the restore include" "$INCLUDE_DEL" "$BE_MK_PRERM"
+assert_contains "trafficctl build-ipk.sh prerm removes the restore include" "$INCLUDE_DEL" "$BE_IPK_PRERM"
+assert_contains "trafficctl build-apk.sh pre-deinstall removes the restore include" "$INCLUDE_DEL" "$BE_APK_PREDEL"
+
 # ── Behaviour ─────────────────────────────────────────────────────────────
 # Run every copy of the trafficctl postinst against fake init scripts and a
 # fake uci. What runs after the install must be what runs after a reboot, and
@@ -266,11 +288,16 @@ esac
 FAKEINIT
         chmod +x "$FAKE/etc/init.d/$svc"
     done
+    : > "$FAKE/etc/config/firewall"
+    : > "$FAKE/uci.calls"
     cat > "$FAKE/bin/uci" <<FAKEUCI
 #!/bin/sh
+echo "\$*" >> "$FAKE/uci.calls"
 case "\$*" in
     "-q get trafficctl.telegram.enabled") cat "$FAKE/telegram.flag" ;;
     "-q get trafficctl.history.enabled") cat "$FAKE/history.flag" ;;
+    -q\ delete\ firewall.trafficctl_restore|-q\ set\ firewall.trafficctl_restore*|-q\ commit\ firewall)
+        exit 0 ;;
     *) exit 1 ;;
 esac
 FAKEUCI
@@ -296,6 +323,12 @@ for f in "$TMP/trafficctl.postinst" "$TMP/ipk.postinst" "$TMP/apk.postinst"; do
     assert_eq "$n, telegram.enabled=1: the bot is started" 1 "$(calls 'trafficctl-telegram start')"
     assert_eq "$n, history.enabled=1: the sampler is enabled in rc.d" yes "$(in_rcd trafficctl-history)"
     assert_eq "$n, history.enabled=1: the sampler is restarted" 1 "$(calls 'trafficctl-history restart')"
+    assert_eq "$n: the firewall include is registered" 1 \
+        "$(grep -c -x -- '-q set firewall.trafficctl_restore=include' "$FAKE/uci.calls")"
+    assert_eq "$n: the include path is the restore script" 1 \
+        "$(grep -c -x -- '-q set firewall.trafficctl_restore.path=/usr/libexec/trafficctl/trafficctl-fw-restore.sh' "$FAKE/uci.calls")"
+    assert_eq "$n: the include is marked fw4-compatible" 1 \
+        "$(grep -c -x -- '-q set firewall.trafficctl_restore.fw4_compatible=1' "$FAKE/uci.calls")"
 
     run_postinst "$f" 0 0 0
     assert_eq "$n, telegram.enabled=0: the bot is not enabled in rc.d" no "$(in_rcd trafficctl-telegram)"
@@ -313,6 +346,8 @@ for f in "$TMP/trafficctl.postinst" "$TMP/ipk.postinst" "$TMP/apk.postinst"; do
     mkdir -p "$TMP/img/etc/config"
     run_postinst "$f" 1 1 0 "$TMP/img"
     assert_eq "$n, IPKG_INSTROOT set: no init script is called" 0 "$(grep -c . "$FAKE/calls")"
+    assert_eq "$n, IPKG_INSTROOT set: the firewall include is not registered" 0 \
+        "$(grep -c firewall.trafficctl_restore "$FAKE/uci.calls")"
 done
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
