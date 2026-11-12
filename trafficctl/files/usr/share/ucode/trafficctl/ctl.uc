@@ -1,0 +1,710 @@
+// SPDX-License-Identifier: Apache-2.0
+'use strict';
+
+// trafficctl.ctl: what restricts each device, read back from where it lives
+// (nft, tc, the radios) and from where it is saved (rules.json, shapes.json,
+// the uci maclist). Nothing here changes state.
+//
+//   import * as ctl from 'trafficctl.ctl';
+//
+// nft. Read as `nft -j`, so a rule is matched on its comment, its handle and
+// whole address fields, never on a substring of the text listing (which is
+// how a limit on 192.168.1.5 used to be read as one on 192.168.1.50).
+//   nft_rules(what)          the rules of `nft -j list <what>` (a qv() list),
+//                            in listing order, as records:
+//                              { chain, handle, comment, daddr, saddr, mac,
+//                                limit, over, rate_kbit, each, counter,
+//                                packets, bytes, verdict }
+//                            daddr/saddr: an `ip` match's address or prefix
+//                            ("10.0.20.0/24"); mac: an `ether saddr` match;
+//                            each: the limit sits in a per-address meter
+//   rate_kbit(n, unit)       an nft rate as SI kbit/s (nft steps by 1024)
+//   rl_rules()               nft_rules of netdev tm_ratelimit
+//   rl_rate_kbit(rules, ip, fld)
+//                            the ceiling of the first `ip <fld> <ip>` limit
+//                            (fld 'daddr' or 'saddr'), null when none
+//   live_blocks(rules)       [{ ip, mac, handle, comment }] of the blocks in
+//                            inet fw4 forward (rules defaults to that chain)
+//   ratelimit_stats(rules)   trafficctl ratelimit-stats
+// tc
+//   shape_records()          the records of shapes.json
+//   shape_classmap(recs)     { ip: classid }
+//   ifb_dev()                the IFB device upload shaping runs on
+//   tc_class_rates(dev)      { classid: kbit } of the per-device HTB classes
+//   shape_stats()            trafficctl shape-stats
+// Everything together
+//   rules_list()             trafficctl rules list
+
+import * as lib from 'trafficctl.lib';
+import * as net from 'trafficctl.net';
+
+const RULES = '/etc/trafficctl/rules.json';
+const SHAPES = '/etc/trafficctl/shapes.json';
+const LEASES = '/tmp/dhcp.leases';
+const NAMES = '/etc/trafficctl/names';
+const RDNS_CACHE = '/tmp/trafficctl_rdns_cache';
+
+// The shell readers' test for an address; looser than lib.valid_ip on purpose,
+// so the same rules are listed.
+const DOTTED = /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/;
+
+// awk's fields of a line.
+function fields(l) {
+	return filter(split(l, /[ \t]+/), (w) => w != '');
+}
+
+// awk's s+0: the leading number, 0 without. Whole numbers stay ints, so a
+// 64-bit tc counter is not rounded.
+function anum(s) {
+	if (type(s) == 'int' || type(s) == 'double')
+		return s;
+	let m = match('' + (s ?? ''), /^[ \t]*([-+]?[0-9]+)(\.[0-9]*)?/);
+	if (m)
+		return (m[2] == null || m[2] == '.') ? int(m[1]) : +(m[1] + m[2]);
+	m = match('' + (s ?? ''), /^[ \t]*([-+]?\.[0-9]+)/);
+	return m ? +m[1] : 0;
+}
+
+// ── nft ─────────────────────────────────────────────────────────────────────
+
+const UNIT = { bytes: 1, kbytes: 1024, mbytes: 1048576, gbytes: 1073741824 };
+
+function rate_kbit(n, unit) {
+	let m = UNIT[unit];
+	if (!m || (type(n) != 'int' && type(n) != 'double'))
+		return 0;
+	// Rounded, as TCTL_NFT_RATE_AWK does.
+	return int(n * m * 8 / 1000.0 + 0.5);
+}
+
+// A match's right-hand side as an address: a plain value or a prefix.
+function addr(r) {
+	if (type(r) == 'string')
+		return r;
+	let p = (type(r) == 'object') ? r.prefix : null;
+	if (type(p) == 'object' && type(p.addr) == 'string' && type(p.len) == 'int')
+		return sprintf('%s/%d', p.addr, p.len);
+	return null;
+}
+
+function set_limit(rec, l, each) {
+	if (type(l) != 'object' || rec.limit)
+		return;
+	rec.limit = true;
+	rec.each = each;
+	// "limit rate over": a ceiling. A plain "limit rate" passes the first N,
+	// which the limiter never writes; the shell readers read it as 0.
+	rec.over = (l.inv == true);
+	rec.rate_kbit = rec.over ? rate_kbit(l.rate, l.rate_unit) : 0;
+}
+
+const VERDICTS = [ 'accept', 'drop', 'reject', 'jump', 'goto', 'return', 'continue', 'queue' ];
+
+function rule_rec(r) {
+	let rec = {
+		chain: r.chain, handle: r.handle, comment: (type(r.comment) == 'string') ? r.comment : '',
+		daddr: null, saddr: null, mac: null, limit: false, over: false, rate_kbit: 0, each: false,
+		counter: false, packets: 0, bytes: 0, verdict: null,
+	};
+	for (let e in r.expr) {
+		if (type(e) != 'object')
+			continue;
+		if (type(e.match) == 'object') {
+			let m = e.match, p = m.left?.payload, a = addr(m.right);
+			if (m.op != '==' || type(p) != 'object' || a == null)
+				continue;
+			if (p.protocol == 'ip' && p.field == 'daddr')
+				rec.daddr ??= a;
+			else if (p.protocol == 'ip' && p.field == 'saddr')
+				rec.saddr ??= a;
+			else if (p.protocol == 'ether' && p.field == 'saddr')
+				rec.mac ??= lc(a);
+		}
+		else if (exists(e, 'limit'))
+			set_limit(rec, e.limit, false);
+		// A per-address bucket: nftables 1.0 lists it as a meter, 1.1 as a
+		// named dynamic set the rule adds to, with the limit inside.
+		else if (type(e.meter) == 'object')
+			set_limit(rec, e.meter.stmt?.limit, true);
+		else if (type(e.set) == 'object' && type(e.set.stmt) == 'array') {
+			for (let s in e.set.stmt)
+				if (type(s) == 'object' && exists(s, 'limit'))
+					set_limit(rec, s.limit, true);
+		}
+		else if (type(e.counter) == 'object') {
+			rec.counter = true;
+			rec.packets = anum(e.counter.packets);
+			rec.bytes = anum(e.counter.bytes);
+		}
+		else {
+			for (let v in VERDICTS)
+				if (exists(e, v))
+					rec.verdict ??= v;
+		}
+	}
+	return rec;
+}
+
+function nft_rules(what) {
+	let out = lib.run('nft -j list ' + lib.qv(what)), d;
+	try {
+		d = json(out);
+	}
+	catch (e) {
+		// No such table or chain: nft prints nothing on stdout.
+		return [];
+	}
+	let rules = [];
+	for (let o in (type(d?.nftables) == 'array') ? d.nftables : [])
+		if (type(o?.rule) == 'object' && type(o.rule.expr) == 'array')
+			push(rules, rule_rec(o.rule));
+	return rules;
+}
+
+function rl_rules() {
+	return nft_rules([ 'table', 'netdev', 'tm_ratelimit' ]);
+}
+
+function rl_rate_kbit(rules, ip, fld) {
+	fld ??= 'daddr';
+	for (let r in rules)
+		if (r.over && (r[fld] == ip || r[fld] == ip + '/32'))
+			return r.rate_kbit;
+	return null;
+}
+
+// Only drop rules this app wrote, told by their comment. The v4 half matches
+// on the address, and its comment is tctl_block_ and the address slug
+// (tctl_block_comment), or, when it was written before v1.13.2, tctl_block_
+// and the caller's label (tctl_block_block_<ip> from LuCI, tctl_block_tg from
+// Telegram). The prefix is all the two forms share, and unblock removes both
+// (tctl_block_remove_legacy). The v6 half matches on the MAC and carries no
+// address; it exists since v1.18.2, so its comment is always the current one,
+// and that exact comment is the way back to an address.
+function live_blocks(rules) {
+	rules ??= nft_rules([ 'chain', 'inet', 'fw4', 'forward' ]);
+	let out = [];
+	for (let r in rules) {
+		if (r.verdict != 'drop' || substr(r.comment, 0, 11) != 'tctl_block_')
+			continue;
+		let ip;
+		if (r.saddr != null)
+			ip = replace(r.saddr, /\/32$/, '');
+		else {
+			let m = match(r.comment, /^tctl_block_([0-9_]+)_mac$/);
+			if (!m)
+				continue;
+			ip = replace(m[1], /_/g, '.');
+		}
+		if (match(ip, DOTTED))
+			push(out, { ip, mac: r.mac, handle: r.handle, comment: r.comment });
+	}
+	return out;
+}
+
+// One entry per target, counters summed across chains: the download rule is
+// installed on every LAN device's egress chain, and only the copy on the
+// device the target lives behind ever matches. Upload rules match on saddr
+// and are not targets of their own.
+function ratelimit_stats(rules) {
+	rules ??= rl_rules();
+	let by = {}, out = [];
+	for (let r in rules) {
+		if (r.daddr == null || !r.limit || !r.counter || !match(r.daddr, /^[0-9]/))
+			continue;
+		let e = by[r.daddr];
+		if (!e) {
+			e = { ip: r.daddr, mode: '', rate_kbit: 0, packets: 0, bytes: 0, pass_packets: 0, pass_bytes: 0 };
+			by[r.daddr] = e;
+			push(out, e);
+		}
+		e.mode = r.each ? 'each' : 'shared';
+		e.rate_kbit = r.rate_kbit;
+		e.packets += r.packets;
+		e.bytes += r.bytes;
+	}
+	return out;
+}
+
+// ── tc ──────────────────────────────────────────────────────────────────────
+
+// shapes.json as the shaper writes it, [{ ip, rate_kbit[, classid][,
+// rate_kbit_up] }]. Read as JSON: the shell readers' patterns also accepted
+// a record whose JSON was broken, and none of them agreed on key order.
+function shape_records() {
+	let d;
+	try {
+		d = json(lib.readfile(SHAPES) ?? '');
+	}
+	catch (e) {
+		return [];
+	}
+	return filter((type(d) == 'array') ? d : [], (s) => type(s) == 'object' &&
+		type(s.ip) == 'string' && s.ip != '' && type(s.rate_kbit) == 'int' && s.rate_kbit >= 0);
+}
+
+// Minors are allocated, not derived from the address, so this map is the only
+// way from an address to its class. A record from before allocation has no
+// classid, and its class is the one the old derivation gave it.
+function classmap_pairs(recs) {
+	let out = [];
+	for (let s in recs ?? shape_records()) {
+		if (exists(s, 'classid')) {
+			if (type(s.classid) == 'string' && match(s.classid, /^1:[0-9a-f]+$/))
+				push(out, [ s.ip, s.classid ]);
+			continue;
+		}
+		let o = split(s.ip, '.');
+		if (length(o) != 4)
+			continue;
+		let dec = int(o[2]) * 256 + int(o[3]);
+		if (dec >= 2 && dec <= 65533)
+			push(out, [ s.ip, sprintf('1:%x', dec) ]);
+	}
+	return out;
+}
+
+function shape_classmap(recs) {
+	let m = {};
+	for (let p in classmap_pairs(recs))
+		m[p[0]] = p[1];
+	return m;
+}
+
+function ifb_dev() {
+	let d = lib.uci_get('trafficctl', 'main', 'shape_ifb');
+	return (d == null || d == '') ? 'tctl-ifb0' : d;
+}
+
+// A tc rate word ("8Mbit") in kbit/s. tc -j class is not JSON on 22.03's
+// iproute2 (5.15 prints the text form for classes), so classes are read from
+// the text listing everywhere. plain: also take a bare "bit" figure.
+function tc_kbit(v, plain) {
+	if (index(v, 'Gbit') >= 0)
+		return anum(v) * 1000000;
+	if (index(v, 'Mbit') >= 0)
+		return anum(v) * 1000;
+	if (match(v, /[Kk]bit/))
+		return anum(v);
+	return plain ? anum(v) / 1000.0 : 0;
+}
+
+function htb_minor(f) {
+	let c = f[2] ?? '';
+	return (substr(c, 0, 2) == '1:') ? substr(c, 2) : c;
+}
+
+function line_rate(f, plain) {
+	for (let i = 0; i < length(f); i++)
+		if (f[i] == 'rate')
+			return tc_kbit(f[i + 1] ?? '', plain);
+	return 0;
+}
+
+function tc_class_rates(dev) {
+	let m = {};
+	for (let l in lib.lines('tc class show dev ' + lib.q(dev))) {
+		if (substr(l, 0, 12) != 'class htb 1:')
+			continue;
+		let f = fields(l), minor = htb_minor(f);
+		if (minor == '1' || minor == 'fffe')
+			continue;
+		m['1:' + minor] = line_rate(f, true);
+	}
+	return m;
+}
+
+// `tc -s class show`: one record per HTB class this app knows, root 1:1 and
+// default 1:fffe left out.
+function htb_stats(text, ipmap) {
+	let out = [], cur = null, skip = false;
+	let flush = () => {
+		if (cur && cur.rate > 0 && cur.rate < 1000000 && exists(ipmap, cur.classid))
+			push(out, cur);
+		cur = null;
+	};
+	for (let l in split(text, '\n')) {
+		if (index(l, 'class fq_codel') >= 0) {
+			skip = true;
+			continue;
+		}
+		let f = fields(l);
+		if (substr(l, 0, 12) == 'class htb 1:') {
+			// A record ends where the next class starts. v1.30.0 did not
+			// close it at the root or default class, and printed the class
+			// before one of those twice.
+			flush();
+			let minor = htb_minor(f);
+			skip = (minor == '1' || minor == 'fffe');
+			if (!skip)
+				cur = { classid: '1:' + minor, rate: line_rate(f, false), bytes: 0, pkts: 0,
+					backlog: 0, drops: 0, overlimits: 0, requeues: 0, lended: 0, borrowed: 0 };
+			continue;
+		}
+		if (skip || !cur)
+			continue;
+		if (match(l, /Sent [0-9]+ bytes/)) {
+			for (let i = 0; i < length(f); i++) {
+				let v = f[i + 1] ?? '';
+				if (f[i] == 'Sent')
+					cur.bytes = anum(v);
+				if (match(f[i], /^[0-9]+$/) && v == 'pkt')
+					cur.pkts = anum(f[i]);
+				if (f[i] == '(dropped')
+					cur.drops = anum(v);
+				if (f[i] == 'overlimits')
+					cur.overlimits = anum(v);
+				if (f[i] == 'requeues' && v != '' && match(v, /[0-9]/))
+					cur.requeues = anum(v);
+			}
+		}
+		if (index(l, 'backlog') >= 0)
+			for (let i = 0; i < length(f); i++)
+				if (f[i] == 'backlog')
+					cur.backlog = anum(f[i + 1]);
+		if (index(l, 'lended:') >= 0)
+			for (let i = 0; i < length(f); i++) {
+				if (f[i] == 'lended:')
+					cur.lended = anum(f[i + 1]);
+				if (f[i] == 'borrowed:')
+					cur.borrowed = anum(f[i + 1]);
+			}
+	}
+	flush();
+	return out;
+}
+
+// `tc -s qdisc show`: the fq_codel leaf under each class, by parent classid.
+// Read as text, not tc -j: iproute2's JSON gives the target in microseconds
+// as the kernel holds it (4999 for "5ms"), so the figures would change.
+function fq_stats(text) {
+	let by = {}, cur = null;
+	let flush = () => {
+		if (cur && cur.parent != '')
+			by[cur.parent] = cur;
+		cur = null;
+	};
+	for (let l in split(text, '\n')) {
+		let f = fields(l);
+		if (substr(l, 0, 14) == 'qdisc fq_codel') {
+			flush();
+			cur = { parent: '', ecn_mark: 0, new_flows: 0, old_flows: 0, target_us: 0, memory_used: 0 };
+			for (let i = 0; i < length(f); i++) {
+				let v = f[i + 1] ?? '';
+				if (f[i] == 'parent')
+					cur.parent = v;
+				if (f[i] == 'target')
+					cur.target_us = match(v, /ms$/) ? anum(v) * 1000 : match(v, /us$/) ? anum(v) : 0;
+			}
+			continue;
+		}
+		if (substr(l, 0, 5) == 'qdisc') {
+			flush();
+			continue;
+		}
+		if (!cur)
+			continue;
+		for (let i = 0; i < length(f); i++) {
+			let v = f[i + 1];
+			if (f[i] == 'ecn_mark')
+				cur.ecn_mark = anum(v);
+			// iproute2 prints new_flows_len/old_flows_len, which v1.30.0
+			// never matched: both stay 0, as they always read.
+			if (f[i] == 'new_flows' && index(l, 'new_flow_count') < 0)
+				cur.new_flows = anum(v);
+			if (f[i] == 'old_flows' && index(l, 'new_flow_count') < 0)
+				cur.old_flows = anum(v);
+			if (f[i] == 'memory_used')
+				cur.memory_used = anum(v);
+		}
+	}
+	flush();
+	return by;
+}
+
+function shape_stats() {
+	let dev = net.lan_device();
+	let qd = lib.run('tc -s qdisc show dev ' + lib.q(dev));
+	if (index(qd, 'htb 1:') < 0)
+		return [];
+	let ipmap = {};
+	for (let p in classmap_pairs())
+		ipmap[p[1]] = p[0];
+	let fq = fq_stats(qd), out = [];
+	for (let c in htb_stats(lib.run('tc -s class show dev ' + lib.q(dev)), ipmap)) {
+		let q = fq[c.classid] ?? {};
+		push(out, {
+			ip: ipmap[c.classid], rate_kbit: int(c.rate), bytes: c.bytes, packets: c.pkts,
+			backlog: int(c.backlog), drops: c.drops, overlimits: c.overlimits,
+			requeues: c.requeues, lended: c.lended, borrowed: c.borrowed,
+			ecn_mark: q.ecn_mark ?? 0, new_flows: int(q.new_flows ?? 0),
+			old_flows: int(q.old_flows ?? 0), target_us: int(q.target_us ?? 0),
+			memory_used: int(q.memory_used ?? 0),
+		});
+	}
+	return out;
+}
+
+// ── the Rules tab ───────────────────────────────────────────────────────────
+
+// Names and presence, with the device table's precedence: alias > DHCP lease
+// > cached PTR. Online = a flow right now, or a live neighbour entry.
+function naming() {
+	let n = { lmac: {}, lip: {}, lname: {}, alias: {}, rdns: {}, nmac: {}, nip: {}, on: {} };
+	for (let l in lib.file_lines(LEASES)) {
+		let f = fields(l);
+		if (length(f) < 3)
+			continue;
+		let mac = lc(f[1]), ip = f[2], name = f[3] ?? '';
+		if (!exists(n.lmac, ip))
+			n.lmac[ip] = mac;
+		if (!exists(n.lip, mac))
+			n.lip[mac] = ip;
+		if (name != '' && name != '*' && !exists(n.lname, ip))
+			n.lname[ip] = name;
+	}
+	// Whitespace runs collapse and a later line wins, as the shell merge had it.
+	for (let l in lib.file_lines(NAMES)) {
+		let f = fields(l);
+		if (length(f) >= 2)
+			n.alias[f[0]] = join(' ', fields(replace(l, /^[^ ]+ +/, '')));
+	}
+	if (lib.uci_get('trafficctl', 'main', 'resolve_names') != '0')
+		for (let l in lib.file_lines(RDNS_CACHE)) {
+			let f = fields(l);
+			if (length(f) >= 2 && f[1] != '-' && !exists(n.rdns, f[0]))
+				n.rdns[f[0]] = f[1];
+		}
+	for (let l in lib.lines('ip neigh show')) {
+		let f = fields(l), nf = length(f);
+		if (nf == 0 || !match(f[0], DOTTED))
+			continue;
+		let mac = null;
+		for (let i = 1; i < nf - 1; i++)
+			if (f[i] == 'lladdr')
+				mac = lc(f[i + 1]);
+		if (mac != null) {
+			if (!exists(n.nmac, f[0]))
+				n.nmac[f[0]] = mac;
+			if (!exists(n.nip, mac))
+				n.nip[mac] = f[0];
+		}
+		if (index([ 'REACHABLE', 'DELAY', 'PROBE', 'PERMANENT' ], f[nf - 1]) >= 0)
+			n.on[f[0]] = true;
+	}
+	net.ct_each((rec) => {
+		n.on[rec.osrc] = true;
+	});
+	return n;
+}
+
+// rules.json, pattern by pattern as the shell read it: a record is any flat
+// {...}, a field any "key":"string" in it.
+function persisted_rules() {
+	let s = lib.readfile(RULES) ?? '', out = [];
+	let get = (o, k) => {
+		let m = match(o, regexp('"' + k + '":"([^"]*)"'));
+		return m ? m[1] : '';
+	};
+	for (let m in match(s, /\{[^{}]*\}/g) ?? []) {
+		let o = m[0];
+		push(out, { type: get(o, 'type'), ip: get(o, 'ip'), param: get(o, 'param'),
+			mode: get(o, 'mode'), param_up: get(o, 'param_up') });
+	}
+	return out;
+}
+
+function hostapd_ifaces() {
+	let objs = lib.ubus_list();
+	if (objs == null)
+		return null;
+	let out = [];
+	for (let o in objs)
+		if (substr(o, 0, 8) == 'hostapd.')
+			push(out, substr(o, 8));
+	return out;
+}
+
+let has_cli;
+function cli_alive(iface) {
+	has_cli ??= (lib.sh('command -v hostapd_cli') == 0);
+	return has_cli && index(lib.run('hostapd_cli -i ' + lib.q(iface) + ' ping'), 'PONG') >= 0;
+}
+
+// What keeps a denied MAC off the air, read back from each running AP: its
+// ACL (acl), a timed ubus ban (ban) or nothing (none); the weakest AP wins.
+// "unknown" when which AP carries which policy cannot be told, "no-radio"
+// when no AP runs (the uci maclist applies when one starts).
+function wifi_denies() {
+	let allow = 0, words = [];
+	lib.uci_foreach('wireless', 'wifi-iface', (s) => {
+		if (s.macfilter == 'allow') {
+			allow++;
+			return;
+		}
+		if (s.macfilter != 'deny')
+			return;
+		for (let v in (type(s.maclist) == 'array') ? s.maclist : [ s.maclist ?? '' ])
+			push(words, ...fields(v));
+	});
+	let macs = uniq(sort(filter(map(words, lc), (w) => match(w, /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/))));
+	let out = [];
+	if (!length(macs))
+		return { allow, macs: out };
+	let ifaces = (allow > 0) ? null : hostapd_ifaces();
+	let fixed = (allow > 0 || ifaces == null) ? 'unknown' : !length(ifaces) ? 'no-radio' : null;
+	let rank = { acl: 3, ban: 2, none: 1 };
+	for (let mac in macs) {
+		if (fixed) {
+			push(out, { mac, state: fixed });
+			continue;
+		}
+		let worst = 3;
+		for (let ifc in ifaces) {
+			let st = 'none';
+			if (cli_alive(ifc) && index(lc(lib.run('hostapd_cli -i ' + lib.q(ifc) + ' deny_acl SHOW')), mac) >= 0)
+				st = 'acl';
+			else {
+				let b = lib.ubus_call('hostapd.' + ifc, 'list_bans');
+				if (b != null && index(lc(lib.to_json(b)), mac) >= 0)
+					st = 'ban';
+			}
+			if (rank[st] < worst)
+				worst = rank[st];
+		}
+		push(out, { mac, state: (worst == 3) ? 'acl' : (worst == 2) ? 'ban' : 'none' });
+	}
+	return { allow, macs: out };
+}
+
+// The shell merge's string escape: control characters dropped, not escaped.
+function esc(s) {
+	return replace('' + (s ?? ''), /[\x01-\x1f]/g, '');
+}
+
+function num_or(v, dflt) {
+	return (v == null || v == '') ? dflt : v;
+}
+
+function rules_list() {
+	let persist = (lib.uci_get('trafficctl', 'main', 'persist_rules') == '1');
+	let n = naming();
+	let recs = {}, order = [];
+	let add = (t, target) => {
+		let k = t + '|' + target;
+		if (!exists(recs, k)) {
+			recs[k] = { t, target, live: false, saved: false, mode: null, rate: null, up: null, bmac: null, enf: null };
+			push(order, k);
+		}
+		return recs[k];
+	};
+
+	for (let b in live_blocks()) {
+		let r = add('block', b.ip);
+		r.live = true;
+		if (b.mac != null)
+			r.bmac = b.mac;
+	}
+
+	let rl = rl_rules();
+	for (let s in ratelimit_stats(rl)) {
+		let r = add('ratelimit', s.ip);
+		r.live = true;
+		r.mode = s.mode;
+		r.rate = s.rate_kbit;
+		r.up = rl_rate_kbit(rl, s.ip, 'saddr') ?? 0;
+	}
+
+	// rules.json records only count while persist_rules is on: the restore
+	// hook skips the file otherwise, so a record left in it restricts nothing.
+	if (persist)
+		for (let p in persisted_rules()) {
+			if (p.ip == '')
+				continue;
+			if (p.type == 'block')
+				add('block', p.ip).saved = true;
+			else if (p.type == 'ratelimit') {
+				let r = add('ratelimit', p.ip);
+				r.saved = true;
+				if (!r.live) {
+					r.rate = num_or(p.param, 0);
+					r.mode = p.mode;
+					r.up = (anum(p.param_up) > 0) ? p.param_up : r.rate;
+				}
+			}
+		}
+
+	// shapes.json is written on every add and remove, so it is the list of
+	// shapes; a class with that minor on the LAN device is what makes one live.
+	let srecs = shape_records(), cls = shape_classmap(srecs);
+	let dl = tc_class_rates(net.lan_device()), ul = tc_class_rates(ifb_dev());
+	for (let s in srecs) {
+		if (s.rate_kbit <= 0)
+			continue;
+		let r = add('shape', s.ip), c = cls[s.ip], up = s.rate_kbit_up ?? 0;
+		r.saved = true;
+		r.rate = s.rate_kbit;
+		r.up = (anum(up) > 0) ? up : s.rate_kbit;
+		if (c != null && exists(dl, c)) {
+			r.live = true;
+			r.rate = dl[c];
+			if (anum(ul[c] ?? 0) > 0)
+				r.up = ul[c];
+		}
+	}
+
+	let w = wifi_denies();
+	for (let d in w.macs) {
+		let r = add('wifi', d.mac);
+		r.saved = true;
+		r.enf = d.state;
+	}
+
+	let rules = [];
+	for (let k in order) {
+		let r = recs[k], ip = '', mac = '', name = '', online = null, applied = null;
+		if (r.t == 'wifi') {
+			mac = r.target;
+			ip = n.lip[mac] ?? n.nip[mac] ?? '';
+			if (r.enf == 'acl' || r.enf == 'ban')
+				applied = true;
+			else if (r.enf == 'none')
+				applied = false;
+		}
+		else {
+			applied = r.live;
+			if (match(r.target, DOTTED))
+				ip = r.target;
+			if (ip != '')
+				mac = n.lmac[ip] ?? n.nmac[ip] ?? '';
+			if (mac == '' && r.bmac != null)
+				mac = r.bmac;
+		}
+		if (ip != '') {
+			name = n.alias[ip] ?? n.lname[ip] ?? n.rdns[ip] ?? '';
+			online = exists(n.on, ip);
+		}
+		let o = { type: r.t, target: esc(r.target), ip: esc(ip), mac: esc(mac), name: esc(name),
+			online, applied, persisted: r.saved };
+		if (r.t == 'ratelimit' || r.t == 'shape') {
+			o.rate_kbit = int(anum(r.rate));
+			o.rate_kbit_up = int(anum((r.up == null || r.up == '' || anum(r.up) == 0) ? r.rate : r.up));
+		}
+		if (r.t == 'ratelimit') {
+			// A record written before modes were stored has none; it gets
+			// the default the restore hook gives it.
+			let mode = r.mode ?? '';
+			if (mode == '')
+				mode = (index(r.target, '/') >= 0 && !match(r.target, /\/32$/)) ? 'each' : 'shared';
+			o.mode = esc(mode);
+		}
+		if (r.t == 'wifi')
+			o.enforcement = esc(r.enf);
+		push(rules, o);
+	}
+	return { fw: 'nft', persist_rules: persist, wifi_allow_ifaces: w.allow, rules };
+}
+
+// 2022-12 needs a ';' after `export function f() {}`; one list avoids it.
+export { nft_rules, rate_kbit, rl_rules, rl_rate_kbit, live_blocks, ratelimit_stats,
+	shape_records, shape_classmap, ifb_dev, tc_class_rates, shape_stats, rules_list };

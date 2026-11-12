@@ -2,7 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # Benchmark gate for the ucode port: wall time and peak RSS of the legacy
 # summary/device/totals/bytes scripts against `trafficctl summary|device|
-# totals|bytes`, over synthetic conntrack tables. Runs ON the router:
+# totals|bytes`, over synthetic conntrack tables, then of the limiter/shaper
+# readers (ratelimit-stats, shape-stats, rules) over the live nft and tc
+# state. Runs ON the router, or in an OpenWrt rootfs after
+# tools/ci/live-readers.sh bench has built that state:
 #
 #   ssh root@192.168.0.1 sh -s -- 2000 8000 16000 < tools/bench.sh
 #
@@ -34,7 +37,8 @@ for f in "$LEGACY"/*.sh; do
         -e "s|/etc/trafficctl/|$B/root/etc/trafficctl/|g" \
         -e "s|/tmp/trafficctl_|$B/root/tmp/trafficctl_|g" \
         -e "s|/tmp/\.trafficctl_|$B/root/tmp/.trafficctl_|g" \
-        -e "s|/var/run/trafficctl|$B/root/var/run/trafficctl|g" "$f" > "$B/legacy/${f##*/}"
+        -e "s|/var/run/trafficctl|$B/root/var/run/trafficctl|g" \
+        -e "s|^SCRIPTS=\"/usr/libexec/trafficctl\"|SCRIPTS=\"$B/legacy\"|" "$f" > "$B/legacy/${f##*/}"
     chmod +x "$B/legacy/${f##*/}"
 done
 cp -p /etc/trafficctl/* "$B/root/etc/trafficctl/" 2>/dev/null
@@ -92,7 +96,7 @@ cell() {   # cell <label> <cmd...>
     t0=$(now_cs); i=0
     while [ "$i" -lt "$RUNS" ]; do "$@" >/dev/null 2>&1; i=$((i + 1)); done
     t1=$(now_cs)
-    printf '%-8s %7s %-7s %8d %9d\n' "$case" "$n" "$label" $(( (t1 - t0) * 10 / RUNS )) "$(peak_rss "$@")"
+    printf '%-15s %7s %-7s %8d %9d\n' "$case" "$n" "$label" $(( (t1 - t0) * 10 / RUNS )) "$(peak_rss "$@")"
 }
 
 new() { TCTL_ROOT="$B/root" "$NEW" "$@"; }
@@ -106,7 +110,7 @@ legacy_has() { [ -f "$B/legacy/trafficctl-$1.sh" ] && ! grep -q '^exec /usr/sbin
 DEV_IP=$(awk 'NR == 1 { print $3 }' /tmp/dhcp.leases 2>/dev/null)
 DEV_IP=${DEV_IP:-192.168.0.100}
 
-printf '%-8s %7s %-7s %8s %9s\n' case entries impl wall_ms peak_kB
+printf '%-15s %7s %-7s %8s %9s\n' case entries impl wall_ms peak_kB
 for n in "$@"; do
     gen "$n"
     for case in summary device totals bytes; do
@@ -117,4 +121,12 @@ for n in "$@"; do
         # shellcheck disable=SC2086
         new_has "$case" && cell ucode new "$case" $args
     done
+done
+
+# These read the rules and classes in the kernel, which the entry count does
+# not change: one pass over whatever is there.
+n=live
+for case in ratelimit-stats shape-stats rules; do
+    legacy_has "$case" && cell legacy sh "$B/legacy/trafficctl-$case.sh"
+    new_has "$case" && cell ucode new "$case"
 done

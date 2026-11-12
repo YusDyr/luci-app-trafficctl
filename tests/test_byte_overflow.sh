@@ -255,13 +255,27 @@ offenders=$(grep -nE '"[a-z_]*bytes[a-z_]*\\?":%d|_bytes(_total)?\{[^}]*\}[^"]*%
 assert_eq "no byte-named field is printed with %d" "" "$offenders"
 
 # shape-stats reports tc's cumulative counters: bytes and packets, but also
-# drops/overlimits/requeues/lended/borrowed/ecn_mark, which climb for the life
-# of the qdisc and overflow the same way. Only "bytes" is byte-named, so the
-# generic scan above cannot see the other six — without this line they would
-# quietly drift back to %d on the next edit.
-assert_contains "shape-stats.sh: cumulative tc counters use %.0f" \
-    '"bytes\":%.0f,\"packets\":%.0f,\"backlog\":%d,\"drops\":%.0f,\"overlimits\":%.0f,\"requeues\":%.0f,\"lended\":%.0f,\"borrowed\":%.0f,\"ecn_mark\":%.0f' \
-    "$(cat "$BIN/trafficctl-shape-stats.sh")"
+# drops/overlimits/requeues/lended/borrowed, which climb for the life of the
+# qdisc and overflow the same way. The ucode reader keeps them as 64-bit
+# integers; this pins every one past 2^32.
+SS="$TMP/shape-stats"
+mkdir -p "$SS/bin" "$SS/root/etc/trafficctl"
+echo '[{"ip":"192.168.1.100","rate_kbit":10000,"classid":"1:2"}]' > "$SS/root/etc/trafficctl/shapes.json"
+cat > "$SS/bin/tc" <<'MOCK'
+#!/bin/sh
+case "$*" in
+    *qdisc\ show*) echo "qdisc htb 1: root refcnt 2 r2q 10 default 0xfffe" ;;
+    *class\ show*)
+        echo "class htb 1:2 parent 1:1 prio 0 rate 10Mbit ceil 10Mbit burst 1600b cburst 1600b"
+        echo " Sent 9007199254740000 bytes 4294967297 pkt (dropped 4294967298, overlimits 4294967299 requeues 4294967300)"
+        echo " backlog 0b 0p requeues 4294967300"
+        echo " lended: 4294967301 borrowed: 4294967302 giants: 0" ;;
+esac
+MOCK
+chmod +x "$SS/bin/tc"
+assert_contains "shape-stats: cumulative tc counters past 2^32 stay exact" \
+    '"bytes":9007199254740000,"packets":4294967297,"backlog":0,"drops":4294967298,"overlimits":4294967299,"requeues":4294967300,"lended":4294967301,"borrowed":4294967302' \
+    "$(PATH="$SS/bin:$PATH" TCTL_ROOT="$SS/root" tctl shape-stats 2>&1)"
 
 # ════════════════════════════════════════════════════════════════════════════
 

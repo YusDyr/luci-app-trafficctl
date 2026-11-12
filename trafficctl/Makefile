@@ -77,6 +77,7 @@ define Package/trafficctl/install
 	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/lib.uc $(1)/usr/share/ucode/trafficctl/
 	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/net.uc $(1)/usr/share/ucode/trafficctl/
 	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/report.uc $(1)/usr/share/ucode/trafficctl/
+	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/ctl.uc $(1)/usr/share/ucode/trafficctl/
 	$(INSTALL_DIR) $(1)/usr/libexec/trafficctl
 	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-block.sh $(1)/usr/libexec/trafficctl/
 	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-bytes.sh $(1)/usr/libexec/trafficctl/

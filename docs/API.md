@@ -104,13 +104,13 @@ method because it returns the contents of the configured log file.
 | `bytes` | `trafficctl-totals.sh` | (none) | read |
 | `ifaces` | `trafficctl ifaces` (ucode) | (none) | read |
 | `rdns` | `trafficctl rdns` (ucode) | `ip` | read |
-| `ratelimit_stats` | `trafficctl-ratelimit-stats.sh` | (none) | read |
+| `ratelimit_stats` | `trafficctl ratelimit-stats` (ucode) | (none) | read |
 | `subnets` | `trafficctl subnets` (ucode) | (none) | read |
-| `shape_stats` | `trafficctl-shape-stats.sh` | (none) | read |
+| `shape_stats` | `trafficctl shape-stats` (ucode) | (none) | read |
 | `shape_status` | `trafficctl-shape.sh status` | `ip` | read |
 | `names_list` | (in plugin) | (none) | read |
 | `portfw_list` | `trafficctl-portfw.sh list` | (none) | read |
-| `rules_list` | `trafficctl-rules.sh list` | (none) | read |
+| `rules_list` | `trafficctl rules list` (ucode) | (none) | read |
 | `netify_status` | `trafficctl netify status` (ucode) | (none) | read |
 | `netify_list` | `trafficctl netify list` (ucode) | (none) | read |
 | `config_get` | (in plugin) | (none) — returns `enabled`, `default_mode`, `offload_mode`, `sw`, `hw`, `poll_interval`, `avg_window` | read |
@@ -189,13 +189,14 @@ methods; the `read` methods are the dashboard's polls.
 
 `trafficctl-subnets.sh`, `trafficctl-names.sh`, `trafficctl-rdns.sh`,
 `trafficctl-rdns-refresh.sh`, `trafficctl-ifaces.sh`, `trafficctl-bytes.sh`,
-`trafficctl-totals.sh`, `trafficctl-summary.sh`, `trafficctl-device.sh`,
-`trafficctl-metrics.sh` and `trafficctl-netify.sh` are two-line wrappers for
-the ucode CLI:
-`/usr/sbin/trafficctl subnets|names|rdns|rdns-refresh|ifaces|bytes|totals|summary|device|metrics|netify`
-takes the same arguments and prints the same bytes. The metrics CGI
-(`/www/cgi-bin/trafficctl-metrics`) checks the token, then execs
-`trafficctl metrics`. `bytes-nft` and its wrapper
+`trafficctl-totals.sh`, `trafficctl-ratelimit-stats.sh`,
+`trafficctl-shape-stats.sh`, `trafficctl-rules.sh`, `trafficctl-summary.sh`,
+`trafficctl-device.sh`, `trafficctl-metrics.sh` and `trafficctl-netify.sh` are
+two-line wrappers for the ucode CLI: `/usr/sbin/trafficctl
+subnets|names|rdns|rdns-refresh|ifaces|bytes|totals|ratelimit-stats|shape-stats|rules|summary|device|metrics|netify`
+takes the same arguments and prints the same bytes (differences listed under
+each command). The metrics CGI (`/www/cgi-bin/trafficctl-metrics`) checks the
+token, then execs `trafficctl metrics`. `bytes-nft` and its wrapper
 are gone (see `trafficctl-bytes.sh` below). The byte commands print their arrays
 sorted by address, where the shell printed awk hash order.
 
@@ -538,7 +539,8 @@ later. Overridable for testing via `TCTL_IFROLE_CACHE`, `TCTL_IFROLE_TTL`,
 
 ### trafficctl-ratelimit-stats.sh
 
-Returns drop counters from the nftables rate-limiter.
+`trafficctl ratelimit-stats`. Returns drop counters from the nftables
+rate-limiter.
 
 **Arguments:** None
 
@@ -553,7 +555,12 @@ Returns drop counters from the nftables rate-limiter.
 
 `ip` is the limit's target, so it may be a CIDR block rather than a host, and
 `mode` is the bucket layout (`each`/`shared`) read back from the live rule — an
-nft meter keyed on the address is what makes a bucket per-device.
+nft meter keyed on the address is what makes a bucket per-device. The rules are
+read from `nft -j list table netdev tm_ratelimit`; of the expressions only
+matches, limits, meters, counters and the verdict are read. nftables 1.1 (OpenWrt 25.12) lists a meter as a named set
+the rule adds to; the shell reader looked for the word `meter` and reported
+those limits as `shared`, the CLI reports `each`. `pass_packets`/`pass_bytes`
+are always 0, as before.
 
 One entry per target: the download rule is installed on every LAN device's
 egress chain, so a router with several bridges holds several copies of the same
@@ -566,7 +573,13 @@ Returns `[]` if no rate limits are active.
 
 ### trafficctl-shape-stats.sh
 
-Returns tc/HTB class statistics for all shaped devices.
+`trafficctl shape-stats`. Returns tc/HTB class statistics for all shaped
+devices, read from the text of `tc -s class show` and `tc -s qdisc show` (one
+call each) on the LAN device: iproute2 5.15 (OpenWrt 22.03) prints `tc -j
+class` as text, and its JSON qdisc stats give the fq_codel target in kernel
+microseconds (4999 for `5ms`). Classes are mapped to addresses through
+`shapes.json`, parsed as JSON. The shell reader printed a class listed before
+the root or default class twice; the CLI prints it once.
 
 **Arguments:** None
 
@@ -578,7 +591,10 @@ Returns tc/HTB class statistics for all shaped devices.
 ]
 ```
 
-Returns `[]` if tc is not installed or no HTB qdisc exists.
+Returns `[]` if tc is not installed or no HTB qdisc exists. All 15 fields:
+`ip`, `rate_kbit`, `bytes`, `packets`, `backlog`, `drops`, `overlimits`,
+`requeues`, `lended`, `borrowed`, `ecn_mark`, `new_flows`, `old_flows`
+(always 0: iproute2 prints `new_flows_len`), `target_us`, `memory_used`.
 
 ---
 
@@ -602,7 +618,7 @@ Uses `ubus call network.rrdns lookup` (rpcd-mod-rrdns, ships with rpcd) with Bus
 
 ### trafficctl-rules.sh
 
-Every restriction the app holds, whether or not the device is online: internet
+`trafficctl rules [list]`. Every restriction the app holds, whether or not the device is online: internet
 blocks, speed limits (subnets and `all` included), shapes and WiFi deny-list
 entries. This feeds the **Rules** tab. The device table is built from live
 conntrack entries, so a device that goes offline drops out of it while its
@@ -626,11 +642,19 @@ and the two are merged:
 
 | `type` | Live state | Saved state |
 |--------|------------|-------------|
-| `block` | `tctl_block_<slug>` rules in `inet fw4 forward` (the `_mac` IPv6 rule folds into the same record) | `rules.json`, only while `persist_rules` is on |
-| `ratelimit` | `trafficctl-ratelimit-stats.sh` (download) and the `_ul` rule (upload) | `rules.json`, only while `persist_rules` is on |
-| `shape` | HTB classes on the LAN device and on `tctl-ifb0`, mapped through `tctl_shape_classmap` | `shapes.json` (always written) |
+| `block` | drop rules in `inet fw4 forward` on an `ip saddr` whose comment starts with `tctl_block_` (`tctl_block_<slug>`, or the caller's label on a block written before v1.13.2), or whose comment is exactly `tctl_block_<slug>_mac` (the IPv6 rule, folded into the same record) | `rules.json`, only while `persist_rules` is on |
+| `ratelimit` | `ratelimit-stats` (download) and the `ip saddr` rule (upload) | `rules.json`, only while `persist_rules` is on |
+| `shape` | HTB classes on the LAN device and on `tctl-ifb0`, mapped through `shapes.json` | `shapes.json` (always written) |
 | `wifi` | hostapd's running deny ACL, or a ubus ban | uci `maclist` of `macfilter=deny` interfaces |
 
+- The nft rules are read from `nft -j`. A rule's handle is carried along, not
+  matched on. An each-mode limit reads `each` on nftables 1.1 as well (see
+  `ratelimit-stats`).
+- Unblocking a block written before v1.13.2 (`tctl_block_tg` from Telegram,
+  `tctl_block_block_<ip>` or a typed label from LuCI) works with any label,
+  the empty one the Rules tab sends included: `trafficctl-unblock.sh` also
+  removes every drop rule on that exact `ip saddr` whose comment starts with
+  `tctl_block_`.
 - `applied`: in the kernel or on the radio now. `persisted`: survives a reboot.
   A saved record that is not applied is restored at the next `ifup lan`; a live
   rule that is not saved is lost at the next reboot. Live rates win over saved ones.

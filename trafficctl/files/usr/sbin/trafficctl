@@ -9,6 +9,7 @@
 
 import * as lib from 'trafficctl.lib';
 import * as net from 'trafficctl.net';
+import * as ctl from 'trafficctl.ctl';
 import * as report from 'trafficctl.report';
 
 function out(v) {
@@ -21,6 +22,8 @@ function result(r) {
 }
 
 const NAMES_USAGE = 'usage: trafficctl names list|set <ip> <name>|remove <ip>';
+// The script's own wording: the rpcd plugin and the view show it as it is.
+const RULES_USAGE = 'usage: trafficctl-rules.sh [list]';
 
 const commands = {
 	subnets: () => {
@@ -68,6 +71,23 @@ const commands = {
 		return 0;
 	},
 
+	'ratelimit-stats': () => {
+		out(ctl.ratelimit_stats());
+		return 0;
+	},
+
+	'shape-stats': () => {
+		out(ctl.shape_stats());
+		return 0;
+	},
+
+	rules: (args) => {
+		if (args[0] != null && args[0] != '' && args[0] != 'list')
+			return result({ ok: false, msg: RULES_USAGE });
+		out(ctl.rules_list());
+		return 0;
+	},
+
 	summary: () => {
 		out(report.summary());
 		return 0;
@@ -105,10 +125,7 @@ const LEGACY = {
 	'macfilter-remove': 'trafficctl-macfilter-remove.sh',
 	portfw: 'trafficctl-portfw.sh',
 	ratelimit: 'trafficctl-ratelimit.sh',
-	'ratelimit-stats': 'trafficctl-ratelimit-stats.sh',
-	rules: 'trafficctl-rules.sh',
 	shape: 'trafficctl-shape.sh',
-	'shape-stats': 'trafficctl-shape-stats.sh',
 	'telegram-test': 'trafficctl-telegram-test.sh',
 	totals: 'trafficctl-totals.sh',
 	unblock: 'trafficctl-unblock.sh',
@@ -116,7 +133,7 @@ const LEGACY = {
 
 // What a caller expecting this command's shape can still parse.
 function fallback(cmd, args, msg) {
-	if (index([ 'subnets', 'ifaces', 'bytes', 'totals', 'summary' ], cmd) >= 0 ||
+	if (index([ 'subnets', 'ifaces', 'bytes', 'totals', 'ratelimit-stats', 'shape-stats', 'summary' ], cmd) >= 0 ||
 	    (cmd == 'names' && args[0] == 'list'))
 		return [];
 	if (cmd == 'rdns')

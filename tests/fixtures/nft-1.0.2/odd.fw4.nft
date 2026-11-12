@@ -1,0 +1,12 @@
+table inet fw4 {
+	chain forward {
+		type filter hook forward priority filter; policy drop;
+		ip saddr 192.168.1.7 counter packets 0 bytes 0 drop comment "tctl_block_192_168_1_7_note"
+		ip saddr 192.168.1.8 counter packets 0 bytes 0 drop comment "tctl_block_192_168_1_80"
+		ip saddr 192.168.1.9 counter packets 0 bytes 0 accept comment "tctl_block_192_168_1_9"
+		meta nfproto ipv6 ether saddr aa:aa:aa:aa:aa:11 counter packets 0 bytes 0 drop comment "tctl_block_x_mac"
+		ip saddr 192.168.1.10 counter packets 0 bytes 0 drop comment "tctl_block_192_168_1_10"
+		ip saddr 192.168.1.15 counter packets 0 bytes 0 drop comment "x_tctl_block_192_168_1_15"
+		meta nfproto ipv6 ether saddr aa:aa:aa:aa:aa:12 counter packets 0 bytes 0 drop comment "tctl_block_192_168_1_12_mac"
+	}
+}

@@ -17,8 +17,10 @@ FAIL=0
 
 BIN="$(cd "$(dirname "$0")/.." && pwd)/trafficctl/files/usr/libexec/trafficctl"
 
-TMPDIR=$(mktemp -d)
-trap 'rm -rf "$TMPDIR"' EXIT
+# shellcheck source=tests/lib/ucode.sh
+. "$(dirname "$0")/lib/ucode.sh"
+TMPDIR="$UC_TMP/t"
+mkdir -p "$TMPDIR/root/etc/trafficctl"
 MOCKBIN="$TMPDIR/bin"
 mkdir -p "$MOCKBIN"
 
@@ -42,7 +44,8 @@ assert_contains() {
     fi
 }
 
-SHAPES="$TMPDIR/shapes.json"
+# The ucode readers find it under TCTL_ROOT, the shell ones at the path below.
+SHAPES="$TMPDIR/root/etc/trafficctl/shapes.json"
 FW="$TMPDIR/fw.sh"
 sed -e "s|TCTL_SHAPES_FILE=\"/etc/trafficctl/shapes.json\"|TCTL_SHAPES_FILE=\"$SHAPES\"|" \
     "$BIN/trafficctl-fw.sh" > "$FW"
@@ -67,8 +70,11 @@ case "$*" in
             echo "class htb $1 parent 1:1 prio 0 rate $3 ceil $3 burst 1600b cburst 1600b"
         done ;;
     *class\ show*)
+        # TC_FIRST: a known class listed ahead of the root class.
+        [ -n "$TC_FIRST" ] && { echo "class htb 1:2 parent 1:1 prio 0 rate 10Mbit ceil 10Mbit burst 1600b cburst 1600b"; echo " Sent 7 bytes 1 pkt (dropped 0, overlimits 0 requeues 0)"; }
         for c in "1:1 rate 1Gbit" "1:2 rate 10Mbit" "1:3 rate 5Mbit" "1:105 rate 2Mbit" "1:fffe rate 1Gbit"; do
             set -- $c
+            [ -n "$TC_FIRST" ] && [ "$1" = 1:2 ] && continue
             echo "class htb $1 parent 1:1 prio 0 rate $3 ceil $3 burst 1600b cburst 1600b"
             echo " Sent 1000 bytes 10 pkt (dropped 0, overlimits 0 requeues 0)"
             echo " backlog 0b 0p requeues 0"
@@ -101,14 +107,37 @@ assert_contains "class rates: IFB upload class" "1:3 1000" "$UL"
 assert_eq "class rates: root and default classes left out" "" "$(printf '%s\n' "$DL" | grep -E '^1:(1|fffe) ')"
 assert_eq "class rates: default IFB name" "tctl-ifb0" "$(fw 'tctl_shape_ifb_dev')"
 
+# ── ucode: the same lookups ─────────────────────────────────────────────────
+
+uc() { PATH="$MOCKBIN:$PATH" TCTL_ROOT="$TMPDIR/root" "$@" 2>&1; }
+assert_eq "ucode classmap: every record form, as the shell map" \
+    '{"192.168.1.100":"1:2","192.168.1.101":"1:3","192.168.1.5":"1:105"}' "$(uc tcall trafficctl.ctl shape_classmap | jq -c .)"
+assert_eq "ucode class rates: LAN, root and default left out" \
+    '{"1:2":10000,"1:3":5000,"1:105":2000}' "$(uc tcall trafficctl.ctl tc_class_rates '"br-lan"' | jq -c .)"
+assert_eq "ucode class rates: IFB" '{"1:2":10000,"1:3":1000}' "$(uc tcall trafficctl.ctl tc_class_rates '"tctl-ifb0"' | jq -c .)"
+assert_eq "ucode: default IFB name" "tctl-ifb0" "$(uc tcall trafficctl.ctl ifb_dev)"
+
 # ── shape-stats: every record form is reported ───────────────────────────────
 
-STATS_SH="$TMPDIR/shape-stats.sh"
-sed "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FW|" "$BIN/trafficctl-shape-stats.sh" > "$STATS_SH"
-STATS=$(PATH="$MOCKBIN:$PATH" sh "$STATS_SH" 2>/dev/null)
+STATS=$(uc tctl shape-stats)
 assert_contains "stats: symmetric shape reported" '"ip":"192.168.1.100"' "$STATS"
 assert_contains "stats: shape with its own upload ceiling reported" '"ip":"192.168.1.101"' "$STATS"
 assert_contains "stats: pre-allocation shape reported" '"ip":"192.168.1.5"' "$STATS"
+assert_contains "stats: counters of the class" '"ip":"192.168.1.101","rate_kbit":5000,"bytes":1000,"packets":10,"backlog":0,"drops":0,"overlimits":0,"requeues":0,"lended":10,"borrowed":0' "$STATS"
+assert_eq "stats: one record per shape" "3" "$(printf '%s' "$STATS" | jq length)"
+# v1.30.0 did not close a record at the root class, so a class listed before
+# 1:1 came out twice.
+STATS=$(TC_FIRST=1 uc tctl shape-stats)
+assert_eq "stats: a class before the root class is reported once" "1" "$(printf '%s' "$STATS" | jq '[.[] | select(.ip == "192.168.1.100")] | length')"
+assert_contains "stats: with its own counters" '"ip":"192.168.1.100","rate_kbit":10000,"bytes":7,"packets":1' "$STATS"
+mv "$SHAPES" "$SHAPES.off"
+assert_eq "stats: no shapes.json, nothing known" "[]" "$(uc tctl shape-stats)"
+mv "$SHAPES.off" "$SHAPES"
+mkdir -p "$TMPDIR/nohtb"
+printf '#!/bin/sh\necho "qdisc fq_codel 0: root refcnt 2"\n' > "$TMPDIR/nohtb/tc"
+chmod +x "$TMPDIR/nohtb/tc"
+assert_eq "stats: no HTB root, no shapes" "[]" "$(PATH="$TMPDIR/nohtb:$MOCKBIN:$PATH" TCTL_ROOT="$TMPDIR/root" tctl shape-stats 2>&1)"
+assert_eq "shim: the script is the CLI command" 'exec /usr/sbin/trafficctl shape-stats "$@"' "$(tail -n 1 "$BIN/trafficctl-shape-stats.sh")"
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

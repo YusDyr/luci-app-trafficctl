@@ -91,10 +91,12 @@ luci-app-trafficctl/                     # repository
 │       │       ├── iface/99-trafficctl-shapes      # Restore tc rules on boot
 │       │       └── dhcp/99-trafficctl-newdevice    # New-device detection
 │       ├── lib/upgrade/keep.d/trafficctl          # /etc/trafficctl/ kept across sysupgrade
-│       ├── usr/sbin/trafficctl          # The CLI (ucode): subnets, names, rdns, rdns-refresh, ifaces, bytes, totals, summary, device, metrics, netify
+│       ├── usr/sbin/trafficctl          # The CLI (ucode): subnets, names, rdns, rdns-refresh, ifaces, bytes, totals,
+│       │                                #   ratelimit-stats, shape-stats, rules, summary, device, metrics, netify
 │       ├── usr/share/ucode/trafficctl/
 │       │   ├── lib.uc                   # Shared helpers: uci/ubus, commands, JSON, validation, files, log
 │       │   ├── net.uc                   # Subnets, interface roles, reverse DNS, byte samples, totals
+│       │   ├── ctl.uc                   # Read-only nft/tc readers: limits, blocks, shapes, the Rules tab
 │       │   └── report.uc                # Summary, device detail, Prometheus exporter, netifyd DPI
 │       ├── usr/libexec/trafficctl/
 │       │   ├── trafficctl-fw.sh         # Firewall abstraction (sourced)
@@ -106,13 +108,13 @@ luci-app-trafficctl/                     # repository
 │       │   ├── trafficctl-block.sh      # Internet block
 │       │   ├── trafficctl-unblock.sh    # Internet unblock
 │       │   ├── trafficctl-shape.sh      # tc/HTB shaping
-│       │   ├── trafficctl-shape-stats.sh
+│       │   ├── trafficctl-shape-stats.sh      # Wrapper: `trafficctl shape-stats`
 │       │   ├── trafficctl-ratelimit.sh  # nft policer
-│       │   ├── trafficctl-ratelimit-stats.sh
+│       │   ├── trafficctl-ratelimit-stats.sh  # Wrapper: `trafficctl ratelimit-stats`
 │       │   ├── trafficctl-macfilter-add.sh
 │       │   ├── trafficctl-macfilter-remove.sh
 │       │   ├── trafficctl-rdns.sh       # Wrapper for `trafficctl rdns`
-│       │   ├── trafficctl-rules.sh      # Every restriction, online or not ("Rules" tab)
+│       │   ├── trafficctl-rules.sh      # Wrapper: `trafficctl rules` (every restriction, online or not; "Rules" tab)
 │       │   └── ...                      # the rest of the helpers
 │       └── www/cgi-bin/trafficctl-metrics          # Prometheus scrape endpoint
 ├── luci-app-trafficctl/                 # package luci-app-trafficctl: the web interface
@@ -198,7 +200,7 @@ ssh root@192.168.0.1 '/usr/sbin/trafficctl device 192.168.0.111 all' | python3 -
 # Shaping
 ssh root@192.168.0.1 '/usr/libexec/trafficctl/trafficctl-shape.sh add 192.168.0.100 5000 test'
 ssh root@192.168.0.1 '/usr/libexec/trafficctl/trafficctl-shape.sh status 192.168.0.100'
-ssh root@192.168.0.1 '/usr/libexec/trafficctl/trafficctl-shape-stats.sh' | python3 -m json.tool
+ssh root@192.168.0.1 'trafficctl shape-stats' | python3 -m json.tool
 ssh root@192.168.0.1 '/usr/libexec/trafficctl/trafficctl-shape.sh remove 192.168.0.100'
 
 # Verify kernel state
@@ -229,7 +231,6 @@ bash tests/test_portfw.sh             # Port-forward control, port ranges
 bash tests/test_netify.sh             # Netify (DPI) integration
 bash tests/test_openwrt_compat.sh     # BusyBox ash compatibility / no bashisms
 bash tests/test_security.sh           # Input validation and injection resistance
-bash tests/test_rules.sh              # Rules tab backend: restrictions of offline devices
 bash tests/test_block.sh              # Internet block/unblock
 bash tests/test_macfilter.sh          # WiFi MAC deny/allow
 bash tests/test_metrics_cgi.sh        # Metrics CGI gate and token check
@@ -254,6 +255,11 @@ bash tests/test_totals.sh             # Byte samples and the lifetime accumulato
 bash tests/test_metrics.sh            # Prometheus exporter (runs the accumulator)
 bash tests/test_byte_overflow.sh      # Counters past 2^31 and 2^53
 bash tests/test_rpcd.sh               # rpcd plugin: every method, dispatch, uci commits, 0600
+bash tests/test_readers.sh            # nft -j readers of both nft versions: block comments, 1.1 meters
+bash tests/test_rules.sh              # Rules tab backend: restrictions of offline devices
+bash tests/test_rl_lookup.sh          # Rate limit read-back: units, prefixes, ratelimit-stats
+bash tests/test_shape_lookup.sh       # Shape classid lookup, shape-stats
+bash tests/test_subnet_limits.sh      # Subnet limits: stats, persisted mode, the restore hook
 bash tests/test_rpcd_contract.sh      # every rpc.declare in the views against the plugin's list
 bash tests/equiv.sh                   # ucode output == the v1.30.0 shell output, rpcd methods included
 ```

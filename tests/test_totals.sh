@@ -556,6 +556,19 @@ assert_contains "a stale shell lock does not stop accumulation" '"bytes_in_total
 assert_eq "the stolen lock is released afterwards" "1" \
     "$([ -d "$LOCKD" ] && echo 0 || echo 1)"
 
+# A lock made just before the first try, and held through the whole wait, is
+# taken over at its end, as the shell did after its 30 x 100 ms. A wait
+# shorter than the steal age wrote without the lock and left the directory
+# for the next caller (equiv.sh case totals-stale-lock, when its setup's mkdir
+# landed early enough in a second).
+rm -f "$STATE"
+sample '[{"ip":"10.0.20.94","bytes_in":30,"bytes_out":0,"bytes_tcp":0,"bytes_udp":0,"src":"ct"}]'
+OUT=$(export TCTL_TEST_FRESH_LOCK=1; be_totals "$SAMPLE")
+assert_contains "a lock as young as it gets is waited out" '"bytes_in_total":30' "$OUT"
+assert_eq "and taken over at the end of the wait, then released" "1" \
+    "$([ -d "$LOCKD" ] && echo 0 || echo 1)"
+rmdir "$LOCKD" 2>/dev/null
+
 # A live holder is waited for (the shell waited 30 x 100 ms), then the sample
 # is accumulated anyway, as the shell did, rather than dropped.
 mkdir "$LOCKD"

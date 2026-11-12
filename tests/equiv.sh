@@ -4,7 +4,8 @@
 #
 # A fixture is a directory under tests/fixtures/ (see tools/capture-fixtures.sh):
 #   root/  becomes TCTL_ROOT; the legacy scripts get their paths rewritten to it
-#   cmd/   replayed by PATH mocks for ip, nft, tc, iw, brctl, conntrack, nslookup
+#   cmd/   replayed by PATH mocks for ip, nft, tc, iw, brctl, conntrack, nslookup,
+#          hostapd_cli
 #   ubus/  served by tests/lib/ubus-mock.uc on a private ubusd
 # Both sides see the real uci, ubus and jsonfilter binaries from build-ucode.sh;
 # logger is recorded to root/tmp/logger.log.
@@ -97,6 +98,42 @@ NETIFY_LOCKED='mkdir "$W/root/tmp/trafficctl_netify.lock"'
 NETIFY_OFF='uci set trafficctl.main.netify_enabled=0; uci commit trafficctl'
 SINK='mkdir -p "$W/root/etc/netifyd"; printf "{\n  \"sink_socket\": { \"channels\": { \"x\": { \"bind_address\" : \"tcp://127.0.0.1:1780\" } } }\n}\n" > "$W/root/etc/netifyd/netify-sink-socket.json"'
 NETF='tmp/trafficctl_netify.json'
+# Limiter, block and shaper readers. live: a router state built by the real
+# writers in an OpenWrt rootfs (tools/ci/live-readers.sh capture) with the
+# nft and tc of that release; nftfix: one listing of tests/fixtures/nft-src
+# as that nft version prints it, text for the legacy side, JSON for the port.
+live() {   # live <nft version>
+    cp -R "$FIXTURES/nft-$1/live/cmd/." "$W/cmd/"
+    cp -R "$FIXTURES/nft-$1/live/root/." "$W/root/"
+}
+nftfix() {   # nftfix <nft version> <name>
+    local d="$FIXTURES/nft-$1"
+    if [ -f "$d/$2.tm_ratelimit.json" ]; then
+        cp "$d/$2.tm_ratelimit.nft" "$W/cmd/nft list table netdev tm_ratelimit"
+        cp "$d/$2.tm_ratelimit.json" "$W/cmd/nft -j list table netdev tm_ratelimit"
+    fi
+    if [ -f "$d/$2.fw4.json" ]; then
+        cp "$d/$2.fw4.nft" "$W/cmd/nft list chain inet fw4 forward"
+        cp "$d/$2.fw4.json" "$W/cmd/nft -j list chain inet fw4 forward"
+    fi
+}
+# nft 1.1 lists a per-address meter as "add @set { ... }", which the legacy
+# readers took for a shared limit (an intentional fix in the port). For the
+# legacy side only, put the listing back into the 1.0 form it recognises.
+meterize() {
+    sed -i -E 's/ add @(tctl_[du]_[0-9a-z_]+) \{/ meter \1 size 65535 {/' "$W/cmd/nft list table netdev tm_ratelimit"
+}
+PERSIST='uci set trafficctl.main.persist_rules=1; uci commit trafficctl'
+NORDNS='uci set trafficctl.main.resolve_names=0; uci commit trafficctl'
+EMPTYRL='printf "table netdev tm_ratelimit {\n}\n" > "$W/cmd/nft list table netdev tm_ratelimit"; printf "{\"nftables\": [{\"metainfo\": {\"version\": \"1.0.2\", \"release_name\": \"Lester Gooch\", \"json_schema_version\": 1}}, {\"table\": {\"family\": \"netdev\", \"name\": \"tm_ratelimit\", \"handle\": 9}}]}\n" > "$W/cmd/nft -j list table netdev tm_ratelimit"'
+NOSHAPES='rm -f "$W/root/etc/trafficctl/shapes.json"'
+# Records from before the classid was allocated: the minor comes from the
+# address (1:3 is 0*256+3), the odd ones are skipped.
+OLDSHAPES='printf "[{\"ip\":\"192.168.0.3\",\"rate_kbit\":2000},{\"ip\":\"192.168.0.109\",\"rate_kbit\":1000,\"classid\":\"1:4\"},{\"ip\":\"x\",\"rate_kbit\":5},{\"ip\":\"192.168.0.9\",\"rate_kbit\":-1}]" > "$W/root/etc/trafficctl/shapes.json"'
+# A deny list in hostapd's running ACL on one AP, none on the other.
+WIFIDENY='uci set wireless.default_radio0.macfilter=deny; uci set wireless.default_radio1.macfilter=deny; uci commit wireless; echo PONG > "$W/cmd/hostapd_cli -i phy0-ap0 ping"; printf "02:00:00:00:00:05\n02:00:00:00:00:06\n" > "$W/cmd/hostapd_cli -i phy0-ap0 deny_acl SHOW"'
+WIFIACL='uci set wireless.default_radio0.macfilter=deny; uci set wireless.default_radio1.macfilter=deny; uci commit wireless; for i in phy0-ap0 phy1-ap0; do echo PONG > "$W/cmd/hostapd_cli -i $i ping"; printf "02:00:00:00:00:05\n02:00:00:00:00:06\n02:00:00:00:00:07\n" > "$W/cmd/hostapd_cli -i $i deny_acl SHOW"; done'
+WIFIALLOW='uci set wireless.default_radio0.macfilter=allow; uci set wireless.default_radio1.macfilter=deny; uci commit wireless'
 
 CASES="
 subnets | json | router-24.10 | trafficctl-subnets.sh | tctl subnets
@@ -181,6 +218,36 @@ netify-collect-locked | text+$NETF | router-24.10 | trafficctl-netify.sh collect
 netify-collect-nodata | text+$NETF | router-24.10 | trafficctl-netify.sh collect 1 | tctl netify collect 1
 netify-raw | text | router-24.10 | trafficctl-netify.sh raw 5 | tctl netify raw 5 | $FEED
 netify-usage | text | router-24.10 | sh:sh \"\$LEXEC/trafficctl-netify.sh\" bogus; echo rc=\$? | tctl netify bogus; echo rc=\$?
+ratelimit-stats-none | json | router-24.10 | trafficctl-ratelimit-stats.sh | tctl ratelimit-stats
+ratelimit-stats-empty | json | router-24.10 | trafficctl-ratelimit-stats.sh | tctl ratelimit-stats | $EMPTYRL
+ratelimit-stats-live-1.0 | json | router-24.10 | trafficctl-ratelimit-stats.sh | tctl ratelimit-stats | live 1.0.2
+ratelimit-stats-live-1.1 | json | router-24.10 | sh:meterize; sh \"\$LEXEC/trafficctl-ratelimit-stats.sh\" | tctl ratelimit-stats | live 1.1.6
+ratelimit-stats-rl-1.0 | json | router-24.10 | trafficctl-ratelimit-stats.sh | tctl ratelimit-stats | nftfix 1.0.2 rl
+ratelimit-stats-rl-1.1 | json | router-24.10 | sh:meterize; sh \"\$LEXEC/trafficctl-ratelimit-stats.sh\" | tctl ratelimit-stats | nftfix 1.1.6 rl
+ratelimit-stats-subnet-1.0 | json | router-24.10 | trafficctl-ratelimit-stats.sh | tctl ratelimit-stats | nftfix 1.0.2 subnet
+ratelimit-stats-subnet-1.1 | json | router-24.10 | sh:meterize; sh \"\$LEXEC/trafficctl-ratelimit-stats.sh\" | tctl ratelimit-stats | nftfix 1.1.6 subnet
+ratelimit-stats-args | json | router-24.10 | trafficctl-ratelimit-stats.sh x y | tctl ratelimit-stats x y | live 1.0.2
+shape-stats | json | router-24.10 | trafficctl-shape-stats.sh | tctl shape-stats
+shape-stats-none | json | router-24.10 | trafficctl-shape-stats.sh | tctl shape-stats | $NOSHAPES
+shape-stats-old-records | json | router-24.10 | trafficctl-shape-stats.sh | tctl shape-stats | $OLDSHAPES
+shape-stats-live-1.0 | json | router-24.10 | trafficctl-shape-stats.sh | tctl shape-stats | live 1.0.2
+shape-stats-live-1.1 | json | router-24.10 | trafficctl-shape-stats.sh | tctl shape-stats | live 1.1.6
+rules | json | router-24.10 | trafficctl-rules.sh | tctl rules
+rules-list | json | router-24.10 | trafficctl-rules.sh list | tctl rules list
+rules-bad-arg | text | router-24.10 | trafficctl-rules.sh bogus; echo \"rc=\$?\" | tctl rules bogus; echo \"rc=\$?\"
+rules-persist | json | router-24.10 | trafficctl-rules.sh | tctl rules | $PERSIST
+rules-no-rdns | json | router-24.10 | trafficctl-rules.sh | tctl rules | $NORDNS
+rules-old-shapes | json | router-24.10 | trafficctl-rules.sh | tctl rules | $OLDSHAPES
+rules-wifi-deny | json | router-24.10 | trafficctl-rules.sh | tctl rules | $WIFIDENY
+rules-wifi-acl | json | router-24.10 | trafficctl-rules.sh | tctl rules | $WIFIACL
+rules-wifi-allow | json | router-24.10 | trafficctl-rules.sh | tctl rules | $WIFIALLOW
+rules-live-1.0 | json | router-24.10 | trafficctl-rules.sh | tctl rules | live 1.0.2; $PERSIST
+rules-live-1.0-transient | json | router-24.10 | trafficctl-rules.sh | tctl rules | live 1.0.2
+rules-live-1.1 | json | router-24.10 | sh:meterize; sh \"\$LEXEC/trafficctl-rules.sh\" | tctl rules | live 1.1.6; $PERSIST
+rules-nft-1.0 | json | router-24.10 | trafficctl-rules.sh | tctl rules | nftfix 1.0.2 rules; $PERSIST
+rules-nft-1.1 | json | router-24.10 | sh:meterize; sh \"\$LEXEC/trafficctl-rules.sh\" | tctl rules | nftfix 1.1.6 rules; $PERSIST
+rules-subnet-1.0 | json | router-24.10 | trafficctl-rules.sh | tctl rules | nftfix 1.0.2 subnet
+rules-subnet-1.1 | json | router-24.10 | sh:meterize; sh \"\$LEXEC/trafficctl-rules.sh\" | tctl rules | nftfix 1.1.6 subnet
 "
 
 command -v jq >/dev/null || { echo "FAIL: jq is required" >&2; exit 1; }
@@ -199,6 +266,7 @@ CEXEC="$C/trafficctl/files/usr/libexec/trafficctl"
 rewrite() {   # rewrite <tree> <its libexec dir>
     find "$1" -type f -exec sed -i \
         -e "s|/usr/libexec/trafficctl/|$2/|g" \
+        -e "s|\"/usr/libexec/trafficctl\"|\"$2\"|g" \
         -e "s|/tmp/dhcp\.leases|$W/root/tmp/dhcp.leases|g" \
         -e "s|/proc/net/|$W/root/proc/net/|g" \
         -e "s|/sys/class/net|$W/root/sys/class/net|g" \
@@ -232,7 +300,7 @@ f="$W/cmd/\${0##*/} \$*"
 [ -f "\$f" ] || { echo "replay: no fixture for: \${0##*/} \$*" >&2; exit 1; }
 cat "\$f"
 EOF
-for c in ip nft tc iw brctl conntrack nslookup; do ln -sf replay "$W/bin/$c"; done
+for c in ip nft tc iw brctl conntrack nslookup hostapd_cli; do ln -sf replay "$W/bin/$c"; done
 # -t, not -P: since 2023 uci treats -P as a search path only, and commit
 # would read its deltas from /tmp/.uci and change nothing.
 cat > "$W/bin/uci" <<EOF

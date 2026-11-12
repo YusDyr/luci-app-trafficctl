@@ -1,0 +1,11 @@
+table inet fw4 {
+	chain forward { # handle 1
+		type filter hook forward priority filter; policy drop;
+		ip saddr 192.168.0.52 counter packets 0 bytes 0 drop comment "tctl_block_block_192.168.0.52" # handle 9
+		ip saddr 192.168.0.51 counter packets 0 bytes 0 drop comment "tctl_block_tg" # handle 8
+		ip saddr 192.168.0.5 counter packets 0 bytes 0 drop comment "tctl_block_192_168_0_5" # handle 6
+		meta nfproto ipv6 ether saddr 02:00:00:00:00:50 counter packets 0 bytes 0 drop comment "tctl_block_192_168_0_50_mac" # handle 5
+		ip saddr 192.168.0.50 counter packets 0 bytes 0 drop comment "tctl_block_192_168_0_50" # handle 4
+		ct state vmap { established : accept, related : accept } comment "!fw4: Handle forwarded flows" # handle 3
+	}
+}
