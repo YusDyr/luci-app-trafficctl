@@ -571,11 +571,16 @@ and the two are merged:
 
 | `type` | Live state | Saved state |
 |--------|------------|-------------|
-| `block` | `tctl_block_<slug>` rules in `inet fw4 forward` (the `_mac` IPv6 rule folds into the same record), or the commented `FORWARD` DROP on iptables | `rules.json`, only while `persist_rules` is on |
+| `block` | drop rules in `inet fw4 forward` whose comment starts with `tctl_block_` (`tctl_block_<slug>`, or the caller's label on a block written before v1.13.2; the `_mac` IPv6 rule folds into the same record), or the commented `FORWARD` DROP on iptables | `rules.json`, only while `persist_rules` is on |
 | `ratelimit` | `trafficctl-ratelimit-stats.sh` (download) and the `_ul` rule (upload) | `rules.json`, only while `persist_rules` is on |
 | `shape` | HTB classes on the LAN device and on `tctl-ifb0`, mapped through `tctl_shape_classmap` | `shapes.json` (always written) |
 | `wifi` | hostapd's running deny ACL, or a ubus ban | uci `maclist` of `macfilter=deny` interfaces |
 
+- Unblocking a block written before v1.13.2 (`tctl_block_tg` from Telegram,
+  `tctl_block_block_<ip>` or a typed label from LuCI) works with any label,
+  the empty one the Rules tab sends included: `trafficctl-unblock.sh` also
+  removes every drop rule on that exact `ip saddr` whose comment starts with
+  `tctl_block_`.
 - `applied`: in the kernel or on the radio now. `persisted`: survives a reboot.
   A saved record that is not applied is restored at the next `ifup lan`; a live
   rule that is not saved is lost at the next reboot. Live rates win over saved ones.

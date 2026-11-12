@@ -554,6 +554,27 @@ tctl_block_remove() {
     fi
 }
 
+# Blocks written before v1.13.2 carry the caller's label in the comment
+# (tctl_block_block_<ip> from LuCI, tctl_block_tg from Telegram, or any label
+# the UI was given), so no comment the caller can name finds them: the Rules
+# tab unblocks with an empty label. They are found by what every version
+# wrote: a drop rule on exactly this source address whose comment starts with
+# tctl_block_. The v4 half only: the v6 half came in v1.18.2 and always
+# carries the current comment.
+tctl_block_remove_legacy() {
+    local ip="$1" h
+
+    for h in $(nft -a list chain inet fw4 forward 2>/dev/null \
+               | awk -v ip="$ip" '$1 == "ip" && $2 == "saddr" &&
+                                  ($3 == ip || $3 == ip "/32") &&
+                                  / drop comment "tctl_block_/ {
+                      for (i = 1; i < NF; i++)
+                          if ($i == "handle") { print $(i+1); break }
+                  }'); do
+        nft delete rule inet fw4 forward handle "$h"
+    done
+}
+
 tctl_is_blocked() {
     local ip="$1" dump comment
     if [ "$TCTL_FW" = "nft" ]; then
