@@ -369,10 +369,12 @@ do_resume() {
 
 do_limit() {
     local scope="$1" proto="$2" ip="$3" port="$4" kbit="$5" p cmt_ip
-    case "$kbit" in ''|*[!0-9]*)
+    # 0 removes; anything else goes through the shared check, which also
+    # refuses "08" (octal to shell arithmetic) and absurd values.
+    if [ "$kbit" != "0" ] && ! tctl_validate_rate "$kbit"; then
         echo '{"ok":false,"msg":"invalid rate"}'
         return 1
-    esac
+    fi
     cmt_ip="$ip"
     [ "$scope" = "input" ] && cmt_ip="local"
     for p in $(proto_tokens "$proto"); do

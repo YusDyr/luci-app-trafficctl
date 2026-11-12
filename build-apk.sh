@@ -22,7 +22,7 @@ BACKEND_SRC="$TCTL_ROOT/${BE_NAME}"
 # luci-app-trafficctl/Makefile.
 # hostapd-utils is optional for the backend (wired-only builds) and is only
 # repeated on luci-app-trafficctl.
-BE_DEPENDS="conntrack curl tc iw firewall4 ucode ucode-mod-fs ucode-mod-uci ucode-mod-ubus"
+BE_DEPENDS="conntrack curl tc iw kmod-nft-netdev firewall4 ucode ucode-mod-fs ucode-mod-uci ucode-mod-ubus"
 FE_EXTRA_DEPENDS="hostapd-utils"
 
 OUTDIR="dist"
@@ -119,6 +119,9 @@ cat > "$BE_SCRIPTS/post-install" <<'SCRIPT'
 # be world-readable before the first save from the UI applies the same mode.
 chmod 0600 "${IPKG_INSTROOT}/etc/config/trafficctl" 2>/dev/null || true
 if [ -z "${IPKG_INSTROOT}" ]; then
+    # Releases up to 1.30.1 gave the cut keeper START=95, so rc.d may
+    # still link it for boot. It is started on demand only.
+    rm -f /etc/rc.d/S95trafficctl-cut /etc/rc.d/K10trafficctl-cut
     # Each service follows its uci flag, so what runs now is what runs after
     # the next reboot: enabled in rc.d and started when the flag is 1, left
     # alone when it is 0.

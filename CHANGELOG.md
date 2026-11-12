@@ -4,6 +4,16 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.30.2] - 2026-11-11
+
+### Bug Fixes
+- validate rates, require a metrics token and declare kmod-nft-netdev ([#141](https://github.com/YusDyr/luci-app-trafficctl/issues/141)) ([65b2d27](https://github.com/YusDyr/luci-app-trafficctl/commit/65b2d27e33f4b937cd4bdbea15deaf3697a90b8d))
+  Addresses the automated review on openwrt/packages#31204:
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.30.1...v1.30.2
+
+---
+
 ## [1.30.1] - 2026-11-10
 
 ### Other

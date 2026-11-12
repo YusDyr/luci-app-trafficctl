@@ -103,7 +103,7 @@ esac
 
 # Verify deps were actually pulled in
 echo "=== Verifying deps installed ==="
-for dep in trafficctl luci-app-trafficctl conntrack curl rpcd luci-base; do
+for dep in trafficctl luci-app-trafficctl conntrack curl kmod-nft-netdev rpcd luci-base; do
     case "$PKG" in
         *.ipk)
             if opkg list-installed | grep -q "^$dep "; then
