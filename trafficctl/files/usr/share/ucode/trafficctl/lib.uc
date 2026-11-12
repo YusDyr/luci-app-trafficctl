@@ -25,6 +25,8 @@
 //   ubus_call(obj, method, args)  reply, or null on any failure; a failed
 //                                 connect is retried on the next call
 //                                 (socket: getenv('TCTL_UBUS_SOCKET'))
+//   ubus_list()                   every object path, or null when ubus could
+//                                 not be asked (not the same as none)
 // External commands. Interpolate every value through q(); nothing else may
 // call popen() or system() (tests/test_security.sh enforces this).
 //   q(s)                          single-quoted for /bin/sh; dies on
@@ -154,6 +156,18 @@ function ubus_call(obj, method, args) {
 		return null;
 	}
 	let r = bus.call(obj, method, args ?? {});
+	if (r == null)
+		ubusmod.error();
+	return r;
+}
+
+function ubus_list() {
+	bus ??= ubusmod.connect(getenv('TCTL_UBUS_SOCKET'));
+	if (!bus) {
+		ubusmod.error();
+		return null;
+	}
+	let r = bus.list();
 	if (r == null)
 		ubusmod.error();
 	return r;
@@ -864,4 +878,4 @@ export { path, pid, reset, plain, cursor, uci_get, uci_words, uci_foreach, commi
 	names_list, names_map, names_set, names_remove, seen_ready, seen_count,
 	seen_known, seen_mark, seen_seed };
 // What the rpcd plugin and the CLI's legacy commands need.
-export { qv, pipe, passthru, set_context, run_rc };
+export { qv, pipe, passthru, set_context, run_rc, ubus_list };

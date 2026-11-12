@@ -1,0 +1,25 @@
+# test_rules.sh: an offline block (its v4 and v6 halves), two blocks written
+# before v1.13.2 (their comments carry the caller's label: Telegram's "tg" and
+# LuCI's default block_<ip>), a drop rule this app did not write, a host limit
+# with its own upload ceiling, a per-device subnet limit.
+table inet fw4 {
+	chain forward {
+		meta nfproto ipv6 ether saddr aa:aa:aa:aa:aa:50 counter packets 0 bytes 0 drop comment "tctl_block_192_168_1_50_mac"
+		ip saddr 192.168.1.50 counter packets 3 bytes 180 drop comment "tctl_block_192_168_1_50"
+		ip saddr 192.168.1.51 counter packets 0 bytes 0 drop comment "tctl_block_tg"
+		ip saddr 192.168.1.52 counter packets 0 bytes 0 drop comment "tctl_block_block_192.168.1.52"
+		ip saddr 192.168.1.33 counter packets 0 bytes 0 drop comment "someone_else"
+	}
+}
+table netdev tm_ratelimit {
+	chain dl_br_lan {
+		type filter hook egress device "br-lan" priority filter; policy accept;
+		ip daddr 192.168.1.60 limit rate over 625000 bytes/second counter packets 7 bytes 900 drop comment "rl_ratelimit_192_168_1_60"
+		ip daddr 10.0.20.0/24 meter tctl_d_10_0_20_0_24 { ip daddr limit rate over 250000 bytes/second } counter packets 0 bytes 0 drop comment "rl_ratelimit_10_0_20_0_24"
+	}
+	chain ul_lan1 {
+		type filter hook ingress device "lan1" priority -200; policy accept;
+		ip saddr 192.168.1.60 limit rate over 125000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_60_ul"
+		ip saddr 10.0.20.0/24 meter tctl_u_10_0_20_0_24 { ip saddr limit rate over 250000 bytes/second } counter packets 0 bytes 0 drop comment "rl_ratelimit_10_0_20_0_24_ul"
+	}
+}

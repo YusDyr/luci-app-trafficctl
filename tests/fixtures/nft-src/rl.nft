@@ -1,0 +1,32 @@
+# test_rl_lookup.sh: rate units, address prefixes, one limit on two bridges,
+# meters, an IPv6 set with its feed rule.
+table netdev tm_ratelimit {
+	set tctl_v6_192_168_1_5 {
+		type ipv6_addr
+		flags dynamic,timeout
+		timeout 1h
+	}
+	chain dl_br_lan {
+		type filter hook egress device "br-lan" priority filter; policy accept;
+		ip daddr 192.168.1.5 limit rate over 625000 bytes/second counter packets 3 bytes 300 drop comment "rl_ratelimit_192_168_1_5"
+		ip daddr 192.168.1.50 limit rate over 1250000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_50"
+		ip daddr 192.168.1.7 limit rate over 1000 kbytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_7"
+		ip daddr 192.168.1.6 limit rate over 625 kbytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_6"
+		ip daddr 192.168.1.4 limit rate over 1 mbytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_4"
+		ip daddr 192.168.1.9 limit rate over 512 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_9"
+		ip daddr 192.168.1.8 meter tctl_d_192_168_1_8 { ip daddr limit rate over 2000 kbytes/second } counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_8"
+		ip6 daddr @tctl_v6_192_168_1_5 limit rate over 625 kbytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_5_dl6"
+	}
+	chain dl_br_guest {
+		type filter hook egress device "br-guest" priority filter; policy accept;
+		ip daddr 192.168.1.5 limit rate over 625000 bytes/second counter packets 4 bytes 5000000000 drop comment "rl_ratelimit_192_168_1_5"
+	}
+	chain ul_lan1 {
+		type filter hook ingress device "lan1" priority -200; policy accept;
+		ip saddr 192.168.1.60 limit rate over 125 kbytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_60_ul"
+		ip saddr 192.168.1.5 limit rate over 125000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_5_ul"
+		ip saddr 192.168.1.8 meter tctl_u_192_168_1_8 { ip saddr limit rate over 250000 bytes/second } counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_8_ul"
+		meta protocol ip6 ether saddr aa:aa:aa:aa:aa:05 ip6 saddr != fe80::/10 update @tctl_v6_192_168_1_5 { ip6 saddr } comment "rl_ratelimit_192_168_1_5_v6"
+		meta protocol ip6 ether saddr aa:aa:aa:aa:aa:05 limit rate over 125000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_5_ul6"
+	}
+}

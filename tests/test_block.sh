@@ -168,5 +168,43 @@ assert_eq "unblock: 192.168.1.1 no longer present as its own exact entry" "" "$E
 OUT=$(run_unblock 'bad;ip')
 assert_contains "unblock: invalid ip rejected" '"ok":false' "$OUT"
 
+# ── unblock removes a block written before v1.13.2 ──────────────────────────
+# Its comment carries the caller's label, not the address. The Rules tab lists
+# it (ctl.live_blocks) and unblocks with an empty label, so the label-derived
+# guess in trafficctl-unblock.sh (tctl_block_block_<ip>) misses a block placed
+# from Telegram (tctl_block_tg) or with a label typed in the UI. v1.30.0
+# reported success and left the rule in place.
+LISTING="$TMPDIR/fw4_forward.txt"
+DELETED="$TMPDIR/deleted.log"
+cat > "$LISTING" <<'NFT'
+table inet fw4 {
+	chain forward {
+		ip saddr 192.168.1.40 counter packets 1 bytes 1 drop comment "tctl_block_tg" # handle 51
+		ip saddr 192.168.1.41 counter packets 1 bytes 1 drop comment "tctl_block_kids_tablet" # handle 52
+		ip saddr 192.168.1.4 counter packets 1 bytes 1 drop comment "tctl_block_tg" # handle 53
+		ip saddr 192.168.1.40 counter packets 1 bytes 1 drop comment "someone_else" # handle 54
+		ip saddr 192.168.1.40 counter packets 1 bytes 1 accept comment "tctl_block_note" # handle 55
+	}
+}
+NFT
+cat > "$MOCKBIN/nft" <<MOCK
+#!/bin/sh
+case "\$*" in
+    "-a list chain inet fw4 forward") cat "$LISTING" ;;
+    delete\ rule*) for a in "\$@"; do h="\$a"; done; echo "\$h" >> "$DELETED" ;;
+esac
+exit 0
+MOCK
+chmod +x "$MOCKBIN/nft"
+
+: > "$DELETED"
+OUT=$(run_unblock 192.168.1.40 "")
+assert_contains "unblock, legacy label: reports ok" '"ok":true' "$OUT"
+assert_eq "unblock, legacy label: deletes the Telegram-placed rule, nothing else" "51" \
+    "$(sort -u "$DELETED" | tr '\n' ' ' | sed 's/ $//')"
+: > "$DELETED"
+run_unblock 192.168.1.41 "" >/dev/null
+assert_eq "unblock, legacy label: a label typed in the UI" "52" "$(sort -u "$DELETED" | tr '\n' ' ' | sed 's/ $//')"
+
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

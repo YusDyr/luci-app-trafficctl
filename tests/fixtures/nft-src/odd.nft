@@ -1,0 +1,15 @@
+# Drop rules near a block's: two whose comment only starts like one (listed:
+# a block from before v1.13.2 carried any label there), one whose comment
+# merely contains tctl_block_, an accept, and a v6 half whose comment carries
+# no address. Only the ones that start with tctl_block_ and drop are listed.
+table inet fw4 {
+	chain forward {
+		ip saddr 192.168.1.7 counter packets 0 bytes 0 drop comment "tctl_block_192_168_1_7_note"
+		ip saddr 192.168.1.8 counter packets 0 bytes 0 drop comment "tctl_block_192_168_1_80"
+		ip saddr 192.168.1.9 counter packets 0 bytes 0 accept comment "tctl_block_192_168_1_9"
+		meta nfproto ipv6 ether saddr aa:aa:aa:aa:aa:11 counter packets 0 bytes 0 drop comment "tctl_block_x_mac"
+		ip saddr 192.168.1.10 counter packets 0 bytes 0 drop comment "tctl_block_192_168_1_10"
+		ip saddr 192.168.1.15 counter packets 0 bytes 0 drop comment "x_tctl_block_192_168_1_15"
+		meta nfproto ipv6 ether saddr aa:aa:aa:aa:aa:12 counter packets 0 bytes 0 drop comment "tctl_block_192_168_1_12_mac"
+	}
+}

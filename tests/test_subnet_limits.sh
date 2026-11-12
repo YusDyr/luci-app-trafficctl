@@ -5,7 +5,7 @@
 # v1.13, but three things around it were broken or missing, and all three are
 # invisible from the CLI success message:
 #
-#   1. trafficctl-ratelimit-stats.sh reported the target of every "each"-mode
+#   1. trafficctl-ratelimit-stats.sh (now `trafficctl ratelimit-stats`) reported the target of every "each"-mode
 #      rule as the literal string "limit" (the meter key is a bare "ip daddr"
 #      with no operand and the parser took the LAST match). "each" is the
 #      default for a CIDR, so every per-device subnet limit was invisible to
@@ -23,8 +23,10 @@ FAIL=0
 BIN="$(cd "$(dirname "$0")/.." && pwd)/trafficctl/files/usr/libexec/trafficctl"
 HOTPLUG="$(cd "$(dirname "$0")/.." && pwd)/trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes"
 
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
+# shellcheck source=tests/lib/ucode.sh
+. "$(dirname "$0")/lib/ucode.sh"
+TMP="$UC_TMP/t"
+mkdir -p "$TMP/root"
 MOCKBIN="$TMP/bin"
 mkdir -p "$MOCKBIN"
 NFT_LOG="$TMP/nft.log"
@@ -154,6 +156,7 @@ echo "\$*" >> "$NFT_LOG"
 case "\$*" in
     "list tables") echo "table inet fw4" ;;
     "list table netdev tm_ratelimit") cat "$TMP/nft_table.txt" 2>/dev/null ;;
+    "-j list table netdev tm_ratelimit") cat "$TMP/nft_table.json" 2>/dev/null ;;
     # fw4_late holds how many more probes fail before fw4 has its table.
     "list table inet fw4")
         n=\$(cat "$TMP/fw4_late" 2>/dev/null || echo 0)
@@ -199,7 +202,6 @@ patch_script() {
         "$1" > "$2"
     chmod +x "$2"
 }
-patch_script "$BIN/trafficctl-ratelimit-stats.sh" "$TMP/ratelimit-stats.sh"
 patch_script "$BIN/trafficctl-ratelimit.sh"       "$TMP/ratelimit.sh"
 
 run() { PATH="$MOCKBIN:$PATH" sh "$@" 2>/dev/null; }
@@ -212,54 +214,47 @@ run() { PATH="$MOCKBIN:$PATH" sh "$@" 2>/dev/null; }
 # subnet limit appears once per bridge. Only the chain on the device the
 # subnet lives behind ever matches; the copies are what made "take one entry"
 # report zero drops for most targets.
-cat > "$TMP/nft_table.txt" <<'TABLE'
-table netdev tm_ratelimit {
-	chain dl_br_lan {
-		type filter hook egress device "br-lan" priority filter; policy accept;
-		ip daddr 192.168.20.0/24 meter tctl_d_192_168_20_0_24 { ip daddr limit rate over 2500000 bytes/second } counter packets 12 bytes 3456 drop comment "rl_ratelimit_192_168_20_0_24"
-		ip daddr 10.0.0.0/24 limit rate over 1250000 bytes/second counter packets 40 bytes 5000 drop comment "rl_ratelimit_10_0_0_0_24"
-		ip daddr 192.168.1.50 limit rate over 625000 bytes/second counter packets 7 bytes 900 drop comment "rl_ratelimit_192_168_1_50"
-	}
-	chain dl_br_guest {
-		type filter hook egress device "br-guest" priority filter; policy accept;
-		ip daddr 192.168.20.0/24 meter tctl_d_192_168_20_0_24 { ip daddr limit rate over 2500000 bytes/second } counter packets 8 bytes 1544 drop comment "rl_ratelimit_192_168_20_0_24"
-		ip daddr 10.0.0.0/24 limit rate over 1250000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_10_0_0_0_24"
-		ip daddr 192.168.1.50 limit rate over 625000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_50"
-	}
-	chain ul_lan1 {
-		type filter hook ingress device "lan1" priority -200; policy accept;
-		ip saddr 192.168.20.0/24 meter tctl_u_192_168_20_0_24 { ip saddr limit rate over 2500000 bytes/second } counter packets 3 bytes 300 drop comment "rl_ratelimit_192_168_20_0_24_ul"
-	}
-}
-TABLE
+# The table is tests/fixtures/nft-src/subnet.nft, as `nft -j` of OpenWrt
+# 22.03 (nft 1.0.2) and 25.12 (1.1.6) lists it.
+stats() { PATH="$MOCKBIN:$PATH" TCTL_ROOT="$TMP/root" tctl ratelimit-stats 2>/dev/null; }
+for v in 1.0.2 1.1.6; do
+    cp "$UC_REPO/tests/fixtures/nft-$v/subnet.tm_ratelimit.json" "$TMP/nft_table.json"
+    STATS=$(stats)
 
-STATS=$(run "$TMP/ratelimit-stats.sh")
+    assert_contains "stats $v: an each-mode subnet reports its CIDR as the target" \
+        '"ip":"192.168.20.0/24"' "$STATS"
+    # The exact symptom: the meter key "ip daddr limit ..." overwrote the target.
+    assert_not_contains "stats $v: no rule reports the target as 'limit'" \
+        '"ip":"limit"' "$STATS"
+    assert_contains "stats $v: a per-device subnet limit is labelled each" \
+        '"ip":"192.168.20.0/24","mode":"each"' "$STATS"
+    assert_contains "stats $v: an aggregate subnet limit is labelled shared" \
+        '"ip":"10.0.0.0/24","mode":"shared"' "$STATS"
+    assert_contains "stats $v: a single host is labelled shared" \
+        '"ip":"192.168.1.50","mode":"shared"' "$STATS"
+    assert_contains "stats $v: rate survives the meter form (2500000 bytes = 20000 kbit)" \
+        '"192.168.20.0/24","mode":"each","rate_kbit":20000' "$STATS"
 
-assert_contains "stats: an each-mode subnet reports its CIDR as the target" \
-    '"ip":"192.168.20.0/24"' "$STATS"
-# The exact symptom: the meter key "ip daddr limit ..." overwrote the target.
-assert_not_contains "stats: no rule reports the target as 'limit'" \
-    '"ip":"limit"' "$STATS"
-assert_contains "stats: a per-device subnet limit is labelled each" \
-    '"ip":"192.168.20.0/24","mode":"each"' "$STATS"
-assert_contains "stats: an aggregate subnet limit is labelled shared" \
-    '"ip":"10.0.0.0/24","mode":"shared"' "$STATS"
-assert_contains "stats: a single host is labelled shared" \
-    '"ip":"192.168.1.50","mode":"shared"' "$STATS"
-assert_contains "stats: rate survives the meter form (2500000 bytes = 20000 kbit)" \
-    '"192.168.20.0/24","mode":"each","rate_kbit":20000' "$STATS"
+    # Summed across chains: 12+8 packets, 3456+1544 bytes. Not 12, and not 8.
+    assert_contains "stats $v: counters are summed across the per-device chains" \
+        '"packets":20,"bytes":5000' "$STATS"
+    # The whole network (target "all"): per-device, 1250000 bytes = 10000
+    # kbit, 30+2 packets and 4000+600 bytes over the two bridges.
+    assert_contains "stats $v: the whole network is one each-mode target" \
+        '"ip":"0.0.0.0/0","mode":"each","rate_kbit":10000,"packets":32,"bytes":4600' "$STATS"
+    assert_eq "stats $v: the whole network's upload rule is no target of its own" "1" \
+        "$(printf '%s' "$STATS" | grep -o '0.0.0.0/0' | wc -l | tr -d ' ')"
+    assert_eq "stats $v: one entry per target, not one per chain" "4" \
+        "$(printf '%s' "$STATS" | tr ',' '\n' | grep -c '"ip":')"
+    # The upload rule matches on saddr and must not become a second entry.
+    assert_eq "stats $v: upload rules are not counted as separate targets" "1" \
+        "$(printf '%s' "$STATS" | grep -o '192.168.20.0/24' | wc -l | tr -d ' ')"
+done
 
-# Summed across chains: 12+8 packets, 3456+1544 bytes. Not 12, and not 8.
-assert_contains "stats: counters are summed across the per-device chains" \
-    '"packets":20,"bytes":5000' "$STATS"
-assert_eq "stats: one entry per target, not one per chain" "3" \
-    "$(printf '%s' "$STATS" | tr ',' '\n' | grep -c '"ip":')"
-# The upload rule matches on saddr and must not become a second entry.
-assert_eq "stats: upload rules are not counted as separate targets" "1" \
-    "$(printf '%s' "$STATS" | grep -o '192.168.20.0/24' | wc -l | tr -d ' ')"
-
-: > "$TMP/nft_table.txt"
-assert_eq "stats: an empty table is an empty array" "[]" "$(run "$TMP/ratelimit-stats.sh")"
+printf '{"nftables": [{"metainfo": {"version": "1.0.2", "release_name": "Lester Gooch", "json_schema_version": 1}}, {"table": {"family": "netdev", "name": "tm_ratelimit", "handle": 9}}]}\n' > "$TMP/nft_table.json"
+assert_eq "stats: an empty table is an empty array" "[]" "$(stats)"
+rm -f "$TMP/nft_table.json"
+assert_eq "stats: no table is an empty array" "[]" "$(stats)"
 
 # Which subnets a limit can be enforced on (`trafficctl subnets`, now ucode):
 # tests/test_ucode_lib.sh.

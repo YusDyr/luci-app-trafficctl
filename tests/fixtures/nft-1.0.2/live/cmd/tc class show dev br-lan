@@ -1,0 +1,3 @@
+class htb 1:fffe parent 1:1 prio 0 rate 1Gbit ceil 1Gbit burst 125000b cburst 125000b 
+class htb 1:1 root rate 1Gbit ceil 1Gbit burst 125000b cburst 125000b 
+class htb 1:2 parent 1:1 prio 0 rate 8Mbit ceil 8Mbit burst 10000b cburst 10000b 

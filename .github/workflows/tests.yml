@@ -38,8 +38,6 @@ jobs:
         run: bash tests/test_security.sh
       - name: Block/unblock tests
         run: bash tests/test_block.sh
-      - name: Rules tab backend tests
-        run: bash tests/test_rules.sh
       - name: IPv6 enforcement tests
         run: bash tests/test_ipv6.sh
       - name: WiFi MAC filter tests
@@ -48,17 +46,11 @@ jobs:
         run: bash tests/test_metrics_cgi.sh
       - name: New device default-limit tests
         run: bash tests/test_newdevice.sh
-      - name: Subnet / aggregate limit tests
-        run: bash tests/test_subnet_limits.sh
       # Independent up/down ceilings. Most of the risk is the shapes.json
       # record format: a record the extraction pattern misses disappears from
       # the classid allocator and two devices end up sharing an HTB class.
       - name: Asymmetric rate limit tests
         run: bash tests/test_asymmetric_limits.sh
-      - name: Shape classid lookup tests (summary, shape-stats)
-        run: bash tests/test_shape_lookup.sh
-      - name: Rate limit lookup tests (summary, device, stats)
-        run: bash tests/test_rl_lookup.sh
       # Slices the CIDR helpers out of status.js and runs them under node —
       # the only frontend logic with a wrong answer an operator cannot see.
       - name: Subnet target warning (frontend slices)
@@ -130,6 +122,18 @@ jobs:
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_metrics.sh
       - name: Byte counter overflow tests
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_byte_overflow.sh
+      # The limiter, block and shaper readers (trafficctl.ctl), read from the
+      # nft -j output of both nft versions; the shell helpers beside them too.
+      - name: Rules tab backend tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_rules.sh
+      - name: Subnet / aggregate limit tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_subnet_limits.sh
+      - name: Shape classid lookup tests (summary, shape-stats)
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_shape_lookup.sh
+      - name: Rate limit lookup tests (summary, device, stats)
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_rl_lookup.sh
+      - name: Reader tests (exact comments, nft 1.1 meters)
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_readers.sh
       - name: rpcd plugin tests
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_rpcd.sh
       # Every rpc.declare in the views against the plugin's list.

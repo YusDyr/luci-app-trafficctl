@@ -1,0 +1,50 @@
+table netdev tm_ratelimit {
+	set tctl_v6_192_168_0_60 {
+		type ipv6_addr
+		size 65535
+		flags dynamic,timeout
+		timeout 1h
+	}
+
+	set tctl_v6_192_168_0_70 {
+		type ipv6_addr
+		size 65535
+		flags dynamic,timeout
+		timeout 1h
+	}
+
+	chain dl_br_lan {
+		type filter hook egress device "br-lan" priority filter; policy accept;
+		ip daddr 192.168.0.60 limit rate over 625000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_0_60"
+		ip6 daddr @tctl_v6_192_168_0_60 limit rate over 625000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_0_60_dl6"
+		ip daddr 192.168.0.6 limit rate over 625000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_0_6"
+		ip daddr 192.168.0.7 limit rate over 1000 kbytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_0_7"
+		ip daddr 192.168.0.70 meter tctl_d_192_168_0_70 size 65535 { ip daddr limit rate over 250000 bytes/second } counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_0_70"
+		ip6 daddr @tctl_v6_192_168_0_70 limit rate over 250000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_0_70_dl6"
+		ip daddr 10.0.20.0/24 meter tctl_d_10_0_20_0_24 size 65535 { ip daddr limit rate over 250000 bytes/second } counter packets 0 bytes 0 drop comment "rl_ratelimit_10_0_20_0_24"
+	}
+
+	chain ul_lan1 {
+		type filter hook ingress device "lan1" priority -200; policy accept;
+		ip saddr 192.168.0.60 limit rate over 125000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_0_60_ul"
+		ether saddr 02:00:00:00:00:60 ip6 saddr != fe80::/10 update @tctl_v6_192_168_0_60 { ip6 saddr } comment "rl_ratelimit_192_168_0_60_v6"
+		meta protocol ip6 ether saddr 02:00:00:00:00:60 limit rate over 125000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_0_60_ul6"
+		ip saddr 192.168.0.6 limit rate over 625000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_0_6_ul"
+		ip saddr 192.168.0.7 limit rate over 1000 kbytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_0_7_ul"
+		ip saddr 192.168.0.70 meter tctl_u_192_168_0_70 size 65535 { ip saddr limit rate over 250000 bytes/second } counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_0_70_ul"
+		ether saddr 02:00:00:00:00:70 ip6 saddr != fe80::/10 update @tctl_v6_192_168_0_70 { ip6 saddr } comment "rl_ratelimit_192_168_0_70_v6"
+		meta protocol ip6 ether saddr 02:00:00:00:00:70 limit rate over 250000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_0_70_ul6"
+		ip saddr 10.0.20.0/24 meter tctl_u_10_0_20_0_24 size 65535 { ip saddr limit rate over 62500 bytes/second } counter packets 0 bytes 0 drop comment "rl_ratelimit_10_0_20_0_24_ul"
+	}
+
+	chain ul_lan2 {
+		type filter hook ingress device "lan2" priority -200; policy accept;
+		ip saddr 192.168.0.60 limit rate over 125000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_0_60_ul"
+		ether saddr 02:00:00:00:00:60 ip6 saddr != fe80::/10 update @tctl_v6_192_168_0_60 { ip6 saddr } comment "rl_ratelimit_192_168_0_60_v6"
+		meta protocol ip6 ether saddr 02:00:00:00:00:60 limit rate over 125000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_0_60_ul6"
+		ip saddr 192.168.0.6 limit rate over 625000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_0_6_ul"
+		ip saddr 192.168.0.7 limit rate over 1000 kbytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_0_7_ul"
+		ether saddr 02:00:00:00:00:70 ip6 saddr != fe80::/10 update @tctl_v6_192_168_0_70 { ip6 saddr } comment "rl_ratelimit_192_168_0_70_v6"
+		meta protocol ip6 ether saddr 02:00:00:00:00:70 limit rate over 250000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_0_70_ul6"
+	}
+}
