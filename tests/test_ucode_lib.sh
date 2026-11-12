@@ -211,15 +211,31 @@ old "$LK"
 assert_eq "lock: no pid, past max_age: taken over" "true" "$(lib lock '"/tmp/t.lock"' 0 300)"
 assert_eq "lock + unlock in one process" "true true no" \
     "$(uc "print(lib.lock('/tmp/t2.lock', 0, 300), ' ', lib.unlock('/tmp/t2.lock'));") $([ -d "$R/tmp/t2.lock" ] && echo yes || echo no)"
-# Eight processes on one stale lock: exactly one may win.
-for round in 1 2 3; do
-    rm -rf "$LK"; mkdir "$LK"; old "$LK"
+# Eight processes on one stale lock: exactly one may win. The winner holds
+# the lock until all eight have tried: with a fixed 1.5 s hold, a process
+# started after the release took the free lock, a second "winner" that is no
+# fault of the lock (once on a loaded runner; under stress-ng the eight
+# started up to 2.3 s apart).
+race8() {   # race8 [extra lock() argument]: how many won
+    rm -rf "$UC_TMP/tried"; mkdir "$UC_TMP/tried"
     for i in $(seq 8); do
-        uc "if (lib.lock('/tmp/t.lock', 0, 300)) { print('got\n'); sleep(1500); lib.unlock('/tmp/t.lock'); }" > "$UC_TMP/race.$i" &
+        uc "import { writefile, lsdir } from 'fs';
+let ok = lib.lock('/tmp/t.lock', 0, 300$1);
+writefile('$UC_TMP/tried/$i', '');
+if (ok) {
+	print('got\n');
+	for (let n = 0; n < 600 && length(lsdir('$UC_TMP/tried')) < 8; n++)
+		sleep(100);
+	lib.unlock('/tmp/t.lock');
+}" > "$UC_TMP/race.$i" &
     done
     wait
-    assert_eq "lock: one winner of eight on a stale lock (round $round)" "1" "$(cat "$UC_TMP"/race.* | grep -c got)"
+    cat "$UC_TMP"/race.* | grep -c got
     rm -f "$UC_TMP"/race.*
+}
+for round in 1 2 3; do
+    rm -rf "$LK"; mkdir "$LK"; old "$LK"
+    assert_eq "lock: one winner of eight on a stale lock (round $round)" "1" "$(race8)"
 done
 assert_eq "lock: nothing left aside" "" "$(find "$R/tmp" -maxdepth 1 -name 't.lock.stale.*')"
 
@@ -227,12 +243,7 @@ assert_eq "lock: nothing left aside" "" "$(find "$R/tmp" -maxdepth 1 -name 't.lo
 # find dead, so only age makes it stale.
 for round in 1 2 3; do
     rm -rf "$LK"; mkdir "$LK"; old "$LK"
-    for i in $(seq 8); do
-        uc "if (lib.lock('/tmp/t.lock', 0, 300, true)) { print('got\n'); sleep(1500); lib.unlock('/tmp/t.lock'); }" > "$UC_TMP/race.$i" &
-    done
-    wait
-    assert_eq "lock: one winner of eight on a stale bare lock (round $round)" "1" "$(cat "$UC_TMP"/race.* | grep -c got)"
-    rm -f "$UC_TMP"/race.*
+    assert_eq "lock: one winner of eight on a stale bare lock (round $round)" "1" "$(race8 ', true')"
 done
 assert_eq "lock: a bare lock is released and nothing left aside" "" \
     "$(find "$R/tmp" -maxdepth 1 -name 't.lock*')"

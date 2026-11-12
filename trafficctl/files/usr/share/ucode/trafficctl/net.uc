@@ -684,8 +684,13 @@ const TOTALS_STATE = '/tmp/trafficctl_totals.state';
 // The shell's lock directory, held the shell's way (an empty directory) so
 // either writer can take it over from the other.
 const TOTALS_LOCK = '/tmp/trafficctl_totals.lock.d';
-// The shell waited 30 x 100 ms, then took the lock regardless.
-const TOTALS_LOCK_TRIES = 30;
+// The shell waited 30 x 100 ms, then took the lock regardless. This one takes
+// a bare lock over only at TOTALS_LOCK_STALE seconds of age, so the wait must
+// outlast that: 30 tries end 2.9 s after the first, when a lock made just
+// before it still read 2 s old, and the write went ahead unlocked and left
+// the lock to the next caller. The first try is at once, so 32 span 3.1 s,
+// past 3 s plus a tick of the coarse clock that time() and mtime both read.
+const TOTALS_LOCK_TRIES = 32;
 const TOTALS_LOCK_STALE = 3;
 
 // What awk's "$n + 0" gave for the shell's numbers.
