@@ -24,8 +24,6 @@ jobs:
         run: bash tests/test_fw.sh
       - name: Port-forward control tests
         run: bash tests/test_portfw.sh
-      - name: Netify (DPI) integration tests
-        run: bash tests/test_netify.sh
       - name: Bidirectional limit/shape tests
         run: bash tests/test_direction.sh
       - name: Telegram unit tests
@@ -44,8 +42,6 @@ jobs:
         run: bash tests/test_ipv6.sh
       - name: WiFi MAC filter tests
         run: bash tests/test_macfilter.sh
-      - name: Metrics CGI endpoint tests
-        run: bash tests/test_metrics_cgi.sh
       - name: New device default-limit tests
         run: bash tests/test_newdevice.sh
       - name: Subnet / aggregate limit tests
@@ -55,9 +51,9 @@ jobs:
       # the classid allocator and two devices end up sharing an HTB class.
       - name: Asymmetric rate limit tests
         run: bash tests/test_asymmetric_limits.sh
-      - name: Shape classid lookup tests (summary, shape-stats)
+      - name: Shape classid lookup tests (classmap, shape-stats)
         run: bash tests/test_shape_lookup.sh
-      - name: Rate limit lookup tests (summary, device, stats)
+      - name: Rate limit lookup tests (fw.sh reader, stats)
         run: bash tests/test_rl_lookup.sh
       # Slices the CIDR helpers out of status.js and runs them under node —
       # the only frontend logic with a wrong answer an operator cannot see.
@@ -70,8 +66,6 @@ jobs:
       # The upload row was built but never attached to the panel (#66).
       - name: Split up/down control and split ceiling display
         run: bash tests/test_split_ui.sh
-      - name: Egress interface naming tests
-        run: bash tests/test_oif_label.sh
       - name: Postinst parity tests
         run: bash tests/test_postinst_parity.sh
       # trafficctl/Makefile lists its files by name; this compares the list
@@ -108,10 +102,11 @@ jobs:
       - uses: actions/checkout@v6
       # equiv.sh runs the shell rpcd plugin under busybox ash, as on the
       # router, where its printf %d differs from dash's. test_byte_overflow.sh:
-      # metrics.sh reads the accumulator with awk, and the 32-bit %d it guards
-      # against is a busybox-awk behaviour (see the same step in the job above).
-      - name: Install busybox and extra awk implementations
-        run: sudo apt-get install -y --no-install-recommends busybox-static mawk
+      # the 32-bit %d it guards against is a busybox-awk behaviour (see the
+      # same step in the job above). socat: test_netify.sh reads the agent's
+      # socket through both readers, and the runner has nc only.
+      - name: Install busybox, extra awk implementations and socat
+        run: sudo apt-get install -y --no-install-recommends busybox-static mawk socat
       - uses: actions/cache@v4
         with:
           path: ~/.cache/trafficctl-ucode/${{ matrix.ucode }}
@@ -130,6 +125,15 @@ jobs:
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_metrics.sh
       - name: Byte counter overflow tests
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_byte_overflow.sh
+      - name: Metrics CGI endpoint tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_metrics_cgi.sh
+      # The summary is the 2-second LuCI poll; the device report is its detail.
+      - name: Summary and device report tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_report.sh
+      - name: Egress interface naming tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_oif_label.sh
+      - name: Netify (DPI) integration tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_netify.sh
       - name: rpcd plugin tests
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_rpcd.sh
       # Every rpc.declare in the views against the plugin's list.

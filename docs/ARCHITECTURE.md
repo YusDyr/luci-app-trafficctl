@@ -29,8 +29,8 @@ graph TD
         end
 
         subgraph "Query Scripts — /usr/libexec/trafficctl/"
-            SUM["trafficctl-summary.sh<br/>(all active devices)"]
-            DEV["trafficctl-device.sh<br/>(per-device connections)"]
+            SUM["trafficctl-summary.sh = trafficctl summary<br/>(all active devices, ucode)"]
+            DEV["trafficctl-device.sh = trafficctl device<br/>(per-device connections, ucode)"]
             TOT["trafficctl-totals.sh = trafficctl totals<br/>(monotonic lifetime totals, ucode)"]
             BYT["trafficctl-bytes.sh = trafficctl bytes<br/>(conntrack byte counters, ucode)"]
             IFA["trafficctl-ifaces.sh<br/>(per-interface counters + role map)"]
@@ -96,7 +96,7 @@ graph TD
 sequenceDiagram
     participant B as Browser
     participant R as rpcd
-    participant S as trafficctl-summary.sh
+    participant S as trafficctl summary
     participant BY as trafficctl-totals.sh
 
     B->>R: summary()
@@ -125,7 +125,7 @@ sequenceDiagram
 sequenceDiagram
     participant B as Browser
     participant R as rpcd
-    participant D as trafficctl-device.sh
+    participant D as trafficctl device
     participant DNS as trafficctl-rdns.sh
 
     B->>R: device(ip, proto)
@@ -303,7 +303,7 @@ The frontend uses independent polling loops:
 | Interfaces | Same tick as Bytes, only while the Overview panel is open | `trafficctl-ifaces.sh` | Per-interface throughput for the global overview. Deliberately has no timer of its own, so it inherits the Poll interval |
 | Drops | 5s | `trafficctl-ratelimit-stats.sh` | nft policer drop counters |
 | Shape stats | 5s | `trafficctl-shape-stats.sh` | tc class stats (backlog, drops, overlimits) |
-| Summary | On-demand / auto-refresh (5s–60s) | `trafficctl-summary.sh` | Full device list refresh |
+| Summary | On-demand / auto-refresh (5s–60s) | `trafficctl summary` | Full device list refresh. The reverse-DNS refresh and the DPI collection it starts run detached and never hold up the poll |
 
 ### Speed Calculation
 

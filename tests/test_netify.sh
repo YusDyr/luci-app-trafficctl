@@ -1,20 +1,22 @@
 #!/bin/bash
-# Tests for the optional netifyd (DPI) integration.
-# Feeds recorded agent output via TCTL_NETIFY_FEED instead of a live socket,
-# and verifies the integration stays inert when netifyd is absent.
+# Tests for the optional netifyd (DPI) integration (`trafficctl netify`).
+# Feeds recorded agent output via TCTL_NETIFY_FEED, and a socket served by a
+# local process, and verifies the integration stays inert when netifyd is
+# absent.
+
+# shellcheck source=tests/lib/ucode.sh
+. "$(dirname "$0")/lib/ucode.sh"
 
 PASS=0
 FAIL=0
 
-BIN="$(cd "$(dirname "$0")/.." && pwd)/trafficctl/files/usr/libexec/trafficctl"
-FWLIB="$BIN/trafficctl-fw.sh"
+TMPDIR="$UC_TMP/netify"
+ROOT="$TMPDIR/root"
+mkdir -p "$ROOT/etc/config" "$ROOT/tmp/.uci" "$ROOT/var/run/netifyd"
+: > "$ROOT/etc/config/trafficctl"
 
-TMPDIR=$(mktemp -d)
-trap 'rm -rf "$TMPDIR"' EXIT
-MOCKBIN="$TMPDIR/bin"
-mkdir -p "$MOCKBIN"
-
-CACHE="$TMPDIR/netify_cache.json"
+CACHE="$ROOT/tmp/trafficctl_netify.json"
+LOCK="$ROOT/tmp/trafficctl_netify.lock"
 
 assert_contains() {
     local desc="$1" needle="$2" haystack="$3"
@@ -36,13 +38,12 @@ assert_not_contains() {
     fi
 }
 
-sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FWLIB|" \
-    -e "s|CACHE=\"/tmp/trafficctl_netify.json\"|CACHE=\"$CACHE\"|" \
-    -e "s|LOCK=\"/tmp/trafficctl_netify.lock\"|LOCK=\"$TMPDIR/netify.lock\"|" \
-    "$BIN/trafficctl-netify.sh" > "$TMPDIR/netify.sh"
-
-printf '#!/bin/sh\nexit 1\n' > "$MOCKBIN/uci"
-chmod +x "$MOCKBIN/uci"
+main_config() {   # main_config <option value>...: the main section
+    {
+        printf "config trafficctl 'main'\n"
+        while [ $# -gt 1 ]; do printf "\toption %s '%s'\n" "$1" "$2"; shift 2; done
+    } > "$ROOT/etc/config/trafficctl"
+}
 
 # Recorded agent output: a flow that is later updated (same digest), a second
 # app for the same device, a routed device, an unclassified flow, and a
@@ -58,7 +59,7 @@ cat > "$FEED" <<'EOF'
 {"type":"agent_status","flows":1234}
 EOF
 
-run_netify() { PATH="$MOCKBIN:$PATH" sh "$TMPDIR/netify.sh" "$@" 2>/dev/null; }
+run_netify() { TCTL_ROOT="$ROOT" tctl netify "$@" 2>/dev/null; }
 
 # ── collect ──────────────────────────────────────────────────────────────────
 
@@ -140,16 +141,89 @@ OUT=$(run_netify list)
 assert_contains "list: empty array when no cache" '[]' "$OUT"
 
 # Disabled by config → inert even if data is available.
-cat > "$MOCKBIN/uci" <<'MOCK'
-#!/bin/sh
-case "$3" in
-    trafficctl.main.netify_enabled) echo "0" ;;
-    *) exit 1 ;;
-esac
-MOCK
-chmod +x "$MOCKBIN/uci"
+main_config netify_enabled 0
 OUT=$(TCTL_NETIFY_FEED="$FEED" run_netify collect 2)
 assert_contains "collect: respects netify_enabled=0" 'disabled' "$OUT"
+main_config
+
+# ── one collector at a time ─────────────────────────────────────────────────
+mkdir "$LOCK"
+OUT=$(TCTL_NETIFY_FEED="$FEED" run_netify collect 2)
+assert_contains "collect: a held lock refuses a second collector" 'collection already running' "$OUT"
+# A collector killed mid-run left its lock behind, and the shell one never
+# took such a lock over: every later collection failed until a reboot.
+touch -d '2020-01-01' "$LOCK"
+OUT=$(TCTL_NETIFY_FEED="$FEED" run_netify collect 2)
+assert_contains "collect: a lock left by a dead collector is taken over" '"ok":true' "$OUT"
+[ -e "$LOCK" ] && { FAIL=$((FAIL + 1)); echo "FAIL: collect: the lock is released"; } || PASS=$((PASS + 1))
+OUT=$(run_netify collect 1)
+[ -e "$LOCK" ] && { FAIL=$((FAIL + 1)); echo "FAIL: collect: the lock is released on failure too"; } || PASS=$((PASS + 1))
+
+# ── the socket, read for a bounded time ─────────────────────────────────────
+# The agent keeps the connection open, so the read only ends when its time is
+# up: collect must come back after secs with what arrived, through either
+# reader.
+SOCK="$ROOT/var/run/netifyd/netifyd.sock"
+python3 - "$SOCK" "$FEED5" <<'PY' &
+import socket, sys, threading, time
+s = socket.socket(socket.AF_UNIX)
+s.bind(sys.argv[1])
+s.listen(4)
+data = open(sys.argv[2], 'rb').read()
+def serve(c):
+    c.sendall(data)
+    time.sleep(8)
+    c.close()
+while True:
+    threading.Thread(target=serve, args=(s.accept()[0],), daemon=True).start()
+PY
+SERVER=$!
+for _ in $(seq 50); do [ -S "$SOCK" ] && break; sleep 0.1; done
+rm -f "$CACHE"
+for reader in socat nc; do
+    command -v "$reader" >/dev/null || { FAIL=$((FAIL + 1)); echo "FAIL: $reader is required"; continue; }
+    # Only this reader on PATH: the CLI prefers socat when both are there.
+    mkdir -p "$TMPDIR/only-$reader"
+    ln -sf "$(command -v "$reader")" "$TMPDIR/only-$reader/$reader"
+    start=$(date +%s)
+    OUT=$(PATH="$TMPDIR/only-$reader" TCTL_ROOT="$ROOT" "$UCODE" -S -L "$UC_LIB" -- \
+        "$UC_REPO/trafficctl/files/usr/sbin/trafficctl" netify collect 2 2>&1)
+    took=$(( $(date +%s) - start ))
+    assert_contains "socket ($reader): collected" '"ok":true,"msg":"collected 2s","devices":3' "$OUT"
+    if [ "$took" -ge 1 ] && [ "$took" -le 5 ]; then PASS=$((PASS + 1)); else
+        FAIL=$((FAIL + 1)); echo "FAIL: socket ($reader): the read took ${took}s for a 2 s window"; fi
+    STATUS=$(PATH="$TMPDIR/only-$reader" TCTL_ROOT="$ROOT" "$UCODE" -S -L "$UC_LIB" -- \
+        "$UC_REPO/trafficctl/files/usr/sbin/trafficctl" netify status 2>&1)
+    assert_contains "status ($reader): running with a socket" '"running":true' "$STATUS"
+    assert_contains "status ($reader): names the reader" "\"reader\":\"$reader\"" "$STATUS"
+done
+kill "$SERVER" 2>/dev/null
+assert_contains "socket: the cache holds what the socket sent" '"ip":"10.0.20.190","top":"claude"' "$(cat "$CACHE" 2>/dev/null)"
+
+# No reader at all: nothing to read with, said so rather than hanging.
+mkdir -p "$TMPDIR/none"
+OUT=$(PATH="$TMPDIR/none" TCTL_ROOT="$ROOT" "$UCODE" -S -L "$UC_LIB" -- \
+    "$UC_REPO/trafficctl/files/usr/sbin/trafficctl" netify status 2>&1)
+assert_contains "status: no reader" '"reader":"none","readable":false' "$OUT"
+
+# ── the endpoint ────────────────────────────────────────────────────────────
+mkdir -p "$ROOT/etc/netifyd"
+printf '{\n  "channels": { "default": { "bind_address": "tcp://127.0.0.1:1780", "enabled": true } }\n}\n' \
+    > "$ROOT/etc/netifyd/netify-sink-socket.json"
+OUT=$(run_netify status)
+assert_contains "endpoint: the agent's socket sink" '"endpoint":"tcp://127.0.0.1:1780"' "$OUT"
+main_config netify_endpoint 'unix:///tmp/other.sock'
+OUT=$(run_netify status)
+assert_contains "endpoint: the uci override wins" '"endpoint":"unix:///tmp/other.sock"' "$OUT"
+main_config
+
+# ── usage and the shim ──────────────────────────────────────────────────────
+TCTL_ROOT="$ROOT" tctl netify bogus > "$TMPDIR/out" 2>/dev/null
+rc=$?
+assert_contains "usage: unknown subcommand" '"msg":"usage: trafficctl-netify.sh status|collect [secs]|list|raw [secs]"' "$(cat "$TMPDIR/out")"
+[ "$rc" = 1 ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); echo "FAIL: usage exits 1 (got $rc)"; }
+assert_contains "the old script is a shim" 'exec /usr/sbin/trafficctl netify "$@"' \
+    "$(cat "$UC_REPO/trafficctl/files/usr/libexec/trafficctl/trafficctl-netify.sh")"
 
 # ── Results ──────────────────────────────────────────────────────────────────
 

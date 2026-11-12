@@ -32,7 +32,7 @@ PASS=0
 FAIL=0
 
 STATUS_JS="$UC_REPO/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js"
-METRICS_SH="$UC_REPO/trafficctl/files/usr/libexec/trafficctl/trafficctl-metrics.sh"
+REPORT_UC="$UC_REPO/trafficctl/files/usr/share/ucode/trafficctl/report.uc"
 NET_UC="$UC_LIB/trafficctl/net.uc"
 STATE="$BE_ROOT/tmp/trafficctl_totals.state"
 LOCKD="$BE_ROOT/tmp/trafficctl_totals.lock.d"
@@ -243,14 +243,14 @@ assert_contains "upload past 2^53 moves by its delta" \
 
 # One accumulator, one store: the exporter must consume the accumulator
 # rather than keep a private copy, or the UI column and the metric can
-# disagree. Pinned to the invocation, not just a mention: the script name also
-# appears in the comments there, so a looser check would keep passing after
-# the call was swapped back to the raw sampler.
-assert_contains "metrics.sh consumes the shared accumulator" \
-    '/usr/libexec/trafficctl/trafficctl-totals.sh --all 2>/dev/null \' \
-    "$(cat "$METRICS_SH")"
-assert_eq "metrics.sh keeps no state file of its own" "" \
-    "$(grep -n 'trafficctl_metrics.state' "$METRICS_SH")"
+# disagree. Pinned to the call, not just a mention: net.totals also appears
+# in the comments there, so a looser check would keep passing after the call
+# was swapped back to the raw sampler.
+assert_contains "the exporter consumes the shared accumulator" \
+    'source_text(src.totals ?? (() => net.totals(true)))' \
+    "$(cat "$REPORT_UC")"
+assert_eq "the exporter keeps no state file of its own" "" \
+    "$(grep -n 'trafficctl_metrics.state' "$REPORT_UC")"
 
 # ── end to end, against real /proc/net/nf_conntrack text ────────────────────
 # Everything above feeds the accumulator hand-written JSON, which cannot catch

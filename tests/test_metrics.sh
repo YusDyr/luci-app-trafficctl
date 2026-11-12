@@ -1,6 +1,6 @@
 #!/bin/bash
-# Tests for the Prometheus exporter.
-# Feeds recorded byte/summary output through the script and checks the
+# Tests for the Prometheus exporter (`trafficctl metrics`, trafficctl.report).
+# Feeds recorded byte samples and source output through it and checks the
 # accumulator's monotonicity rules, which are the part that cannot simply be
 # eyeballed: raw conntrack sums drop when flows expire, so exporting them
 # directly would look like a counter reset on every expiry.
@@ -11,13 +11,10 @@
 PASS=0
 FAIL=0
 
-BIN="$UC_REPO/trafficctl/files/usr/libexec/trafficctl"
-FWLIB="$BIN/trafficctl-fw.sh"
-
 TMPDIR="$UC_TMP/metrics"
-MOCKBIN="$TMPDIR/bin"
-mkdir -p "$MOCKBIN" "$TMPDIR/root/tmp"
-STATE="$TMPDIR/root/tmp/trafficctl_totals.state"
+ROOT="$TMPDIR/root"
+mkdir -p "$ROOT/etc/config" "$ROOT/tmp/.uci"
+STATE="$ROOT/tmp/trafficctl_totals.state"
 
 assert_contains() {
     local desc="$1" needle="$2" haystack="$3"
@@ -39,66 +36,33 @@ assert_not_contains() {
     fi
 }
 
-# metrics.sh shells out to the other trafficctl scripts by absolute path;
-# point those at mocks and the state file at the temp dir.
-#
 # The accumulator is deliberately NOT mocked: it is the whole point of these
-# monotonicity assertions, so `trafficctl totals` runs for real (through
-# tests/lib/totals.uc), with only its byte sample and its root redirected.
-sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FWLIB|" \
-    -e "s|/usr/libexec/trafficctl/trafficctl-totals.sh|$TMPDIR/totals.sh|" \
-    -e "s|/usr/libexec/trafficctl/trafficctl-summary.sh|$MOCKBIN/summary|" \
-    -e "s|/usr/libexec/trafficctl/trafficctl-portfw.sh|$MOCKBIN/portfw|" \
-    -e "s|/usr/libexec/trafficctl/trafficctl-netify.sh|$MOCKBIN/netify|" \
-    "$BIN/trafficctl-metrics.sh" > "$TMPDIR/metrics.sh"
-
+# monotonicity assertions, so net.totals runs for real (tests/lib/metrics.uc)
+# on a recorded byte sample. The summary, port forwards and DPI apps are
+# recorded output.
 BYTES_FILE="$TMPDIR/bytes.json"
-cat > "$TMPDIR/totals.sh" <<MOCK
-#!/bin/sh
-TCTL_ROOT="$TMPDIR/root" exec "$UCODE" -S -L "$UC_LIB" -- "$UC_TESTLIB/totals.uc" "$BYTES_FILE" "\$@"
-MOCK
-chmod +x "$TMPDIR/totals.sh"
+metrics_config() {   # metrics_config <option value>...: the metrics section
+    {
+        printf "config metrics 'metrics'\n"
+        while [ $# -gt 1 ]; do printf "\toption %s '%s'\n" "$1" "$2"; shift 2; done
+    } > "$ROOT/etc/config/trafficctl"
+}
+# Exporter enabled, apps enabled so the cardinality guard is exercised.
+metrics_config enabled 1 apps 1
 
-# sed exits 0 when nothing matched, so a renamed path would leave these
-# pointing at the production scripts and /tmp state while the tests still pass.
-for must in "$TMPDIR/totals.sh" "$MOCKBIN/summary"; do
-    grep -qF "$must" "$TMPDIR/metrics.sh" || \
-        { echo "FAIL: metrics.sh was not redirected to $must"; exit 1; }
-done
-
-# uci mock: exporter enabled, apps enabled so cardinality guard is exercised
-cat > "$MOCKBIN/uci" <<'MOCK'
-#!/bin/sh
-case "$3" in
-    trafficctl.metrics.enabled) echo "1" ;;
-    trafficctl.metrics.apps)    echo "1" ;;
-    *) exit 1 ;;
-esac
-MOCK
-
-cat > "$MOCKBIN/summary" <<'MOCK'
-#!/bin/sh
-printf '[{"ip":"10.0.20.11","name":"Denis-NAS","mac":"aa:bb:cc:dd:ee:ff","conn_type":"routed","app":"google","conns":7,"total":9000,"tcp":7000,"udp":2000,"blocked":true,"block_bytes":4242,"wifi_blocked":false,"rate_limit_kbit":1000,"rate_limit_kbit_up":250,"shape_kbit":0,"shape_kbit_up":0}]\n'
-MOCK
-
-cat > "$MOCKBIN/portfw" <<'MOCK'
-#!/bin/sh
-printf '[{"id":"r0","kind":"forward","name":"Web","proto":"tcp","ext_port":"8080","enabled":true,"paused":true,"limit_kbit":5000,"conns":3,"clients":2,"bytes_in":12345,"bytes_out":678}]\n'
-MOCK
-
-cat > "$MOCKBIN/netify" <<'MOCK'
-#!/bin/sh
-printf '[{"ip":"10.0.20.11","top":"google","apps":[{"name":"google","bytes":5000,"flows":2},{"name":"ntp","bytes":300,"flows":1}]}]\n'
-MOCK
-
-chmod +x "$MOCKBIN"/*
+printf '[{"ip":"10.0.20.11","name":"Denis-NAS","mac":"aa:bb:cc:dd:ee:ff","conn_type":"routed","app":"google","conns":7,"total":9000,"tcp":7000,"udp":2000,"blocked":true,"block_bytes":4242,"wifi_blocked":false,"rate_limit_kbit":1000,"rate_limit_kbit_up":250,"shape_kbit":0,"shape_kbit_up":0}]\n' \
+    > "$TMPDIR/summary.json"
+printf '[{"id":"r0","kind":"forward","name":"Web","proto":"tcp","ext_port":"8080","enabled":true,"paused":true,"limit_kbit":5000,"conns":3,"clients":2,"bytes_in":12345,"bytes_out":678}]\n' \
+    > "$TMPDIR/portfw.json"
+printf '[{"ip":"10.0.20.11","top":"google","apps":[{"name":"google","bytes":5000,"flows":2},{"name":"ntp","bytes":300,"flows":1}]}]\n' \
+    > "$TMPDIR/netify.json"
 
 # Reverse-DNS cache, as the background resolver leaves it ("-" = cached miss).
-RDNS="$TMPDIR/rdns_cache"
-printf '10.0.20.11 nas.lan 1787166682\n10.0.20.99 - 1787166682\n' > "$RDNS"
-sed -i.bak "s|rdnsfile=/tmp/trafficctl_rdns_cache|rdnsfile=$RDNS|" "$TMPDIR/metrics.sh"
+printf '10.0.20.11 nas.lan 1787166682\n10.0.20.99 - 1787166682\n' > "$ROOT/tmp/trafficctl_rdns_cache"
 
-run_metrics() { PATH="$MOCKBIN:$PATH" sh "$TMPDIR/metrics.sh" 2>/dev/null; }
+run_metrics() {
+    TCTL_ROOT="$ROOT" "$UCODE" -S -L "$UC_LIB" -- "$UC_TESTLIB/metrics.uc" "$BYTES_FILE" "$TMPDIR" 2>/dev/null
+}
 
 # ── first scrape establishes the baseline ────────────────────────────────────
 echo '[{"ip":"10.0.20.11","bytes_in":1000,"bytes_out":500}]' > "$BYTES_FILE"
@@ -177,15 +141,129 @@ assert_contains "counter is typed for prometheus" '# TYPE trafficctl_device_byte
 LINES=$(wc -l < "$STATE" | tr -d ' ')
 assert_contains "state holds one line per device" "1" "$LINES"
 
+# ── the layout: section and line order ──────────────────────────────────────
+# tests/equiv.sh compares the lines as a set (the shell exporter listed
+# devices in awk hash order), so the order of the families is pinned here:
+# H/T = HELP/TYPE, S = a sample, by metric name.
+kinds() { awk '$1 == "#" { print substr($2, 1, 1), $3; next } { sub(/[{ ].*/, ""); print "S", $0 }'; }
+EXPECTED_KINDS='H trafficctl_device_bytes_total
+T trafficctl_device_bytes_total
+H trafficctl_device_bytes_degraded
+T trafficctl_device_bytes_degraded
+S trafficctl_device_bytes_total
+S trafficctl_device_bytes_total
+S trafficctl_device_bytes_degraded
+H trafficctl_device_connections
+T trafficctl_device_connections
+H trafficctl_device_blocked
+T trafficctl_device_blocked
+H trafficctl_device_limit_kbit
+T trafficctl_device_limit_kbit
+H trafficctl_device_limit_up_kbit
+T trafficctl_device_limit_up_kbit
+H trafficctl_device_wifi_blocked
+T trafficctl_device_wifi_blocked
+H trafficctl_device_conntrack_bytes
+T trafficctl_device_conntrack_bytes
+H trafficctl_device_blocked_bytes
+T trafficctl_device_blocked_bytes
+H trafficctl_device_info
+T trafficctl_device_info
+S trafficctl_device_connections
+S trafficctl_device_blocked
+S trafficctl_device_wifi_blocked
+S trafficctl_device_limit_kbit
+S trafficctl_device_limit_kbit
+S trafficctl_device_limit_up_kbit
+S trafficctl_device_limit_up_kbit
+S trafficctl_device_conntrack_bytes
+S trafficctl_device_conntrack_bytes
+S trafficctl_device_conntrack_bytes
+S trafficctl_device_blocked_bytes
+S trafficctl_device_info
+H trafficctl_portfw_connections
+T trafficctl_portfw_connections
+H trafficctl_portfw_clients
+T trafficctl_portfw_clients
+H trafficctl_portfw_paused
+T trafficctl_portfw_paused
+H trafficctl_portfw_enabled
+T trafficctl_portfw_enabled
+H trafficctl_portfw_limit_kbit
+T trafficctl_portfw_limit_kbit
+H trafficctl_portfw_bytes
+T trafficctl_portfw_bytes
+S trafficctl_portfw_connections
+S trafficctl_portfw_clients
+S trafficctl_portfw_paused
+S trafficctl_portfw_enabled
+S trafficctl_portfw_limit_kbit
+S trafficctl_portfw_bytes
+S trafficctl_portfw_bytes
+H trafficctl_app_bytes
+T trafficctl_app_bytes
+S trafficctl_app_bytes
+S trafficctl_app_flows
+S trafficctl_app_bytes
+S trafficctl_app_flows
+H trafficctl_up
+T trafficctl_up
+S trafficctl_up'
+GOT_KINDS=$(printf '%s\n' "$OUT" | kinds)
+if [ "$GOT_KINDS" = "$EXPECTED_KINDS" ]; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+    echo "FAIL: the families are not in the exporter's order"
+    diff <(printf '%s\n' "$EXPECTED_KINDS") <(printf '%s\n' "$GOT_KINDS")
+fi
+assert_contains "the output ends in a newline" "trafficctl_up 1
+" "$OUT
+"
+
+# ── the optional families ───────────────────────────────────────────────────
+metrics_config enabled 1 state 0 portfw 0
+OUT=$(run_metrics)
+assert_contains "the byte counters do not depend on the state option" \
+    'trafficctl_device_bytes_total{ip="10.0.20.11",direction="rx"} ' "$OUT"
+assert_not_contains "state 0 drops the per-device gauges" "trafficctl_device_connections" "$OUT"
+assert_not_contains "state 0 drops the info metric" "trafficctl_device_info" "$OUT"
+assert_not_contains "portfw 0 drops the port-forward families" "trafficctl_portfw_" "$OUT"
+assert_not_contains "apps are off unless asked for" "trafficctl_app_" "$OUT"
+assert_contains "the up metric is always last" "trafficctl_up 1" "$OUT"
+
+# A source that printed nothing (portfw failed, no DPI cache) leaves the
+# HELP lines and no samples, never a broken document.
+metrics_config enabled 1 apps 1
+mv "$TMPDIR/portfw.json" "$TMPDIR/portfw.json.off"
+printf '' > "$TMPDIR/netify.json"
+OUT=$(run_metrics)
+assert_contains "a silent source keeps its HELP line" "# TYPE trafficctl_portfw_bytes gauge" "$OUT"
+assert_not_contains "a silent source has no samples" "trafficctl_portfw_connections{" "$OUT"
+assert_contains "the exporter still completes" "trafficctl_up 1" "$OUT"
+
+# An app record without a flow count still exports its bytes.
+printf '[{"ip":"10.0.20.11","top":"x","apps":[{"name":"x","bytes":7}]}]\n' > "$TMPDIR/netify.json"
+OUT=$(run_metrics)
+assert_contains "app bytes without flows" 'trafficctl_app_bytes{ip="10.0.20.11",app="x"} 7' "$OUT"
+assert_not_contains "no flow line without a flow count" 'trafficctl_app_flows{ip="10.0.20.11",app="x"}' "$OUT"
+
 # ── disabled by default ─────────────────────────────────────────────────────
-cat > "$MOCKBIN/uci" <<'MOCK'
-#!/bin/sh
-exit 1
-MOCK
-chmod +x "$MOCKBIN/uci"
+: > "$ROOT/etc/config/trafficctl"
 OUT=$(run_metrics)
 assert_contains "inert unless explicitly enabled" "metrics are disabled" "$OUT"
 assert_not_contains "no data leaks while disabled" "trafficctl_device_bytes_total{" "$OUT"
+metrics_config enabled 0
+OUT=$(run_metrics)
+assert_contains "enabled 0 is disabled too" "metrics are disabled" "$OUT"
+
+# ── the CLI and the shim ────────────────────────────────────────────────────
+# The command and the old script path reach the same exporter.
+metrics_config enabled 0
+OUT=$(TCTL_ROOT="$ROOT" tctl metrics)
+assert_contains "trafficctl metrics runs the exporter" "metrics are disabled" "$OUT"
+assert_contains "the old script is a shim for it" 'exec /usr/sbin/trafficctl metrics "$@"' \
+    "$(cat "$UC_REPO/trafficctl/files/usr/libexec/trafficctl/trafficctl-metrics.sh")"
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

@@ -491,7 +491,7 @@ assert_contains "tx_bytes at 2^63-1 is exact" "\"tx_bytes\":$MAX" "$OUT"
 assert_not_contains "no decimal point in a byte field" '.0,' "$OUT"
 assert_not_contains "no exponent in a byte field" 'e+' "$OUT"
 
-# ── the role cache keeps the format trafficctl-device.sh reads ──────────────
+# ── the role cache keeps the format `trafficctl device` reads ──────────────
 {
     netdev_header
     netdev_row wan 1 2

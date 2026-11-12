@@ -9,6 +9,7 @@
 
 import * as lib from 'trafficctl.lib';
 import * as net from 'trafficctl.net';
+import * as report from 'trafficctl.report';
 
 function out(v) {
 	print(lib.to_json(v), '\n');
@@ -66,6 +67,31 @@ const commands = {
 		net.rdns_refresh(args);
 		return 0;
 	},
+
+	summary: () => {
+		out(report.summary());
+		return 0;
+	},
+
+	device: (args) => {
+		let r = report.device(args);
+		out(r.reply);
+		return r.rc;
+	},
+
+	metrics: () => {
+		print(report.metrics());
+		return 0;
+	},
+
+	netify: (args) => {
+		let r = report.netify(args);
+		if (type(r.out) == 'string')
+			print(r.out);
+		else
+			out(r.out);
+		return r.rc;
+	},
 };
 
 // Commands the shell scripts still serve: run with our arguments, stdin,
@@ -74,18 +100,15 @@ const LEGACY = {
 	block: 'trafficctl-block.sh',
 	bytes: 'trafficctl-bytes.sh',
 	cut: 'trafficctl-cut.sh',
-	device: 'trafficctl-device.sh',
 	history: 'trafficctl-history.sh',
 	'macfilter-add': 'trafficctl-macfilter-add.sh',
 	'macfilter-remove': 'trafficctl-macfilter-remove.sh',
-	netify: 'trafficctl-netify.sh',
 	portfw: 'trafficctl-portfw.sh',
 	ratelimit: 'trafficctl-ratelimit.sh',
 	'ratelimit-stats': 'trafficctl-ratelimit-stats.sh',
 	rules: 'trafficctl-rules.sh',
 	shape: 'trafficctl-shape.sh',
 	'shape-stats': 'trafficctl-shape-stats.sh',
-	summary: 'trafficctl-summary.sh',
 	'telegram-test': 'trafficctl-telegram-test.sh',
 	totals: 'trafficctl-totals.sh',
 	unblock: 'trafficctl-unblock.sh',
@@ -93,7 +116,7 @@ const LEGACY = {
 
 // What a caller expecting this command's shape can still parse.
 function fallback(cmd, args, msg) {
-	if (index([ 'subnets', 'ifaces', 'bytes', 'totals' ], cmd) >= 0 ||
+	if (index([ 'subnets', 'ifaces', 'bytes', 'totals', 'summary' ], cmd) >= 0 ||
 	    (cmd == 'names' && args[0] == 'list'))
 		return [];
 	if (cmd == 'rdns')

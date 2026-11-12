@@ -99,8 +99,8 @@ method because it returns the contents of the configured log file.
 
 | Method | Script | Params | ACL |
 |--------|--------|--------|-----|
-| `summary` | `trafficctl-summary.sh` | (none) | read |
-| `device` | `trafficctl-device.sh` | `ip`, `proto` | read |
+| `summary` | `trafficctl summary` (ucode) | (none) | read |
+| `device` | `trafficctl device` (ucode) | `ip`, `proto` | read |
 | `bytes` | `trafficctl-totals.sh` | (none) | read |
 | `ifaces` | `trafficctl ifaces` (ucode) | (none) | read |
 | `rdns` | `trafficctl rdns` (ucode) | `ip` | read |
@@ -111,8 +111,8 @@ method because it returns the contents of the configured log file.
 | `names_list` | (in plugin) | (none) | read |
 | `portfw_list` | `trafficctl-portfw.sh list` | (none) | read |
 | `rules_list` | `trafficctl-rules.sh list` | (none) | read |
-| `netify_status` | `trafficctl-netify.sh status` | (none) | read |
-| `netify_list` | `trafficctl-netify.sh list` | (none) | read |
+| `netify_status` | `trafficctl netify status` (ucode) | (none) | read |
+| `netify_list` | `trafficctl netify list` (ucode) | (none) | read |
 | `config_get` | (in plugin) | (none) — returns `enabled`, `default_mode`, `offload_mode`, `sw`, `hw`, `poll_interval`, `avg_window` | read |
 | `telegram_config_get` | (in plugin) | (none) — `bot_token` is masked as `***`; `bot_running` comes from procd (`ubus call service list`) | read |
 | `logging_config_get` | (in plugin) | (none) | read |
@@ -130,7 +130,7 @@ method because it returns the contents of the configured log file.
 | `name_set` | (in plugin) | `ip`, `name` (empty `name` clears the alias) | write |
 | `name_clear` | (in plugin) | `ip` | write |
 | `portfw_ctl` | `trafficctl-portfw.sh` | `action`, `scope`, `proto`, `ip`, `port`, `rate_kbit` | write |
-| `netify_collect` | `trafficctl-netify.sh collect` | `secs` (1–30, default 3) | write |
+| `netify_collect` | `trafficctl netify collect` (ucode) | `secs` (1–30, default 3) | write |
 | `config_set` | (in plugin) | `enabled`, `default_mode`, `sw`, `hw`, `poll_interval`, `avg_window` (all optional) | write |
 | `telegram_config_set` | (in plugin) | `enabled`, `bot_token`, `chat_id`, `poll_interval`, `notify_new_device`, `notify_known_device`, `control_enabled`, `notify_template`, `btn_block_inet`, `btn_block_wifi`, `btn_limiter`, `btn_shaper` | write |
 | `telegram_test` | `trafficctl-telegram-test.sh` | `bot_token`, `chat_id`, `message` — the token goes to the plugin's wrapping shell on stdin, which exports it as `TCTL_TG_TOKEN` for the script; it is never in an argument list | write |
@@ -188,14 +188,18 @@ methods; the `read` methods are the dashboard's polls.
 ## Query Scripts
 
 `trafficctl-subnets.sh`, `trafficctl-names.sh`, `trafficctl-rdns.sh`,
-`trafficctl-rdns-refresh.sh`, `trafficctl-ifaces.sh`, `trafficctl-bytes.sh`
-and `trafficctl-totals.sh` are two-line wrappers for the ucode CLI:
-`/usr/sbin/trafficctl subnets|names|rdns|rdns-refresh|ifaces|bytes|totals`
-takes the same arguments and prints the same bytes. `bytes-nft` and its wrapper
+`trafficctl-rdns-refresh.sh`, `trafficctl-ifaces.sh`, `trafficctl-bytes.sh`,
+`trafficctl-totals.sh`, `trafficctl-summary.sh`, `trafficctl-device.sh`,
+`trafficctl-metrics.sh` and `trafficctl-netify.sh` are two-line wrappers for
+the ucode CLI:
+`/usr/sbin/trafficctl subnets|names|rdns|rdns-refresh|ifaces|bytes|totals|summary|device|metrics|netify`
+takes the same arguments and prints the same bytes. The metrics CGI
+(`/www/cgi-bin/trafficctl-metrics`) checks the token, then execs
+`trafficctl metrics`. `bytes-nft` and its wrapper
 are gone (see `trafficctl-bytes.sh` below). The byte commands print their arrays
 sorted by address, where the shell printed awk hash order.
 
-### trafficctl-summary.sh
+### trafficctl-summary.sh (`trafficctl summary`)
 
 Returns a summary of all active LAN devices with traffic control status and connection type.
 
@@ -249,7 +253,7 @@ Returns a summary of all active LAN devices with traffic control status and conn
 
 ---
 
-### trafficctl-device.sh
+### trafficctl-device.sh (`trafficctl device`)
 
 Returns detailed connection information for a single device.
 
