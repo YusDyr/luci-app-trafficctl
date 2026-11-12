@@ -4,6 +4,21 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.30.4] - 2026-11-12
+
+### Bug Fixes
+- unblock removes blocks written before v1.13.2 ([#153](https://github.com/YusDyr/luci-app-trafficctl/issues/153)) ([c2d7091](https://github.com/YusDyr/luci-app-trafficctl/commit/c2d7091f534db96bbb0f05d33daed99104caed38))
+  Their nft comment carries the caller's label, not the address:
+  tctl_block_tg from Telegram, tctl_block_block_<ip> from LuCI, or a label
+  typed in the UI. The Rules tab lists them (any drop on an ip saddr whose
+  comment starts with tctl_block_) and unblocks with an empty label, so
+  trafficctl-unblock.sh only tried tctl_block_block_<ip> and the derived
+  comment, left a Telegram-placed or typed-label rule in place, and still
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.30.3...v1.30.4
+
+---
+
 ## [1.30.3] - 2026-11-12
 
 ### Bug Fixes
