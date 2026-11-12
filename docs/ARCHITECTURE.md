@@ -34,8 +34,8 @@ graph TD
             TOT["trafficctl-totals.sh = trafficctl totals<br/>(monotonic lifetime totals, ucode)"]
             BYT["trafficctl-bytes.sh = trafficctl bytes<br/>(conntrack byte counters, ucode)"]
             IFA["trafficctl-ifaces.sh<br/>(per-interface counters + role map)"]
-            RLS["trafficctl-ratelimit-stats.sh<br/>(nft drop counters)"]
-            SHS["trafficctl-shape-stats.sh<br/>(tc class stats)"]
+            RLS["trafficctl-ratelimit-stats.sh = trafficctl ratelimit-stats<br/>(nft drop counters, ucode)"]
+            SHS["trafficctl-shape-stats.sh = trafficctl shape-stats<br/>(tc class stats, ucode)"]
             RDNS["trafficctl-rdns.sh<br/>(reverse DNS — Telegram/CLI)"]
         end
 
@@ -194,6 +194,43 @@ The file `trafficctl-fw.sh` is sourced by all scripts and provides firewall func
 | `tctl_validate_ip` | regex + octet range check, no leading zeros |
 | `tctl_get_wifi_interfaces` | `uci show wireless` parsing |
 
+### Reading the rules back (ucode)
+
+The writers above stay shell. Everything that reads their rules back for a
+report (`trafficctl ratelimit-stats`, `shape-stats`, `rules`) is in
+`trafficctl/files/usr/share/ucode/trafficctl/ctl.uc`:
+
+- nft rules come from `nft -j list chain inet fw4 forward` and
+  `nft -j list table netdev tm_ratelimit`. A rule is told by its comment
+  (its handle is carried along for the caller), and an address is the whole
+  `ip daddr`/`ip saddr` field; of the expressions only matches, limits,
+  meters, counters and the verdict are read. A block is a drop rule whose
+  comment starts with `tctl_block_` on its `ip saddr`, since blocks written
+  before v1.13.2 carry the caller's label there, or whose comment is exactly
+  `tctl_block_<slug>_mac` (the IPv6 half). Rates convert as
+  the shell did: nft's unit steps of 1024, then SI kbit rounded to the
+  nearest. A per-address meter is `meter` in nftables 1.0 and a dynamic set
+  the rule adds to (`set` with a limit `stmt`) in 1.1; both read as `each`.
+- There is no text fallback for nft. `nft -j` needs nftables built with JSON,
+  and firewall4, which this package depends on, depends on `nftables-json`
+  (checked in the 22.03.7 and 25.12.4 rootfs).
+- tc stays text: iproute2 5.15 (22.03) prints `tc -j class` as text, and
+  `tc -j qdisc` reports the fq_codel target in kernel microseconds (4999 for
+  `5ms`), which would change the reported figure.
+
+`tools/ci/live-readers.sh` (the `live-readers` job in `compat.yml`) builds real
+blocks, limits and shapes with the shell writers in the 22.03.7 and 25.12.4
+rootfs and compares the v1.30.0 readers with the CLI on that state. The
+bridge has two dummy ports, so the upload rules land on more than one
+`ul_<port>` chain. The container runs on the CI host's kernel, which has the
+netdev egress hook, so the job never takes the WAN-ingress `dl` fallback that
+22.03's 5.10 kernel needs. On 22.03 the second port also shows a writer bug,
+fixed separately: an each-mode limit gives its upload meter the same name in
+every `ul_<port>` chain, nftables 1.0.2 refuses the second one ("Resource
+busy"), and the writer still reports success, so `ul_lan2` has no IPv4
+upload rule for those targets. Both readers report that same state, so the
+comparison keeps them.
+
 ---
 
 ## tc/HTB Hierarchy
@@ -245,7 +282,7 @@ in `shapes.json` next to the rate:
 - `alloc_classid` hands out the lowest free minor in `2..65533`, checking both
   `shapes.json` and the live `tc class show` on the LAN and IFB devices.
 - `lookup_classid` reads the recorded minor, so a device keeps its class for as
-  long as it is shaped, and `trafficctl-shape-stats.sh` maps class to IP from
+  long as it is shaped, and `trafficctl shape-stats` maps class to IP from
   `shapes.json` alone.
 - `1:1` (root) and `1:fffe` (default, unshaped) are reserved and never allocated.
 

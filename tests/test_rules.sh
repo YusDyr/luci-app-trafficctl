@@ -1,5 +1,6 @@
 #!/bin/bash
-# The Rules tab's backend, trafficctl-rules.sh (#128).
+# The Rules tab's backend, `trafficctl rules` (#128; trafficctl-rules.sh until
+# the ucode port).
 #
 # The device table is built from conntrack, so a device that goes offline loses
 # its row, and with it the only way to see or lift its block, limit or shape —
@@ -8,8 +9,11 @@
 # are SAVED (rules.json, shapes.json, the uci maclist), never from the set of
 # devices currently online, and it must say which of the two each was found in.
 #
-# Runs the real scripts with fake nft/tc/ip/uci/hostapd_cli on PATH
-# (test_direction.sh's pattern). The second half runs
+# Runs the ucode CLI and the real removal scripts with fake nft/tc/ip/
+# hostapd_cli on PATH (test_direction.sh's pattern), a private ubusd, and one
+# scratch root both read: the CLI through TCTL_ROOT, the scripts through
+# rewritten paths. The list is read from the `nft -j` output of OpenWrt 22.03
+# (nft 1.0.2) and 25.12 (1.1.6) in turn. The second half runs
 # the existing removal scripts the tab calls against an OFFLINE device, since
 # "listed but cannot be removed" would be the same bug one step later.
 
@@ -18,18 +22,22 @@ FAIL=0
 
 BIN="$(cd "$(dirname "$0")/.." && pwd)/trafficctl/files/usr/libexec/trafficctl"
 
-TMPDIR=$(mktemp -d)
-trap 'rm -rf "$TMPDIR"' EXIT
+# shellcheck source=tests/lib/ucode.sh
+. "$(dirname "$0")/lib/ucode.sh"
+TMPDIR="$UC_TMP/t"
+ROOT="$TMPDIR/root"
 MOCKBIN="$TMPDIR/bin"
 STATE="$TMPDIR/state"
-mkdir -p "$MOCKBIN" "$STATE"
+FIXTURES="$UC_REPO/tests/fixtures"
+mkdir -p "$MOCKBIN" "$STATE" "$ROOT/tmp/.uci" "$ROOT/etc/trafficctl" "$ROOT/etc/config" "$ROOT/proc/net" "$TMPDIR/ubus"
+CTX=""
 
 assert_eq() {
     if [ "$2" = "$3" ]; then
         PASS=$((PASS + 1))
     else
         FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$1" "$2" "$3"
+        printf "FAIL: %s%s\n  expected: '%s'\n  actual:   '%s'\n" "${CTX:+[$CTX] }" "$1" "$2" "$3"
     fi
 }
 assert_contains() {
@@ -37,16 +45,16 @@ assert_contains() {
         PASS=$((PASS + 1))
     else
         FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected to find: '%s'\n  in: %s\n" "$1" "$2" "$3"
+        printf "FAIL: %s%s\n  expected to find: '%s'\n  in: %s\n" "${CTX:+[$CTX] }" "$1" "$2" "$3"
     fi
 }
 
-LEASES="$TMPDIR/dhcp.leases"
-RULES="$TMPDIR/rules.json"
-SHAPES="$TMPDIR/shapes.json"
-NAMES="$TMPDIR/names"
-RDNS="$TMPDIR/rdns_cache"
-CT="$TMPDIR/nf_conntrack"
+LEASES="$ROOT/tmp/dhcp.leases"
+RULES="$ROOT/etc/trafficctl/rules.json"
+SHAPES="$ROOT/etc/trafficctl/shapes.json"
+NAMES="$ROOT/etc/trafficctl/names"
+RDNS="$ROOT/tmp/trafficctl_rdns_cache"
+CT="$ROOT/proc/net/nf_conntrack"
 
 FW="$TMPDIR/fw.sh"
 sed -e "s|TCTL_LEASES_FILE=\"/tmp/dhcp.leases\"|TCTL_LEASES_FILE=\"$LEASES\"|" \
@@ -62,8 +70,6 @@ patch_script() {
         -e "s|/tmp/dhcp.leases|$LEASES|g" \
         "$1" > "$2"
 }
-patch_script "$BIN/trafficctl-rules.sh"            "$TMPDIR/rules.sh"
-patch_script "$BIN/trafficctl-ratelimit-stats.sh"  "$TMPDIR/trafficctl-ratelimit-stats.sh"
 patch_script "$BIN/trafficctl-ratelimit.sh"        "$TMPDIR/ratelimit.sh"
 patch_script "$BIN/trafficctl-unblock.sh"          "$TMPDIR/unblock.sh"
 patch_script "$BIN/trafficctl-macfilter-remove.sh" "$TMPDIR/macfilter-remove.sh"
@@ -79,6 +85,8 @@ echo "\$*" >> "\$S/nft.log"
 case "\$*" in
     "list chain inet fw4 forward"|"-a list chain inet fw4 forward") cat "\$S/fw4_forward" 2>/dev/null ;;
     "list table netdev tm_ratelimit"|"-a list table netdev tm_ratelimit") cat "\$S/tm_ratelimit" 2>/dev/null ;;
+    "-j list chain inet fw4 forward") cat "\$S/fw4_forward.json" 2>/dev/null ;;
+    "-j list table netdev tm_ratelimit") cat "\$S/tm_ratelimit.json" 2>/dev/null ;;
     # A real nft exits 1 for a set that does not exist.
     delete\ set*) exit 1 ;;
 esac
@@ -101,8 +109,9 @@ case "\$*" in
 esac
 exit 0
 MOCK
-# uci: persist flag and a wireless config with one deny-mode radio. Writes are
-# logged so the removal test can see the maclist edit.
+# uci for the removal scripts: persist flag and a wireless config with one
+# deny-mode radio. Writes are logged so the removal test can see the maclist
+# edit. The CLI reads the same settings from real config files (setcfg).
 cat > "$MOCKBIN/uci" <<MOCK
 #!/bin/sh
 S="$STATE"
@@ -127,6 +136,8 @@ case "\$*" in
 esac
 exit 0
 MOCK
+echo '{"clients":[]}' > "$TMPDIR/ubus/hostapd.phy0-ap0@list_bans.json"
+ubus_start "$TMPDIR/ubus"
 cat > "$MOCKBIN/hostapd_cli" <<MOCK
 #!/bin/sh
 shift 2
@@ -143,6 +154,18 @@ for t in conntrack logger; do printf '#!/bin/sh\nexit 0\n' > "$MOCKBIN/$t"; done
 chmod +x "$MOCKBIN"/*
 
 run() { PATH="$MOCKBIN:$PATH" sh "$@" 2>/dev/null; }
+list() { PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" tctl rules list 2>/dev/null; }
+
+setcfg() {   # setcfg <persist_rules> <macfilter>
+    echo "$1" > "$STATE/persist"
+    echo "$2" > "$STATE/wifi_mode"
+    printf "config trafficctl 'main'\n\toption persist_rules '%s'\n" "$1" > "$ROOT/etc/config/trafficctl"
+    printf "config interface 'lan'\n\toption device 'br-lan'\n\nconfig interface 'wan'\n\toption device 'eth1'\n" > "$ROOT/etc/config/network"
+    {
+        printf "config wifi-iface 'default_radio0'\n\toption macfilter '%s'\n" "$2"
+        for m in $(cat "$STATE/maclist"); do printf "\tlist maclist '%s'\n" "$m"; done
+    } > "$ROOT/etc/config/wireless"
+}
 
 # A field of the record of one type and target, via python so the test never
 # depends on the key order the script happens to print.
@@ -183,9 +206,8 @@ cat > "$STATE/neigh" <<'EOF'
 192.168.1.80 dev br-lan lladdr aa:aa:aa:aa:aa:80 REACHABLE
 EOF
 
-echo 1 > "$STATE/persist"
-echo deny > "$STATE/wifi_mode"
 echo "AA:AA:AA:AA:AA:99 aa:aa:aa:aa:aa:50" > "$STATE/maclist"
+setcfg 1 deny
 echo "aa:aa:aa:aa:aa:50" > "$STATE/acl"
 
 cat > "$STATE/fw4_forward" <<EOF
@@ -224,94 +246,105 @@ cat > "$STATE/tc_ifb" <<'EOF'
 class htb 1:3 parent 1:1 leaf 30: prio 0 rate 2Mbit ceil 2Mbit burst 1600b cburst 1600b
 EOF
 
-OUT=$(run "$TMPDIR/rules.sh" list)
-if python3 -c 'import json,sys; json.loads(sys.argv[1])' "$OUT" 2>/dev/null; then
-    PASS=$((PASS + 1))
-else
-    FAIL=$((FAIL + 1)); printf "FAIL: output is not valid JSON:\n%s\n" "$OUT"
-fi
-assert_eq "nft: firewall reported" '"nft"' "$(top "$OUT" fw)"
-assert_eq "nft: persist_rules reported" 'true' "$(top "$OUT" persist_rules)"
+for NFTV in 1.0.2 1.1.6; do
+    CTX="nft $NFTV"
+    cp "$FIXTURES/nft-$NFTV/rules.fw4.json" "$STATE/fw4_forward.json"
+    cp "$FIXTURES/nft-$NFTV/rules.tm_ratelimit.json" "$STATE/tm_ratelimit.json"
+    OUT=$(list)
+    if python3 -c 'import json,sys; json.loads(sys.argv[1])' "$OUT" 2>/dev/null; then
+        PASS=$((PASS + 1))
+    else
+        FAIL=$((FAIL + 1)); printf "FAIL: output is not valid JSON:\n%s\n" "$OUT"
+    fi
+    assert_eq "nft: firewall reported" '"nft"' "$(top "$OUT" fw)"
+    assert_eq "nft: persist_rules reported" 'true' "$(top "$OUT" persist_rules)"
 
-# An offline device's block is listed — the point of the feature.
-assert_eq "offline block: listed" "192.168.1.50" "$(rec "$OUT" block 192.168.1.50 ip)"
-assert_eq "offline block: device is offline" "false" "$(rec "$OUT" block 192.168.1.50 online)"
-assert_eq "offline block: applied" "true" "$(rec "$OUT" block 192.168.1.50 applied)"
-assert_eq "offline block: persisted" "true" "$(rec "$OUT" block 192.168.1.50 persisted)"
-assert_eq "offline block: hostname from the lease" "kid-tablet" "$(rec "$OUT" block 192.168.1.50 name)"
-assert_eq "offline block: MAC" "aa:aa:aa:aa:aa:50" "$(rec "$OUT" block 192.168.1.50 mac)"
-# The v4 rule and the v6 one are one restriction, not two rows.
-assert_eq "offline block: v4 and v6 halves are one record" "1" \
-    "$(python3 -c 'import json,sys; print(sum(1 for r in json.loads(sys.argv[1])["rules"] if r["type"]=="block" and r["target"]=="192.168.1.50"))' "$OUT")"
-assert_eq "a drop rule this app did not write is not listed" "<none>" "$(rec "$OUT" block 192.168.1.33 ip)"
+    # An offline device's block is listed — the point of the feature.
+    assert_eq "offline block: listed" "192.168.1.50" "$(rec "$OUT" block 192.168.1.50 ip)"
+    assert_eq "offline block: device is offline" "false" "$(rec "$OUT" block 192.168.1.50 online)"
+    assert_eq "offline block: applied" "true" "$(rec "$OUT" block 192.168.1.50 applied)"
+    assert_eq "offline block: persisted" "true" "$(rec "$OUT" block 192.168.1.50 persisted)"
+    assert_eq "offline block: hostname from the lease" "kid-tablet" "$(rec "$OUT" block 192.168.1.50 name)"
+    assert_eq "offline block: MAC" "aa:aa:aa:aa:aa:50" "$(rec "$OUT" block 192.168.1.50 mac)"
+    # Blocks written before v1.13.2: the caller's label in the comment.
+    assert_eq "block from before v1.13.2 (Telegram label): listed, applied" "true" \
+        "$(rec "$OUT" block 192.168.1.51 applied)"
+    assert_eq "block from before v1.13.2 (LuCI label): listed, applied" "true" \
+        "$(rec "$OUT" block 192.168.1.52 applied)"
+    # The v4 rule and the v6 one are one restriction, not two rows.
+    assert_eq "offline block: v4 and v6 halves are one record" "1" \
+        "$(python3 -c 'import json,sys; print(sum(1 for r in json.loads(sys.argv[1])["rules"] if r["type"]=="block" and r["target"]=="192.168.1.50"))' "$OUT")"
+    assert_eq "a drop rule this app did not write is not listed" "<none>" "$(rec "$OUT" block 192.168.1.33 ip)"
 
-# Saved but missing from the kernel: shown, and shown as not applied.
-assert_eq "saved-only block: listed" "192.168.1.90" "$(rec "$OUT" block 192.168.1.90 target)"
-assert_eq "saved-only block: not applied" "false" "$(rec "$OUT" block 192.168.1.90 applied)"
-assert_eq "saved-only block: persisted" "true" "$(rec "$OUT" block 192.168.1.90 persisted)"
-assert_eq "saved-only block: no lease, no name" "" "$(rec "$OUT" block 192.168.1.90 name)"
+    # Saved but missing from the kernel: shown, and shown as not applied.
+    assert_eq "saved-only block: listed" "192.168.1.90" "$(rec "$OUT" block 192.168.1.90 target)"
+    assert_eq "saved-only block: not applied" "false" "$(rec "$OUT" block 192.168.1.90 applied)"
+    assert_eq "saved-only block: persisted" "true" "$(rec "$OUT" block 192.168.1.90 persisted)"
+    assert_eq "saved-only block: no lease, no name" "" "$(rec "$OUT" block 192.168.1.90 name)"
 
-# Limits: live values win over saved ones; both directions are reported.
-assert_eq "online limit: online" "true" "$(rec "$OUT" ratelimit 192.168.1.60 online)"
-assert_eq "online limit: download from the kernel" "5000" "$(rec "$OUT" ratelimit 192.168.1.60 rate_kbit)"
-assert_eq "online limit: upload from the kernel" "1000" "$(rec "$OUT" ratelimit 192.168.1.60 rate_kbit_up)"
-assert_eq "online limit: applied + persisted" "true true" \
-    "$(rec "$OUT" ratelimit 192.168.1.60 applied) $(rec "$OUT" ratelimit 192.168.1.60 persisted)"
-assert_eq "subnet limit: listed with its CIDR" "10.0.20.0/24" "$(rec "$OUT" ratelimit 10.0.20.0/24 target)"
-assert_eq "subnet limit: per-device mode" "each" "$(rec "$OUT" ratelimit 10.0.20.0/24 mode)"
-assert_eq "subnet limit: 2000 kbit/s" "2000" "$(rec "$OUT" ratelimit 10.0.20.0/24 rate_kbit)"
-assert_eq "subnet limit: no single online state" "null" "$(rec "$OUT" ratelimit 10.0.20.0/24 online)"
-assert_eq "subnet limit: live, not saved (lost on reboot)" "true false" \
-    "$(rec "$OUT" ratelimit 10.0.20.0/24 applied) $(rec "$OUT" ratelimit 10.0.20.0/24 persisted)"
-# A record from before modes were stored gets the default the restore hook
-# gives it, and a symmetric one reports upload = download.
-assert_eq "saved-only limit: rate from rules.json" "2000" "$(rec "$OUT" ratelimit 192.168.1.66 rate_kbit)"
-assert_eq "saved-only limit: symmetric upload" "2000" "$(rec "$OUT" ratelimit 192.168.1.66 rate_kbit_up)"
-assert_eq "saved-only limit: default mode for a host" "shared" "$(rec "$OUT" ratelimit 192.168.1.66 mode)"
-assert_eq "saved-only limit: not applied" "false" "$(rec "$OUT" ratelimit 192.168.1.66 applied)"
-assert_eq "port-forward records belong to their own tab" "0" \
-    "$(python3 -c 'import json,sys; print(sum(1 for r in json.loads(sys.argv[1])["rules"] if "/22" in r["target"]))' "$OUT")"
+    # Limits: live values win over saved ones; both directions are reported.
+    assert_eq "online limit: online" "true" "$(rec "$OUT" ratelimit 192.168.1.60 online)"
+    assert_eq "online limit: download from the kernel" "5000" "$(rec "$OUT" ratelimit 192.168.1.60 rate_kbit)"
+    assert_eq "online limit: upload from the kernel" "1000" "$(rec "$OUT" ratelimit 192.168.1.60 rate_kbit_up)"
+    assert_eq "online limit: applied + persisted" "true true" \
+        "$(rec "$OUT" ratelimit 192.168.1.60 applied) $(rec "$OUT" ratelimit 192.168.1.60 persisted)"
+    assert_eq "subnet limit: listed with its CIDR" "10.0.20.0/24" "$(rec "$OUT" ratelimit 10.0.20.0/24 target)"
+    assert_eq "subnet limit: per-device mode" "each" "$(rec "$OUT" ratelimit 10.0.20.0/24 mode)"
+    assert_eq "subnet limit: 2000 kbit/s" "2000" "$(rec "$OUT" ratelimit 10.0.20.0/24 rate_kbit)"
+    assert_eq "subnet limit: no single online state" "null" "$(rec "$OUT" ratelimit 10.0.20.0/24 online)"
+    assert_eq "subnet limit: live, not saved (lost on reboot)" "true false" \
+        "$(rec "$OUT" ratelimit 10.0.20.0/24 applied) $(rec "$OUT" ratelimit 10.0.20.0/24 persisted)"
+    # A record from before modes were stored gets the default the restore hook
+    # gives it, and a symmetric one reports upload = download.
+    assert_eq "saved-only limit: rate from rules.json" "2000" "$(rec "$OUT" ratelimit 192.168.1.66 rate_kbit)"
+    assert_eq "saved-only limit: symmetric upload" "2000" "$(rec "$OUT" ratelimit 192.168.1.66 rate_kbit_up)"
+    assert_eq "saved-only limit: default mode for a host" "shared" "$(rec "$OUT" ratelimit 192.168.1.66 mode)"
+    assert_eq "saved-only limit: not applied" "false" "$(rec "$OUT" ratelimit 192.168.1.66 applied)"
+    assert_eq "port-forward records belong to their own tab" "0" \
+        "$(python3 -c 'import json,sys; print(sum(1 for r in json.loads(sys.argv[1])["rules"] if "/22" in r["target"]))' "$OUT")"
 
-# Shapes: shapes.json is always written, so it is the list.
-assert_eq "shape without a live class: listed" "3000" "$(rec "$OUT" shape 192.168.1.70 rate_kbit)"
-assert_eq "shape without a live class: not applied" "false" "$(rec "$OUT" shape 192.168.1.70 applied)"
-assert_eq "shape: alias beats the lease, quotes escaped" 'Console "X"' "$(rec "$OUT" shape 192.168.1.70 name)"
-assert_eq "live shape: applied" "true" "$(rec "$OUT" shape 192.168.1.80 applied)"
-assert_eq "live shape: download from tc" "8000" "$(rec "$OUT" shape 192.168.1.80 rate_kbit)"
-assert_eq "live shape: upload from the IFB" "2000" "$(rec "$OUT" shape 192.168.1.80 rate_kbit_up)"
-assert_eq "live shape: name from the PTR cache" "printer.lan" "$(rec "$OUT" shape 192.168.1.80 name)"
-assert_eq "live shape: online from a reachable neighbour" "true" "$(rec "$OUT" shape 192.168.1.80 online)"
+    # Shapes: shapes.json is always written, so it is the list.
+    assert_eq "shape without a live class: listed" "3000" "$(rec "$OUT" shape 192.168.1.70 rate_kbit)"
+    assert_eq "shape without a live class: not applied" "false" "$(rec "$OUT" shape 192.168.1.70 applied)"
+    assert_eq "shape: alias beats the lease, quotes escaped" 'Console "X"' "$(rec "$OUT" shape 192.168.1.70 name)"
+    assert_eq "live shape: applied" "true" "$(rec "$OUT" shape 192.168.1.80 applied)"
+    assert_eq "live shape: download from tc" "8000" "$(rec "$OUT" shape 192.168.1.80 rate_kbit)"
+    assert_eq "live shape: upload from the IFB" "2000" "$(rec "$OUT" shape 192.168.1.80 rate_kbit_up)"
+    assert_eq "live shape: name from the PTR cache" "printer.lan" "$(rec "$OUT" shape 192.168.1.80 name)"
+    assert_eq "live shape: online from a reachable neighbour" "true" "$(rec "$OUT" shape 192.168.1.80 online)"
 
-# WiFi: keyed on the MAC; one with no lease still listed, with no address.
-assert_eq "wifi deny: MAC with a lease maps to its IP" "192.168.1.50" "$(rec "$OUT" wifi aa:aa:aa:aa:aa:50 ip)"
-assert_eq "wifi deny: in the running ACL" "acl" "$(rec "$OUT" wifi aa:aa:aa:aa:aa:50 enforcement)"
-assert_eq "wifi deny: applied" "true" "$(rec "$OUT" wifi aa:aa:aa:aa:aa:50 applied)"
-assert_eq "wifi deny without a lease: listed, MAC lowercased" "" "$(rec "$OUT" wifi aa:aa:aa:aa:aa:99 ip)"
-assert_eq "wifi deny missing from the radio: not applied" "false" "$(rec "$OUT" wifi aa:aa:aa:aa:aa:99 applied)"
-assert_eq "everything above and nothing else" "9" "$(count "$OUT")"
+    # WiFi: keyed on the MAC; one with no lease still listed, with no address.
+    assert_eq "wifi deny: MAC with a lease maps to its IP" "192.168.1.50" "$(rec "$OUT" wifi aa:aa:aa:aa:aa:50 ip)"
+    assert_eq "wifi deny: in the running ACL" "acl" "$(rec "$OUT" wifi aa:aa:aa:aa:aa:50 enforcement)"
+    assert_eq "wifi deny: applied" "true" "$(rec "$OUT" wifi aa:aa:aa:aa:aa:50 applied)"
+    assert_eq "wifi deny without a lease: listed, MAC lowercased" "" "$(rec "$OUT" wifi aa:aa:aa:aa:aa:99 ip)"
+    assert_eq "wifi deny missing from the radio: not applied" "false" "$(rec "$OUT" wifi aa:aa:aa:aa:aa:99 applied)"
+    assert_eq "everything above and nothing else" "11" "$(count "$OUT")"
 
-# ── persist_rules off: rules.json restricts nothing ────────────────────────
-# The restore hook skips the file then, so its records are not restrictions.
-echo 0 > "$STATE/persist"
-OUT=$(run "$TMPDIR/rules.sh" list)
-assert_eq "persist off: reported" "false" "$(top "$OUT" persist_rules)"
-assert_eq "persist off: saved-only block not listed" "<none>" "$(rec "$OUT" block 192.168.1.90 target)"
-assert_eq "persist off: live block still listed, not persisted" "false" "$(rec "$OUT" block 192.168.1.50 persisted)"
-assert_eq "persist off: shapes are still saved" "true" "$(rec "$OUT" shape 192.168.1.70 persisted)"
-echo 1 > "$STATE/persist"
+    # ── persist_rules off: rules.json restricts nothing ────────────────────────
+    # The restore hook skips the file then, so its records are not restrictions.
+    setcfg 0 deny
+    OUT=$(list)
+    assert_eq "persist off: reported" "false" "$(top "$OUT" persist_rules)"
+    assert_eq "persist off: saved-only block not listed" "<none>" "$(rec "$OUT" block 192.168.1.90 target)"
+    assert_eq "persist off: live block still listed, not persisted" "false" "$(rec "$OUT" block 192.168.1.50 persisted)"
+    assert_eq "persist off: shapes are still saved" "true" "$(rec "$OUT" shape 192.168.1.70 persisted)"
+    setcfg 1 deny
 
-# ── whitelist radio: nothing to enumerate, and it says so ──────────────────
-echo allow > "$STATE/wifi_mode"
-OUT=$(run "$TMPDIR/rules.sh" list)
-assert_eq "allow-mode radio: counted" "1" "$(top "$OUT" wifi_allow_ifaces)"
-assert_eq "allow-mode radio: its maclist is not read as a deny list" "<none>" "$(rec "$OUT" wifi aa:aa:aa:aa:aa:50 mac)"
-echo deny > "$STATE/wifi_mode"
+    # ── whitelist radio: nothing to enumerate, and it says so ──────────────────
+    setcfg 1 allow
+    OUT=$(list)
+    assert_eq "allow-mode radio: counted" "1" "$(top "$OUT" wifi_allow_ifaces)"
+    assert_eq "allow-mode radio: its maclist is not read as a deny list" "<none>" "$(rec "$OUT" wifi aa:aa:aa:aa:aa:50 mac)"
+    setcfg 1 deny
+done
+CTX=""
 
 # ── removing what the tab lists, for an offline device ─────────────────────
 # Saved-only block: nothing in the kernel to delete, the record must still go.
 OUT=$(run "$TMPDIR/unblock.sh" 192.168.1.90)
 assert_contains "unblock of a saved-only block reports ok" '"ok":true' "$OUT"
-OUT=$(run "$TMPDIR/rules.sh" list)
+OUT=$(list)
 assert_eq "unblock: the saved-only block is gone from the list" "<none>" "$(rec "$OUT" block 192.168.1.90 target)"
 
 # A limit on a target that never had an IPv6 set (any subnet, any host with no
@@ -343,6 +376,12 @@ OUT=$(run "$TMPDIR/macfilter-remove.sh" 'aa:bb;reboot')
 assert_contains "macfilter-remove: a malformed MAC is rejected" '"ok":false' "$OUT"
 OUT=$(run "$TMPDIR/macfilter-remove.sh" "$(printf 'aa:aa:aa:aa:aa:99\nx')")
 assert_contains "macfilter-remove: a MAC followed by a second line is rejected" '"ok":false' "$OUT"
+
+OUT=$(PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" tctl rules bogus 2>/dev/null; echo "rc=$?")
+assert_eq "an unknown subcommand is refused, as by the shell script" \
+    "$(printf '%s\n%s' '{"ok":false,"msg":"usage: trafficctl-rules.sh [list]"}' 'rc=1')" "$OUT"
+assert_eq "no subcommand is list" "$(list)" "$(PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" tctl rules 2>/dev/null)"
+assert_eq "shim: the script is the CLI command" 'exec /usr/sbin/trafficctl rules "$@"' "$(tail -n 1 "$BIN/trafficctl-rules.sh")"
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

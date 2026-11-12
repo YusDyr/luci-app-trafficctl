@@ -24,8 +24,11 @@ FAIL=0
 BIN="$(cd "$(dirname "$0")/.." && pwd)/trafficctl/files/usr/libexec/trafficctl"
 FWLIB="$BIN/trafficctl-fw.sh"
 
-TMPDIR=$(mktemp -d)
-trap 'rm -rf "$TMPDIR"' EXIT
+# shellcheck source=tests/lib/ucode.sh
+. "$(dirname "$0")/lib/ucode.sh"
+TMPDIR="$UC_TMP/t"
+mkdir -p "$TMPDIR/root"
+FIXTURES="$UC_REPO/tests/fixtures"
 MOCKBIN="$TMPDIR/bin"
 mkdir -p "$MOCKBIN"
 
@@ -77,10 +80,13 @@ ${TAB}}
 }
 DUMP
 
+# The ucode readers ask for JSON: the same ruleset as the nft of OpenWrt
+# 22.03 (1.0.2) or 25.12 (1.1.6) prints it (tests/fixtures/nft-src/rl.nft).
 cat > "$MOCKBIN/nft" <<MOCK
 #!/bin/sh
 case "\$*" in
     "list tables") echo "table inet fw4" ;;
+    "-j list table netdev tm_ratelimit") cat "$FIXTURES/nft-\$NFTV/rl.tm_ratelimit.json" ;;
     *"list table netdev tm_ratelimit"*) cat "$DUMP" ;;
 esac
 exit 0
@@ -140,15 +146,36 @@ assert_contains "device: reads the upload ceiling too" \
 assert_contains "device: the upload ceiling is in the JSON" \
     '"rate_limit_kbit_up":%d' "$(cat "$BIN/trafficctl-device.sh")"
 
-# ── stats: units ─────────────────────────────────────────────────────────────
+# ── ucode: the same reads from nft -j, on both nft versions ────────────────
 
-STATS_SH="$TMPDIR/rl-stats.sh"
-sed "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FWLIB|" "$BIN/trafficctl-ratelimit-stats.sh" > "$STATS_SH"
-STATS=$(PATH="$MOCKBIN:$PATH" sh "$STATS_SH" 2>/dev/null)
-assert_contains "stats: bytes rate" '"ip":"192.168.1.5","mode":"shared","rate_kbit":5000' "$STATS"
-assert_contains "stats: kbytes listing" '"ip":"192.168.1.7","mode":"shared","rate_kbit":8192' "$STATS"
-assert_contains "stats: mbytes listing is not read as 8 kbit/s" '"ip":"192.168.1.4","mode":"shared","rate_kbit":8389' "$STATS"
-assert_contains "stats: per-device rule in kbytes" '"ip":"192.168.1.8","mode":"each","rate_kbit":16384' "$STATS"
+for NFTV in 1.0.2 1.1.6; do
+    export NFTV
+    RULES=$(PATH="$MOCKBIN:$PATH" TCTL_ROOT="$TMPDIR/root" tcall trafficctl.ctl rl_rules)
+    uc_rate() { tcall trafficctl.ctl rl_rate_kbit "$RULES" "\"$1\"" "\"${2:-daddr}\""; }
+    # Every address the shell helper is asked about above, both directions.
+    for ip in 192.168.1.5 192.168.1.50 192.168.1.51 192.168.1. 192.168.1.7 192.168.1.8 \
+              192.168.1.6 192.168.1.4 192.168.1.9 192.168.1.60 192x168x1x5; do
+        assert_eq "ucode $NFTV: $ip reads what the shell helper reads" "$(rate_of "$ip")" "$(uc_rate "$ip")"
+        assert_eq "ucode $NFTV: $ip upload reads what the shell helper reads" "$(rate_up_of "$ip")" "$(uc_rate "$ip" saddr)"
+    done
+
+    STATS=$(PATH="$MOCKBIN:$PATH" TCTL_ROOT="$TMPDIR/root" tctl ratelimit-stats 2>&1)
+    assert_contains "stats $NFTV: bytes rate" '"ip":"192.168.1.5","mode":"shared","rate_kbit":5000' "$STATS"
+    assert_contains "stats $NFTV: kbytes listing" '"ip":"192.168.1.7","mode":"shared","rate_kbit":8192' "$STATS"
+    assert_contains "stats $NFTV: mbytes listing is not read as 8 kbit/s" '"ip":"192.168.1.4","mode":"shared","rate_kbit":8389' "$STATS"
+    # nft 1.1 lists the meter as "add @set { ... }": the shell reader looked
+    # for " meter " and called this limit shared there.
+    assert_contains "stats $NFTV: per-device rule in kbytes" '"ip":"192.168.1.8","mode":"each","rate_kbit":16384' "$STATS"
+    # Both bridges' counters, past 2^32, and the upload rules not at all.
+    assert_contains "stats $NFTV: one device's chains summed" '"ip":"192.168.1.5","mode":"shared","rate_kbit":5000,"packets":7,"bytes":5000000300' "$STATS"
+    assert_eq "stats $NFTV: one record per download address" "7" "$(printf '%s' "$STATS" | jq length)"
+done
+
+STATS=$(PATH="$MOCKBIN:$PATH" TCTL_ROOT="$TMPDIR/root" tctl ratelimit-stats bogus 2>&1)
+mkdir -p "$TMPDIR/none"; printf '#!/bin/sh\necho "Error: No such file or directory" >&2\nexit 1\n' > "$TMPDIR/none/nft"; chmod +x "$TMPDIR/none/nft"
+assert_eq "stats: no table is an empty array" "[]" "$(PATH="$TMPDIR/none:$PATH" TCTL_ROOT="$TMPDIR/root" tctl ratelimit-stats 2>/dev/null)"
+assert_contains "stats: arguments are ignored, as by the shell script" '"ip":"192.168.1.8"' "$STATS"
+assert_eq "shim: the script is the CLI command" 'exec /usr/sbin/trafficctl ratelimit-stats "$@"' "$(tail -n 1 "$BIN/trafficctl-ratelimit-stats.sh")"
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
