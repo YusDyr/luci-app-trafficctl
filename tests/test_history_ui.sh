@@ -239,7 +239,7 @@ assert_contains "the view distinguishes an IP-keyed row" "IP-keyed" "$JS"
 grep -oE "method: '[a-z_]+'" "$JS" | sed "s/method: '//; s/'//" | sort -u > "$TMP/called"
 while read -r m; do
     [ -n "$m" ] || continue
-    if grep -q "\"$m\":{" "$RPCD"; then
+    if grep -qE "^[[:space:]]$m: \{" "$RPCD"; then
         PASS=$((PASS + 1))
     else
         FAIL=$((FAIL + 1))

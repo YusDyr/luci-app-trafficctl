@@ -19,7 +19,7 @@ include $(TOPDIR)/rules.mk
 PKG_NAME:=trafficctl
 # Released in lockstep with luci-app-trafficctl: auto-release.yml sets both
 # PKG_VERSIONs to the same value.
-PKG_VERSION:=1.30.1
+PKG_VERSION:=1.30.2
 PKG_RELEASE:=1
 
 PKG_LICENSE:=Apache-2.0
@@ -36,12 +36,14 @@ include $(INCLUDE_DIR)/package.mk
 # iw stays: it is selectable on every target and only reads station lists.
 # firewall4: blocks are rules in its inet fw4 table, so nftables alone is not
 # enough.
+# kmod-nft-netdev carries CONFIG_NF_TABLES_NETDEV, the nft family of the
+# limiter's table (netdev tm_ratelimit); firewall4 does not pull it in.
 define Package/trafficctl
   SECTION:=net
   CATEGORY:=Network
   TITLE:=Per-device traffic monitoring and control
   URL:=https://github.com/YusDyr/luci-app-trafficctl
-  DEPENDS:=+conntrack +curl +tc +iw +firewall4 +ucode +ucode-mod-fs +ucode-mod-uci +ucode-mod-ubus
+  DEPENDS:=+conntrack +curl +tc +iw +kmod-nft-netdev +firewall4 +ucode +ucode-mod-fs +ucode-mod-uci +ucode-mod-ubus
   PKGARCH:=all
 endef
 
@@ -159,6 +161,9 @@ if [ -z "$${IPKG_INSTROOT}" ]; then
 		rm -f /etc/config/trafficctl-opkg.backup
 	fi
 	nft delete table inet trafficctl_mon 2>/dev/null || true
+	# Releases up to 1.30.1 gave the cut keeper START=95, so rc.d may
+	# still link it for boot. It is started on demand only.
+	rm -f /etc/rc.d/S95trafficctl-cut /etc/rc.d/K10trafficctl-cut
 	if [ -x /etc/init.d/trafficctl-telegram ] && [ "$$(uci -q get trafficctl.telegram.enabled)" = "1" ]; then
 		/etc/init.d/trafficctl-telegram enable 2>/dev/null || true
 		/etc/init.d/trafficctl-telegram start 2>/dev/null || true

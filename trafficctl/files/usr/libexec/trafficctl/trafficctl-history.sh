@@ -122,6 +122,9 @@ hist_validate_dir() {
     local d="$1"
     case "$d" in
         */../*|*/..|../*|..) return 1 ;;
+        # Every component a name: /mnt/. /mnt// /mnt/./x would pass the root
+        # test below and still name the mount root itself.
+        *//*|*/./*|*/.|./*|.) return 1 ;;
         *[\'\"\$\`\|\;\&\<\>]*) return 1 ;;
         /etc/trafficctl/*|/mnt/*|/media/*|/srv/*|/tmp/*) ;;
         *) return 1 ;;

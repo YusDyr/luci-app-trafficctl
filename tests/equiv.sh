@@ -124,7 +124,10 @@ rewrite() {   # rewrite <tree> <its libexec dir>
         -e "s|/tmp/trafficctl_|$W/root/tmp/trafficctl_|g" \
         -e "s|/tmp/trafficctl/|$W/root/tmp/trafficctl/|g" \
         -e "s|/tmp/\.trafficctl_|$W/root/tmp/.trafficctl_|g" \
-        -e "s|/var/run/trafficctl|$W/root/var/run/trafficctl|g" {} +
+        -e "s|/var/run/trafficctl|$W/root/var/run/trafficctl|g" \
+        -e "s|/etc/init\.d/|$W/root/etc/init.d/|g" \
+        -e "s|/etc/config/trafficctl|$W/root/etc/config/trafficctl|g" \
+        -e "s|/sys/kernel/debug/ecm|$W/root/sys/kernel/debug/ecm|g" {} +
 }
 rewrite "$L" "$LEXEC"
 rewrite "$C" "$CEXEC"
@@ -140,13 +143,27 @@ f="$W/cmd/\${0##*/} \$*"
 cat "\$f"
 EOF
 for c in ip nft tc iw brctl conntrack nslookup; do ln -sf replay "$W/bin/$c"; done
+# -t, not -P: since 2023 uci treats -P as a search path only, and commit
+# would read its deltas from /tmp/.uci and change nothing.
 cat > "$W/bin/uci" <<EOF
 #!/bin/sh
-exec "$UCODE_PREFIX/bin/uci" -c "$W/root/etc/config" -P "$W/root/tmp/.uci" "\$@"
+exec "$UCODE_PREFIX/bin/uci" -c "$W/root/etc/config" -t "$W/root/tmp/.uci" "\$@"
 EOF
 cat > "$W/bin/ubus" <<EOF
 #!/bin/sh
 exec "$UCODE_PREFIX/bin/ubus" -s "\$TCTL_UBUS_SOCKET" "\$@"
+EOF
+# The shell plugin's version and bot checks, answered from the case's root and
+# the same procd fixture the ucode plugin asks over ubus.
+cat > "$W/bin/opkg" <<EOF
+#!/bin/sh
+[ "\$1" = info ] || exit 1
+awk -v p="\$2" '/^Package: /{ on = (\$2 == p) } on' "$W/root/usr/lib/opkg/status" 2>/dev/null
+EOF
+cat > "$W/bin/pgrep" <<EOF
+#!/bin/sh
+[ "\$*" = "-f trafficctl-telegram.sh" ] || exit 1
+jq -e '."trafficctl-telegram".instances[] | select(.running)' "\$TCTL_FIXTURE/ubus/service@list.json" >/dev/null
 EOF
 cat > "$W/bin/logger" <<EOF
 #!/bin/sh
@@ -243,6 +260,301 @@ while IFS='|' read -r name mode fixture legacy new setup; do
         FAIL=$((FAIL + 1)); echo "FAIL: $name ($mode)"; cat "$W/diff" "$W/new.err"
     fi
 done <<< "$CASES"
+
+# ── the rpcd plugin ─────────────────────────────────────────────────────────
+# The v1.30.0 shell plugin and the ucode one, method by method, with the same
+# JSON on stdin. Case lines: name | mode | scripts | method | json [| setup]
+#   scripts  stub: every backend script is a stub that logs its arguments and
+#            the caller variables to tmp/dispatch.log, so a delegated method is
+#            compared on what it hands on. The ucode side reaches the stubs
+#            through the real CLI for the commands it still passes to a
+#            script; a command the CLI has ported goes to the stub of the
+#            script it replaced, with the plugin's arguments and environment
+#            (the port itself is compared in the CLI cases above).
+#            real: the legacy scripts themselves
+#   mode     json[+files]: the reply semantically (jq -S, or as text when it
+#            is not JSON), then the files; the root prefix is masked
+LPLUGIN="$L/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
+NPLUGIN="$UC_REPO/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
+STUBS="$UC_TMP/stubs"
+mkdir -p "$STUBS"
+cat > "$STUBS/stub" <<EOF
+#!/bin/sh
+n=\${0##*/}
+{ printf '%s' "\$n"; for a in "\$@"; do printf ' [%s]' "\$a"; done
+  printf ' via=%s src=%s user=%s token=%s\n' "\$TCTL_VIA" "\$TCTL_SRC" "\$TCTL_USER" "\$TCTL_TG_TOKEN"; } >> "$W/root/tmp/dispatch.log"
+printf '{"stub":"%s","argc":%d}\n' "\$n" "\$#"
+EOF
+chmod +x "$STUBS/stub"
+for f in "$LEXEC"/trafficctl-*.sh; do
+    [ "${f##*/}" = trafficctl-fw.sh ] || ln -sf stub "$STUBS/${f##*/}"
+done
+# The stubbed plugin still sources the real library.
+ln -sf "$LEXEC/trafficctl-fw.sh" "$STUBS/trafficctl-fw.sh"
+
+# The CLI's ported commands: the keys of its `commands` table.
+PORTED=$(awk '/^const commands = \{/ { f = 1; next } f && /^\};/ { f = 0 }
+    f && match($0, /^\t'"'"'?[a-z-]+'"'"'?: /) { c = substr($0, 2, RLENGTH - 3); gsub(/'"'"'/, "", c); print c }' \
+    "$UC_REPO/trafficctl/files/usr/sbin/trafficctl" | tr '\n' ' ')
+case " $PORTED " in *" totals "*) ;; *) echo "FAIL: no ported commands found in the CLI ($PORTED)"; exit 1 ;; esac
+for c in $PORTED; do
+    [ -e "$STUBS/trafficctl-$c.sh" ] || { echo "FAIL: ported command $c has no legacy script to stub"; exit 1; }
+done
+
+# Mock init scripts for the services the plugin restarts; reload runs in the
+# background, hence the pause after each call.
+INITS='mkdir -p "$W/root/etc/init.d"; for s in trafficctl-telegram trafficctl-history; do printf "#!/bin/sh\necho \"$s \$*\" >> \"$W/root/tmp/init.log\"\n" > "$W/root/etc/init.d/$s"; chmod +x "$W/root/etc/init.d/$s"; done'
+LOGF='tmp/dispatch.log,tmp/init.log,etc/config/trafficctl,tmp/trafficctl/activity.log,tmp/logger.log'
+TOKEN='uci set trafficctl.telegram.bot_token=123456:SECRETTOKEN; uci set trafficctl.telegram.chat_id=4242; uci set trafficctl.telegram.notify_template="say hi to {{name}}"; uci commit trafficctl'
+NOTG='uci delete trafficctl.telegram; uci commit trafficctl'
+ACTLOG='mkdir -p "$W/root/tmp/trafficctl"; for i in 1 2 3 4 5; do echo "[trafficctl] line $i \"q\""; done > "$W/root/tmp/trafficctl/activity.log"'
+OPKG='mkdir -p "$W/root/usr/lib/opkg"; printf "Package: luci-base\nVersion: 25.0\n\nPackage: luci-app-trafficctl\nVersion: 1.30.1-r1\nStatus: install user installed\n" > "$W/root/usr/lib/opkg/status"'
+ECM_ON='mkdir -p "$W/root/sys/kernel/debug/ecm"; echo 1 > "$W/root/sys/kernel/debug/ecm/front_end_ipv4_stop"; echo 0 > "$W/root/sys/kernel/debug/ecm/front_end_ipv6_stop"'
+ECM_OFF='mkdir -p "$W/root/sys/kernel/debug/ecm"; echo 1 > "$W/root/sys/kernel/debug/ecm/front_end_ipv4_stop"; echo 1 > "$W/root/sys/kernel/debug/ecm/front_end_ipv6_stop"'
+NOFLOW='uci set firewall.@defaults[0].flow_offloading=0; uci set firewall.@defaults[0].flow_offloading_hw=0; uci commit firewall'
+SWFLOW='uci set firewall.@defaults[0].flow_offloading=1; uci set firewall.@defaults[0].flow_offloading_hw=0; uci commit firewall'
+SEEN='mkdir -p "$W/root/etc/trafficctl"; printf "aa:bb:cc:00:00:01\naa:bb:cc:00:00:02\n" > "$W/root/etc/trafficctl/seen_macs"'
+HIST='uci set trafficctl.history=history; uci set trafficctl.history.enabled=1; uci commit trafficctl'
+ODD='uci set trafficctl.main.poll_interval=0x1f; uci set trafficctl.main.avg_window=12x; uci commit trafficctl'
+ODD2='uci set trafficctl.main.poll_interval=" 010"; uci set trafficctl.main.avg_window=99999999999999999999; uci set trafficctl.newdevice.limit_kbit=-5; uci commit trafficctl'
+NOLOG='uci delete trafficctl.logging; uci commit trafficctl'
+
+RPCD_CASES="
+unknown | json | stub | bogus_method | {}
+summary | json+$LOGF | stub | summary | {}
+device | json+$LOGF | stub | device | {\"ip\":\"192.168.0.101\"}
+device-tcp | json+$LOGF | stub | device | {\"ip\":\"192.168.0.101\",\"proto\":\"tcp\"}
+device-proto-bad | json+$LOGF | stub | device | {\"ip\":\"192.168.0.101\",\"proto\":\"icmp\"}
+device-no-ip | json+$LOGF | stub | device | {}
+bytes | json+$LOGF | stub | bytes | {}
+ifaces | json | real | ifaces | {}
+ifaces-stub | json+$LOGF | stub | ifaces | {}
+block | json+$LOGF | stub | block | {\"ip\":\"192.168.0.9\",\"label\":\"my label; reboot\"}
+block-no-ip | json+$LOGF | stub | block | {\"label\":\"x\"}
+unblock | json+$LOGF | stub | unblock | {\"ip\":\"192.168.0.9\",\"label\":\"block_192.168.0.9\"}
+unblock-no-ip | json+$LOGF | stub | unblock | {}
+macfilter-add | json+$LOGF | stub | macfilter_add | {\"ip\":\"192.168.0.9\"}
+macfilter-add-no-ip | json+$LOGF | stub | macfilter_add | {}
+macfilter-remove-ip | json+$LOGF | stub | macfilter_remove | {\"ip\":\"192.168.0.9\"}
+macfilter-remove-mac | json+$LOGF | stub | macfilter_remove | {\"mac\":\"AA:bb:cc:dd:ee:ff\"}
+macfilter-remove-both | json+$LOGF | stub | macfilter_remove | {\"ip\":\"192.168.0.9\",\"mac\":\"aa:bb:cc:dd:ee:ff\"}
+macfilter-remove-none | json+$LOGF | stub | macfilter_remove | {}
+ratelimit | json+$LOGF | stub | ratelimit | {\"ip\":\"192.168.0.9\",\"rate_kbit\":5000,\"label\":\"rl\",\"mode\":\"each\",\"rate_kbit_up\":0}
+ratelimit-up | json+$LOGF | stub | ratelimit | {\"ip\":\"10.0.20.0/24\",\"rate_kbit\":5000,\"mode\":\"shared\",\"rate_kbit_up\":2000}
+ratelimit-bad-mode | json+$LOGF | stub | ratelimit | {\"ip\":\"192.168.0.9\",\"rate_kbit\":5000,\"mode\":\"bogus\"}
+ratelimit-no-rate | json+$LOGF | stub | ratelimit | {\"ip\":\"192.168.0.9\"}
+ratelimit-no-ip | json+$LOGF | stub | ratelimit | {\"rate_kbit\":5000}
+ratelimit-stats | json+$LOGF | stub | ratelimit_stats | {}
+subnets | json | real | subnets | {}
+subnets-stub | json+$LOGF | stub | subnets | {}
+shape-add | json+$LOGF | stub | shape_add | {\"ip\":\"192.168.0.9\",\"rate_kbit\":8000,\"label\":\"x y\",\"rate_kbit_up\":1000}
+shape-add-up0 | json+$LOGF | stub | shape_add | {\"ip\":\"192.168.0.9\",\"rate_kbit\":8000,\"rate_kbit_up\":0}
+shape-add-no-rate | json+$LOGF | stub | shape_add | {\"ip\":\"192.168.0.9\"}
+shape-remove | json+$LOGF | stub | shape_remove | {\"ip\":\"192.168.0.9\",\"label\":\"x\"}
+shape-remove-no-ip | json+$LOGF | stub | shape_remove | {}
+shape-status | json+$LOGF | stub | shape_status | {\"ip\":\"192.168.0.9\"}
+shape-status-no-ip | json+$LOGF | stub | shape_status | {}
+shape-stats | json+$LOGF | stub | shape_stats | {}
+rules-list | json+$LOGF | stub | rules_list | {}
+rdns | json | real | rdns | {\"ip\":\"192.168.0.101\"} | $RESOLV
+rdns-no-ip | json | real | rdns | {}
+rdns-stub | json+$LOGF | stub | rdns | {\"ip\":\"192.168.0.101; reboot\"}
+netify-status | json+$LOGF | stub | netify_status | {}
+netify-list | json+$LOGF | stub | netify_list | {}
+netify-collect | json+$LOGF | stub | netify_collect | {\"secs\":5}
+netify-collect-default | json+$LOGF | stub | netify_collect | {}
+names-list | json | real | names_list | {} | $NAMES
+names-list-empty | json | real | names_list | {}
+name-set | json+$LOGF,etc/trafficctl/names | real | name_set | {\"ip\":\"192.168.0.50\",\"name\":\"Living room;TV\"} | $NAMES
+name-set-bad-ip | json+$LOGF,etc/trafficctl/names | real | name_set | {\"ip\":\"192.168.0.500\",\"name\":\"x\"} | $NAMES
+name-set-empty | json+$LOGF,etc/trafficctl/names | real | name_set | {\"ip\":\"192.168.0.101\",\"name\":\"\"} | $NAMES
+name-set-no-ip | json+$LOGF | real | name_set | {\"name\":\"x\"}
+name-clear | json+$LOGF,etc/trafficctl/names | real | name_clear | {\"ip\":\"192.168.0.101\"} | $NAMES
+name-clear-none | json+$LOGF | real | name_clear | {\"ip\":\"192.168.0.101\"}
+name-clear-no-ip | json+$LOGF | real | name_clear | {}
+portfw-list | json+$LOGF | stub | portfw_list | {}
+portfw-pause | json+$LOGF | stub | portfw_ctl | {\"action\":\"pause\",\"scope\":\"forward\",\"proto\":\"tcp\",\"ip\":\"192.168.0.9\",\"port\":\"8080\"}
+portfw-resume-local | json+$LOGF | stub | portfw_ctl | {\"action\":\"resume\",\"scope\":\"input\",\"proto\":\"udp\",\"port\":\"51820\"}
+portfw-limit | json+$LOGF | stub | portfw_ctl | {\"action\":\"limit\",\"scope\":\"forward\",\"proto\":\"tcp\",\"ip\":\"192.168.0.9\",\"port\":\"8080\",\"rate_kbit\":5000}
+portfw-limit-no-rate | json+$LOGF | stub | portfw_ctl | {\"action\":\"limit\",\"scope\":\"forward\",\"proto\":\"tcp\",\"port\":\"8080\"}
+portfw-bad-action | json+$LOGF | stub | portfw_ctl | {\"action\":\"delete\"}
+config-get | json | stub | config_get | {}
+config-get-sw | json | stub | config_get | {} | $SWFLOW
+config-get-none | json | stub | config_get | {} | $NOFLOW
+config-get-ecm-active | json | stub | config_get | {} | $ECM_ON
+config-get-ecm-stopped | json | stub | config_get | {} | $ECM_OFF
+config-get-odd | json | stub-ash | config_get | {} | $ODD
+config-get-odd2 | json | stub-ash | config_get | {} | $ODD2
+config-get-ash | json | stub-ash | config_get | {}
+logging-get-ash | json | stub-ash | logging_config_get | {}
+newdevice-get-odd | json | stub-ash | newdevice_config_get | {} | $ODD2
+config-set | json+$LOGF,etc/config/firewall | stub | config_set | {\"enabled\":false,\"default_mode\":\"shaper\",\"poll_interval\":30,\"avg_window\":300}
+config-set-poll-off | json+$LOGF | stub | config_set | {\"poll_interval\":0}
+config-set-poll-high | json+$LOGF | stub | config_set | {\"poll_interval\":301}
+config-set-poll-nan | json+$LOGF | stub | config_set | {\"poll_interval\":\"abc\"}
+config-set-poll-double | json+$LOGF | stub | config_set | {\"poll_interval\":5.5}
+config-set-window-low | json+$LOGF | stub | config_set | {\"avg_window\":1}
+config-set-window-high | json+$LOGF | stub | config_set | {\"avg_window\":3601}
+config-set-window-nan | json+$LOGF | stub | config_set | {\"avg_window\":\"1e3\"}
+config-set-offload | json+$LOGF,etc/config/firewall | stub | config_set | {\"sw\":false,\"hw\":false}
+config-set-offload-sw | json+$LOGF,etc/config/firewall | stub | config_set | {\"sw\":true} | $NOFLOW
+telegram-get | json | stub | telegram_config_get | {}
+telegram-get-token | json | stub | telegram_config_get | {} | $TOKEN
+telegram-get-none | json | stub | telegram_config_get | {} | $NOTG
+telegram-set | json+$LOGF | stub | telegram_config_set | {\"enabled\":true,\"bot_token\":\"999:NEWTOKEN\",\"chat_id\":\"54321\",\"poll_interval\":5,\"notify_new_device\":false,\"notify_known_device\":true,\"control_enabled\":false,\"notify_template\":\"{{name}} joined\",\"btn_block_inet\":false,\"btn_block_wifi\":true,\"btn_limiter\":false,\"btn_shaper\":true} | $INITS
+telegram-set-mask | json+$LOGF | stub | telegram_config_set | {\"enabled\":false,\"bot_token\":\"***\",\"chat_id\":\"54321\"} | $TOKEN; $INITS
+telegram-set-clear | json+$LOGF | stub | telegram_config_set | {\"bot_token\":\"\",\"notify_template\":\"\"} | $TOKEN; $INITS
+telegram-set-new-section | json+$LOGF | stub | telegram_config_set | {\"enabled\":true,\"chat_id\":\"1\"} | $NOTG; $INITS
+telegram-test | json+$LOGF | stub | telegram_test | {\"bot_token\":\"777:ABC\",\"chat_id\":\"4242\",\"message\":\"it's {{name}}\"}
+telegram-test-mask | json+$LOGF | stub | telegram_test | {\"bot_token\":\"***\",\"chat_id\":\"4242\"} | $TOKEN
+telegram-test-no-chat | json+$LOGF | stub | telegram_test | {\"bot_token\":\"777:ABC\"}
+telegram-test-no-token | json+$LOGF | stub | telegram_test | {\"chat_id\":\"4242\"}
+logging-get | json | stub | logging_config_get | {}
+logging-get-unset | json | stub | logging_config_get | {} | $NOLOG
+logging-set | json+$LOGF | stub | logging_config_set | {\"enabled\":true,\"log_file\":\"/tmp/trafficctl/other.log\",\"max_lines\":800,\"syslog\":false,\"log_blocks\":false,\"log_ratelimits\":true,\"log_shapes\":false,\"log_telegram\":true,\"log_config\":true,\"persist_rules\":true}
+logging-set-persist-off | json+$LOGF | stub | logging_config_set | {\"persist_rules\":false}
+logging-set-shadow | json+$LOGF | stub | logging_config_set | {\"log_file\":\"/etc/shadow\"}
+logging-set-dotdot | json+$LOGF | stub | logging_config_set | {\"log_file\":\"/var/log/../shadow\"}
+logging-set-varlog | json+$LOGF | stub | logging_config_set | {\"log_file\":\"/var/log/trafficctl.log\"}
+logging-set-max-low | json+$LOGF | stub | logging_config_set | {\"max_lines\":\"1\"}
+logging-set-max-high | json+$LOGF | stub | logging_config_set | {\"max_lines\":100001}
+logging-set-max-nan | json+$LOGF | stub | logging_config_set | {\"max_lines\":\"5k\"}
+logging-set-max-str | json+$LOGF | stub | logging_config_set | {\"max_lines\":\"500\"}
+newdevice-get | json | stub | newdevice_config_get | {}
+newdevice-get-seen | json | stub | newdevice_config_get | {} | $SEEN
+newdevice-set | json+$LOGF,etc/trafficctl/seen_macs | stub | newdevice_config_set | {\"enabled\":true,\"limit_kbit\":2000,\"limit_mode\":\"shaper\"}
+newdevice-set-seeded | json+$LOGF,etc/trafficctl/seen_macs | stub | newdevice_config_set | {\"enabled\":true} | $SEEN
+newdevice-set-off | json+$LOGF,etc/trafficctl/seen_macs | stub | newdevice_config_set | {\"enabled\":false}
+newdevice-set-kbit-nan | json+$LOGF | stub | newdevice_config_set | {\"limit_kbit\":\"fast\"}
+newdevice-set-mode-bad | json+$LOGF | stub | newdevice_config_set | {\"limit_mode\":\"both\"}
+cut-status | json+$LOGF | stub | cut_status | {}
+cut-engage | json+$LOGF | stub | cut_set | {\"active\":true,\"duration\":600,\"persist\":true}
+cut-engage-forever | json+$LOGF | stub | cut_set | {\"active\":\"true\",\"duration\":0}
+cut-engage-no-duration | json+$LOGF | stub | cut_set | {\"active\":true}
+cut-release | json+$LOGF | stub | cut_set | {\"active\":false}
+cut-bad | json+$LOGF | stub | cut_set | {\"active\":\"maybe\"}
+activity-log | json | stub | activity_log | {\"lines\":2} | $ACTLOG
+activity-log-default | json | stub | activity_log | {} | $ACTLOG
+activity-log-zero | json | stub | activity_log | {\"lines\":0} | $ACTLOG
+activity-log-huge | json | stub | activity_log | {\"lines\":99999} | $ACTLOG
+activity-log-nan | json | stub | activity_log | {\"lines\":\"x\"} | $ACTLOG
+activity-log-missing | json | stub | activity_log | {}
+history-status | json+$LOGF | stub | history_status | {}
+history-periods | json+$LOGF | stub | history_periods | {}
+history-read | json+$LOGF | stub | history_read | {\"period\":\"2026-11\",\"to\":\"2026-W46\"}
+history-read-day | json+$LOGF | stub | history_read | {\"period\":\"2026-11-11\"}
+history-read-all | json+$LOGF | stub | history_read | {}
+history-read-bad | json+$LOGF | stub | history_read | {\"period\":\"../../etc\"}
+history-read-bad-to | json+$LOGF | stub | history_read | {\"period\":\"2026-11\",\"to\":\"2026-11-1\"}
+history-read-ifaces | json+$LOGF | stub | history_read_ifaces | {\"period\":\"2026-W01\",\"to\":\"2026-W02\"}
+history-read-ifaces-bad | json+$LOGF | stub | history_read_ifaces | {\"to\":\"x\"}
+history-config-get | json+$LOGF | stub | history_config_get | {}
+history-config-set | json+$LOGF | real | history_config_set | {\"enabled\":true,\"dir\":\"/mnt/usb/history/\",\"period\":\"week\",\"interval\":900,\"sample_interval\":30,\"keep\":24,\"interfaces\":true} | $INITS
+history-config-set-off | json+$LOGF | real | history_config_set | {\"enabled\":false} | $HIST; $INITS
+history-config-set-own | json+$LOGF | real | history_config_set | {\"dir\":\"/etc/trafficctl/hist\"} | $INITS
+history-config-set-noinit | json+$LOGF | real | history_config_set | {\"enabled\":true}
+history-config-set-dir-bad | json+$LOGF | real | history_config_set | {\"dir\":\"/etc\"} | $INITS
+history-config-set-dir-root | json+$LOGF | real | history_config_set | {\"dir\":\"/mnt/\"} | $INITS
+history-config-set-dir-dotdot | json+$LOGF | real | history_config_set | {\"dir\":\"/mnt/../etc\"} | $INITS
+history-config-set-dir-meta | json+$LOGF | real | history_config_set | {\"dir\":\"/tmp/a;b\"} | $INITS
+history-config-set-period-bad | json+$LOGF | real | history_config_set | {\"period\":\"year\"} | $INITS
+history-config-set-keep-nan | json+$LOGF | real | history_config_set | {\"keep\":\"-1\"} | $INITS
+history-flush | json+$LOGF | stub | history_flush | {}
+version | json | stub | version | {} | $OPKG
+version-none | json | stub | version | {}
+"
+
+normalise() {   # normalise <out> <files>: the reply as jq -S, the files, prefix masked
+    if jq -S . "$1" > "$1.n" 2>/dev/null && [ -s "$1.n" ]; then mv "$1.n" "$1"; fi
+    [ -z "$2" ] || with_files "$1" "$2"
+    sed -i "s|$W/root||g" "$1"
+}
+rpcd_side() {   # rpcd_side <legacy|new> <stub|real> <method> <json>
+    local dir="$STUBS"
+    [ "$2" = real ] && dir="$LEXEC"
+    if [ "$1" = legacy ]; then
+        sed "s|^SCRIPTS=.*|SCRIPTS=\"$dir\"|" "$LPLUGIN" > "$W/legacy-plugin"
+        printf '%s\n' "$4" | sed -e "s|/tmp/trafficctl/|$W/root/tmp/trafficctl/|g" \
+            -e "s|/etc/trafficctl/|$W/root/etc/trafficctl/|g" |
+            (export PATH="$W/bin:$PATH"; $LSH "$W/legacy-plugin" call "$3")
+    else
+        mkdir -p "$W/root/usr/sbin" "$W/root/usr/libexec"
+        ln -sfn "$dir" "$W/root/usr/libexec/trafficctl"
+        # glibc's getopt would take the CLI's own --proto for a ucode option;
+        # musl's, on the router, stops at the script name.
+        {
+            echo '#!/bin/sh'
+            if [ "$2" = stub ]; then
+                printf 'case "$1" in\n'
+                for c in $PORTED; do
+                    printf '%s) c=$1; shift; exec "%s/trafficctl-$c.sh" "$@" ;;\n' "$c" "$STUBS"
+                done
+                printf 'esac\n'
+            fi
+            printf 'POSIXLY_CORRECT=1 exec "%s" -S -L "%s" "%s" "$@"\n' "$UCODE" "$UC_LIB" \
+                "$UC_REPO/trafficctl/files/usr/sbin/trafficctl"
+        } > "$W/root/usr/sbin/trafficctl"
+        chmod +x "$W/root/usr/sbin/trafficctl"
+        printf '%s\n' "$4" |
+            (export TCTL_ROOT="$W/root" PATH="$W/bin:$PATH"; "$UCODE" -S -L "$UC_LIB" "$NPLUGIN" call "$3")
+    fi
+    sleep 0.3
+}
+
+# scripts "stub-ash": the shell plugin runs under busybox ash, as on the
+# router, for the cases where its printf %d differs from dash's ('12x' is 0,
+# not 12). Not by default: a busybox built to prefer its applets bypasses the
+# logger mock. Skipped without busybox; CI installs it.
+BUSYBOX_SH=""
+busybox sh -c 'printf %d 12x' 2>/dev/null | grep -qx 0 && BUSYBOX_SH="busybox sh"
+RSKIP=0
+RPASS=0
+while IFS='|' read -r name mode scripts method input setup; do
+    name=$(trim "$name")
+    [ -n "$name" ] || continue
+    mode=$(trim "$mode"); scripts=$(trim "$scripts"); method=$(trim "$method")
+    input=$(trim "$input"); setup=$(trim "$setup")
+    files=""
+    case "$mode" in *+*) files="${mode#*+}"; mode="${mode%%+*}" ;; esac
+    LSH="sh"
+    if [ "$scripts" = stub-ash ]; then
+        scripts=stub
+        [ -n "$BUSYBOX_SH" ] || { RSKIP=$((RSKIP + 1)); continue; }
+        LSH=$BUSYBOX_SH
+    fi
+    export TCTL_FIXTURE="$FIXTURES/router-24.10"
+    ubus_start "$TCTL_FIXTURE/ubus"
+
+    fresh_root router-24.10 "$setup"
+    sed -i "s|'/tmp/trafficctl/|'$W/root/tmp/trafficctl/|" "$W/root/etc/config/trafficctl"
+    rpcd_side legacy "$scripts" "$method" "$input" > "$W/legacy.out" 2> "$W/legacy.err"
+    normalise "$W/legacy.out" "$files"
+
+    fresh_root router-24.10 "$setup"
+    rpcd_side new "$scripts" "$method" "$input" > "$W/new.out" 2> "$W/new.err"
+    normalise "$W/new.out" "$files"
+    ubus_stop
+    if [ -n "${EQUIV_KEEP:-}" ]; then
+        mkdir -p "$EQUIV_KEEP"
+        cp "$W/legacy.out" "$EQUIV_KEEP/rpcd-$name.legacy"; cp "$W/new.out" "$EQUIV_KEEP/rpcd-$name.new"
+    fi
+
+    if [ ! -s "$W/legacy.out" ]; then
+        FAIL=$((FAIL + 1)); echo "FAIL: rpcd $name: legacy side printed nothing"; cat "$W/legacy.err"
+    elif diff "$W/legacy.out" "$W/new.out" > "$W/diff" 2>&1; then
+        PASS=$((PASS + 1)); RPASS=$((RPASS + 1))
+    else
+        FAIL=$((FAIL + 1)); echo "FAIL: rpcd $name"; cat "$W/diff"
+        sed 's/^/legacy stderr: /' "$W/legacy.err"; sed 's/^/new stderr: /' "$W/new.err"
+    fi
+done <<< "$RPCD_CASES"
+# Every method the plugin lists has a case.
+covered=$(printf '%s\n' "$RPCD_CASES" | awk -F'|' 'NF > 3 { gsub(/[[:space:]]/, "", $4); print $4 }')
+for m in $("$UCODE" -S -L "$UC_LIB" "$NPLUGIN" list | jq -r 'keys[]'); do
+    printf '%s\n' "$covered" | grep -qx "$m" ||
+        { FAIL=$((FAIL + 1)); echo "FAIL: rpcd method $m has no equivalence case"; }
+done
+echo "rpcd plugin: $RPASS cases equal, $RSKIP skipped (no busybox)"
 
 echo ""
 echo "$PASS passed, $FAIL failed"

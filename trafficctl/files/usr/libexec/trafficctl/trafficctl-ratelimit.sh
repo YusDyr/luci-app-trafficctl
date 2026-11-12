@@ -28,6 +28,16 @@ if [ -z "$IP" ] || [ -z "$RATE" ]; then
     exit 1
 fi
 
+# Validated here and not at the callers: rpcd, the bot and the CLI all land here.
+if [ "$RATE" != "0" ] && ! tctl_validate_rate "$RATE"; then
+    echo "{\"ok\":false,\"msg\":\"invalid rate: expected whole kbit/s, 1 to $TCTL_RATE_MAX_KBIT\"}"
+    exit 1
+fi
+if [ "$RATE" != "0" ] && ! tctl_validate_rate "$RATE_UP"; then
+    echo "{\"ok\":false,\"msg\":\"invalid upload rate: expected whole kbit/s, 1 to $TCTL_RATE_MAX_KBIT\"}"
+    exit 1
+fi
+
 TARGET=$(tctl_validate_target "$IP") || {
     echo '{"ok":false,"msg":"invalid target — expected an IP, a CIDR, or \"all\""}'
     exit 1
@@ -72,7 +82,12 @@ else
     TCTL_RL_UPLOAD_FAILED=0
     TCTL_RL_UPLOAD6_OK=0
     TCTL_RL_DOWNLOAD6_OK=0
+    TCTL_RL_NETDEV_FAILED=0
     tctl_ratelimit_add "$IP" "$RATE" "$COMMENT" "$MODE" "$RATE_UP"
+    if [ "$TCTL_RL_NETDEV_FAILED" = "1" ]; then
+        echo "{\"ok\":false,\"msg\":\"failed to set rate limit for $IP: cannot create the nftables netdev table (is kmod-nft-netdev installed?)\"}"
+        exit 1
+    fi
 
     # IPv6 coverage depends on whether the target has a MAC to key on, and
     # each half can fail to load on its own. The operator has to know which

@@ -85,44 +85,9 @@ assert_eq "log_file: falls back to default for /etc/shadow" \
 assert_eq "log_file: passes through a legitimate value" \
     "/var/log/trafficctl.log" "$(_log_file_with '/var/log/trafficctl.log')"
 
-# logging_config_set (the real rpcd method) rejects a bad log_file and a
-# max_lines outside 20..100000. Drive it the way rpcd does: `call
-# logging_config_set` with JSON on stdin.
-cat > "$MOCKBIN/uci" <<'MOCK'
-#!/bin/sh
-exit 1
-MOCK
-cat > "$MOCKBIN/jsonfilter" <<'MOCK'
-#!/bin/sh
-expr="$2"
-key=$(printf '%s' "$expr" | sed "s/.*\.//;s/\[.*//")
-input=$(cat)
-val=$(printf '%s' "$input" | sed -n "s/.*\"$key\":\"\([^\"]*\)\".*/\1/p")
-if [ -n "$val" ]; then printf '%s' "$val"; exit 0; fi
-printf '%s' "$input" | sed -n "s/.*\"$key\":\([A-Za-z0-9_.-]*\).*/\1/p"
-MOCK
-chmod +x "$MOCKBIN/uci" "$MOCKBIN/jsonfilter"
-
-RPCD="$TMPDIR/rpcd.sh"
-sed "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" \
-    "$ROOT/usr/libexec/rpcd/luci.trafficctl" > "$RPCD"
-
-run_rpcd_call() {
-    local method="$1" json="$2"
-    printf '%s' "$json" | PATH="$MOCKBIN:$PATH" sh "$RPCD" call "$method" 2>&1
-}
-
-OUT=$(run_rpcd_call logging_config_set '{"log_file":"/etc/shadow"}')
-assert_contains "logging_config_set: rejects /etc/shadow" '"ok":false' "$OUT"
-OUT=$(run_rpcd_call logging_config_set '{"log_file":"/tmp/trafficctl/x.log"}')
-assert_contains "logging_config_set: accepts a legitimate path" '"ok":true' "$OUT"
-OUT=$(run_rpcd_call logging_config_set '{"max_lines":"1"}')
-assert_contains "logging_config_set: rejects max_lines=1 (would round rotation to 0 and truncate)" \
-    '"ok":false' "$OUT"
-OUT=$(run_rpcd_call logging_config_set '{"max_lines":"100001"}')
-assert_contains "logging_config_set: rejects max_lines above 100000" '"ok":false' "$OUT"
-OUT=$(run_rpcd_call logging_config_set '{"max_lines":"500"}')
-assert_contains "logging_config_set: accepts a legitimate max_lines" '"ok":true' "$OUT"
+# logging_config_set, the rpcd method, refuses a bad log_file and a max_lines
+# outside 20..100000 before it writes anything: tests/test_rpcd.sh, which runs
+# the ucode plugin.
 
 # ════════════════════════════════════════════════════════════════════════════
 # 2. activity_log removed from the read ACL + general mutating/read invariant

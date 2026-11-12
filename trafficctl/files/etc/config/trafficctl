@@ -154,7 +154,8 @@ config metrics 'metrics'
 	# Prometheus/OpenMetrics exporter. Off by default: it exposes device
 	# names, addresses and traffic volumes without a LuCI session.
 	option enabled '0'
-	# Shared token for the CGI endpoint (empty = no token check).
+	# Shared token for the CGI endpoint, required: with it empty the
+	# endpoint answers 403. Scrape with ?token=<value>.
 	option token ''
 	# Per-device gauges (connections, blocked, limits, name/mac). Costs a
 	# full summary run per scrape — set 0 for byte counters only.

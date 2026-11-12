@@ -350,6 +350,14 @@ assert_contains "a traversal is refused" \
 uciset trafficctl.history.dir "/mnt"
 assert_contains "a bare mount root is refused, or prune would delete all of it" \
     '"dir":"/etc/trafficctl/history"' "$(run status)"
+for d in /mnt/. /mnt/./ /mnt// /mnt/// /mnt/./x /mnt//x /etc/trafficctl/. /tmp/x/./y; do
+    uciset trafficctl.history.dir "$d"
+    assert_contains "$d is refused: every component must be a name" \
+        '"dir":"/etc/trafficctl/history"' "$(run status)"
+done
+uciset trafficctl.history.dir "/mnt/.nas/x..y"
+assert_contains "a dot inside a name is still a name" \
+    '"dir":"/mnt/.nas/x..y"' "$(run status)"
 uciset trafficctl.history.dir "/mnt/nas/tctl"
 assert_contains "a real mount point is allowed — that is the network-share case" \
     '"dir":"/mnt/nas/tctl"' "$(run status)"
