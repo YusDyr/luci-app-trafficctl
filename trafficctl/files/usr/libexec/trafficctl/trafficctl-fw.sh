@@ -23,7 +23,7 @@ TCTL_FW="nft"
 # hooks used here the client's own frame is still intact, so it is what the v6
 # rules are keyed on.
 #
-# Only the directions where that holds are covered; see tctl_block_add and
+# Only the directions where that holds are covered; see block_add (ctl.uc) and
 # tctl_ratelimit_add for which, and README/COMPATIBILITY for what is not.
 
 # Named by absolute path, as it must be on the router; the tests sed this line
@@ -77,34 +77,6 @@ tctl_target_mac() {
     tctl_lookup_mac "$t"
 }
 
-# Flush a device's live IPv6 flows.
-#
-# "conntrack -D -s <v4addr>" only touches the IPv4 table, so without this an
-# established v6 flow survives a block that was just installed — and with flow
-# offload it is never re-evaluated by the forward chain again, so it survives
-# indefinitely. That is the same "a block that does not block" failure in a new
-# place, on the offload-enabled hardware most likely to hit it.
-#
-# Addresses come from a one-shot neighbour snapshot. Reading them is sound even
-# though a RULE written against them would not be: the snapshot cannot go stale
-# between here and the next statement, whereas a rule has to stay correct for
-# as long as the block lasts.
-tctl_conntrack_flush_v6() {
-    local mac="$1" addr
-    [ -n "$mac" ] || return 0
-    command -v conntrack >/dev/null 2>&1 || return 0
-    ip -6 neigh show 2>/dev/null | awk -v m="$mac" '
-        { for (i = 1; i < NF; i++) if ($i == "lladdr" && tolower($(i+1)) == m) { print $1; break } }
-    ' | while read -r addr; do
-        case "$addr" in
-            ''|*[!0-9a-fA-F:]*) continue ;;
-        esac
-        conntrack -D -f ipv6 -s "$addr" >/dev/null 2>&1
-        conntrack -D -f ipv6 -d "$addr" >/dev/null 2>&1
-    done
-    return 0
-}
-
 # ── Rate Limiting (policer) ────────────────────────────────────────────────
 
 # Rate limits are symmetric: the same ceiling is policed in both directions.
@@ -147,7 +119,7 @@ tctl_ratelimit_add() {
     # The scope is "meta protocol ip6", NOT "meta nfproto ipv6" — these chains
     # are in the NETDEV family, where nft rejects nfproto outright ("meta
     # nfproto is only useful in the inet family", verified with nft --check
-    # against nftables 1.1.1 / kernel 6.6). nfproto is what tctl_block_add uses,
+    # against nftables 1.1.1 / kernel 6.6). nfproto is what the block (ctl.uc) uses,
     # because that rule lives in inet fw4. Same intent, different family, and
     # the wrong one does not silently under-match — it fails to load.
     #
@@ -537,94 +509,10 @@ tctl_ratelimit_default_mode() {
 }
 
 # ── Internet Blocking ──────────────────────────────────────────────────────
-
-# A block is two rules: the address-keyed one for IPv4, and a MAC-keyed one
-# scoped to IPv6.
 #
-# This is the row of issue #67 that matters most. A rate limit that under-
-# delivers shows up in a speed test; a block that reports success while the
-# device keeps full, unmetered IPv6 access is invisible until it matters — and
-# "block internet" is what people reach for as a parental control.
-#
-# The MAC is resolved HERE rather than in trafficctl-block.sh because three
-# callers reach this function: the block script, the Telegram bot, and the
-# ifup-lan restore hook. Resolving it in the script would bring every persisted
-# block back IPv4-only after each reboot.
-#
-# "meta nfproto ipv6" keeps the two rules disjoint: IPv4 is still dropped by
-# precisely the rule it always was, so a failed MAC lookup costs the v6 half
-# and nothing else. (nfproto is correct HERE, in the inet family; the limiter's
-# netdev chains need "meta protocol ip6" instead — see tctl_ratelimit_add.)
-# `insert`, not `add`, for the same reason the v4 rule uses it — fw4's forward
-# chain accepts established/offloaded flows near the top, and a rule appended
-# below that is dead.
-tctl_block_add() {
-    local ip="$1" comment="$2" mac rc
-
-    nft insert rule inet fw4 forward "ip saddr $ip counter drop comment \"$comment\""
-    rc=$?
-    # Whether the v6 half is live. Read by callers; see trafficctl-block.sh.
-    # shellcheck disable=SC2034
-    TCTL_BLOCK_IPV6=0
-    if mac=$(tctl_target_mac "$ip"); then
-        nft insert rule inet fw4 forward \
-            "meta nfproto ipv6 ether saddr $mac counter drop comment \"${comment}_mac\"" \
-            2>/dev/null && TCTL_BLOCK_IPV6=1
-    fi
-    return "$rc"
-}
-
-tctl_block_remove() {
-    local ip="$1" comment="$2"
-
-    # Match the quoted comment in full: comments end in the address, so a
-    # substring match on 192.168.1.1 also deletes the rule for 192.168.1.10.
-    # The IPv6 half carries no address to match on at all, only its own
-    # "_mac" comment — which is why it is listed explicitly here rather
-    # than being caught by a looser pattern.
-    for h in $(nft -a list chain inet fw4 forward 2>/dev/null \
-               | awk -v cmt="$comment" 'index($0, "\"" cmt "\"") ||
-                                        index($0, "\"" cmt "_mac\"") {
-                      for (i = 1; i < NF; i++)
-                          if ($i == "handle") { print $(i+1); break }
-                  }'); do
-        nft delete rule inet fw4 forward handle "$h"
-    done
-}
-
-# Blocks written before v1.13.2 carry the caller's label in the comment
-# (tctl_block_block_<ip> from LuCI, tctl_block_tg from Telegram, or any label
-# the UI was given), so no comment the caller can name finds them: the Rules
-# tab unblocks with an empty label. They are found by what every version
-# wrote: a drop rule on exactly this source address whose comment starts with
-# tctl_block_. The v4 half only: the v6 half came in v1.18.2 and always
-# carries the current comment.
-tctl_block_remove_legacy() {
-    local ip="$1" h
-
-    for h in $(nft -a list chain inet fw4 forward 2>/dev/null \
-               | awk -v ip="$ip" '$1 == "ip" && $2 == "saddr" &&
-                                  ($3 == ip || $3 == ip "/32") &&
-                                  / drop comment "tctl_block_/ {
-                      for (i = 1; i < NF; i++)
-                          if ($i == "handle") { print $(i+1); break }
-                  }'); do
-        nft delete rule inet fw4 forward handle "$h"
-    done
-}
-
-tctl_is_blocked() {
-    local ip="$1" dump comment
-    dump=$(nft list chain inet fw4 forward 2>/dev/null)
-    # The v4 rule is still found by address, so blocks written by versions
-    # that derived the comment from the caller's label keep reading as
-    # blocked.
-    echo "$dump" | grep -q "ip saddr $ip .*drop" && return 0
-    # The v6 rule names a MAC, not an address — its comment is the only
-    # handle on it, and it is matched in full for the reason above.
-    comment=$(tctl_block_comment "$ip")
-    echo "$dump" | grep -qF "comment \"${comment}_mac\""
-}
+# The block, the unblock, their restore on boot and the WiFi deny are the
+# ucode CLI's (trafficctl block/unblock/macfilter-add/macfilter-remove/
+# restore, trafficctl.ctl). tctl_block_comment below names the same rule.
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -863,251 +751,46 @@ tctl_validate_ip() {
     [ "$1" -le 255 ] && [ "$2" -le 255 ] && [ "$3" -le 255 ] && [ "$4" -le 255 ] 2>/dev/null
 }
 
-tctl_get_wifi_interfaces() {
-    uci show wireless 2>/dev/null | grep '=wifi-iface' | cut -d. -f2 | cut -d= -f1
-}
-
-# Running AP interface names, one per line (e.g. phy0-ap0), taken from the
-# hostapd ubus objects.
-#
-# Returns non-zero when ubus itself could not be consulted. That is NOT the
-# same as "no AP is running", and callers must not read an empty list as
-# "nothing to enforce" unless the query actually succeeded — doing so would
-# turn a broken router into a silent "blocked".
-tctl_get_hostapd_ifaces() {
-    local out
-    command -v ubus >/dev/null 2>&1 || return 1
-    out=$(ubus list 2>/dev/null) || return 1
-    # An empty result is a valid answer -- "no AP is running" -- so the grep
-    # matching nothing must not be reported as a failed query. Only ubus itself
-    # failing, above, is that.
-    printf '%s\n' "$out" | grep '^hostapd\.' | cut -d. -f2-
-    return 0
-}
-
-# Which ACL policy a wifi-iface uses: "allow" (whitelist — only listed MACs may
-# associate) or "deny" (blacklist — listed MACs are rejected). Anything else,
-# including unset, means no filtering is configured yet, reported as "deny"
-# because that is the mode we create on demand.
-tctl_get_wifi_filter_mode() {
-    local iface="$1" mode
-    mode=$(uci -q get "wireless.${iface}.macfilter" 2>/dev/null)
-    [ "$mode" = "allow" ] && echo "allow" || echo "deny"
-}
-
-# ── Runtime WiFi enforcement ──────────────────────────────────────────────
-#
-# The uci maclist is the durable half of a WiFi block; hostapd's running ACL is
-# the half that decides whether the device is on the air *now*. The two drift
-# apart whenever the runtime call cannot be made, and for a long time that
-# drift was invisible: the calls below were fire-and-forget, their exit status
-# discarded, so a router without hostapd-utils reported every block as done
-# while the device kept browsing.
-#
-# So every entry point here reports how far enforcement actually got, as one
-# of these words, and proves it by reading the state back rather than trusting
-# a return code:
-#
-#   acl      - the running ACL was changed and the change was read back
-#   ban      - no usable hostapd_cli; hostapd's ubus deauthed and banned the
-#              client, which expires on its own (see TCTL_WIFI_BAN_MS)
-#   none     - nothing could be applied or verified on the running radio
-#   no-radio - ubus answered and no AP is running, so there is nothing to
-#              enforce; the uci maclist applies when wifi next starts
-#
-# Only "acl" and "no-radio" mean the operator's intent is in force, and the
-# functions return 0 for exactly those two.
-
-# How long a ubus ban lasts, in milliseconds. Used only where hostapd_cli is
-# unavailable: hostapd's ubus object has no ACL method (del_client, list_bans,
-# get_clients, reload), so a timed ban is the strongest immediate measure it
-# can offer. One hour is long enough to be worth doing and short enough that
-# callers must keep calling it temporary rather than done.
-TCTL_WIFI_BAN_MS=3600000
-
-# hostapd_cli exists AND this AP's control socket answers. Both halves matter:
-# the package can be absent (the router this bug was found on), or present
-# while hostapd is not listening, and only a PONG shows the ACL commands will
-# reach anything.
-tctl_hostapd_cli_alive() {
-    command -v hostapd_cli >/dev/null 2>&1 || return 1
-    hostapd_cli -i "$1" ping 2>/dev/null | grep -q PONG
-}
-
-# Does the running ACL currently keep this MAC off the air? Read back from
-# hostapd instead of inferred from our own call: hostapd_cli exits 0 for
-# "command delivered", and an ACL that stays empty afterwards is exactly the
-# failure being guarded against. hostapd also reloads its maclist file at times
-# of its own choosing, so the entry present may not be the one we added — which
-# is fine, and another reason to ask rather than assume.
-tctl_hostapd_acl_blocks() {
-    local iface="$1" mac="$2" mode="$3" acl
-    if [ "$mode" = "allow" ]; then
-        acl=$(hostapd_cli -i "$iface" accept_acl SHOW 2>/dev/null)
-        ! printf '%s\n' "$acl" | grep -qi "$mac"
-    else
-        acl=$(hostapd_cli -i "$iface" deny_acl SHOW 2>/dev/null)
-        printf '%s\n' "$acl" | grep -qi "$mac"
-    fi
-}
-
-tctl_hostapd_ubus_banned() {
-    local iface="$1" mac="$2"
-    command -v ubus >/dev/null 2>&1 || return 1
-    ubus call "hostapd.$iface" list_bans 2>/dev/null | grep -qi "$mac"
-}
-
-# Fallback when hostapd_cli is unusable. del_client deauthenticates and refuses
-# the client for ban_time, which is not an ACL entry — the durable half stays
-# the uci maclist. The call's own exit status is deliberately ignored: it can
-# fail for a client that is not currently associated while the ban still lands,
-# and list_bans is the only answer worth having.
-tctl_hostapd_ubus_ban() {
-    local iface="$1" mac="$2"
-    command -v ubus >/dev/null 2>&1 || return 1
-    ubus call "hostapd.$iface" del_client \
-        "{\"addr\":\"$mac\",\"reason\":1,\"deauth\":true,\"ban_time\":$TCTL_WIFI_BAN_MS}" \
-        >/dev/null 2>&1
-    tctl_hostapd_ubus_banned "$iface" "$mac"
-}
-
-# How well this router can block a device on WiFi, router-wide, for the UI to
-# decide what to offer before anyone presses a button:
-#
-#   none      - no wifi-iface in uci: a wired-only build or a router with its
-#               radios removed. There is nothing to block on.
-#   temporary - wifi exists but hostapd_cli does not. hostapd-utils is an
-#               optional dependency (it cannot be selected on builds without
-#               hostapd), so a block falls back to the timed ubus ban above.
-#   full      - hostapd_cli is installed; blocks go into the running ACL.
-#
-# Only the presence of the tool is checked here, not whether each AP answers:
-# that is per radio and per call, and the enforcement words above report it.
-tctl_wifi_filter_support() {
-    [ -n "$(tctl_get_wifi_interfaces)" ] || { echo none; return; }
-    if command -v hostapd_cli >/dev/null 2>&1; then
-        echo full
-    else
-        echo temporary
-    fi
-}
-
-# acl > ban > none, so a loop over several APs can keep the worst result.
-tctl_enforce_rank() {
-    case "$1" in
-        acl) echo 3 ;;
-        ban) echo 2 ;;
-        *)   echo 1 ;;
-    esac
-}
-
-tctl_hostapd_block_iface() {
-    local iface="$1" mac="$2" mode="$3"
-    if tctl_hostapd_cli_alive "$iface"; then
-        if [ "$mode" = "allow" ]; then
-            hostapd_cli -i "$iface" accept_acl DEL_MAC "$mac" >/dev/null 2>&1
-        else
-            hostapd_cli -i "$iface" deny_acl ADD_MAC "$mac" >/dev/null 2>&1
-        fi
-        hostapd_cli -i "$iface" deauthenticate "$mac" >/dev/null 2>&1
-        if tctl_hostapd_acl_blocks "$iface" "$mac" "$mode"; then
-            echo acl
-            return
-        fi
-    fi
-    if tctl_hostapd_ubus_ban "$iface" "$mac"; then
-        echo ban
-        return
-    fi
-    echo none
-}
-
-tctl_hostapd_unblock_iface() {
-    local iface="$1" mac="$2" mode="$3"
-    if tctl_hostapd_cli_alive "$iface"; then
-        if [ "$mode" = "allow" ]; then
-            hostapd_cli -i "$iface" accept_acl ADD_MAC "$mac" >/dev/null 2>&1
-        else
-            hostapd_cli -i "$iface" deny_acl DEL_MAC "$mac" >/dev/null 2>&1
-        fi
-        if ! tctl_hostapd_acl_blocks "$iface" "$mac" "$mode"; then
-            # The ACL permits the MAC again, but a ban left over from an
-            # earlier hostapd_cli-less block would still keep it off the air,
-            # and there is no ubus method to lift one.
-            if tctl_hostapd_ubus_banned "$iface" "$mac"; then
-                echo ban
-            else
-                echo acl
-            fi
-            return
-        fi
-    fi
-    if tctl_hostapd_ubus_banned "$iface" "$mac"; then
-        echo ban
-        return
-    fi
-    echo none
-}
-
-# Applies $2 ("allow"/"deny" ACL policy) to every running AP and echoes the
-# worst per-AP outcome. Always safe to re-run: it enforces from the runtime
-# state, so calling it on a MAC that uci already lists is how a block that was
-# only ever written to config gets applied for real.
-tctl_hostapd_apply_mac() {
-    local op="$1" mac="$2" mode="$3"
-    local ifaces iface state rank worst=3
-    ifaces=$(tctl_get_hostapd_ifaces) || { echo none; return 1; }
-    if [ -z "$ifaces" ]; then
-        echo no-radio
-        return 0
-    fi
-    for iface in $ifaces; do
-        case "$op" in
-            block) state=$(tctl_hostapd_block_iface "$iface" "$mac" "$mode") ;;
-            *)     state=$(tctl_hostapd_unblock_iface "$iface" "$mac" "$mode") ;;
-        esac
-        rank=$(tctl_enforce_rank "$state")
-        [ "$rank" -lt "$worst" ] && worst="$rank"
-    done
-    case "$worst" in
-        3) echo acl; return 0 ;;
-        2) echo ban ;;
-        *) echo none ;;
-    esac
-    return 1
-}
-
-tctl_hostapd_block_mac() {
-    tctl_hostapd_apply_mac block "$1" "$2"
-}
-
-tctl_hostapd_unblock_mac() {
-    tctl_hostapd_apply_mac unblock "$1" "$2"
-}
-
-# A device listed as WiFi-blocked while it is associated on a radio right now
-# is proof the running ACL does not carry the block — the state a silent
-# enforcement failure leaves a router in. Keyed off conn_type rather than the
-# station dump so it still holds where iw is missing and the connection type
-# came from the bridge port instead.
-tctl_wifi_block_pending() {
-    local blocked="$1" conn_type="$2"
-    [ "$blocked" = "1" ] || return 1
-    case "$conn_type" in
-        wifi|2.4G|5G|6G) return 0 ;;
-    esac
-    return 1
-}
-
 # ── Persistence ───────────────────────────────────────────────────────────
 
 TCTL_RULES_FILE="/etc/trafficctl/rules.json"
+# Shared with the ucode writer (lib.persist_save): without it the two read
+# the same file and the later rename drops the other's record. Same wait and
+# takeover as the shapes lock in trafficctl-shape.sh.
+TCTL_RULES_LOCK="/tmp/trafficctl_rules.lock.d"
+
+tctl_rules_lock() {
+    local tries=0
+    while ! mkdir "$TCTL_RULES_LOCK" 2>/dev/null; do
+        tries=$((tries + 1))
+        if [ "$tries" -ge 50 ]; then
+            # A stale directory from a killed writer must not stop persistence.
+            rmdir "$TCTL_RULES_LOCK" 2>/dev/null || true
+            mkdir "$TCTL_RULES_LOCK" 2>/dev/null
+            return 0
+        fi
+        sleep 0.1 2>/dev/null || sleep 1
+    done
+}
+
+tctl_rules_unlock() {
+    rmdir "$TCTL_RULES_LOCK" 2>/dev/null || true
+}
 
 tctl_persist_enabled() {
     [ "$(uci -q get trafficctl.main.persist_rules 2>/dev/null)" = "1" ]
 }
 
 tctl_persist_save() {
+    local rc
+    tctl_rules_lock
+    tctl_persist_save_locked "$@"
+    rc=$?
+    tctl_rules_unlock
+    return "$rc"
+}
+
+tctl_persist_save_locked() {
     local type="$1" ip="$2" param="$3" mode="$4" param_up="$5"
     [ -d "$(dirname "$TCTL_RULES_FILE")" ] || mkdir -p "$(dirname "$TCTL_RULES_FILE")"
     # [ -s ], not [ -f ]: a previous failed save can leave a zero-length file,
@@ -1173,6 +856,15 @@ tctl_persist_save() {
 }
 
 tctl_persist_remove() {
+    local rc
+    tctl_rules_lock
+    tctl_persist_remove_locked "$@"
+    rc=$?
+    tctl_rules_unlock
+    return "$rc"
+}
+
+tctl_persist_remove_locked() {
     local type="$1" ip="$2"
     [ -s "$TCTL_RULES_FILE" ] || return 0
     local tmp="${TCTL_RULES_FILE}.tmp"
@@ -1207,21 +899,8 @@ tctl_persist_remove() {
     fi
 }
 
-# ── New-device ledger ─────────────────────────────────────────────────────
-#
-# Which MAC addresses this router has already seen. The default-limit feature
-# keys off it, which makes the ledger safety-critical in one direction only:
-# wrongly calling a device NEW applies an unasked-for limit, while wrongly
-# calling it KNOWN merely does nothing. Every ambiguous case below therefore
-# resolves to "known".
-#
-# It lives in /etc/trafficctl (kept across sysupgrade by keep.d) rather than
-# in tmpfs. A ledger that reset on reboot would make every device on the LAN
-# new again on the next lease renewal — the same mass-limiting accident, just
-# reached more slowly. Flash cost is bounded by device count, not by DHCP
-# traffic: an entry is appended only for a MAC that is not already listed.
-TCTL_SEEN_FILE="/etc/trafficctl/seen_macs"
-TCTL_SEEN_MAX=1000
+# ── Shapes ────────────────────────────────────────────────────────────────
+
 # TCTL_LEASES_FILE is set once at the top of this file (overridable for tests).
 TCTL_SHAPES_FILE="/etc/trafficctl/shapes.json"
 
@@ -1282,94 +961,6 @@ tctl_tc_class_rates() {
         }
         print classid, rate
     }'
-}
-
-tctl_seen_normalize() {
-    printf '%s' "$1" | tr 'A-Z' 'a-z'
-}
-
-# Take the baseline from the devices already on the network, so switching the
-# feature on does not declare the existing LAN to be new. Callers should do
-# this at a moment when the network is up (i.e. from the rpcd setter, on an
-# operator's action) rather than early in boot, when both sources are empty.
-tctl_seen_seed() {
-    [ -f "$TCTL_SEEN_FILE" ] && return 0
-    mkdir -p "$(dirname "$TCTL_SEEN_FILE")" 2>/dev/null
-    {
-        awk '{ print $2 }' "$TCTL_LEASES_FILE" 2>/dev/null
-        ip neigh show 2>/dev/null | awk '/lladdr/ { print $5 }'
-    } | tr 'A-Z' 'a-z' \
-      | grep -E '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' \
-      | sort -u > "${TCTL_SEEN_FILE}.tmp" 2>/dev/null
-    mv "${TCTL_SEEN_FILE}.tmp" "$TCTL_SEEN_FILE" 2>/dev/null
-}
-
-tctl_seen_count() {
-    [ -f "$TCTL_SEEN_FILE" ] || { echo 0; return 0; }
-    wc -l < "$TCTL_SEEN_FILE" 2>/dev/null | tr -d ' ' || echo 0
-}
-
-# "Known" is the safe answer, so an unreadable MAC or a missing ledger says
-# yes. Whether the ledger EXISTS is a separate question, asked by the caller
-# through tctl_seen_ready before it acts on a negative.
-tctl_seen_known() {
-    local mac
-    mac=$(tctl_seen_normalize "$1")
-    [ -n "$mac" ] || return 0
-    [ -f "$TCTL_SEEN_FILE" ] || return 0
-    grep -qxF "$mac" "$TCTL_SEEN_FILE" 2>/dev/null
-}
-
-tctl_seen_ready() {
-    [ -f "$TCTL_SEEN_FILE" ]
-}
-
-tctl_seen_mark() {
-    local mac n keep
-    mac=$(tctl_seen_normalize "$1")
-    [ -n "$mac" ] || return 0
-    # Not tctl_seen_known alone: it answers "known" for a missing ledger,
-    # which here would mean never writing the first entry.
-    if [ -f "$TCTL_SEEN_FILE" ] && tctl_seen_known "$mac"; then
-        return 0
-    fi
-    mkdir -p "$(dirname "$TCTL_SEEN_FILE")" 2>/dev/null
-    printf '%s\n' "$mac" >> "$TCTL_SEEN_FILE"
-
-    # Trim from the head when the ledger outgrows the cap. A device dropped
-    # this way can be seen as new again later; the cap sits far above any
-    # plausible LAN, so that is a theoretical cost against an unbounded file.
-    n=$(tctl_seen_count)
-    if [ "$n" -gt "$TCTL_SEEN_MAX" ]; then
-        keep=$((TCTL_SEEN_MAX * 4 / 5))
-        tail -n "$keep" "$TCTL_SEEN_FILE" > "${TCTL_SEEN_FILE}.tmp" 2>/dev/null &&
-            mv "${TCTL_SEEN_FILE}.tmp" "$TCTL_SEEN_FILE"
-    fi
-}
-
-# Does this address already carry a limit somebody set deliberately?
-#
-# Live nft/tc state alone is not a sufficient answer. After a reboot the
-# restore hook runs on `ifup lan` and only when persist_rules is on, so a
-# device with a manual limit reads as unlimited until then — and a default
-# limit applied in that window would silently overwrite the operator's
-# choice. The persisted files are consulted as well.
-tctl_has_limit() {
-    local ip="$1"
-    [ -n "$ip" ] || return 1
-
-    /usr/libexec/trafficctl/trafficctl-ratelimit-stats.sh 2>/dev/null \
-        | grep -qF "\"ip\":\"$ip\"" && return 0
-    /usr/libexec/trafficctl/trafficctl-shape-stats.sh 2>/dev/null \
-        | grep -qF "\"ip\":\"$ip\"" && return 0
-
-    if [ -f "$TCTL_RULES_FILE" ]; then
-        grep -qF "\"ip\":\"$ip\"" "$TCTL_RULES_FILE" 2>/dev/null && return 0
-    fi
-    if [ -f "$TCTL_SHAPES_FILE" ]; then
-        grep -qF "\"ip\":\"$ip\"" "$TCTL_SHAPES_FILE" 2>/dev/null && return 0
-    fi
-    return 1
 }
 
 # ── Activity Logging ──────────────────────────────────────────────────────

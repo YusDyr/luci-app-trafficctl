@@ -120,13 +120,13 @@ method because it returns the contents of the configured log file.
 | `version` | (in plugin) | (none) — the installed `luci-app-trafficctl` version, read from the opkg status file or the apk database; `dev` when neither lists it | read |
 | `cut_status` | `trafficctl-cut.sh status` | (none) | **write** — see below |
 | `cut_set` | `trafficctl-cut.sh engage`/`release` | `active` (bool), `duration` (seconds, `0` = indefinite), `persist` (bool) | write |
-| `block` | `trafficctl-block.sh` | `ip`, `label` | write |
-| `unblock` | `trafficctl-unblock.sh` | `ip`, `label` | write |
+| `block` | `trafficctl block` (ucode) | `ip`, `label` | write |
+| `unblock` | `trafficctl unblock` (ucode) | `ip`, `label` | write |
 | `ratelimit` | `trafficctl-ratelimit.sh` | `ip` (host, CIDR or `all`), `rate_kbit`, `label`, `mode` (`each`\|`shared`) | write |
 | `shape_add` | `trafficctl-shape.sh add` | `ip`, `rate_kbit`, `label` | write |
 | `shape_remove` | `trafficctl-shape.sh remove` | `ip`, `label` | write |
-| `macfilter_add` | `trafficctl-macfilter-add.sh` | `ip` | write |
-| `macfilter_remove` | `trafficctl-macfilter-remove.sh` | `ip` or `mac` (`mac` wins when both are sent) | write |
+| `macfilter_add` | `trafficctl macfilter-add` (ucode) | `ip` | write |
+| `macfilter_remove` | `trafficctl macfilter-remove` (ucode) | `ip` or `mac` (`mac` wins when both are sent) | write |
 | `name_set` | (in plugin) | `ip`, `name` (empty `name` clears the alias) | write |
 | `name_clear` | (in plugin) | `ip` | write |
 | `portfw_ctl` | `trafficctl-portfw.sh` | `action`, `scope`, `proto`, `ip`, `port`, `rate_kbit` | write |
@@ -654,9 +654,11 @@ and the two are merged:
   `ratelimit-stats`).
 - Unblocking a block written before v1.13.2 (`tctl_block_tg` from Telegram,
   `tctl_block_block_<ip>` or a typed label from LuCI) works with any label,
-  the empty one the Rules tab sends included: `trafficctl-unblock.sh` also
+  the empty one the Rules tab sends included: `trafficctl unblock` also
   removes every drop rule on that exact `ip saddr` whose comment starts with
-  `tctl_block_`.
+  `tctl_block_`. It no longer removes rules by the label alone: v1.30.x
+  deleted every rule commented `tctl_block_<label>`, so unblocking one device
+  with the bot's label `tg` also lifted every other device's Telegram block.
 - `applied`: in the kernel or on the radio now. `persisted`: survives a reboot.
   A saved record that is not applied is restored at the next `ifup lan`; a live
   rule that is not saved is lost at the next reboot. Live rates win over saved ones.
@@ -678,7 +680,9 @@ and the two are merged:
 
 ### trafficctl-block.sh / trafficctl-unblock.sh
 
-Block/unblock a device's internet access.
+Block/unblock a device's internet access. Both scripts are wrappers for
+`trafficctl block` / `trafficctl unblock` (ucode); the reply, the rule text
+and the `rules.json` record are those of v1.30.0 (`tests/equiv.sh`).
 
 **Arguments:** `<ip> [label]`
 
@@ -948,7 +952,8 @@ Manage tc/HTB traffic shaping.
 
 ### trafficctl-macfilter-add.sh / trafficctl-macfilter-remove.sh
 
-Block/unblock a device from WiFi (MAC filter).
+Block/unblock a device from WiFi (MAC filter). Both scripts are wrappers for
+`trafficctl macfilter-add` / `macfilter-remove` (ucode).
 
 **Arguments:** `<ip>`; the remove script also takes `<mac>`. A device that has
 been offline long enough has no lease or neighbour entry left to find its MAC
@@ -981,6 +986,8 @@ radio, so it is never done automatically).
 - Applies at runtime via `hostapd_cli deny_acl`/`accept_acl` + `deauthenticate` (no wifi reload -- only the target client is affected), then reads the ACL back with `deny_acl SHOW` / `accept_acl SHOW` to confirm. An exit status of 0 is not treated as proof.
 - Runs the runtime half **unconditionally**, even when uci already listed the MAC, so that a block which was previously only written to config can be repaired by repeating the action.
 - Where `hostapd_cli` is unavailable, falls back to `ubus call hostapd.<iface> del_client` with `ban_time`, confirmed via `list_bans`. hostapd's ubus object exposes no ACL method, so this is a timed ban, never a substitute for the durable `maclist` entry.
+- Every `hostapd_cli` call has a 3 s timeout; an AP whose hostapd does not answer in time is treated as one without `hostapd_cli` and gets the ubus ban.
+- With several APs, `enforcement` is the weakest outcome of any of them (`none`, then `ban`, then `acl`).
 
 **Requires:** `hostapd-utils` (declared in `LUCI_DEPENDS`). Without it only the
 degraded `ban` path is available and every block reports `ok:false`.
