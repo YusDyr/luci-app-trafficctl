@@ -70,6 +70,17 @@ function default_mode(t) {
 	return (index(t, '/') >= 0) ? 'each' : 'shared';
 }
 
+// lib.valid_target, and a zero-padded mask as 1.30.x took it
+// (tctl_validate_target read 10.0.0.0/024 as a number and kept it as
+// typed): in its normal form, 10.0.0.0/24.
+function target(s) {
+	let t = lib.valid_target(s);
+	if (t != null)
+		return t;
+	let m = lib.plain(s) ? match(s, /^([0-9.]+)\/0+([0-9]{1,2})$/) : null;
+	return m ? lib.valid_target(m[1] + '/' + int(m[2])) : null;
+}
+
 // From the target, never the caller's label (see ctl.block_comment).
 function comment(t) {
 	return 'rl_ratelimit_' + lib.slug(t);
@@ -79,8 +90,21 @@ function fields(l) {
 	return filter(split(l, /[ \t]+/), (w) => w != '');
 }
 
+// Device names come from ubus, uci, the routing table and sysfs, and go
+// into an nft command (device %s) and a sysfs path: only what the kernel
+// itself allows in a name (IFNAMSIZ, no '/' or space) and nft parses as one
+// word.
+function valid_dev(d) {
+	return lib.plain(d) && match(d, /^[A-Za-z0-9._@-]{1,15}$/) != null && d != '.' && d != '..';
+}
+
+// For a message: the name with anything unsafe masked.
+function shown_dev(d) {
+	return lib.plain(d) ? replace(substr(d, 0, 32), /[^A-Za-z0-9._@-]/g, '?') : '?';
+}
+
 function is_dev(d) {
-	return stat(lib.path(SYSFS + '/' + d)) != null;
+	return valid_dev(d) && stat(lib.path(SYSFS + '/' + d)) != null;
 }
 
 // Every candidate is checked in sysfs: the literal "wan" the shell once
@@ -107,7 +131,7 @@ function wan_device() {
 		}
 	}
 	for (let d in cands)
-		if (d != '' && lib.plain(d) && is_dev(d))
+		if (is_dev(d))
 			return d;
 	return null;
 }
@@ -131,9 +155,11 @@ function chain(pfx, dev) {
 	return pfx + replace(dev, /[^a-zA-Z0-9]/g, '_');
 }
 
+// A test knob, but it lands in an nft set declaration: a duration or the
+// default.
 function v6_timeout() {
 	let t = getenv('TCTL_V6SET_TIMEOUT');
-	return (t == null || t == '') ? '1h' : t;
+	return (lib.plain(t) && match(t, /^[0-9]{1,9}[smhd]$/)) ? t : '1h';
 }
 
 function nft(argv) {
@@ -217,6 +243,11 @@ function add(ip, kbit, cmt, mode, kbit_up) {
 	// a bridge port never fires for routed traffic.
 	let dl_ok = false, dl6_ok = false, dl_err = '', dl6_err = '', e;
 	for (let dev in net.lan_devices()) {
+		if (!valid_dev(dev)) {
+			dl_err = joined(dl_err, shown_dev(dev) + ': invalid device name');
+			lib.logger('rate limit: skipped LAN device with an invalid name: ' + shown_dev(dev));
+			continue;
+		}
 		let ch = chain('dl_', dev);
 		add_chain(ch, 'egress', dev, 0);
 		if ((e = add_rule(ch, v4_expr('daddr', ip, b, mode, s, ch) + ' counter drop comment "' + cmt + '"')) == null)
@@ -260,6 +291,11 @@ function add(ip, kbit, cmt, mode, kbit_up) {
 	// One chain per port: a port that refuses the hook loses only its own.
 	let ul_ok = false, ul6_ok = false, feed6_ok = false, ul_err = '', ul6_err = '', feed6_err = '';
 	for (let dev in ingress_devices()) {
+		if (!valid_dev(dev)) {
+			ul_err = joined(ul_err, shown_dev(dev) + ': invalid device name');
+			lib.logger('rate limit: skipped LAN port with an invalid name: ' + shown_dev(dev));
+			continue;
+		}
 		let ch = chain('ul_', dev);
 		add_chain(ch, 'ingress', dev, -200);
 		if ((e = add_rule(ch, v4_expr('saddr', ip, bu, mode, s, ch) + ' counter drop comment "' + cmt + '_ul"')) == null)
@@ -349,17 +385,38 @@ function delete_rules(pick) {
 
 const SUFFIXES = [ '', '_ul', '_ul6', '_dl6', '_v6' ];
 
+// 1.30.x kept a zero-padded mask as typed (10.0.0.0/024) in the comment:
+// the comment with the mask as a number, and the slug as it was, else null.
+function unpad(c) {
+	let m = match(c, /^"rl_ratelimit_([0-9]+_[0-9]+_[0-9]+_[0-9]+)_(0+[0-9]+)(_ul|_ul6|_dl6|_v6)?"$/);
+	if (!m)
+		return null;
+	return [ sprintf('"rl_ratelimit_%s_%d%s"', m[1], int(m[2]), m[3] ?? ''), m[1] + '_' + m[2] ];
+}
+
 // The whole quoted comment: "_ul" is a prefix of "_ul6" and the slugs nest,
-// so a substring would take 192.168.1.10's rules for 192.168.1.1's. The v6
-// address set last, once no rule uses it. Most targets never had one, and
-// its absence is not a failure: the shell once returned nft's status here,
-// so removing such a limit failed and left its rules.json record.
+// so a substring would take 192.168.1.10's rules for 192.168.1.1's. The same
+// comment with a zero-padded mask is the same target. The v6 address sets
+// last, once no rule uses them. Most targets never had one, and its absence
+// is not a failure: the shell once returned nft's status here, so removing
+// such a limit failed and left its rules.json record.
 function remove(ip, cmt) {
-	let want = {};
+	let want = {}, padded = {};
 	for (let x in SUFFIXES)
 		want['"' + cmt + x + '"'] = true;
-	delete_rules((f) => exists(want, comment_of(f) ?? ''));
+	delete_rules(function(f) {
+		let c = comment_of(f) ?? '';
+		if (exists(want, c))
+			return true;
+		let u = unpad(c);
+		if (u == null || !exists(want, u[0]))
+			return false;
+		padded[u[1]] = true;
+		return true;
+	});
 	nft([ 'delete', 'set', ...TABLE, 'tctl_v6_' + lib.slug(ip) ]);
+	for (let s in keys(padded))
+		nft([ 'delete', 'set', ...TABLE, 'tctl_v6_' + s ]);
 	return true;
 }
 
@@ -394,6 +451,24 @@ function arg(a) {
 	return (a == null) ? '' : '' + a;
 }
 
+// The records of t in another spelling: 1.30.x saved a zero-padded mask as
+// typed, and "all" as it was given. remove() takes their rules.
+function unsave_others(t) {
+	if (!lib.persist_enabled())
+		return;
+	let d;
+	try {
+		d = json(lib.readfile(RULES) ?? '');
+	}
+	catch (e) {
+		return;
+	}
+	for (let r in (type(d) == 'array') ? d : [])
+		if (type(r) == 'object' && r.type == 'ratelimit' && type(r.ip) == 'string' &&
+		    r.ip != t && target(r.ip) == t)
+			lib.persist_remove('ratelimit', r.ip);
+}
+
 // args: <target> <rate_kbit> [label] [mode] [rate_up]. rate 0 removes the
 // limit; an empty rate_up is the download rate, never zero (a zero ceiling
 // polices every packet: a block reported as a limit).
@@ -408,7 +483,7 @@ function ratelimit(args) {
 		return fail(sprintf('invalid rate: expected whole kbit/s, 1 to %d', MAX_KBIT));
 	if (rate != '0' && valid_rate(up) == null)
 		return fail(sprintf('invalid upload rate: expected whole kbit/s, 1 to %d', MAX_KBIT));
-	let t = lib.valid_target(ip);
+	let t = target(ip);
 	if (t == null)
 		return fail('invalid target — expected an IP, a CIDR, or "all"');
 	ip = t;
@@ -426,6 +501,7 @@ function ratelimit(args) {
 		// Telegram.
 		remove_legacy(ip, 'rl_ratelimit_' + label);
 		remove(ip, cmt);
+		unsave_others(ip);
 		if (lib.persist_enabled())
 			lib.persist_remove('ratelimit', ip);
 		lib.log('ratelimit_remove', ip, '', via, src);
@@ -435,6 +511,7 @@ function ratelimit(args) {
 	let rk = int(rate), uk = int(up);
 	let rates = (uk != rk) ? sprintf('%d kbit/s down, %d kbit/s up', rk, uk) : sprintf('%d kbit/s', rk);
 	remove(ip, cmt);
+	unsave_others(ip);
 	let r = add(ip, rk, cmt, mode, uk);
 	if (!r.netdev)
 		return fail('failed to set rate limit for ' + ip + ': cannot create the nftables netdev table (is kmod-nft-netdev installed?)');
@@ -480,6 +557,17 @@ function ratelimit(args) {
 	return reply(o);
 }
 
+// A record field as the shell's jsonfilter printed it: absent or null is
+// empty, an int its digits, anything else (true, an object) text that is no
+// rate, so it is refused and logged rather than skipped as "no rate".
+function rec_str(v) {
+	if (v == null)
+		return '';
+	if (type(v) == 'string' || type(v) == 'int')
+		return '' + v;
+	return lib.to_json(v);
+}
+
 // The limits of rules.json, while persist_rules is on, on ifup lan. A limit
 // still in the table (lan going up again without a reboot) is replaced, not
 // stacked: a second copy's meter clashed with the first on nftables 1.0.
@@ -500,9 +588,7 @@ function restore() {
 	for (let r in (type(d) == 'array') ? d : []) {
 		if (type(r) != 'object' || r.type != 'ratelimit' || type(r.ip) != 'string' || r.ip == '')
 			continue;
-		let ip = r.ip, param = r.param, up = r.param_up;
-		param = (type(param) == 'int') ? '' + param : (type(param) == 'string') ? param : '';
-		up = (type(up) == 'int') ? '' + up : (type(up) == 'string') ? up : '';
+		let ip = r.ip, param = rec_str(r.param), up = rec_str(r.param_up);
 		// A record with no rate restores nothing and is not a failure.
 		if (param == '' || param == '0')
 			continue;
@@ -513,19 +599,25 @@ function restore() {
 			lib.logger(sprintf("Not restoring ratelimit for %s: invalid rate '%s'/'%s'", ip, param, up));
 			continue;
 		}
-		if (lib.valid_target(ip) != ip) {
+		// In its normal form: 1.30.x saved a zero-padded mask as typed
+		// (10.0.0.0/024), and removing either spelling reaches the rules.
+		let t = target(ip);
+		if (t == null || ip == 'all' || ip == 'any') {
 			lib.logger('Not restoring ratelimit for ' + ip + ': invalid target');
 			continue;
 		}
+		ip = t;
 		// A mode other than each is a shared bucket, as it always was here.
 		let mode = (type(r.mode) == 'string' && r.mode != '') ? r.mode : default_mode(ip);
 		let cmt = comment(ip);
 		live ??= lib.run('nft list table netdev tm_ratelimit');
+		// Or with the mask zero-padded, as 1.30.x left it live.
+		let found = (index(ip, '/') >= 0 && index(live, '"rl_ratelimit_' + lib.slug(split(ip, '/')[0]) + '_0') >= 0);
 		for (let x in SUFFIXES)
-			if (index(live, '"' + cmt + x + '"') >= 0) {
-				remove(ip, cmt);
-				break;
-			}
+			if (index(live, '"' + cmt + x + '"') >= 0)
+				found = true;
+		if (found)
+			remove(ip, cmt);
 		let a = add(ip, int(param), cmt, mode, (up != '') ? int(up) : null);
 		let errs = ((a.dl_err != '') ? ': ' + a.dl_err : '') + ((a.ul_err != '') ? ': ' + a.ul_err : '');
 		if (!a.netdev || a.dl_failed || a.ul_failed) {

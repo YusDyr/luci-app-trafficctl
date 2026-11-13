@@ -195,6 +195,39 @@ fi
 n=$(table | grep -c 'ip [sd]addr 192\.168\.0\.81 .*"rl_ratelimit_tg\(_ul\)\{0,1\}"')
 [ "$n" = 2 ] && ok "legacy label: the other target keeps both rules" || bad "legacy label: the other target has $n of 2 rules"
 
+# ── the restore on ifup lan (`trafficctl restore`) ───────────────────────────
+# Saved limits, a reboot (the table gone), the restore; then an ifup without
+# a reboot, whose restore must replace the live limits, not stack a copy
+# (its meter clashed with the first on nftables 1.0). A record 1.30.x saved
+# with a zero-padded mask comes back in its normal form.
+say "restore: persisted limits after a reboot, then again over them"
+uci set trafficctl.main.persist_rules=1 && uci commit trafficctl
+sh $S/trafficctl-ratelimit.sh 10.0.20.0/24 2000 "" each 500 >/dev/null
+sh $S/trafficctl-ratelimit.sh 192.168.0.70 2000 >/dev/null
+sed -i 's/\]$/,{"type":"ratelimit","ip":"10.0.30.0\/024","param":"1000","mode":"each"}]/' /etc/trafficctl/rules.json
+cat /etc/trafficctl/rules.json; echo
+nft delete table netdev tm_ratelimit
+for pass in boot ifup; do
+    out=$(/usr/sbin/trafficctl restore)
+    echo "$out"
+    case "$out" in
+        '{"ok":true,"restored":3,"failed":0}') ok "restore ($pass): three limits back" ;;
+        *) bad "restore ($pass): $out" ;;
+    esac
+    check_target 10.0.20.0/24 rl_ratelimit_10_0_20_0_24 62500
+    check_target 192.168.0.70 rl_ratelimit_192_168_0_70 250000
+    check_target 10.0.30.0/024 rl_ratelimit_10_0_30_0_24 125000
+done
+n=$(table | grep -c 'rl_ratelimit_tg')
+[ "$n" = 2 ] && ok "restore: the legacy label rules of 192.168.0.81 untouched" || bad "restore: $n of 2 legacy label rules left"
+sh $S/trafficctl-ratelimit.sh 10.0.30.0/024 0 >/dev/null
+if table | grep -q 'rl_ratelimit_10_0_30_0'; then
+    bad "restore: the padded record's limit not removed as typed"; table
+else
+    ok "restore: the padded record's limit removed as typed"
+fi
+grep -q '10.0.30.0' /etc/trafficctl/rules.json && bad "restore: the padded record is still saved" || ok "restore: the padded record is gone"
+
 echo
 [ "$FAILS" = 0 ] && echo "live-ratelimit: all checks passed" || echo "live-ratelimit: $FAILS failed"
 [ "$FAILS" = 0 ]

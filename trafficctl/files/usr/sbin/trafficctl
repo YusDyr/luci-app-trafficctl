@@ -143,11 +143,22 @@ const commands = {
 	ratelimit: (args) => replied(limit.ratelimit(args)),
 
 	// The iface hotplug hook on ifup lan: the saved blocks, then the saved
-	// limits. Counted together; each failure is in syslog.
+	// limits. Counted together; each failure is in syslog. Each half on its
+	// own: an error in the blocks must not leave every limit off until the
+	// next ifup.
 	restore: () => {
-		let r = ctl.restore(), l = limit.restore();
-		r.restored += l.restored;
-		r.failed += l.failed;
+		let r = { ok: true, restored: 0, failed: 0 };
+		for (let half in [ [ 'blocks', ctl.restore ], [ 'limits', limit.restore ] ]) {
+			try {
+				let h = half[1]();
+				r.restored += h.restored;
+				r.failed += h.failed;
+			}
+			catch (e) {
+				r.failed++;
+				lib.logger(sprintf('restore: %s failed: %s', half[0], e.message));
+			}
+		}
 		r.ok = (r.failed == 0);
 		return result(r);
 	},

@@ -957,7 +957,24 @@ restore`, run by the `ifup lan` hook) logs
 `Restored ratelimit for <target> (<rate>kbit) PARTIALLY: ...` for a partial
 restore and `Failed to restore ratelimit ...` when nothing went in. A saved
 record with an invalid rate or target is skipped with a `Not restoring
-ratelimit for ...` line, and the records after it are still restored.
+ratelimit for ...` line, and the records after it are still restored. A rate
+saved as anything but a string or a number (`true`, an object) is an invalid
+rate too. The blocks and the limits are restored independently: an error in
+one is logged (`restore: blocks failed: ...`) and counted, and the other still
+runs.
+
+**Device names are checked.** A LAN device, bridge port or WAN device whose
+name the kernel could not have made (more than 15 characters, a space, a `/`,
+anything but letters, digits and `._@-`) never reaches nft: it is skipped,
+named with the odd characters masked in the result (`lan2?x: invalid device
+name`) and in syslog.
+
+**Zero-padded masks from 1.30.x.** Releases up to 1.30.6 accepted
+`10.0.0.0/024` and kept it as typed, in `rules.json` and in the rule comment
+(`rl_ratelimit_10_0_0_0_024`). The target is now read in its normal form,
+`10.0.0.0/24`: setting or removing a limit in either spelling also removes the
+padded rules and record, and the restore puts a padded record back as
+`10.0.0.0/24` (the record itself is left as it is).
 
 **Meters are per chain.** In `each` mode every chain gets its own meter,
 `tctl_m_<target slug>_<chain>` (`tctl_m_10_0_20_0_24_ul_lan1`). Releases up to

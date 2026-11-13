@@ -237,6 +237,7 @@ Run all tests locally. These run on the host with fake `nft`/`tc`/`ip`/`uci`/
 bash tests/test_fw.sh                 # Firewall helper library
 bash tests/test_direction.sh          # Bidirectional limit/shape, classid allocation
 bash tests/test_meter_per_chain.sh    # Each-mode meters per chain, per-port success, nft 1.0/1.1
+bash tests/test_limit_inputs.sh       # Limiter: device names, v6 set timeout, rules.json fields, 1.30.x padded masks
 bash tests/test_netify.sh             # Netify (DPI) integration
 bash tests/test_openwrt_compat.sh     # BusyBox ash compatibility / no bashisms
 bash tests/test_security.sh           # Input validation and injection resistance

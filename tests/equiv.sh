@@ -191,6 +191,8 @@ RLW="$WR"
 RLT='nft -a list table netdev tm_ratelimit'
 # A limit placed by the shell limiter itself.
 RLOLD="$RL; $PERSIST; sh \"\$L5EXEC/trafficctl-ratelimit.sh\" 192.168.0.109 5000 >/dev/null; sh \"\$L5EXEC/trafficctl-ratelimit.sh\" 192.168.0.0/24 2000 '' each >/dev/null; $FORGET"
+# The same, placed on nftables 1.1 (each meter a named set).
+RLOLD11="$RL; $PERSIST; NFT_EMU=1.1 sh \"\$L5EXEC/trafficctl-ratelimit.sh\" 192.168.0.109 5000 >/dev/null; NFT_EMU=1.1 sh \"\$L5EXEC/trafficctl-ratelimit.sh\" 192.168.0.0/24 2000 '' each >/dev/null; $FORGET"
 # Its rules.json after a reboot: the netdev table gone.
 RLBOOT="$RLOLD; rm -rf \"\$W/root/tmp/nft-netdev\"; mkdir -p \"\$W/root/tmp/nft-netdev\"; rm -f \"\$W/root/etc/trafficctl/shapes.json\""
 L5RL='sh "$L5EXEC/trafficctl-ratelimit.sh"'
@@ -210,6 +212,9 @@ for t in 10.0.20.0/24 10.0.30.0/24; do
     RLLEG="$RLLEG; $(rlrule dl_br_lan "ip daddr $t meter tctl_d_$m { ip daddr $RATE }" rl_ratelimit_tg)"
 done
 L5HOOK='ACTION=ifup INTERFACE=lan sh "$L5/trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes"'
+# Saved limits for targets that also have rules from before v1.13.2 live:
+# those are not the restore's, and stay.
+RLLEGREC="$RLLEG; $PERSIST; printf '[{\"type\":\"ratelimit\",\"ip\":\"192.168.0.109\",\"param\":\"4000\"},{\"type\":\"ratelimit\",\"ip\":\"10.0.20.0/24\",\"param\":\"3000\",\"mode\":\"each\"}]' > \"\$W/root/etc/trafficctl/rules.json\"; $FORGET"
 
 CASES="
 subnets | json | router-24.10 | trafficctl-subnets.sh | tctl subnets
@@ -398,6 +403,8 @@ rl-restore | text+$RLW | router-24.10 | sh:$L5HOOK; echo rc=\$?; $RLT | tctl res
 rl-restore-live | text+$RLW | router-24.10 | sh:$L5HOOK; echo rc=\$?; $RLT | tctl restore >/dev/null; echo rc=\$?; $RLT | $RLOLD
 rl-restore-off | text+$RLW | router-24.10 | sh:$L5HOOK; echo rc=\$?; $RLT | tctl restore >/dev/null; echo rc=\$?; $RLT | $RLBOOT; uci set trafficctl.main.persist_rules=0; uci commit trafficctl
 rl-restore-bad | text+$RLW | router-24.10 | sh:$L5HOOK; echo rc=\$?; $RLT | tctl restore >/dev/null; echo rc=\$?; $RLT | $RL; $PERSIST; printf '[{\"type\":\"ratelimit\",\"ip\":\"192.168.0.9\",\"param\":\"abc\"},{\"type\":\"ratelimit\",\"ip\":\"192.168.0.10\",\"param\":\"0\"},{\"type\":\"ratelimit\",\"ip\":\"192.168.0.109\",\"param\":\"4000\",\"mode\":\"each\",\"param_up\":\"400\"}]' > \"\$W/root/etc/trafficctl/rules.json\"
+rl-restore-live-1.1 | text+$RLW | router-24.10 | sh:NFT_EMU=1.1 $L5HOOK; echo rc=\$?; NFT_EMU=1.1 $RLT | NFT_EMU=1.1 tctl restore >/dev/null; echo rc=\$?; NFT_EMU=1.1 $RLT | $RLOLD11
+rl-restore-legacy-live | text+$RLW | router-24.10 | sh:$L5HOOK; echo rc=\$?; $RLT | tctl restore >/dev/null; echo rc=\$?; $RLT | $RLLEGREC
 rl-restore-fails | text+$RLW | router-24.10 | sh:NFT_FAIL_CHAINS=ul_lan3 $L5HOOK; echo rc=\$?; $RLT | NFT_FAIL_CHAINS=ul_lan3 tctl restore >/dev/null; echo rc=\$?; $RLT | $RLBOOT
 newdevice-old | text+$NDF | router-24.10 | sh:ACTION=old MACADDR=02:00:00:00:00:99 IPADDR=192.168.0.99 HOSTNAME=x; export ACTION MACADDR IPADDR HOSTNAME; $LND | ACTION=old MACADDR=02:00:00:00:00:99 IPADDR=192.168.0.99 HOSTNAME=x; export ACTION MACADDR IPADDR HOSTNAME; $NND | $ND
 "

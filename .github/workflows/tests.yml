@@ -127,6 +127,10 @@ jobs:
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_direction.sh
       - name: Per-chain limiter meters on a multi-port bridge
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_meter_per_chain.sh
+      # Device names, the v6 set timeout and rules.json fields as they reach
+      # nft; 1.30.x's zero-padded masks; one restore half failing.
+      - name: Limiter input tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_limit_inputs.sh
       - name: IPv6 enforcement tests (limiter)
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_ipv6.sh
       - name: Qualcomm NSS reporting tests
