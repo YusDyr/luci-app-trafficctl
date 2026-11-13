@@ -77,6 +77,33 @@ assert_eq "removing one shape leaves the other's download filter" \
 assert_eq "and its upload filter" "src 192.168.1.51/32 flowid 1:3" "$(filters_of tctl-ifb0)"
 assert_not_contains "and the removed class is gone" "class 1:2 " "$(st_dump)"
 
+# .1 is a prefix of .10 as text, in the records and in the filter keys.
+st_reset
+st_run add 192.168.1.1 5000 >/dev/null
+st_run add 192.168.1.10 3000 >/dev/null
+st_run remove 192.168.1.1 >/dev/null
+assert_eq ".1 removed: .10's download filter stays" "dst 192.168.1.10/32 flowid 1:3" "$(filters_of br-lan)"
+assert_eq ".1 removed: and its upload filter" "src 192.168.1.10/32 flowid 1:3" "$(filters_of tctl-ifb0)"
+assert_contains ".1 removed: and its class" "class 1:3 1:1 3000kbit" "$(st_dump)"
+st_run add 192.168.1.1 5000 >/dev/null
+st_run remove 192.168.1.10 >/dev/null
+assert_eq ".10 removed: .1's download filter stays" "dst 192.168.1.1/32 flowid 1:2" "$(filters_of br-lan)"
+assert_eq ".10 removed: and its upload filter" "src 192.168.1.1/32 flowid 1:2" "$(filters_of tctl-ifb0)"
+assert_eq ".10 removed: .1's record stays" '[{"ip":"192.168.1.1","rate_kbit":5000,"classid":"1:2"}]' "$(cat "$SHAPES")"
+
+# Concurrent adds (the DHCP hook's, the UI's, the bot's) each get their own
+# minor: the pick and the save are under one lock.
+st_reset
+st_run add 192.168.1.41 5000 > "$STATE/c1" &
+st_run add 192.168.1.42 5000 > "$STATE/c2" &
+st_run add 192.168.1.43 5000 > "$STATE/c3" &
+wait
+assert_eq "concurrent adds: three distinct minors" "1:2 1:3 1:4" \
+    "$(for i in 41 42 43; do cid_of 192.168.1.$i; done | sort | tr '\n' ' ' | sed 's/ $//')"
+assert_eq "concurrent adds: three download filters" "3" "$(filters_of br-lan | wc -l)"
+assert_eq "concurrent adds: each its own class" "3" "$(filters_of br-lan | awk '{ print $4 }' | sort -u | wc -l)"
+assert_eq "concurrent adds: all replied ok" "3" "$(cat "$STATE/c1" "$STATE/c2" "$STATE/c3" | grep -c '"ok":true')"
+
 # ════════════════════════════════════════════════════════════════════════════
 # Classids are allocated, not derived from the address
 # ════════════════════════════════════════════════════════════════════════════
@@ -126,6 +153,19 @@ OUT=$(st_run remove 192.168.1.77)
 assert_contains "a pre-allocation record is removable" '"ok":true' "$OUT"
 assert_eq "its derived class and filter are gone" "" "$(st_dump | grep -E '1:14d')"
 assert_eq "and the record with it" "[]" "$(cat "$SHAPES")"
+
+# An address with no record has no class to remove: its derived minor
+# (192.168.0.4 -> 1:4) may be allocated to another device, whose filters,
+# class and qdisc the remove would tear down (the bot and rpcd pass any
+# address).
+st_reset
+printf '[{"ip":"192.168.0.50","rate_kbit":5000,"classid":"1:4"}]' > "$SHAPES"
+st_run add 192.168.0.50 5000 >/dev/null
+before=$(st_dump)
+OUT=$(st_run remove 192.168.0.4)
+assert_contains "remove, no record: still ok" '"ok":true' "$OUT"
+assert_eq "remove, no record: another device's shape on the derived minor is untouched" "$before" "$(st_dump)"
+assert_eq "remove, no record: and its record" '[{"ip":"192.168.0.50","rate_kbit":5000,"classid":"1:4"}]' "$(cat "$SHAPES")"
 
 # ════════════════════════════════════════════════════════════════════════════
 # A foreign root qdisc (SQM's cake) is declined, never torn down
@@ -181,6 +221,17 @@ rc=$?
 assert_eq "tc failure: the reply" '{"ok":false,"msg":"tc setup failed for 192.168.1.70 on br-lan"}' "$OUT"
 assert_eq "tc failure: exit status 1" "1" "$rc"
 assert_eq "tc failure: nothing is recorded" "" "$(cat "$SHAPES" 2>/dev/null)"
+
+# A record that cannot be written: the shape is in force, the reply says
+# the restore will not know it.
+st_reset
+mkdir -p "$SHAPES"
+OUT=$(st_run add 192.168.1.71 5000)
+assert_contains "save fails: the shape is still applied" '"ok":true' "$OUT"
+assert_contains "save fails: and the reply says it is not saved" "shapes.json could not be written" "$OUT"
+OUT=$(st_run remove 192.168.1.71)
+assert_contains "save fails on remove: says the shape comes back" "comes back on the next ifup lan" "$OUT"
+rmdir "$SHAPES"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Arguments
@@ -270,6 +321,12 @@ before=$(st_dump)
 OUT=$(lt_run restore)
 assert_eq "restore again: the same shapes back" '{"ok":true,"restored":3,"failed":0}' "$OUT"
 assert_eq "restore again: the same tc state" "$before" "$(st_dump)"
+
+# A shapes.json that is no JSON array restores nothing, and says so.
+st_reset
+printf '[{"ip":"192.168.1.20","rate_kbit":5000,' > "$SHAPES"
+assert_eq "restore: a corrupt shapes.json" '{"ok":true,"restored":0,"failed":0}' "$(lt_run restore)"
+assert_contains "restore: and it is in syslog" "shapes.json is not a JSON array" "$(cat "$LOGGER_LOG")"
 
 # No shapes.json at all is no failure.
 st_reset

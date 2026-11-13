@@ -1047,19 +1047,28 @@ not used.
 
 Errors are `{"ok": false, "msg": "..."}` with exit status 1: an invalid
 address or rate (whole kbit/s, 1 to the limiter's maximum), no free classid,
-a root qdisc another QoS setup owns (SQM's cake, a foreign HTB tree: declined,
-never torn down), or `tc setup failed for <ip> on <dev>`.
+a root qdisc another QoS setup owns (SQM's cake, HFSC, any root that is not
+HTB or a default qdisc: declined, never torn down), or `tc setup failed for
+<ip> on <dev>`. An HTB root is taken for the shaper's own, as the shell did: one
+with a class `1:1` is reused, one without is replaced. A shape applied whose
+record cannot be written stays `ok`, and `msg` ends in a warning that the
+restore will not know it; a remove whose record cannot be written warns that
+the shape comes back on the next `ifup lan`.
 
 **Persistence:** `/etc/trafficctl/shapes.json`, written on every add and
 remove whatever `persist_rules` says, in the bytes the shell shaper wrote
 (`{"ip":...,"rate_kbit":...,"classid":"1:<hex>"[,"rate_kbit_up":...]}`, one
 array, mode 0644, replaced atomically) and under the same mkdir lock,
-`/tmp/trafficctl_shapes.lock.d` (taken over after 5 s). A record the shell's
+`/tmp/trafficctl_shapes.lock.d` (taken over after 5 s). An add holds the lock
+from the read of the file through the classid pick and the tc calls to the
+write, so concurrent adds get distinct classids. A record the shell's
 pattern would not have matched is dropped on the next write, as before.
 `trafficctl restore` (the `ifup lan` hook) applies every record again and
 counts them in its `restored`/`failed`; a record it cannot apply is logged as
-`Failed to restore shape for <ip> (<rate>kbit)`, and nothing is written to the
-activity log. The hook no longer has a shape loop of its own.
+`Failed to restore shape for <ip> (<rate>kbit)` (a record whose apply dies
+too, and the next record is still applied), a `shapes.json` that is not a JSON
+array is logged and restores nothing, and nothing is written to the activity
+log. The hook no longer has a shape loop of its own.
 
 **Differences from the shell shaper (v1.30.6):**
 
@@ -1072,6 +1081,13 @@ activity log. The hook no longer has a shape loop of its own.
   all those saved.
 - stdout is the JSON reply only; the shell printed tc's error text before the
   `tc setup failed` reply.
+- `remove` of an address with no record touches no class. The shell fell back
+  to the classid derived from the address (`1:<hex(o3*256+o4)>`) whenever no
+  classid was recorded, so removing an address never shaped (192.168.0.4, 1:4)
+  tore down the device that had been allocated 1:4. The derived classid is
+  used only for a record written before classids were allocated.
+- The classid pick and the record's write are under one lock; the shell took
+  the lock for the write only, so two adds at once could pick the same classid.
 - The restore takes each record as it is (two records for one address are both
   applied, the last wins), skips a record with an empty address, and logs a
   record with an invalid rate, which the shell handed to the shaper and

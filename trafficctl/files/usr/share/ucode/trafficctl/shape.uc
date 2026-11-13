@@ -53,9 +53,11 @@ const CLASSID_MAX = 65533;
 const RECORD = /\{"ip":"[^"]+","rate_kbit":[0-9]+(,"classid":"1:[0-9a-f]+")?(,"rate_kbit_up":[0-9]+)?\}/g;
 const WITH_CLASSID = /^\{"ip":"([^"]+)","rate_kbit":[0-9]+,"classid":"(1:[0-9a-f]+)"(,"rate_kbit_up":[0-9]+)?\}$/;
 
-// Root qdiscs OpenWrt or the kernel put there carry nothing worth keeping.
-// Anything else (cake from SQM, HFSC, a foreign HTB tree) is somebody's QoS
-// setup and is not torn down; shaping is declined instead.
+// Root qdiscs OpenWrt or the kernel put there carry nothing worth keeping,
+// and HTB is taken for this app's own tree: ensure_root reuses an HTB root
+// that has a class 1:1 and replaces one that has none, so a foreign HTB tree
+// is not protected. Any other root (cake from SQM, HFSC, ...) is not torn
+// down; shaping is declined instead.
 const REPLACEABLE = [ 'pfifo_fast', 'fq_codel', 'fq', 'noqueue', 'mq', 'pfifo', 'bfifo', 'sfq', 'codel', 'htb' ];
 
 const KMOD_IFB = 'opkg/apk install kmod-ifb kmod-sched';
@@ -234,30 +236,44 @@ function attach(dev, dir, ip, cid, rate, burst) {
 	return tc([ ...filter_argv('add', dev, dir, ip), 'flowid', cid ]);
 }
 
+function rec_prefix(ip) {
+	return '{"ip":"' + ip + '",';
+}
+
 // The record of ip replaced (rate > 0) or dropped (0), the others kept byte
 // for byte: what the pattern does not match is dropped, as the shell did.
 // rate_kbit_up only when the directions differ, so a symmetric shape writes
-// the record every release reads.
+// the record every release reads. The caller holds LOCK (locked()).
 function save(ip, rate, cid, up) {
+	let pfx = rec_prefix(ip);
+	let recs = filter(entries(), (e) => substr(e, 0, length(pfx)) != pfx);
+	if (rate > 0)
+		push(recs, sprintf('{"ip":"%s","rate_kbit":%d,"classid":"%s"%s}', ip, rate, cid,
+			(up != null && up != rate) ? sprintf(',"rate_kbit_up":%d', up) : ''));
+	return lib.write_atomic(SHAPES, '[' + join(',', recs) + ']', 0o644);
+}
+
+// fn() under LOCK, from the read of shapes.json to its write: two adds at
+// once (the DHCP hook's and the UI's, or the bot's) would otherwise read the
+// same file, pick the same free minor, and share one class. Not taken in 5 s
+// (a holder that is stuck), fn runs anyway, as the shell writer did.
+function locked(fn) {
 	lib.mkdir_p(dirname(SHAPES));
-	let locked = lib.lock(LOCK, LOCK_TRIES, LOCK_STALE, true), ok;
+	let held = lib.lock(LOCK, LOCK_TRIES, LOCK_STALE, true), r;
 	try {
-		let pfx = '{"ip":"' + ip + '",';
-		let recs = filter(entries(), (e) => substr(e, 0, length(pfx)) != pfx);
-		if (rate > 0)
-			push(recs, sprintf('{"ip":"%s","rate_kbit":%d,"classid":"%s"%s}', ip, rate, cid,
-				(up != null && up != rate) ? sprintf(',"rate_kbit_up":%d', up) : ''));
-		ok = lib.write_atomic(SHAPES, '[' + join(',', recs) + ']', 0o644);
+		r = fn();
 	}
 	catch (e) {
-		if (locked)
+		if (held)
 			lib.unlock(LOCK);
 		die(e.message);
 	}
-	if (locked)
+	if (held)
 		lib.unlock(LOCK);
-	return ok;
+	return r;
 }
+
+const NOT_SAVED = ' — WARNING: shapes.json could not be written';
 
 function reply(o, rc) {
 	return { reply: o, rc: rc ?? (o.ok ? 0 : 1) };
@@ -273,25 +289,34 @@ function burst_of(kbit) {
 	return (b < 1600) ? 1600 : b;
 }
 
-// Both directions and the record; rates already validated, as ints.
-function apply(ip, rate, up) {
+// The classes and the record, under LOCK: { err } or { cid, ul_ok, saved }.
+function apply_locked(ip, rate, up) {
 	let ents = entries();
 	let cid = lookup_classid(ip, ents) ?? alloc_classid(ents);
 	if (cid == null)
-		return fail('no free shaping class available');
+		return { err: 'no free shaping class available' };
 	let lan = net.lan_device(), ifb = ifb_dev();
 
 	if (!attach(lan, 'dst', ip, cid, rate, burst_of(rate))) {
 		// Declining a foreign root qdisc is deliberate (it is how SQM
 		// survives this app), and "tc setup failed" would read as a bug.
 		if (!root_replaceable(lan))
-			return fail('shaping declined on ' + lan + ': another QoS setup (SQM/cake or a custom HTB tree) owns the root qdisc and will not be torn down. Use the limiter instead — it is a policer and coexists with SQM.');
-		return fail('tc setup failed for ' + ip + ' on ' + lan);
+			return { err: 'shaping declined on ' + lan + ': another QoS setup (SQM/cake or another non-HTB qdisc) owns the root qdisc and will not be torn down. Use the limiter instead — it is a policer and coexists with SQM.' };
+		return { err: 'tc setup failed for ' + ip + ' on ' + lan };
 	}
 	// Reported apart, so a missing kmod-ifb does not read as a total failure.
 	let ul_ok = ensure_ifb(ifb) && attach(ifb, 'src', ip, cid, up, burst_of(up));
+	return { cid, ul_ok, saved: save(ip, rate, cid, up) };
+}
 
-	save(ip, rate, cid, up);
+// Both directions and the record; rates already validated, as ints. A record
+// that cannot be written leaves the shape in force but unknown to the
+// restore and to every reader: still ok, and the reply says so.
+function apply(ip, rate, up) {
+	let a = locked(() => apply_locked(ip, rate, up));
+	if (a.err != null)
+		return fail(a.err);
+	let cid = a.cid, ul_ok = a.ul_ok;
 	let rates = (up != rate) ? sprintf('%d kbit/s down, %d kbit/s up', rate, up) : sprintf('%d kbit/s', rate);
 	// HTB never queues a flow the NSS firmware forwards (#81): installed and
 	// inert, and said so.
@@ -305,17 +330,32 @@ function apply(ip, rate, up) {
 			rate, ip, up, KMOD_IFB, note);
 	else
 		msg = sprintf('shape %d kbit/s applied to %s (download only — upload needs kmod-ifb: %s)%s', rate, ip, KMOD_IFB, note);
+	if (!a.saved)
+		msg += NOT_SAVED + ': this shape will not be restored on the next ifup lan';
 	return reply({ ok: true, nss, msg });
 }
 
-function remove(ip) {
-	let cid = lookup_classid(ip) ?? legacy_classid(ip);
+// The class of ip's record: its classid, or for a record written before
+// classids were allocated the one derived from the address. No record, no
+// class: the derived minor of an address never shaped may be allocated to
+// another device, and detaching it would tear that device's shape down.
+function remove_locked(ip) {
+	let ents = entries(), pfx = rec_prefix(ip);
+	let cid = lookup_classid(ip, ents);
+	if (cid == null && length(filter(ents, (e) => substr(e, 0, length(pfx)) == pfx)))
+		cid = legacy_classid(ip);
 	if (cid != null) {
 		detach(net.lan_device(), 'dst', ip, cid);
 		detach(ifb_dev(), 'src', ip, cid);
 	}
-	save(ip, 0);
-	return reply({ ok: true, msg: 'shape removed for ' + ip });
+	return save(ip, 0);
+}
+
+function remove(ip) {
+	let msg = 'shape removed for ' + ip;
+	if (!locked(() => remove_locked(ip)))
+		msg += NOT_SAVED + ': the record stays and the shape comes back on the next ifup lan';
+	return reply({ ok: true, msg });
 }
 
 function status(ip) {
@@ -381,20 +421,33 @@ function rec_str(v) {
 // device. Through the same validation as `trafficctl shape add`; nothing is
 // logged to the activity log or announced, as nothing was changed.
 function restore() {
-	let res = { restored: 0, failed: 0 }, d;
+	let res = { restored: 0, failed: 0 }, raw = lib.readfile(SHAPES), d;
+	if (raw == null || trim(raw) == '')
+		return res;
 	try {
-		d = json(lib.readfile(SHAPES) ?? '');
+		d = json(raw);
 	}
 	catch (e) {
+		d = null;
+	}
+	if (type(d) != 'array') {
+		lib.logger('shapes.json is not a JSON array, no shape restored: ' + SHAPES);
 		return res;
 	}
-	for (let r in (type(d) == 'array') ? d : []) {
+	for (let r in d) {
 		if (type(r) != 'object' || r.ip == null || r.ip == '')
 			continue;
-		let ip = rec_str(r.ip), rate = rec_str(r.rate_kbit), up = rec_str(r.rate_kbit_up);
+		let ip = rec_str(r.ip), rate = rec_str(r.rate_kbit), up = rec_str(r.rate_kbit_up), ok;
 		if (rate == '' || rate == '0')
 			continue;
-		if (main([ 'add', ip, rate, 'shape_' + ip, up ], true).rc == 0)
+		// One record that dies (a tc or file error) does not stop the rest.
+		try {
+			ok = main([ 'add', ip, rate, 'shape_' + ip, up ], true).rc == 0;
+		}
+		catch (e) {
+			ok = false;
+		}
+		if (ok)
 			res.restored++;
 		else {
 			res.failed++;
