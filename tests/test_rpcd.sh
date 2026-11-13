@@ -107,10 +107,11 @@ for m in summary device bytes block unblock macfilter_add macfilter_remove \
          newdevice_config_get newdevice_config_set cut_status cut_set \
          history_status history_read history_read_ifaces history_periods \
          history_config_get history_config_set history_flush \
-         activity_log version; do
+         activity_log version \
+         notify_config_get notify_config_set notify_test; do
     assert_eq "list: declares method $m" "true" "$(printf '%s' "$LIST_OUT" | jq --arg m "$m" 'has($m)')"
 done
-assert_eq "list: no method beyond the known ones" "45" "$(printf '%s' "$LIST_OUT" | jq 'length')"
+assert_eq "list: no method beyond the known ones" "48" "$(printf '%s' "$LIST_OUT" | jq 'length')"
 # settings.js has always sent persist_rules; undeclared, rpcd dropped it.
 assert_eq "list: logging_config_set declares persist_rules" '"bool"' \
     "$(printf '%s' "$LIST_OUT" | jq -c '.logging_config_set.persist_rules')"

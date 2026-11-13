@@ -5,30 +5,30 @@
 # Available env vars: ACTION, MACADDR, IPADDR, HOSTNAME
 #
 # Two consumers sit on "this MAC is new":
-#   * the Telegram bot, which wants a notification
+#   * notifications (`trafficctl notify dhcp`: new_device on ubus, hotplug.d
+#     and the configured senders)
 #   * the default-limit feature, which applies a rate limit or shape
 #
 # They are deliberately independent — either can be on without the other —
-# and they use different notions of "known". The bot has always keyed off its
-# own telegram_known.json, which the bot itself rewrites; the limiter uses the
-# seen-MAC ledger in trafficctl-fw.sh, because applying a limit is not an
+# and they use different notions of "known". Notifications have always keyed
+# off telegram_known.json, which the device scan also writes; the limiter uses
+# the seen-MAC ledger in trafficctl-fw.sh, because applying a limit is not an
 # action that may be repeated or misfired.
 
 [ "$ACTION" = "add" ] || exit 0
 [ -n "$MACADDR" ] || exit 0
 
-# ── Telegram notification ──────────────────────────────────────────────────
+# ── Notification ───────────────────────────────────────────────────────────
 
 KNOWN_FILE="/etc/trafficctl/telegram_known.json"
-NOTIFY_FLAG="/tmp/trafficctl_tg_newdev"
 
-if [ "$(uci -q get trafficctl.telegram.enabled)" = "1" ] &&
-    ! grep -q "\"$MACADDR\"" "$KNOWN_FILE" 2>/dev/null; then
-    mkdir -p "$(dirname "$NOTIFY_FLAG")"
+# Only an unknown MAC costs a ucode start; the command decides whether anybody
+# listens, and runs detached so dnsmasq never waits on the network.
+if [ -x /usr/sbin/trafficctl ] && ! grep -q "\"$MACADDR\"" "$KNOWN_FILE" 2>/dev/null; then
     # HOSTNAME comes from the dnsmasq dhcp hotplug environment (see header),
     # not a POSIX shell builtin — shellcheck's SC3028 is a false positive.
     # shellcheck disable=SC3028
-    printf '%s\t%s\t%s\n' "$MACADDR" "${IPADDR:-?}" "${HOSTNAME:-unknown}" >> "$NOTIFY_FLAG"
+    /usr/sbin/trafficctl notify dhcp "$MACADDR" "$IPADDR" "$HOSTNAME" >/dev/null 2>&1 </dev/null &
 fi
 
 # ── Default limit for a device seen for the first time ─────────────────────

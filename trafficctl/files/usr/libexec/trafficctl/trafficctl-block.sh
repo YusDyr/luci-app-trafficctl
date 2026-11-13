@@ -50,6 +50,7 @@ if tctl_block_add "$IP" "$COMMENT"; then
 
     tctl_persist_enabled && tctl_persist_save "block" "$IP" "$LABEL"
     tctl_log "block" "$IP" "$LABEL" "${TCTL_VIA:-cli}" "${TCTL_SRC:-local}"
+    tctl_notify block_applied ip="$IP" mac="$MAC" kind=internet
 
     # Say which families are actually covered. Reporting plain success while
     # half the traffic walks past the rule is the bug this fixes, so the

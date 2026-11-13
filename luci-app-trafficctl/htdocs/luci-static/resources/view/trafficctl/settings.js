@@ -36,8 +36,7 @@ var callTelegramGet = rpc.declare({
 var callTelegramSet = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'telegram_config_set',
-	params: ['enabled', 'bot_token', 'chat_id', 'poll_interval',
-		'notify_new_device', 'notify_known_device', 'control_enabled', 'notify_template',
+	params: ['enabled', 'bot_token', 'chat_id', 'poll_interval', 'control_enabled',
 		'btn_block_inet', 'btn_block_wifi', 'btn_limiter', 'btn_shaper']
 });
 
@@ -194,10 +193,7 @@ return view.extend({
 							tk,
 							chatInput.value,
 							parseInt(cfg.poll_interval) || 3,
-							container.querySelector('#tm-tg-new').checked,
-							container.querySelector('#tm-tg-known').checked,
 							controlMode,
-							templateArea.value,
 							inetEl ? inetEl.checked : cfg.btn_block_inet,
 							wifiEl ? wifiEl.checked : cfg.btn_block_wifi,
 							limitEl ? limitEl.checked : cfg.btn_limiter,
@@ -259,7 +255,7 @@ return view.extend({
 					testResult.textContent = _('Sending…');
 					testResult.style.color = 'var(--tc-muted)';
 					var tk = tokenInput.value || '***';
-					callTelegramTest(tk, chatInput.value, templateArea.value || '').then(function(res) {
+					callTelegramTest(tk, chatInput.value, '').then(function(res) {
 						testResult.textContent = (res && res.ok) ? '✓ ' + (res.msg || 'OK') : '✗ ' + (res && res.msg || 'error');
 						testResult.style.color = (res && res.ok) ? 'var(--tc-ok)' : 'var(--tc-err)';
 					}).catch(function(e) {
@@ -300,92 +296,12 @@ return view.extend({
 
 				section.appendChild(E('div', {'class':'tg-row'}, [segmented]));
 
-				// ── Notifications ──
+				// ── Notifications: their own tab since 1.31 ──
 				notifySection.appendChild(E('div', {'class':'tg-divider'}, _('Notifications')));
-				var notifyNew = mkToggle('tm-tg-new', _('New devices'), cfg.notify_new_device, doSave);
-				var notifyKnown = mkToggle('tm-tg-known', _('Known devices'), cfg.notify_known_device, doSave);
-				notifySection.appendChild(E('div', {'class':'tg-row'}, [notifyNew, notifyKnown]));
-
-				// ── Custom template ──
-				var templateArea = E('textarea', {
-					'class': 'tg-input tg-input--template',
-					'placeholder': '🆕 New device\\n{{ name }} ({{ ip }})\\nMAC: {{ mac }}\\nLink: {{ link }}'
-				}, cfg.notify_template || '');
-				templateArea.addEventListener('input', function() { renderPreview(); doSave(); });
-
-				var previewBubble = E('div', {'class':'tg-bubble'});
-				var defaultTpl = '🆕 <b>New device</b>\n{{ name }} ({{ ip }})\nMAC: <code>{{ mac }}</code>\nLink: {{ link }}';
-				var renderPreview = function() {
-					var tpl = templateArea.value || defaultTpl;
-					var txt = tpl
-						.replace(/\{\{\s*name\s*\}\}/g, 'MacBookPro')
-						.replace(/\{\{\s*ip\s*\}\}/g, '192.168.0.100')
-						.replace(/\{\{\s*mac\s*\}\}/g, 'aa:bb:cc:dd:ee:ff')
-						.replace(/\{\{\s*link\s*\}\}/g, '5G')
-						.replace(/\{\{\s*date\s*\}\}/g, new Date().toISOString().slice(0,10))
-						.replace(/\{\{\s*time\s*\}\}/g, new Date().toTimeString().slice(0,5))
-						.replace(/\{\{\s*datetime\s*\}\}/g, new Date().toISOString().slice(0,10) + ' ' + new Date().toTimeString().slice(0,5))
-						.replace(/\{\{\s*router\s*\}\}/g, 'OpenWrt')
-						.replace(/\{\{\s*ssid\s*\}\}/g, 'MyNetwork_5G')
-						.replace(/\{\{\s*signal\s*\}\}/g, '-52')
-						.replace(/\{\{\s*freq\s*\}\}/g, '5GHz')
-						.replace(/\{\{\s*iface\s*\}\}/g, 'wlan1')
-						.replace(/\{\{\s*clients\s*\}\}/g, '12')
-						.replace(/\{\{\s*uptime\s*\}\}/g, '3d 5h')
-						.replace(/\{\{\s*wan_ip\s*\}\}/g, '85.192.48.1')
-						.replace(/\{\{\s*load\s*\}\}/g, '0.42')
-						.replace(/\{\{\s*conns\s*\}\}/g, '47');
-					previewBubble.innerHTML = txt.replace(/\\n/g, '<br>').replace(/\n/g, '<br>');
-				};
-				renderPreview();
-
-				var varRef = E('div', {'style':'font-size:12px;line-height:1.7;color:currentColor'}, [
-					E('div', {'style':'font-weight:600;margin-bottom:4px'}, _('Variables')),
-					E('div', {}, [E('code', {}, '{{ name }}'), document.createTextNode(' — ' + _('device hostname'))]),
-					E('div', {}, [E('code', {}, '{{ ip }}'), document.createTextNode(' — ' + _('IP address'))]),
-					E('div', {}, [E('code', {}, '{{ mac }}'), document.createTextNode(' — ' + _('MAC address'))]),
-					E('div', {}, [E('code', {}, '{{ link }}'), document.createTextNode(' — ' + _('connection type (5G, LAN)'))]),
-					E('div', {}, [E('code', {}, '{{ date }}'), document.createTextNode(' — ' + _('date (2026-05-26)'))]),
-					E('div', {}, [E('code', {}, '{{ time }}'), document.createTextNode(' — ' + _('time (14:32)'))]),
-					E('div', {}, [E('code', {}, '{{ datetime }}'), document.createTextNode(' — ' + _('date + time'))]),
-					E('div', {}, [E('code', {}, '{{ router }}'), document.createTextNode(' — ' + _('router hostname'))]),
-					E('div', {}, [E('code', {}, '{{ ssid }}'), document.createTextNode(' — ' + _('WiFi SSID'))]),
-					E('div', {}, [E('code', {}, '{{ signal }}'), document.createTextNode(' — ' + _('WiFi signal (dBm)'))]),
-					E('div', {}, [E('code', {}, '{{ freq }}'), document.createTextNode(' — ' + _('WiFi band (2.4/5GHz)'))]),
-					E('div', {}, [E('code', {}, '{{ iface }}'), document.createTextNode(' — ' + _('network interface'))]),
-					E('div', {}, [E('code', {}, '{{ clients }}'), document.createTextNode(' — ' + _('total connected clients'))]),
-					E('div', {}, [E('code', {}, '{{ uptime }}'), document.createTextNode(' — ' + _('router uptime'))]),
-					E('div', {}, [E('code', {}, '{{ wan_ip }}'), document.createTextNode(' — ' + _('WAN IP'))]),
-					E('div', {}, [E('code', {}, '{{ load }}'), document.createTextNode(' — ' + _('CPU load (1 min)'))]),
-					E('div', {}, [E('code', {}, '{{ conns }}'), document.createTextNode(' — ' + _('device connections'))]),
-					E('div', {'style':'margin-top:6px;color:var(--tc-muted);font-size:11px'}, [
-						document.createTextNode(_('HTML:') + ' '),
-						E('code', {}, '<b>'), document.createTextNode(' '),
-						E('code', {}, '<i>'), document.createTextNode(' '),
-						E('code', {}, '<code>'), document.createTextNode(' '),
-						E('code', {}, '<a href="">'),
-						document.createTextNode('. \\n = ' + _('line break'))
-					])
-				]);
-
-				var templateToggle = E('span', {
-					'style': 'font-size:12px;cursor:pointer;color:var(--tc-muted);user-select:none'
-				}, '▸ ' + _('Customize message'));
-				var templateBody = E('div', {'class':'tc-hidden','style':'margin-top:6px'});
-				templateBody.appendChild(E('div', {'style':'display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap'}, [
-					E('div', {'style':'flex:1;min-width:200px'}, [templateArea]),
-					varRef
+				notifySection.appendChild(E('div', {'class':'tg-row','style':'font-size:12px'}, [
+					document.createTextNode(_('New and known device messages, and the message template, are set on the Notifications tab.') + ' '),
+					E('a', {'href': L.url('admin/status/trafficctl/notify')}, _('Open Notifications'))
 				]));
-				templateBody.appendChild(E('div', {'style':'margin-top:8px'}, [
-					E('span', {'class':'tg-label','style':'display:block;margin-bottom:4px'}, _('Preview:')),
-					previewBubble
-				]));
-				templateToggle.addEventListener('click', function() {
-					var show = templateBody.classList.contains('tc-hidden');
-					templateBody.classList.toggle('tc-hidden');
-					templateToggle.textContent = (show ? '▾ ' : '▸ ') + _('Customize message');
-				});
-				notifySection.appendChild(E('div', {'style':'margin-top:8px'}, [templateToggle, templateBody]));
 
 				// ── Control section (conditionally visible) ──
 				controlSection.appendChild(E('div', {'class':'tg-divider'}, _('Control')));

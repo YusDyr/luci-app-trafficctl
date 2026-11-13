@@ -119,6 +119,7 @@ else
     tctl_persist_enabled && tctl_persist_save "ratelimit" "$IP" "$RATE" "$MODE" \
         "$([ "$RATE_UP" != "$RATE" ] && echo "$RATE_UP")"
     tctl_log "ratelimit_set" "$IP" "$(rate_text)" "${TCTL_VIA:-cli}" "${TCTL_SRC:-local}"
+    tctl_notify limit_applied ip="$IP" rate_kbit="$RATE" rate_kbit_up="$RATE_UP" mode=limiter
     # An already-accelerated flow is not re-evaluated against a rule that
     # appeared afterwards, exactly as with flow offload — so the NSS flow
     # table gets the same treatment the conntrack table does.

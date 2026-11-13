@@ -12,7 +12,7 @@
 					"config_get", "telegram_config_get",
 					"logging_config_get", "newdevice_config_get",
 					"history_status", "history_read", "history_read_ifaces", "history_periods",
-					"history_config_get"
+					"history_config_get", "notify_config_get"
 				],
 				"file": [ "read" ]
 			},
@@ -33,7 +33,8 @@
 					"logging_config_set", "activity_log",
 					"newdevice_config_set",
 					"cut_status", "cut_set",
-					"history_config_set", "history_flush"
+					"history_config_set", "history_flush",
+					"notify_config_set", "notify_test"
 				]
 			},
 			"uci": [ "trafficctl" ]

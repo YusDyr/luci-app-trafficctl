@@ -126,42 +126,7 @@ tail -1 "$NEUTERED" | grep -q '^main$' && {
     exit 1
 }
 
-# ── Token / chat_id format validation (real trafficctl-telegram-test.sh) ───
-# These are the actual regex checks the production binary runs before ever
-# touching the network — invoked as a real subprocess, not a copy-pasted
-# regex.
-
-run_tg_test() {
-    PATH="$MOCKBIN:$PATH" sh "$BIN/trafficctl-telegram-test.sh" "$1" "$2" 2>/dev/null
-}
-
-OUT=$(run_tg_test '123456:ABC!@#' '999')
-assert_contains "invalid token special chars rejected" "invalid token format" "$OUT"
-
-OUT=$(run_tg_test ':ABCdef' '999')
-assert_contains "invalid token no bot id rejected" "invalid token format" "$OUT"
-
-OUT=$(run_tg_test '123456ABCdef' '999')
-assert_contains "invalid token no colon rejected" "invalid token format" "$OUT"
-
-OUT=$(run_tg_test '123; rm -rf /' '999')
-assert_contains "injection token rejected" "invalid token format" "$OUT"
-
-OUT=$(run_tg_test '123456:ABCdef' 'abc123')
-assert_contains "invalid chat_id letters rejected" "chat_id must be numeric" "$OUT"
-
-OUT=$(run_tg_test '123456:ABCdef' '123;whoami')
-assert_contains "injection chat_id rejected" "chat_id must be numeric" "$OUT"
-
-OUT=$(run_tg_test '' '999')
-assert_contains "empty token rejected before network call" "required" "$OUT"
-
-# A syntactically valid token/chat_id must pass validation and reach curl
-# (mocked, so no real network call happens).
-: > "$CURL_LOG"
-OUT=$(run_tg_test '7104583920:AAF_x9k-Lm2NpQ3rS5tU7vW' '-100123456789')
-assert_contains "valid token/chat_id reaches the API call" '"ok":true' "$OUT"
-assert_eq "valid token/chat_id: curl was actually invoked" "yes" "$([ -s "$CURL_LOG" ] && echo yes || echo no)"
+# telegram-test (token and chat_id checks): tests/test_notify.sh.
 
 # ── tg_json_escape (real function) ──────────────────────────────────────────
 
@@ -200,48 +165,7 @@ TOAST_BODY=$(cat "$CURL_LOG")
 assert_contains "answer_cb: a toast within the limit is sent whole" "$SHORT_TOAST" "$TOAST_BODY"
 assert_not_contains "answer_cb: a toast within the limit gains no ellipsis" "..." "$TOAST_BODY"
 
-# ── Known devices JSON manipulation (real add_known_mac / is_known_mac) ────
-
-KNOWN_TEST="$TMPDIR/known.json"
-FLOW="
-KNOWN_FILE='$KNOWN_TEST'
-is_known_mac 'aa:bb:cc:dd:ee:ff' && echo FOUND || echo NOTFOUND
-"
-echo '[]' > "$KNOWN_TEST"
-OUT=$(PATH="$MOCKBIN:$PATH" sh -c ". '$NEUTERED'; $FLOW")
-assert_eq "empty known: not found" "NOTFOUND" "$OUT"
-
-OUT=$(PATH="$MOCKBIN:$PATH" sh -c "
-. '$NEUTERED'
-KNOWN_FILE='$KNOWN_TEST'
-add_known_mac 'aa:bb:cc:dd:ee:ff' 'test1' '192.168.0.1'
-is_known_mac 'aa:bb:cc:dd:ee:ff' && echo FOUND || echo NOTFOUND
-")
-assert_eq "known: found after real add_known_mac" "FOUND" "$OUT"
-
-OUT=$(PATH="$MOCKBIN:$PATH" sh -c "
-. '$NEUTERED'
-KNOWN_FILE='$KNOWN_TEST'
-add_known_mac 'aa:bb:cc:dd:ee:ff' 'test1' '192.168.0.1'
-add_known_mac '11:22:33:44:55:66' 'test2' '192.168.0.2'
-is_known_mac '11:22:33:44:55:66' && echo FOUND2
-is_known_mac 'aa:bb:cc:dd:ee:ff' && echo FOUND1
-")
-assert_contains "known: second device found after real add" "FOUND2" "$OUT"
-assert_contains "known: first device still found" "FOUND1" "$OUT"
-
-# add_known_mac must sanitize inputs — this is the same function that used to
-# be faked as a standalone "sanitize_mac"/"sanitize_name" in this file.
-: > "$KNOWN_TEST"; echo '[]' > "$KNOWN_TEST"
-OUT=$(PATH="$MOCKBIN:$PATH" sh -c "
-. '$NEUTERED'
-KNOWN_FILE='$KNOWN_TEST'
-add_known_mac 'aa:bb:cc:dd:ee:ff\"; rm -rf /' 'evil\"};\$(rm -rf /);{\"' '192.168.0.1'
-cat '$KNOWN_TEST'
-")
-assert_not_contains "add_known_mac: no semicolon survives into the store" ";" "$OUT"
-assert_not_contains "add_known_mac: no raw double-quote survives" '";' "$OUT"
-assert_not_contains "add_known_mac: no dollar-paren survives" '$(' "$OUT"
+# The known-device ledger moved to trafficctl.notify: tests/test_notify.sh.
 
 # ── Callback validation (real handle_callback, verb "noop" so nothing fires) ─
 # handle_callback validates ip/param before dispatching on verb, so an unknown

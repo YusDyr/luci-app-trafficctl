@@ -27,6 +27,7 @@
 //                                 (socket: getenv('TCTL_UBUS_SOCKET'))
 //   ubus_list()                   every object path, or null when ubus could
 //                                 not be asked (not the same as none)
+//   ubus_event(type, data)        send an event (ubus listen); false if not sent
 // External commands. Interpolate every value through q(); nothing else may
 // call popen() or system() (tests/test_security.sh enforces this).
 //   q(s)                          single-quoted for /bin/sh; dies on
@@ -171,6 +172,20 @@ function ubus_list() {
 	if (r == null)
 		ubusmod.error();
 	return r;
+}
+
+// A ubus event (`ubus listen <type>`): false when it could not be sent.
+function ubus_event(etype, data) {
+	bus ??= ubusmod.connect(getenv('TCTL_UBUS_SOCKET'));
+	if (!bus) {
+		ubusmod.error();
+		return false;
+	}
+	if (!bus.event(etype, data ?? {})) {
+		ubusmod.error();
+		return false;
+	}
+	return true;
 }
 
 function reset() {
@@ -879,3 +894,5 @@ export { path, pid, reset, plain, cursor, uci_get, uci_words, uci_foreach, commi
 	seen_known, seen_mark, seen_seed };
 // What the rpcd plugin and the CLI's legacy commands need.
 export { qv, pipe, passthru, set_context, run_rc, ubus_list };
+// The notification events (trafficctl.notify).
+export { ubus_event };

@@ -134,6 +134,15 @@ WIFIDENY='uci set wireless.default_radio0.macfilter=deny; uci set wireless.defau
 WIFIACL='uci set wireless.default_radio0.macfilter=deny; uci set wireless.default_radio1.macfilter=deny; uci commit wireless; for i in phy0-ap0 phy1-ap0; do echo PONG > "$W/cmd/hostapd_cli -i $i ping"; printf "02:00:00:00:00:05\n02:00:00:00:00:06\n02:00:00:00:00:07\n" > "$W/cmd/hostapd_cli -i $i deny_acl SHOW"; done'
 WIFIALLOW='uci set wireless.default_radio0.macfilter=allow; uci set wireless.default_radio1.macfilter=deny; uci commit wireless'
 
+# ── notifications ──
+# telegram-test: the request curl got, and Telegram refusing it. Not
+# {{wan_ip}}: v1.30.0's jsonfilter expression for it ('@.ipv4-address...') is
+# a syntax error, so it always fell back to the route's source address; the
+# port reads the WAN interface (tests/test_notify.sh). Not the clock tags.
+CURLF='tmp/curl.log'
+CURLERR='echo "{\\"ok\\":false,\\"error_code\\":400,\\"description\\":\\"Bad Request: chat not found\\"}" > "$W/root/tmp/curl.reply"'
+# ── end notifications ──
+
 CASES="
 subnets | json | router-24.10 | trafficctl-subnets.sh | tctl subnets
 subnets-routed | json | router-24.10 | trafficctl-subnets.sh | tctl subnets | $ROUTED
@@ -252,6 +261,15 @@ rules-nft-1.0 | json | router-24.10 | trafficctl-rules.sh | tctl rules | nftfix 
 rules-nft-1.1 | json | router-24.10 | sh:meterize; sh \"\$LEXEC/trafficctl-rules.sh\" | tctl rules | nftfix 1.1.6 rules; $PERSIST
 rules-subnet-1.0 | json | router-24.10 | trafficctl-rules.sh | tctl rules | nftfix 1.0.2 subnet
 rules-subnet-1.1 | json | router-24.10 | sh:meterize; sh \"\$LEXEC/trafficctl-rules.sh\" | tctl rules | nftfix 1.1.6 subnet
+tg-test-default | text+$CURLF | router-24.10 | trafficctl-telegram-test.sh 777:ABC 4242 | tctl telegram-test 777:ABC 4242
+tg-test-env | text+$CURLF | router-24.10 | sh:TCTL_TG_TOKEN=777:ABC sh \"\$LEXEC/trafficctl-telegram-test.sh\" - -100123 | TCTL_TG_TOKEN=777:ABC tctl telegram-test - -100123
+tg-test-template | text+$CURLF | router-24.10 | sh:sh \"\$LEXEC/trafficctl-telegram-test.sh\" 777:ABC 4242 '<b>{{name}}</b> {{ ip }}\\n{{mac}} {{link}} on {{router}} {{ssid}} {{signal}} {{freq}} {{iface}} {{clients}} {{conns}} {{nope}} \"q\"' | tctl telegram-test 777:ABC 4242 '<b>{{name}}</b> {{ ip }}\\n{{mac}} {{link}} on {{router}} {{ssid}} {{signal}} {{freq}} {{iface}} {{clients}} {{conns}} {{nope}} \"q\"'
+tg-test-api-error | text+$CURLF | router-24.10 | trafficctl-telegram-test.sh 777:ABC 4242 | tctl telegram-test 777:ABC 4242 | $CURLERR
+tg-test-garbage | text+$CURLF | router-24.10 | trafficctl-telegram-test.sh 777:ABC 4242 | tctl telegram-test 777:ABC 4242 | echo 'not json' > \"\$W/root/tmp/curl.reply\"
+tg-test-no-chat | text+$CURLF | router-24.10 | trafficctl-telegram-test.sh 777:ABC | tctl telegram-test 777:ABC
+tg-test-no-token | text+$CURLF | router-24.10 | trafficctl-telegram-test.sh '' 4242 | tctl telegram-test '' 4242
+tg-test-chat-nan | text+$CURLF | router-24.10 | trafficctl-telegram-test.sh 777:ABC 42a | tctl telegram-test 777:ABC 42a
+tg-test-bad-token | text+$CURLF | router-24.10 | trafficctl-telegram-test.sh 777-ABC 4242 | tctl telegram-test 777-ABC 4242
 "
 
 command -v jq >/dev/null || { echo "FAIL: jq is required" >&2; exit 1; }
@@ -335,6 +353,40 @@ cat > "$W/bin/spawn" <<EOF
 #!/bin/sh
 echo "\$*" >> "$W/root/tmp/spawn.log"
 EOF
+# ── notifications ──
+# curl, for telegram-test: the request (URL and JSON body, from argv or from
+# the --config on stdin, wherever each side puts them) goes to
+# root/tmp/curl.log, the reply comes from root/tmp/curl.reply.
+cat > "$W/bin/curl" <<EOF
+#!/usr/bin/env python3
+import json, re, sys
+root = "$W/root"
+url, body, argv = '', '', sys.argv[1:]
+for i, a in enumerate(argv):
+    if a in ('-d', '--data', '--data-raw') and i + 1 < len(argv):
+        body = argv[i + 1]
+if '-' in argv:
+    for line in sys.stdin.read().splitlines():
+        m = re.match(r'^(\\S+) = "(.*)"\$', line)
+        if not m:
+            continue
+        v = json.loads('"' + m.group(2) + '"')
+        if m.group(1) == 'url':
+            url = v
+        elif m.group(1) in ('data', 'data-raw'):
+            body = v
+try:
+    body = json.dumps(json.loads(body), sort_keys=True, ensure_ascii=False)
+except ValueError:
+    pass
+with open(root + '/tmp/curl.log', 'a') as f:
+    f.write('url=%s body=%s\\n' % (url, body))
+try:
+    sys.stdout.write(open(root + '/tmp/curl.reply').read())
+except OSError:
+    sys.stdout.write('{"ok":true,"result":{}}')
+EOF
+# ── end notifications ──
 chmod +x "$W/bin/"*
 # A recorded agent feed, read by both netify sides when a case writes it.
 export TCTL_NETIFY_FEED="$W/root/tmp/feed"
@@ -487,6 +539,10 @@ PORTED=$(awk '/^const commands = \{/ { f = 1; next } f && /^\};/ { f = 0 }
     f && match($0, /^\t'"'"'?[a-z-]+'"'"'?: /) { c = substr($0, 2, RLENGTH - 3); gsub(/'"'"'/, "", c); print c }' \
     "$UC_REPO/trafficctl/files/usr/sbin/trafficctl" | tr '\n' ' ')
 case " $PORTED " in *" totals "*) ;; *) echo "FAIL: no ported commands found in the CLI ($PORTED)"; exit 1 ;; esac
+# ── notifications ──
+# `notify` is new in the CLI, not a port: v1.30.0 has no script for it.
+PORTED=$(printf '%s\n' $PORTED | grep -vx notify | tr '\n' ' ')
+# ── end notifications ──
 for c in $PORTED; do
     [ -e "$STUBS/trafficctl-$c.sh" ] || { echo "FAIL: ported command $c has no legacy script to stub"; exit 1; }
 done
@@ -742,6 +798,10 @@ done <<< "$RPCD_CASES"
 # Every method the plugin lists has a case.
 covered=$(printf '%s\n' "$RPCD_CASES" | awk -F'|' 'NF > 3 { gsub(/[[:space:]]/, "", $4); print $4 }')
 for m in $("$UCODE" -S -L "$UC_LIB" "$NPLUGIN" list | jq -r 'keys[]'); do
+    # ── notifications ── new in 1.31, no v1.30.0 method to compare with
+    # (tests/test_notify.sh covers them)
+    case "$m" in notify_*) continue ;; esac
+    # ── end notifications ──
     printf '%s\n' "$covered" | grep -qx "$m" ||
         { FAIL=$((FAIL + 1)); echo "FAIL: rpcd method $m has no equivalence case"; }
 done

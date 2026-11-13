@@ -11,6 +11,7 @@ import * as lib from 'trafficctl.lib';
 import * as net from 'trafficctl.net';
 import * as ctl from 'trafficctl.ctl';
 import * as report from 'trafficctl.report';
+import * as notify from 'trafficctl.notify';
 
 function out(v) {
 	print(lib.to_json(v), '\n');
@@ -20,6 +21,9 @@ function result(r) {
 	out(r);
 	return r.ok ? 0 : 1;
 }
+
+const NOTIFY_USAGE = 'usage: trafficctl notify emit <event> [key=value...]|dispatch <event> [key=value...]|' +
+	'scan|watch|wanted|dhcp <mac> [ip] [name]|migrate|test <sender>';
 
 const NAMES_USAGE = 'usage: trafficctl names list|set <ip> <name>|remove <ip>';
 // The script's own wording: the rpcd plugin and the view show it as it is.
@@ -112,6 +116,46 @@ const commands = {
 			out(r.out);
 		return r.rc;
 	},
+
+	// ── notifications (trafficctl.notify) ──
+	notify: (args) => {
+		let sub = shift(args);
+		switch (sub) {
+		case 'emit':
+			return result(notify.emit(args[0], notify.parse_kv(slice(args, 1))));
+		case 'dispatch': {
+			let f = notify.parse_kv(slice(args, 1));
+			out(notify.dispatch(args[0], f, lib.valid_int(f.time ?? '', 0)));
+			return 0;
+		}
+		case 'scan':
+			out({ ok: true, ...notify.scan() });
+			return 0;
+		case 'watch':
+			notify.watch();
+			return 0;
+		case 'wanted': {
+			let w = notify.scan_wanted();
+			out({ ok: w });
+			return w ? 0 : 1;
+		}
+		case 'dhcp':
+			return result(notify.dhcp(args[0], args[1], args[2]));
+		case 'migrate':
+			return result(notify.migrate());
+		case 'test':
+			return result(notify.test(args[0]));
+		default:
+			return result({ ok: false, msg: NOTIFY_USAGE });
+		}
+	},
+
+	// Always exit 0, as the script did: the reply says what happened.
+	'telegram-test': (args) => {
+		out(notify.telegram_test(args));
+		return 0;
+	},
+	// ── end notifications ──
 };
 
 // Commands the shell scripts still serve: run with our arguments, stdin,
@@ -126,7 +170,6 @@ const LEGACY = {
 	portfw: 'trafficctl-portfw.sh',
 	ratelimit: 'trafficctl-ratelimit.sh',
 	shape: 'trafficctl-shape.sh',
-	'telegram-test': 'trafficctl-telegram-test.sh',
 	totals: 'trafficctl-totals.sh',
 	unblock: 'trafficctl-unblock.sh',
 };

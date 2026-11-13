@@ -302,6 +302,7 @@ do_add() {
     fi
 
     save_shape "$IP" "$RATE" "$classid" "$RATE_UP"
+    tctl_notify limit_applied ip="$IP" rate_kbit="$RATE" rate_kbit_up="$RATE_UP" mode=shaper
     local rates="${RATE} kbit/s"
     [ "$RATE_UP" != "$RATE" ] && rates="${RATE} kbit/s down, ${RATE_UP} kbit/s up"
     # Linux HTB never gets to queue a flow the NSS firmware is forwarding, so

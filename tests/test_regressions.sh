@@ -363,41 +363,8 @@ DELETED=$(cat "$NFT_DELETE_LOG")
 assert_contains "unblock via Telegram path actually deleted the rule (handle 42)" "handle 42" "$DELETED"
 
 # ════════════════════════════════════════════════════════════════════════════
-# 7. Telegram bot token never appears in fake-curl argv (goes via stdin)
-# ════════════════════════════════════════════════════════════════════════════
-# (Covered end-to-end against tg_api/tg_send in test_security.sh; repeated
-# here narrowly against trafficctl-telegram-test.sh's independent tg call
-# path, which has its own curl invocation.)
-
-cat > "$MOCKBIN/uci" <<'MOCK'
-#!/bin/sh
-echo "OpenWrt"
-MOCK
-CURL_ARGV="$TMPDIR/curl_argv2.log"
-CURL_STDIN="$TMPDIR/curl_stdin2.log"
-: > "$CURL_ARGV"; : > "$CURL_STDIN"
-cat > "$MOCKBIN/curl" <<MOCK
-#!/bin/sh
-echo "\$*" >> "$CURL_ARGV"
-cat >> "$CURL_STDIN"
-echo '{"ok":true}'
-MOCK
-cat > "$MOCKBIN/jsonfilter" <<'MOCK'
-#!/bin/sh
-exit 1
-MOCK
-cat > "$MOCKBIN/ip" <<'MOCK'
-#!/bin/sh
-exit 1
-MOCK
-chmod +x "$MOCKBIN/uci" "$MOCKBIN/curl" "$MOCKBIN/jsonfilter" "$MOCKBIN/ip"
-
-PATH="$MOCKBIN:$PATH" sh "$BIN/trafficctl-telegram-test.sh" "999999:SECRETTOKENVALUE" "12345" >/dev/null 2>&1
-assert_not_contains "telegram-test.sh: bot token absent from curl argv" \
-    "SECRETTOKENVALUE" "$(cat "$CURL_ARGV")"
-assert_contains "telegram-test.sh: bot token present on curl's stdin (--config -)" \
-    "SECRETTOKENVALUE" "$(cat "$CURL_STDIN")"
-
+# 7. telegram-test keeps the bot token out of curl's argv: tests/test_notify.sh
+#    (the command is `trafficctl telegram-test` now).
 # ════════════════════════════════════════════════════════════════════════════
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"

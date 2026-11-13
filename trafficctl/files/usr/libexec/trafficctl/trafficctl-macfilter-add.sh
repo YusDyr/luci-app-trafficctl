@@ -116,4 +116,5 @@ case "$ENFORCE" in
 esac
 
 tctl_log "wifi_block" "$IP" "MAC=$MAC enforce=$ENFORCE" "${TCTL_VIA:-cli}" "${TCTL_SRC:-local}"
+[ "$OK" = "false" ] || tctl_notify block_applied ip="$IP" mac="$MAC" kind=wifi
 printf '{"ok":%s,"enforcement":"%s","msg":"%s"}\n' "$OK" "$ENFORCE" "$MSG"

@@ -1465,3 +1465,15 @@ tctl_nss_defunct() {
     echo 1 > "$f" 2>/dev/null || true
     return 0
 }
+
+# ── notifications ───────────────────────────────────────────────────────────
+# tctl_notify <event> [key=value...]: hand an event to `trafficctl notify emit`
+# (ubus trafficctl.notify, /etc/hotplug.d/trafficctl, the configured senders).
+# Never fails the caller and never waits on the network: emit queues the
+# delivery. TCTL_NOTIFY_CLI points the tests at a mock.
+tctl_notify() {
+    local cli="${TCTL_NOTIFY_CLI:-/usr/sbin/trafficctl}"
+    [ -x "$cli" ] || return 0
+    "$cli" notify emit "$@" via="${TCTL_VIA:-cli}" src="${TCTL_SRC:-local}" >/dev/null 2>&1 </dev/null
+    return 0
+}

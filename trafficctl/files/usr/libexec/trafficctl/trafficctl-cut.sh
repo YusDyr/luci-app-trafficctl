@@ -411,6 +411,8 @@ do_engage() {
 	tctl_log "cut" "all" "expires=$expires persist=$persist" "${TCTL_VIA:-cli}" "${TCTL_SRC:-local}"
 
 	[ "$quiet" = "quiet" ] && return 0
+	# A restore after a reboot is quiet and is not a new cut.
+	tctl_notify cut_engaged duration="$([ "${expires:-0}" -gt 0 ] 2>/dev/null && echo $((expires - $(now))) || echo 0)" persist="$persist"
 	emit_status "internet cut for all devices${ct_msg}"
 }
 
