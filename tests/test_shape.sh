@@ -100,7 +100,7 @@ st_run add 192.168.1.42 5000 > "$STATE/c2" & p2=$!
 st_run add 192.168.1.43 5000 > "$STATE/c3" & p3=$!
 wait "$p1" "$p2" "$p3"
 assert_eq "concurrent adds: three distinct minors" "1:2 1:3 1:4" \
-    "$(echo $(for i in 41 42 43; do cid_of 192.168.1.$i; echo; done | sort))"
+    "$(for i in 41 42 43; do cid_of 192.168.1.$i; echo; done | sort | paste -sd " " -)"
 assert_eq "concurrent adds: three download filters" "3" "$(filters_of br-lan | wc -l)"
 assert_eq "concurrent adds: each its own class" "3" "$(filters_of br-lan | awk '{ print $4 }' | sort -u | wc -l)"
 assert_eq "concurrent adds: all replied ok" "3" "$(cat "$STATE/c1" "$STATE/c2" "$STATE/c3" | grep -c '"ok":true')"
