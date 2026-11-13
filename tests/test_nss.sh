@@ -20,8 +20,10 @@ FAIL=0
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$REPO_ROOT/trafficctl/files/usr/libexec/trafficctl"
 
-TMPDIR=$(mktemp -d)
-trap 'rm -rf "$TMPDIR"' EXIT
+# shellcheck source=tests/lib/ucode.sh
+. "$(dirname "$0")/lib/ucode.sh"
+TMPDIR="$UC_TMP/nss"
+mkdir -p "$TMPDIR"
 
 ECM="$TMPDIR/ecm"
 
@@ -136,8 +138,9 @@ printf '' > "$ECM/ecm_db/defunct_all"
 # Structural, so a success message added later without the note fails here
 # rather than shipping an unqualified claim. Checked per script because each
 # has its own set of partial-success messages. The block is `trafficctl block`
-# since the ucode port, run against an active ECM in tests/test_block.sh.
-for f in trafficctl-ratelimit.sh trafficctl-shape.sh; do
+# since the ucode port, run against an active ECM in tests/test_block.sh; the
+# limiter is `trafficctl ratelimit`, run against one below.
+for f in trafficctl-shape.sh; do
     src="$BIN/$f"
     for fn in tctl_nss_status tctl_nss_defunct; do
         if grep -q "$fn" "$src"; then
@@ -152,10 +155,7 @@ for f in trafficctl-ratelimit.sh trafficctl-shape.sh; do
     # success message, which reads "rate limit ... for $IP" — verified by
     # mutation. The number of apply-success emissions per script is pinned
     # instead, so ADDING one without the verdict fails here too.
-    case "$f" in
-        trafficctl-ratelimit.sh) want=3 ;;
-        trafficctl-shape.sh)     want=3 ;;
-    esac
+    want=3
     got=$(grep -c '\\"nss\\":\\"$NSS\\"' "$src")
     assert_eq "$f reports nss on each of its apply results" "$want" "$got"
 
@@ -169,6 +169,39 @@ for f in trafficctl-ratelimit.sh trafficctl-shape.sh; do
         PASS=$((PASS + 1))
     fi
 done
+
+# ── the limiter, against an active ECM ─────────────────────────────────────
+# Each of its three apply results (both directions, upload only, download
+# only) carries the field and the verdict, and the flows ECM holds are
+# defuncted.
+# shellcheck source=tests/lib/limit_env.sh
+. "$UC_TESTLIB/limit_env.sh"
+lt_net br-lan lan1
+LECM="$ROOT/sys/kernel/debug/ecm"
+mkdir -p "$LECM/ecm_db"
+for c in both:: up:dl_br_lan: down::ul_lan1; do
+    IFS=: read -r name hooks chains <<EOF
+$c
+EOF
+    lt_reset
+    : > "$LECM/ecm_db/defunct_all"
+    OUT=$(NFT_FAIL_HOOKS="$hooks dl" NFT_FAIL_CHAINS="$chains" lt_run ratelimit 192.168.1.50 5000)
+    [ "$name" = both ] && OUT=$(lt_run ratelimit 192.168.1.50 5000)
+    assert_contains "limiter $name: reports nss" '"nss":"active"' "$OUT"
+    assert_contains "limiter $name: the message says the limit is not enforced" "NOT ENFORCED" "$OUT"
+    assert_eq "limiter $name: accelerated flows are defuncted" "1" "$(tr -d '\n' < "$LECM/ecm_db/defunct_all")"
+done
+assert_contains "limiter: the last case was the download-only result" "DOWNLOAD ONLY" "$OUT"
+echo 1 > "$LECM/front_end_ipv4_stop"
+echo 1 > "$LECM/front_end_ipv6_stop"
+lt_reset
+OUT=$(lt_run ratelimit 192.168.1.50 5000)
+assert_contains "limiter, acceleration stopped: reported" '"nss":"stopped"' "$OUT"
+if printf '%s' "$OUT" | grep -q 'NOT ENFORCED'; then
+    FAIL=$((FAIL + 1)); printf "FAIL: limiter, acceleration stopped: warned anyway\n"
+else
+    PASS=$((PASS + 1))
+fi
 
 # ── the dashboard must surface it where people look ────────────────────────
 # The apply result already says it on every attempt, but the Flow Offload

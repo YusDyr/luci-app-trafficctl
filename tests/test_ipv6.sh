@@ -21,8 +21,12 @@ FAIL=0
 
 BIN="$(cd "$(dirname "$0")/.." && pwd)/trafficctl/files/usr/libexec/trafficctl"
 
-TMPDIR=$(mktemp -d)
-trap 'rm -rf "$TMPDIR"' EXIT
+# The limiter is `trafficctl ratelimit` (ucode, run with TCTL_ROOT=$ROOT); the
+# MAC helpers it shares with the shell readers are still fw.sh's.
+# shellcheck source=tests/lib/ucode.sh
+. "$(dirname "$0")/lib/ucode.sh"
+TMPDIR="$UC_TMP/ipv6"
+ROOT="$TMPDIR/root"
 MOCKBIN="$TMPDIR/bin"
 mkdir -p "$MOCKBIN"
 
@@ -83,8 +87,20 @@ assert_contains "harness: the lease path was redirected into the scratch dir" \
 assert_eq "harness: no production lease path survived the rewrite" "" \
     "$(grep -n '/tmp/dhcp.leases' "$FW")"
 
-RATELIMIT_SH="$TMPDIR/ratelimit.sh"
-sed "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FW|" "$BIN/trafficctl-ratelimit.sh" > "$RATELIMIT_SH"
+# The scratch root of the ucode limiter: the same LAN as the shell mocks
+# below, br-lan bridging lan1, eth1 the WAN.
+mkdir -p "$ROOT/etc/config" "$ROOT/etc/trafficctl" "$ROOT/tmp" "$TMPDIR/ubus"
+ln -s "$LEASES" "$ROOT/tmp/dhcp.leases"
+printf "config trafficctl 'main'\n\toption persist_rules '0'\n\nconfig logging 'logging'\n\toption enabled '0'\n" \
+    > "$ROOT/etc/config/trafficctl"
+printf "config interface 'lan'\n\toption device 'br-lan'\n\nconfig interface 'wan'\n\toption device 'eth1'\n" \
+    > "$ROOT/etc/config/network"
+printf "config zone\n\toption name 'lan'\n\tlist network 'lan'\n\nconfig zone\n\toption name 'wan'\n\tlist network 'wan'\n\toption masq '1'\n" \
+    > "$ROOT/etc/config/firewall"
+printf '{"interface":[{"interface":"lan","up":true,"l3_device":"br-lan","ipv4-address":[{"address":"192.168.1.1","mask":24}]},{"interface":"wan","up":true,"l3_device":"eth1"}]}\n' \
+    > "$TMPDIR/ubus/network.interface@dump.json"
+printf '{"up":true,"l3_device":"eth1"}\n' > "$TMPDIR/ubus/network.interface.wan@status.json"
+ubus_start "$TMPDIR/ubus"
 
 # ── mocks ────────────────────────────────────────────────────────────────────
 
@@ -190,11 +206,13 @@ chmod +x "$MOCKBIN"/*
 
 # br-lan is a bridge with one port: ingress hooks land on the PORT, egress on
 # the bridge itself (see tctl_ingress_devices).
-mkdir -p "$TMPDIR/sys/class/net/br-lan/brif/lan1" "$TMPDIR/sys/class/net/eth1"
+mkdir -p "$TMPDIR/sys/class/net/br-lan/brif/lan1" "$TMPDIR/sys/class/net/eth1" \
+         "$TMPDIR/sys/class/net/lan1"
 export TCTL_SYSFS_NET="$TMPDIR/sys/class/net"
+ln -s "$TMPDIR/sys" "$ROOT/sys"
 
 fw() { PATH="$MOCKBIN:$PATH" sh -c ". $FW >/dev/null 2>&1; $1" 2>&1; }
-run_ratelimit() { : > "$NFT_LOG"; PATH="$MOCKBIN:$PATH" sh "$RATELIMIT_SH" "$@" 2>&1; }
+run_ratelimit() { : > "$NFT_LOG"; PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" tctl ratelimit "$@" 2>&1; }
 
 # The fixture LAN:
 #   .50  dual-stack laptop      — lease, ARP entry, three v6 addresses
@@ -390,7 +408,7 @@ ${TAB}}
 EOF
 
 : > "$NFT_LOG"
-fw 'tctl_ratelimit_remove 192.168.1.5 rl_ratelimit_192_168_1_5' >/dev/null
+PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" tcall trafficctl.limit remove '"192.168.1.5"' '"rl_ratelimit_192_168_1_5"' >/dev/null
 DELS=$(grep '^delete rule netdev' "$NFT_LOG")
 assert_contains "limiter removal: deletes the IPv4 upload rule" \
     "delete rule netdev tm_ratelimit ul_lan1 handle 11" "$DELS"

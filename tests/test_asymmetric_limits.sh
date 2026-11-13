@@ -26,18 +26,26 @@
 PASS=0
 FAIL=0
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="$ROOT/trafficctl/files/usr/libexec/trafficctl"
-HOTPLUG="$ROOT/trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes"
-RPCD="$ROOT/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+BIN="$REPO/trafficctl/files/usr/libexec/trafficctl"
+HOTPLUG="$REPO/trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes"
+RPCD="$REPO/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
 
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-MOCKBIN="$TMP/bin"
-mkdir -p "$MOCKBIN"
+# The limiter is `trafficctl ratelimit` and the limit half of `trafficctl
+# restore` (ucode, tests/lib/limit_env.sh); the shaper, the shapes restore of
+# the hook and fw.sh's persistence helpers are still shell, run with the fakes
+# in $SHBIN. Both write the one rules.json, $RULES.
+# shellcheck source=tests/lib/ucode.sh
+. "$(dirname "$0")/lib/ucode.sh"
+# shellcheck source=tests/lib/limit_env.sh
+. "$UC_TESTLIB/limit_env.sh"
+lt_cfg 1
+lt_net br-lan lan1
+printf '[]' > "$RULES"
+TMP="$UC_TMP/asym"
+SHBIN="$TMP/bin"
+mkdir -p "$SHBIN"
 SHAPES="$TMP/shapes.json"
-RULES="$TMP/rules.json"
-NFT_LOG="$TMP/nft.log"
 TC_LOG="$TMP/tc.log"
 
 assert_eq() {
@@ -72,7 +80,7 @@ assert_not_contains() {
 
 # ── mocks ───────────────────────────────────────────────────────────────────
 
-cat > "$MOCKBIN/uci" <<'MOCK'
+cat > "$SHBIN/uci" <<'MOCK'
 #!/bin/sh
 case "$3" in
     network.lan.device) echo "br-lan" ;;
@@ -86,7 +94,7 @@ case "$3" in
 esac
 MOCK
 
-cat > "$MOCKBIN/ubus" <<'MOCK'
+cat > "$SHBIN/ubus" <<'MOCK'
 #!/bin/sh
 case "$2" in
     network.interface.wan) echo '{"l3_device":"eth1"}' ;;
@@ -94,7 +102,7 @@ case "$2" in
 esac
 MOCK
 
-cat > "$MOCKBIN/jsonfilter" <<'MOCK'
+cat > "$SHBIN/jsonfilter" <<'MOCK'
 #!/bin/sh
 file=""; expr=""
 while [ $# -gt 0 ]; do
@@ -161,7 +169,7 @@ case "$expr" in
 esac
 MOCK
 
-cat > "$MOCKBIN/nft" <<MOCK
+cat > "$SHBIN/nft" <<MOCK
 #!/bin/sh
 printf '%s\n' "\$*" >> "$NFT_LOG"
 case "\$*" in
@@ -171,7 +179,7 @@ esac
 exit 0
 MOCK
 
-cat > "$MOCKBIN/tc" <<MOCK
+cat > "$SHBIN/tc" <<MOCK
 #!/bin/sh
 printf '%s\n' "\$*" >> "$TC_LOG"
 case "\$*" in
@@ -187,10 +195,10 @@ exit 0
 MOCK
 
 for m in logger conntrack ip; do
-    printf '#!/bin/sh\nexit 0\n' > "$MOCKBIN/$m"
+    printf '#!/bin/sh\nexit 0\n' > "$SHBIN/$m"
 done
 
-chmod +x "$MOCKBIN"/*
+chmod +x "$SHBIN"/*
 
 export TCTL_TEST_PERSIST="$TMP/persist_on"
 mkdir -p "$TMP/sys/class/net/br-lan/brif/lan1"
@@ -213,13 +221,13 @@ patch_script() {
     chmod +x "$2"
 }
 patch_script "$BIN/trafficctl-shape.sh"     "$TMP/shape.sh"
-patch_script "$BIN/trafficctl-ratelimit.sh" "$TMP/ratelimit.sh"
 patch_script "$HOTPLUG"                     "$TMP/hotplug"
 
 assert_not_contains "harness: no production shapes path survived the rewrite" \
     "/etc/trafficctl/shapes.json" "$(cat "$TMP/shape.sh")"
 
-run() { PATH="$MOCKBIN:$PATH" sh "$@" 2>/dev/null; }
+run() { PATH="$SHBIN:$PATH" sh "$@" 2>/dev/null; }
+rl() { lt_run ratelimit "$@"; }
 
 # Source only the record helpers out of the patched shaper, so they can be
 # called directly without going through its action dispatch.
@@ -238,7 +246,7 @@ slice_helpers() {
 slice_helpers
 
 helper() {
-    PATH="$MOCKBIN:$PATH" sh -c ". '$TMP/helpers.sh'; $1" 2>/dev/null
+    PATH="$SHBIN:$PATH" sh -c ". '$TMP/helpers.sh'; $1" 2>/dev/null
 }
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -317,7 +325,7 @@ assert_not_contains "an explicitly equal upload rate still writes no field" \
 # ════════════════════════════════════════════════════════════════════════════
 
 : > "$NFT_LOG"
-out=$(run "$TMP/ratelimit.sh" 192.168.1.70 8000 rl_test each 800)
+out=$(rl 192.168.1.70 8000 rl_test each 800)
 
 # 8000 kbit is 1000000 bytes/s (SI: kbit * 125); 800 kbit is 100000.
 assert_contains "download rule takes the download rate" \
@@ -329,7 +337,7 @@ assert_contains "limiter reports both figures" "8000 kbit/s down, 800 kbit/s up"
 # ── absence means symmetric, and never zero ────────────────────────────────
 
 : > "$NFT_LOG"
-out=$(run "$TMP/ratelimit.sh" 192.168.1.71 8000 rl_test each)
+out=$(rl 192.168.1.71 8000 rl_test each)
 assert_contains "a limit with no upload argument polices upload at the same rate" \
     "1000000 bytes/second" "$(cat "$NFT_LOG")"
 # 1 byte/s is what rate 0 would floor to — the total-block signature.
@@ -343,27 +351,27 @@ assert_contains "and it reports a single figure" "8000 kbit/s for" "$out"
 
 : > "$TCTL_TEST_PERSIST"
 printf '[]' > "$RULES"
-run "$TMP/ratelimit.sh" 192.168.1.80 8000 rl_test each 800 >/dev/null
+rl 192.168.1.80 8000 rl_test each 800 >/dev/null
 assert_contains "an asymmetric limit persists its upload rate" '"param_up":"800"' "$(cat "$RULES")"
 
 printf '[]' > "$RULES"
-run "$TMP/ratelimit.sh" 192.168.1.81 8000 rl_test each >/dev/null
+rl 192.168.1.81 8000 rl_test each >/dev/null
 assert_not_contains "a symmetric limit writes no upload field" "param_up" "$(cat "$RULES")"
 assert_contains "and still records mode and rate as before" '"mode":"each"' "$(cat "$RULES")"
 
-# ── the restore hook must carry the upload rate back ───────────────────────
+# ── the restore must carry the upload rate back ────────────────────────────
 
-: > "$NFT_LOG"
+lt_reset
 printf '[{"type":"ratelimit","ip":"192.168.1.90","param":"8000","mode":"each","param_up":"800"}]' > "$RULES"
 printf '[]' > "$SHAPES"
-INTERFACE=lan ACTION=ifup run "$TMP/hotplug" >/dev/null 2>&1
+lt_run restore >/dev/null
 assert_contains "restore re-applies the download rate" "1000000 bytes/second" "$(cat "$NFT_LOG")"
 assert_contains "restore re-applies the upload rate" "100000 bytes/second" "$(cat "$NFT_LOG")"
 
 # A record from before the feature must come back symmetric, not zeroed.
-: > "$NFT_LOG"
+lt_reset
 printf '[{"type":"ratelimit","ip":"192.168.1.91","param":"8000","mode":"each"}]' > "$RULES"
-INTERFACE=lan ACTION=ifup run "$TMP/hotplug" >/dev/null 2>&1
+lt_run restore >/dev/null
 assert_contains "a pre-feature record restores symmetrically" "1000000 bytes/second" "$(cat "$NFT_LOG")"
 assert_not_contains "a pre-feature record does not restore as a total upload block" \
     "over 1 bytes/second" "$(cat "$NFT_LOG")"
@@ -403,7 +411,7 @@ assert_eq "both handlers normalise a zero upload rate away" "2" \
 # ceiling and floor to one byte/second — a total upload block. It is sliced out
 # of status.js rather than restated, so this cannot drift into testing a copy.
 
-JS="$ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js"
+JS="$REPO/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js"
 
 if command -v node >/dev/null 2>&1; then
     sed -n '/^\t\tfunction getRateKbitUp()/,/^\t\t}/p' "$JS"  > "$TMP/ui.js"
@@ -532,9 +540,9 @@ assert_eq "every apply path sends null, not 0, when symmetric" "3" \
 
 : > "$TCTL_TEST_PERSIST"
 printf '[]' > "$RULES"
-run "$TMP/ratelimit.sh" 192.168.1.10  4000 rl_test each     >/dev/null
-run "$TMP/ratelimit.sh" 192.168.1.100 5000 rl_test each     >/dev/null
-run "$TMP/ratelimit.sh" 192.168.1.1   6000 rl_test each 600 >/dev/null
+rl 192.168.1.10  4000 rl_test each     >/dev/null
+rl 192.168.1.100 5000 rl_test each     >/dev/null
+rl 192.168.1.1   6000 rl_test each 600 >/dev/null
 
 rules=$(cat "$RULES")
 assert_eq "three adjacent addresses keep three separate records" "3" \
@@ -544,7 +552,7 @@ assert_contains "the .100 record survives too" '"ip":"192.168.1.100","param":"50
 assert_contains "and .1 is stored with its own upload rate" '"param_up":"600"' "$rules"
 
 # Re-saving one target must replace exactly that record and leave its neighbours.
-run "$TMP/ratelimit.sh" 192.168.1.1 7000 rl_test each >/dev/null
+rl 192.168.1.1 7000 rl_test each >/dev/null
 rules=$(cat "$RULES")
 assert_eq "re-saving one target still leaves three records" "3" \
     "$(printf '%s' "$rules" | grep -o '"type":"ratelimit"' | wc -l | tr -d ' ')"
@@ -561,8 +569,8 @@ assert_contains "the .10 neighbour is untouched" '"ip":"192.168.1.10","param":"4
 # wrong one silently deletes a limit that the next reboot then does not
 # restore — the damage surfaces long after the cause.
 #
-# Rate 0 is the removal path (trafficctl-ratelimit.sh:47).
-run "$TMP/ratelimit.sh" 192.168.1.1 0 rl_test >/dev/null
+# Rate 0 is the removal path of `trafficctl ratelimit`.
+rl 192.168.1.1 0 rl_test >/dev/null
 rules=$(cat "$RULES")
 assert_eq "removing one target leaves its two neighbours" "2" \
     "$(printf '%s' "$rules" | grep -o '"type":"ratelimit"' | wc -l | tr -d ' ')"
@@ -571,13 +579,12 @@ assert_contains "the .10 neighbour survived the removal" '"ip":"192.168.1.10","p
 assert_contains "the .100 neighbour survived too" '"ip":"192.168.1.100","param":"5000"' "$rules"
 
 # The longest-prefix direction as well: removing .10 must not take .100.
-run "$TMP/ratelimit.sh" 192.168.1.10 0 rl_test >/dev/null
+rl 192.168.1.10 0 rl_test >/dev/null
 rules=$(cat "$RULES")
 assert_eq "removing the shorter of two prefixed addresses leaves the longer" "1" \
     "$(printf '%s' "$rules" | grep -o '"type":"ratelimit"' | wc -l | tr -d ' ')"
 assert_contains "and the one left is the longer address" '"ip":"192.168.1.100","param":"5000"' "$rules"
 
-LOGGER_LOG="$TMP/logger.log"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Rates are whole numbers
@@ -587,30 +594,30 @@ LOGGER_LOG="$TMP/logger.log"
 # clamped the 0 to 1 byte/s, so a typo became a persisted near-total block
 # reported as {"ok":true}.
 
-printf '#!/bin/sh\necho "$*" >> "%s"\nexit 0\n' "$LOGGER_LOG" > "$MOCKBIN/logger"
-chmod +x "$MOCKBIN/logger"
+printf '#!/bin/sh\necho "$*" >> "%s"\nexit 0\n' "$LOGGER_LOG" > "$SHBIN/logger"
+chmod +x "$SHBIN/logger"
 : > "$TCTL_TEST_PERSIST"
 
 for r in 1 5000 100000000; do
     assert_eq "tctl_validate_rate accepts $r" "0" \
-        "$(PATH="$MOCKBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; tctl_validate_rate '$r'; echo \$?")"
+        "$(PATH="$SHBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; tctl_validate_rate '$r'; echo \$?")"
 done
 for r in '' 0 abc 1.5 010 -5 1e3 ' 5' 100000001 999999999999999999999; do
     assert_eq "tctl_validate_rate refuses '$r'" "1" \
-        "$(PATH="$MOCKBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; tctl_validate_rate '$r'; echo \$?")"
+        "$(PATH="$SHBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; tctl_validate_rate '$r'; echo \$?")"
 done
 
 printf '[]' > "$RULES"
 for r in abc 1.5 010 -5 100000001; do
     : > "$NFT_LOG"
-    out=$(run "$TMP/ratelimit.sh" 192.168.1.90 "$r")
+    out=$(rl 192.168.1.90 "$r")
     assert_contains "ratelimit: rate '$r' is refused" '"ok":false' "$out"
     assert_not_contains "ratelimit: rate '$r' writes no rule" 'limit rate over' "$(cat "$NFT_LOG")"
 done
-out=$(run "$TMP/ratelimit.sh" 192.168.1.90 5000 rl_test each abc)
+out=$(rl 192.168.1.90 5000 rl_test each abc)
 assert_contains "ratelimit: an invalid upload rate is refused" '"ok":false' "$out"
 assert_not_contains "ratelimit: nothing invalid was persisted" '192.168.1.90' "$(cat "$RULES")"
-out=$(run "$TMP/ratelimit.sh" 192.168.1.90 0)
+out=$(rl 192.168.1.90 0)
 assert_contains "ratelimit: 0 still removes" '"ok":true' "$out"
 
 : > "$SHAPES"
@@ -631,33 +638,15 @@ assert_not_contains "shape: nothing invalid was persisted" '192.168.1.91' "$(cat
 # Without kmod-nft-netdev the kernel has no netdev family. The table creation
 # failed into /dev/null and the result still read as applied.
 
-cat > "$MOCKBIN/nft" <<MOCK
-#!/bin/sh
-printf '%s\n' "\$*" >> "$NFT_LOG"
-case "\$*" in
-    "list tables") echo "table inet fw4" ;;
-    "add table netdev tm_ratelimit")
-        if [ -f "$TMP/no_netdev" ]; then
-            echo "Error: Could not process rule: Operation not supported" >&2
-            exit 1
-        fi
-        ;;
-esac
-exit 0
-MOCK
-chmod +x "$MOCKBIN/nft"
-
-: > "$TMP/no_netdev"
 : > "$LOGGER_LOG"
-out=$(run "$TMP/ratelimit.sh" 192.168.1.92 5000)
+out=$(NFT_FAIL_TABLE=1 rl 192.168.1.92 5000)
 assert_contains "no netdev family: the limit is refused" '"ok":false' "$out"
 assert_contains "no netdev family: the reply names kmod-nft-netdev" 'kmod-nft-netdev' "$out"
 assert_contains "no netdev family: the failure is logged with nft's error" \
     'Operation not supported' "$(cat "$LOGGER_LOG")"
-rm -f "$TMP/no_netdev"
 
 # ════════════════════════════════════════════════════════════════════════════
-# The restore hook logs real failures only
+# The restore logs real failures only
 # ════════════════════════════════════════════════════════════════════════════
 #
 # `a && b && c || logger` logged "Failed to restore" for every record with no
@@ -665,10 +654,9 @@ rm -f "$TMP/no_netdev"
 # path of tctl_ratelimit_add returns 0 whatever happened.
 
 hook() {
+    lt_reset
     printf '%s' "$1" > "$RULES"
-    : > "$NFT_LOG"
-    : > "$LOGGER_LOG"
-    PATH="$MOCKBIN:$PATH" ACTION=ifup INTERFACE=lan sh "$TMP/hotplug" >/dev/null 2>&1
+    lt_run restore >/dev/null
 }
 
 hook '[{"type":"ratelimit","ip":"192.168.1.93","param":"0"},{"type":"ratelimit","ip":"192.168.1.95","param":""},{"type":"pfw_limit","ip":"forward/tcp/192.168.1.94/8080","param":"0"}]'
@@ -679,11 +667,9 @@ assert_contains "restore: an invalid persisted rate is skipped and logged" \
     'Not restoring ratelimit for 192.168.1.96' "$(cat "$LOGGER_LOG")"
 assert_not_contains "restore: and no rule is written for it" '192.168.1.96' "$(cat "$NFT_LOG")"
 
-: > "$TMP/no_netdev"
-hook '[{"type":"ratelimit","ip":"192.168.1.97","param":"5000"}]'
+NFT_FAIL_TABLE=1 hook '[{"type":"ratelimit","ip":"192.168.1.97","param":"5000"}]'
 assert_contains "restore: a limit that failed to load is logged" \
     'Failed to restore ratelimit for 192.168.1.97' "$(cat "$LOGGER_LOG")"
-rm -f "$TMP/no_netdev"
 
 hook '[{"type":"ratelimit","ip":"192.168.1.98","param":"5000"}]'
 assert_not_contains "restore: a limit that loaded logs nothing" 'Failed to restore' "$(cat "$LOGGER_LOG")"
@@ -728,7 +714,7 @@ run_persist() { # <awk-impl> <shell snippet>
         *) printf '#!/bin/sh\nexec %s "$@"\n' "$(command -v "$impl")" > "$shim/awk" ;;
     esac
     chmod +x "$shim/awk"
-    PATH="$shim:$MOCKBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; $2"
+    PATH="$shim:$SHBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; $2"
 }
 
 persist_count() {
@@ -787,7 +773,7 @@ shim="$TMP/awkfail"
 mkdir -p "$shim"
 printf '#!/bin/sh\nexit 1\n' > "$shim/awk"
 chmod +x "$shim/awk"
-PATH="$shim:$MOCKBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; tctl_persist_save block 192.0.2.99 lab" >/dev/null 2>&1
+PATH="$shim:$SHBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; tctl_persist_save block 192.0.2.99 lab" >/dev/null 2>&1
 rc=$?
 after=$(cat "$RULES")
 assert_eq "a failing awk leaves persist_save unsuccessful" "1" "$rc"
@@ -799,7 +785,7 @@ else
     PASS=$((PASS + 1))
 fi
 
-PATH="$shim:$MOCKBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; tctl_persist_remove block 192.0.2.10" >/dev/null 2>&1
+PATH="$shim:$SHBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; tctl_persist_remove block 192.0.2.10" >/dev/null 2>&1
 rc=$?
 after=$(cat "$RULES")
 assert_eq "a failing awk leaves persist_remove unsuccessful" "1" "$rc"
