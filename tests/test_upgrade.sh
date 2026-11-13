@@ -270,7 +270,22 @@ echo "OK: the old shell scripts were removed by the upgrade"
 if [ "$OLD_RULES" = 1 ]; then
     nft flush chain inet fw4 forward
     nft delete table inet tctl_pfw
-    ACTION=ifup INTERFACE=lan sh /etc/hotplug.d/iface/99-trafficctl-shapes
+    # The hook's status is restore's: non-zero when a record did not come
+    # back. Without netifd there is no LAN interface in ubus, so the upload
+    # half of a rate limit has no port to hook and that limit counts as
+    # failed (the download half on the WAN device comes back, checked below),
+    # as v1.30.x's hook logged it too. Anything else must restore cleanly.
+    HOOK_RC=0
+    ACTION=ifup INTERFACE=lan sh /etc/hotplug.d/iface/99-trafficctl-shapes || HOOK_RC=$?
+    if [ "$HOOK_RC" != 0 ] && [ "$OLD_RL" != 1 ]; then
+        echo "FAIL: the ifup hook reported a failed restore: $(/usr/sbin/trafficctl restore 2>&1)"
+        cat /etc/trafficctl/rules.json; nft list ruleset; exit 1
+    fi
+    if [ "$OLD_RL" = 1 ]; then
+        nft list table netdev tm_ratelimit 2>/dev/null | grep -q '"rl_ratelimit_192_168_1_70"' ||
+            { echo "FAIL: the ifup hook did not restore the old release's rate limit"; nft list ruleset; exit 1; }
+        echo "OK: the ifup hook restored the old release's rate limit (hook status $HOOK_RC)"
+    fi
     nft list chain inet fw4 forward | grep -q '"tctl_block_192_168_1_50"' ||
         { echo "FAIL: the ifup hook did not restore the old release's block"; nft list ruleset; exit 1; }
     nft list table inet tctl_pfw 2>/dev/null | grep -q '"tctl_pfw_pause_tcp_192.168.1.60_80"' ||
