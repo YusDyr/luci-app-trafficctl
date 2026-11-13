@@ -20,7 +20,7 @@
 // The command runs synchronously: the plugin's deferred-call timeout fires
 // when it is done, before its reply is read, as a real one would have meanwhile.
 
-import { readfile, stdin, unlink, stat } from 'fs';
+import { readfile, stdin, unlink, stat, open } from 'fs';
 import * as ubus from 'ubus';
 import * as uloop from 'uloop';
 import * as lib from 'trafficctl.lib';
@@ -140,7 +140,20 @@ function lookup(cmd) {
 }
 
 
+// TCTL_RPCD_EXEC_LOG: one line per file.exec call, its arguments as JSON.
+function exec_log(a) {
+	let p = getenv('TCTL_RPCD_EXEC_LOG');
+	if (p == null || p == '')
+		return;
+	let f = open(p, 'a');
+	if (f) {
+		f.write(lib.to_json(a) + '\n');
+		f.close();
+	}
+}
+
 function file_exec(req) {
+	exec_log(req.args ?? {});
 	let a = req.args ?? {}, cmd = (type(a.command) == 'string') ? lookup(a.command) : null;
 	if (type(a.command) != 'string')
 		return 2;

@@ -17,7 +17,10 @@
 //
 // Nothing here may call an object rpcd itself serves (session, file, uci,
 // luci, rrdns) synchronously: rpcd would wait on itself. Those go through
-// chain() below. procd's (service) and netifd's are fine.
+// chain() below. procd's (service) and netifd's are fine. Nor may anything
+// in process run lib.run/sh/run_rc with a timeout: system() with one blocks
+// SIGCHLD and waits for it, which takes the signal rpcd's own children
+// (file.exec) report their exit with.
 
 import { connect } from 'ubus';
 import * as lib from 'trafficctl.lib';
@@ -506,7 +509,8 @@ const methods = {
 		let ip = arg(a, 'ip'), proto = arg(a, 'proto');
 		if (ip == '')
 			return fail('ip required');
-		return cli((proto == 'tcp' || proto == 'udp') ? [ 'device', ip, '--proto', proto ] : [ 'device', ip ]);
+		let argv = (proto == 'tcp' || proto == 'udp') ? [ 'device', ip, '--proto', proto ] : [ 'device', ip ];
+		return cli(x, [ ...argv, '--max-bytes', '' + DEVICE_MAX_BYTES ]);
 	},
 
 	// The accumulator, not the raw sampler: the lifetime totals the columns
@@ -723,21 +727,21 @@ const methods = {
 		};
 		// Since 1.31 the notification options belong to the notify_telegram
 		// sender (the Notifications tab); the old keys read it back.
-		let x = tg_sender();
-		if (x) {
-			let ev = notify.events_of(x.s), on_ = (x.s.enabled ?? '1') == '1';
+		let snd = tg_sender();
+		if (snd) {
+			let ev = notify.events_of(snd.s), on_ = (snd.s.enabled ?? '1') == '1';
 			r.notify_new_device = on_ && index(ev, 'new_device') >= 0;
 			r.notify_known_device = on_ && index(ev, 'known_device') >= 0;
-			r.notify_template = x.s.template ?? '';
+			r.notify_template = snd.s.template ?? '';
 		}
 		return r;
 	},
 
 	telegram_config_set: (x, a) => {
 		ensure_section('telegram');
-		let x = tg_sender();
-		if (x)
-			tg_sender_set(x, a);
+		let snd = tg_sender();
+		if (snd)
+			tg_sender_set(snd, a);
 		let v = arg(a, 'enabled');
 		if (v != '')
 			uset('telegram', 'enabled', bool01(v));
@@ -750,12 +754,12 @@ const methods = {
 			if (v != '')
 				uset('telegram', o, v);
 		}
-		if (!x)
+		if (!snd)
 			uset('telegram', 'notify_template', arg(a, 'notify_template'));
 		for (let o in [ 'notify_new_device', 'notify_known_device', 'control_enabled', 'btn_block_inet',
 		                'btn_block_wifi', 'btn_limiter', 'btn_shaper' ]) {
 			v = arg(a, o);
-			if (v != '' && (!x || substr(o, 0, 7) != 'notify_'))
+			if (v != '' && (!snd || substr(o, 0, 7) != 'notify_'))
 				uset('telegram', o, bool01(v));
 		}
 		let err = save('trafficctl');

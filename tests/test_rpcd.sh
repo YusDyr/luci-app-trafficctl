@@ -2,8 +2,11 @@
 # Tests for the rpcd/ubus backend (luci.trafficctl), the entire authenticated
 # write surface reachable from LuCI/ubus.
 #
-# Drives the real plugin the way rpcd does: `luci.trafficctl call <method>`
-# with the JSON argument object on stdin, and `list` with none. TCTL_ROOT
+# Drives the real plugin the way rpcd-mod-ucode does, through
+# tests/lib/rpcd.uc: the signature it returns, rpcd's strict argument policy,
+# the reply or the deferred reply of each method, and rpcd's file.exec on a
+# private ubusd for the commands. tools/ci/live-rpcd.sh does the same through
+# a real rpcd on OpenWrt images. TCTL_ROOT
 # points it at a scratch root holding the shipped config; /usr/sbin/trafficctl
 # there is a mock that logs every command and its caller variables, and the
 # init scripts are mocks that log their actions. uci is the real one from
@@ -46,7 +49,9 @@ assert_not_contains() {
     fi
 }
 
-PLUGIN="$UC_REPO/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
+PLUGIN="$UC_REPO/luci-app-trafficctl/root/usr/share/rpcd/ucode/luci.trafficctl.uc"
+EXEC_LOG="$UC_TMP/exec.log"
+export TCTL_RPCD_EXEC_LOG="$EXEC_LOG"
 ACL="$UC_REPO/luci-app-trafficctl/root/usr/share/rpcd/acl.d/luci-app-trafficctl.json"
 R="$UC_TMP/root"
 CONF="$R/etc/config/trafficctl"
@@ -76,12 +81,12 @@ EOF
 }
 
 run_list() {
-    TCTL_ROOT="$R" "$UCODE" -S -L "$UC_LIB" "$PLUGIN" list 2>&1
+    TCTL_ROOT="$R" rpcd_uc "$PLUGIN" list 2>&1
 }
 
 run_call() {
     local method="$1" json="${2:-{\}}"
-    printf '%s' "$json" | TCTL_ROOT="$R" "$UCODE" -S -L "$UC_LIB" "$PLUGIN" call "$method" 2>&1
+    printf '%s' "$json" | TCTL_ROOT="$R" rpcd_uc "$PLUGIN" call "$method" 2>&1
 }
 
 uget() { uci -c "$R/etc/config" -t "$R/tmp/.uci" -q get "$1"; }
@@ -91,6 +96,7 @@ staged() { cat "$R/tmp/.uci"/* 2>/dev/null; }
 dispatched() { grep '^trafficctl ' "$DISPATCH_LOG"; }
 
 fresh
+ubusd_start
 
 # ════════════════════════════════════════════════════════════════════════════
 # list: every method and its argument schema
@@ -144,7 +150,8 @@ assert_contains "bytes: runs the accumulator, not the raw sampler" '"msg":"stub-
 
 : > "$DISPATCH_LOG"
 run_call device '{"ip":"192.168.1.5"}' >/dev/null
-assert_eq "device: forwards the ip" "trafficctl device 192.168.1.5" "$(dispatched)"
+assert_eq "device: forwards the ip, with the reply capped under file.exec's 256 KiB" \
+    "trafficctl device 192.168.1.5 --max-bytes 200000" "$(dispatched)"
 assert_contains "device: the caller travels in the environment" "env via=luci src= user=root token=" "$(cat "$DISPATCH_LOG")"
 
 : > "$DISPATCH_LOG"
@@ -154,7 +161,7 @@ assert_eq "device: missing ip, nothing dispatched" "" "$(dispatched)"
 
 : > "$DISPATCH_LOG"
 run_call device '{"ip":"192.168.1.5","proto":"tcp"}' >/dev/null
-assert_eq "device: proto tcp forwarded as --proto" "trafficctl device 192.168.1.5 --proto tcp" "$(dispatched)"
+assert_eq "device: proto tcp forwarded as --proto" "trafficctl device 192.168.1.5 --proto tcp --max-bytes 200000" "$(dispatched)"
 
 : > "$DISPATCH_LOG"
 run_call block '{"ip":"192.168.1.9","label":"my label"}' >/dev/null
@@ -260,7 +267,7 @@ assert_contains "portfw_ctl: invalid action rejected" '"ok":false' "$OUT"
 
 : > "$DISPATCH_LOG"
 printf '{"ip":"192.168.1.9"}' | REMOTE_ADDR=10.1.2.3 USERNAME=alice TCTL_ROOT="$R" \
-    "$UCODE" -S -L "$UC_LIB" "$PLUGIN" call macfilter_add >/dev/null
+    rpcd_uc "$PLUGIN" call macfilter_add >/dev/null
 assert_contains "caller: REMOTE_ADDR and USERNAME are passed on" "env via=luci src=10.1.2.3 user=alice" "$(cat "$DISPATCH_LOG")"
 
 # LuCI's session (uhttpd adds ubus_rpc_session to every call) names the user.
@@ -275,6 +282,7 @@ assert_contains "caller: the session's username is passed on" "env via=luci src=
 run_call macfilter_add '{"ip":"192.168.1.9","ubus_rpc_session":"not-a-session; id"}' >/dev/null
 assert_contains "caller: a malformed session id is not looked up" "env via=luci src= user=root" "$(cat "$DISPATCH_LOG")"
 ubus_stop
+ubusd_start
 
 # The session is asked for only by a method that logs or changes something:
 # the read methods are the dashboard's polls, every 2 s. The ACL's read and
@@ -295,19 +303,22 @@ for m in $(jq -r '."luci-app-trafficctl".write.ubus."luci.trafficctl"[]' "$ACL")
     assert_contains "caller: write method $m asks for the session" "session get" "$(cat "$SLOG")"
 done
 ubus_stop
+ubusd_start
 fresh
 
 # A login name is one word of one log line, whatever its source holds.
 uci -c "$R/etc/config" -t "$R/tmp/.uci" set trafficctl.logging.enabled=1
 uci -c "$R/etc/config" -t "$R/tmp/.uci" commit trafficctl
 printf '{"enabled":true}' | USERNAME="$(printf 'eve\nsrc=6.6.6.6 forged')" TCTL_ROOT="$R" \
-    "$UCODE" -S -L "$UC_LIB" "$PLUGIN" call newdevice_config_set >/dev/null
+    rpcd_uc "$PLUGIN" call newdevice_config_set >/dev/null
 assert_eq "caller: a newline in the user name stays on its log line" "1" \
     "$(grep -c . "$R/tmp/trafficctl/activity.log" 2>/dev/null)"
 assert_contains "caller: ... as a blank" "user=eve src=6.6.6.6 forged via=luci" "$(cat "$R/tmp/trafficctl/activity.log" 2>/dev/null)"
 
 # ── a delegated command that does not finish ───────────────────────────────
-# rpcd kills the plugin after 120 s; the plugin gives up first and says so.
+# The plugin gives up after TCTL_CLI_TIMEOUT_MS (60 s on a router) and says
+# so; rpcd's file.exec kills the command at rpcd's exec timeout (120 s on a
+# router, TCTL_RPCD_EXEC_TIMEOUT_MS here).
 fresh
 cat > "$R/usr/sbin/trafficctl" <<EOF
 #!/bin/sh
@@ -317,17 +328,58 @@ echo '{"ok":true}'
 EOF
 chmod +x "$R/usr/sbin/trafficctl"
 t0=$(date +%s)
-OUT=$(printf '{"ip":"192.168.1.9"}' | TCTL_CLI_TIMEOUT_MS=1000 TCTL_ROOT="$R" "$UCODE" -S -L "$UC_LIB" "$PLUGIN" call block 2>&1)
+OUT=$(printf '{"ip":"192.168.1.9"}' | TCTL_CLI_TIMEOUT_MS=1000 TCTL_RPCD_EXEC_TIMEOUT_MS=2000 TCTL_ROOT="$R" \
+    rpcd_uc "$PLUGIN" call block 2>&1)
 assert_eq "timeout: an error reply" '{"ok":false,"msg":"trafficctl block did not finish within 1 s"}' "$OUT"
-assert_eq "timeout: after the timeout, not after the command" "yes" "$([ $(( $(date +%s) - t0 )) -lt 4 ] && echo yes)"
-assert_eq "timeout: the CLI itself is killed" "gone" "$(kill -0 "$(cat "$R/tmp/cli.pid")" 2>/dev/null && echo alive || echo gone)"
-OUT=$(TCTL_CLI_TIMEOUT_MS=1000 TCTL_ROOT="$R" "$UCODE" -S -L "$UC_LIB" "$PLUGIN" call summary 2>&1 </dev/null)
+assert_eq "timeout: at rpcd's exec timeout, not after the command" "yes" "$([ $(( $(date +%s) - t0 )) -lt 4 ] && echo yes)"
+assert_eq "timeout: file.exec kills the CLI" "gone" "$(kill -0 "$(cat "$R/tmp/cli.pid")" 2>/dev/null && echo alive || echo gone)"
+OUT=$(TCTL_CLI_TIMEOUT_MS=1000 TCTL_RPCD_EXEC_TIMEOUT_MS=2000 TCTL_ROOT="$R" rpcd_uc "$PLUGIN" call summary 2>&1 </dev/null)
 assert_eq "timeout: a result method keeps its result key" \
     '{"result":null,"ok":false,"msg":"trafficctl summary did not finish within 1 s"}' "$OUT"
+# rpcd guards the plugin's own request with the same exec timeout, armed
+# first: with that below the plugin's limit, the caller gets rpcd's TIMEOUT.
+# That is why the plugin's limit (60 s, at most 110) stays under rpcd's 120.
+OUT=$(printf '{"ip":"192.168.1.9"}' | TCTL_CLI_TIMEOUT_MS=60000 TCTL_RPCD_EXEC_TIMEOUT_MS=1000 TCTL_ROOT="$R" \
+    rpcd_uc "$PLUGIN" call block 2>&1)
+assert_eq "timeout: rpcd's own timeout first is rpcd's TIMEOUT" "Command failed: Request timed out" "$OUT"
+
+# ── the command's output as rpcd took it from the exec plugin ──────────────
+fresh
+cli_prints() {   # the CLI stub becomes a script printing $1
+    printf '#!/bin/sh\n%s\n' "$1" > "$R/usr/sbin/trafficctl"
+    chmod +x "$R/usr/sbin/trafficctl"
+}
+cli_prints 'echo "not json"'
+assert_eq "output: not JSON is INVALID_ARGUMENT" "Command failed: Invalid argument" "$(run_call block '{"ip":"192.168.1.9"}')"
+assert_eq "output: not JSON under result too" "Command failed: Invalid argument" "$(run_call summary)"
+cli_prints 'echo "[1,2]"'
+assert_eq "output: an array is INVALID_ARGUMENT" "Command failed: Invalid argument" "$(run_call block '{"ip":"192.168.1.9"}')"
+assert_eq "output: an array under result is the reply" '{"result":[1,2]}' "$(run_call summary)"
+cli_prints 'exit 0'
+assert_eq "output: nothing under result is null" '{"result":null}' "$(run_call summary)"
+cli_prints 'echo null'
+assert_eq "output: null is NO_DATA" "Command failed: No response" "$(run_call block '{"ip":"192.168.1.9"}')"
+cli_prints "echo '{\"ok\":true}'; echo noise >&2; exit 3"
+assert_eq "output: stderr and the exit status are dropped" '{"ok":true}' "$(run_call block '{"ip":"192.168.1.9"}')"
+# file.exec refuses 256 KiB of output with NOT_SUPPORTED and nothing else.
+cli_prints 'head -c 300000 /dev/zero | tr "\\000" a'
+assert_eq "output: over 256 KiB is an error reply" \
+    '{"ok":false,"msg":"trafficctl device printed more than rpcd takes (256 KiB)"}' "$(run_call device '{"ip":"192.168.1.9"}')"
+rm -f "$R/usr/sbin/trafficctl"
+assert_eq "output: a missing CLI is an error reply" \
+    '{"ok":false,"msg":"trafficctl block could not be run (ubus status 4)"}' "$(run_call block '{"ip":"192.168.1.9"}')"
+
+# The session never goes on to file.exec: without one, rpcd skips its exec
+# ACL check, which LuCI's session (no exec grant) would fail.
+fresh
+: > "$EXEC_LOG"
+run_call block '{"ip":"192.168.1.9","ubus_rpc_session":"0123456789abcdef0123456789abcdef"}' >/dev/null
+assert_contains "file.exec: the command is called" '"command":"'"$R"'/usr/sbin/trafficctl"' "$(cat "$EXEC_LOG")"
+assert_not_contains "file.exec: never with the caller's session" 'ubus_rpc_session' "$(cat "$EXEC_LOG")"
 
 # ── netify_collect: a sample window the call can wait for ──────────────────
 fresh
-for s in 0 31 3600 '"5s"'; do
+for s in 0 31 3600; do
     : > "$DISPATCH_LOG"
     OUT=$(run_call netify_collect "{\"secs\":$s}")
     assert_contains "netify_collect: secs $s rejected" '"ok":false' "$OUT"
@@ -336,6 +388,10 @@ done
 : > "$DISPATCH_LOG"
 run_call netify_collect '{"secs":30}' >/dev/null
 assert_eq "netify_collect: 30 s is taken" "trafficctl netify collect 30" "$(dispatched)"
+: > "$DISPATCH_LOG"
+assert_eq "netify_collect: a string is refused by rpcd's policy" "Command failed: Invalid argument" \
+    "$(run_call netify_collect '{"secs":"5s"}')"
+assert_eq "netify_collect: a string, nothing dispatched" "" "$(dispatched)"
 
 # ════════════════════════════════════════════════════════════════════════════
 # Device names (handled in process)
@@ -394,7 +450,7 @@ OUT=$(run_call config_set '{"poll_interval":0}')
 assert_contains "config_set: 0 means polling off, not an invalid value" '"ok":true' "$OUT"
 assert_eq "config_set: commits poll_interval=0" "0" "$(uget trafficctl.main.poll_interval)"
 
-for bad in '{"poll_interval":301}' '{"avg_window":3601}' '{"avg_window":1}' '{"poll_interval":"abc"}' \
+for bad in '{"poll_interval":301}' '{"avg_window":3601}' '{"avg_window":1}' \
            '{"enabled":false,"poll_interval":301}'; do
     fresh
     before=$(sum)
@@ -403,6 +459,33 @@ for bad in '{"poll_interval":301}' '{"avg_window":3601}' '{"avg_window":1}' '{"p
     assert_eq "config_set $bad: the config is untouched" "$before" "$(sum)"
     assert_eq "config_set $bad: nothing left staged" "" "$(staged)"
 done
+
+# Wrong types never reach the method: rpcd's policy refuses them.
+for bad in '{"poll_interval":"abc"}' '{"poll_interval":5.5}' '{"poll_interval":null}' '{"enabled":1}' \
+           '{"enabled":"true"}' '{"poll_interval":4294967296}' '{"bogus":1}'; do
+    fresh
+    before=$(sum)
+    assert_eq "config_set $bad: refused by rpcd's policy" "Command failed: Invalid argument" "$(run_call config_set "$bad")"
+    assert_eq "config_set $bad: the config is untouched" "$before" "$(sum)"
+done
+
+# ── the offload mode: nft asked through file.exec only when offload is on ──
+fresh
+mkdir -p "$R/bin"
+printf '#!/bin/sh\necho "nft $*" >> "%s"\necho "flowtable ft { counter }"\n' "$DISPATCH_LOG" > "$R/bin/nft"
+chmod +x "$R/bin/nft"
+OUT=$(PATH="$R/bin:$PATH" run_call config_get)
+assert_contains "config_get: a counter flowtable" '"offload_mode":"software-counter"' "$OUT"
+assert_contains "config_get: asks nft list flowtables" "nft list flowtables" "$(cat "$DISPATCH_LOG")"
+assert_contains "config_get: the reply keeps its key order" \
+    '{"enabled":true,"default_mode":"limiter","offload_mode":"software-counter","nss":"absent","sw":true,"hw":false,' "$OUT"
+printf "config defaults\n\toption flow_offloading '0'\n" > "$R/etc/config/firewall"
+: > "$DISPATCH_LOG"
+OUT=$(PATH="$R/bin:$PATH" run_call config_get)
+assert_contains "config_get: no offload, none" '"offload_mode":"none"' "$OUT"
+assert_eq "config_get: no offload, nft not asked" "" "$(cat "$DISPATCH_LOG")"
+fresh
+assert_contains "config_get: no nft, no counter" '"offload_mode":"software"' "$(run_call config_get)"
 
 # ── NSS (Qualcomm ECM) offload: read from its debugfs knobs ────────────────
 fresh
@@ -433,10 +516,12 @@ printf '{"trafficctl-telegram":{"instances":{"instance1":{"running":true,"pid":4
 ubus_start "$UB"
 assert_contains "telegram_config_get: bot_running from procd" '"bot_running":true' "$(run_call telegram_config_get)"
 ubus_stop
+ubusd_start
 printf '{"trafficctl-telegram":{"instances":{"instance1":{"running":false}}}}' > "$UB/service@list.json"
 ubus_start "$UB"
 assert_contains "telegram_config_get: a stopped instance is not running" '"bot_running":false' "$(run_call telegram_config_get)"
 ubus_stop
+ubusd_start
 assert_contains "telegram_config_get: no ubus, not running" '"bot_running":false' "$(run_call telegram_config_get)"
 
 OUT=$(run_call telegram_config_set '{"bot_token":"***","chat_id":"54321"}')
@@ -502,7 +587,7 @@ run_call logging_config_set '{"persist_rules":false}' >/dev/null
 assert_eq "logging_config_set: clears persist_rules" "0" "$(uget trafficctl.main.persist_rules)"
 
 for bad in '{"log_file":"/etc/shadow"}' '{"log_file":"/var/log/../shadow"}' \
-           '{"max_lines":"1"}' '{"max_lines":"100001"}' '{"max_lines":"5k"}'; do
+           '{"max_lines":1}' '{"max_lines":100001}'; do
     fresh
     before=$(sum)
     OUT=$(run_call logging_config_set "$bad")
@@ -513,7 +598,9 @@ done
 OUT=$(run_call logging_config_set '{"log_file":"/tmp/trafficctl/x.log"}')
 assert_contains "logging_config_set: accepts a legitimate path" '"ok":true' "$OUT"
 assert_eq "logging_config_set: commits it" "/tmp/trafficctl/x.log" "$(uget trafficctl.logging.log_file)"
-OUT=$(run_call logging_config_set '{"max_lines":"500"}')
+assert_eq "logging_config_set: a string max_lines is refused by rpcd's policy" "Command failed: Invalid argument" \
+    "$(run_call logging_config_set '{"max_lines":"5k"}')"
+OUT=$(run_call logging_config_set '{"max_lines":500}')
 assert_contains "logging_config_set: accepts a legitimate max_lines" '"ok":true' "$OUT"
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -557,8 +644,9 @@ assert_eq "cut_set: engage with duration and persist" "trafficctl cut engage 600
 : > "$DISPATCH_LOG"
 run_call cut_set '{"active":false}' >/dev/null
 assert_eq "cut_set: release" "trafficctl cut release" "$(dispatched)"
-OUT=$(run_call cut_set '{"active":"maybe"}')
-assert_contains "cut_set: a non-boolean is rejected" '"ok":false' "$OUT"
+assert_eq "cut_set: a non-boolean is refused by rpcd's policy" "Command failed: Invalid argument" \
+    "$(run_call cut_set '{"active":"maybe"}')"
+assert_contains "cut_set: active absent is rejected" '"ok":false' "$(run_call cut_set '{}')"
 
 # ════════════════════════════════════════════════════════════════════════════
 # A commit that fails is an error, and leaves nothing behind
@@ -572,9 +660,9 @@ readonly_call() {
     chmod 400 "$CONF" "$R/etc/config/firewall"
     if [ "$(id -u)" = 0 ]; then
         printf '%s' "$json" | TCTL_ROOT="$R" setpriv --bounding-set -dac_override,-dac_read_search \
-            "$UCODE" -S -L "$UC_LIB" "$PLUGIN" call "$method" 2>&1
+            "$UCODE" -S -L "$UC_LIB" "$UC_TESTLIB/rpcd.uc" "$PLUGIN" call "$method" 2>&1
     else
-        printf '%s' "$json" | TCTL_ROOT="$R" "$UCODE" -S -L "$UC_LIB" "$PLUGIN" call "$method" 2>&1
+        printf '%s' "$json" | TCTL_ROOT="$R" rpcd_uc "$PLUGIN" call "$method" 2>&1
     fi
     chmod 755 "$R/etc/config"
     chmod 600 "$CONF" "$R/etc/config/firewall"
@@ -609,7 +697,7 @@ chmod 400 "$R/etc/config/firewall"
 before=$(cksum < "$R/etc/config/firewall")
 if [ "$(id -u)" = 0 ]; then
     OUT=$(printf '{"hw":true}' | TCTL_ROOT="$R" setpriv --bounding-set -dac_override,-dac_read_search \
-        "$UCODE" -S -L "$UC_LIB" "$PLUGIN" call config_set 2>&1)
+        "$UCODE" -S -L "$UC_LIB" "$UC_TESTLIB/rpcd.uc" "$PLUGIN" call config_set 2>&1)
 else
     OUT=$(run_call config_set '{"hw":true}')
 fi
@@ -653,10 +741,10 @@ assert_eq "version: from the apk database" '{"version":"1.31.0-r1"}' "$(run_call
 # Unknown method, malformed input
 # ════════════════════════════════════════════════════════════════════════════
 
-OUT=$(run_call totally_bogus_method)
-assert_contains "unknown method: returns an error, not a crash" '"error"' "$OUT"
-OUT=$(printf 'not json' | TCTL_ROOT="$R" "$UCODE" -S -L "$UC_LIB" "$PLUGIN" call config_get 2>&1)
-assert_contains "malformed input: still a JSON reply" '"enabled":true' "$OUT"
+assert_eq "unknown method: METHOD_NOT_FOUND" "Command failed: Method not found" "$(run_call totally_bogus_method)"
+assert_contains "ubus_rpc_session: always allowed" '"enabled":true' \
+    "$(run_call config_get '{"ubus_rpc_session":"0123456789abcdef0123456789abcdef"}')"
+assert_eq "an undeclared argument is refused" "Command failed: Invalid argument" "$(run_call config_get '{"x":1}')"
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
