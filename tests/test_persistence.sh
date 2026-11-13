@@ -226,32 +226,40 @@ assert_contains "lock: a stale lock does not stop persistence" '"192.168.1.10"' 
 assert_eq "lock: nor holds it up for long" "yes" "$([ $((t1 - t0)) -lt 10 ] && echo yes || echo no)"
 rmdir "$LOCK" 2>/dev/null
 
-# Both writers at once: every record lands.
-rm -f "$RULES"
+# Writers at once: every record lands. Each kind alone first, so a lost
+# record says whose lock let it through.
 WLOG="$ROOT/tmp/writers.log"
-: > "$WLOG"
-pids=""
-for i in 1 2 3 4 5 6; do
-    ( PATH="$MOCKBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; tctl_persist_save ratelimit 10.1.0.$i 100" \
-        >/dev/null 2>"$ROOT/tmp/sh.$i.err"; echo "sh $i rc=$?" >> "$WLOG" ) &
-    pids="$pids $!"
-    ( PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" tcall trafficctl.lib persist_save '"block"' "\"10.2.0.$i\"" '""' \
-        >/dev/null 2>"$ROOT/tmp/uc.$i.err"; echo "uc $i rc=$?" >> "$WLOG" ) &
-    pids="$pids $!"
-done
-# shellcheck disable=SC2086
-wait $pids
-n=$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$RULES" 2>&1)
-assert_eq "lock: twelve writers at once, twelve records" "12" "$n"
-if [ "$n" != 12 ]; then
-    # A lost record is a timing fault: say which writer and what it saw.
-    cat "$RULES"; echo
-    sort "$WLOG"
-    for f in "$ROOT"/tmp/sh.*.err "$ROOT"/tmp/uc.*.err; do
-        [ -s "$f" ] && { echo "--- $f"; cat "$f"; }
+writers() {   # writers <shell writers> <ucode writers> <name>
+    local i pids="" n f
+    rm -f "$RULES" "$ROOT"/tmp/sh.*.err "$ROOT"/tmp/uc.*.err
+    : > "$WLOG"
+    for i in $(seq 1 "$1"); do
+        ( PATH="$MOCKBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; tctl_persist_save ratelimit 10.1.0.$i 100" \
+            >/dev/null 2>"$ROOT/tmp/sh.$i.err"; echo "sh $i rc=$?" >> "$WLOG" ) &
+        pids="$pids $!"
     done
-    ls -la "$ROOT/tmp" "$(dirname "$RULES")"
-fi
+    for i in $(seq 1 "$2"); do
+        ( PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" tcall trafficctl.lib persist_save '"block"' "\"10.2.0.$i\"" '""' \
+            >/dev/null 2>"$ROOT/tmp/uc.$i.err"; echo "uc $i rc=$?" >> "$WLOG" ) &
+        pids="$pids $!"
+    done
+    # shellcheck disable=SC2086
+    wait $pids
+    n=$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$RULES" 2>&1)
+    assert_eq "lock: $3, every record" "$(($1 + $2))" "$n"
+    if [ "$n" != "$(($1 + $2))" ]; then
+        # A lost record is a timing fault: say which writer and what it saw.
+        cat "$RULES"; echo
+        sort "$WLOG"
+        for f in "$ROOT"/tmp/sh.*.err "$ROOT"/tmp/uc.*.err; do
+            [ -s "$f" ] && { echo "--- $f"; cat "$f"; }
+        done
+        ls -la "$ROOT/tmp" "$(dirname "$RULES")"
+    fi
+}
+writers 12 0 "twelve shell writers at once"
+writers 0 12 "twelve ucode writers at once"
+writers 6 6 "six of each at once"
 
 # ── the restore path ──────────────────────────────────────────────────────
 # Shapes are restored unconditionally and blocks are restored behind the flag.
