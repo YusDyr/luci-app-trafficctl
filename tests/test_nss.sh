@@ -135,42 +135,9 @@ rmdir "$ECM/ecm_db/defunct_all"
 printf '' > "$ECM/ecm_db/defunct_all"
 
 # ── every apply path must carry the verdict ────────────────────────────────
-# Structural, so a success message added later without the note fails here
-# rather than shipping an unqualified claim. Checked per script because each
-# has its own set of partial-success messages. The block is `trafficctl block`
-# since the ucode port, run against an active ECM in tests/test_block.sh; the
-# limiter is `trafficctl ratelimit`, run against one below.
-# One shell script is left; its port to ucode retires this loop.
-# shellcheck disable=SC2043
-for f in trafficctl-shape.sh; do
-    src="$BIN/$f"
-    for fn in tctl_nss_status tctl_nss_defunct; do
-        if grep -q "$fn" "$src"; then
-            PASS=$((PASS + 1))
-        else
-            FAIL=$((FAIL + 1))
-            printf "FAIL: %s never calls %s\n" "$f" "$fn"
-        fi
-    done
-    # Counted, not pattern-matched against the prose. An earlier version of
-    # this test grepped for "applied to $IP" and missed the limiter's main
-    # success message, which reads "rate limit ... for $IP" — verified by
-    # mutation. The number of apply-success emissions per script is pinned
-    # instead, so ADDING one without the verdict fails here too.
-    want=3
-    got=$(grep -c '\\"nss\\":\\"$NSS\\"' "$src")
-    assert_eq "$f reports nss on each of its apply results" "$want" "$got"
-
-    # And every one of them carries the human-readable verdict too, so the
-    # operator sees it in the notification and not only in the JSON.
-    bare=$(grep -n '\\"nss\\":\\"$NSS\\"' "$src" | grep -v 'NSSNOTE' | grep -v '\$NOTE')
-    if [ -n "$bare" ]; then
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s reports nss as a field but omits the verdict from the message:\n%s\n" "$f" "$bare"
-    else
-        PASS=$((PASS + 1))
-    fi
-done
+# Each apply path runs against an active ECM: the block in tests/test_block.sh,
+# the shaper in tests/test_shape.sh, the limiter below. The shell helpers above
+# have no caller left; they stay, pinned here, until trafficctl-fw.sh goes.
 
 # ── the limiter, against an active ECM ─────────────────────────────────────
 # Each of its three apply results (both directions, upload only, download

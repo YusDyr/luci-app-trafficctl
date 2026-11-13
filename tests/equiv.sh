@@ -184,14 +184,17 @@ NEIGH="for a in 192.168.0.109 192.168.0.102 192.168.0.140; do grep \"^\$a \" \"\
 MF="$FW4; $NEIGH; uci set wireless.default_radio0.macfilter=deny; uci set wireless.default_radio1.macfilter=deny; uci commit wireless; for i in phy0-ap0 phy1-ap0; do echo PONG > \"\$W/cmd/hostapd_cli -i \$i ping\"; : > \"\$W/cmd/hostapd_cli -i \$i deny_acl SHOW\"; done; echo OK > \"\$W/cmd/hostapd_cli.default\""
 MFDEAD="$FW4; $NEIGH; uci set wireless.default_radio0.macfilter=deny; uci commit wireless"
 MFW="$WR,etc/config/wireless"
-# New devices: the default limit on, a ledger, the limiter and shaper as stubs
-# (their own work is compared elsewhere); the hook is the v1.30.0 one. Not
+# New devices: the default limit on, a ledger, and what the limit lands on: a
+# stateful netdev table and tc (st_init, below). The legacy side is the
+# v1.30.6 hook with the v1.30.6 limiter and shaper it runs; the port applies
+# the limit in process (limit.uc, shape.uc), so the two are compared on the
+# writes, the saved state and the logs, not on which script was called. Not
 # the bot's flag file /tmp/trafficctl_tg_newdev: the port hands an unknown
 # MAC to `trafficctl notify dhcp` instead (tests/test_newdevice.sh).
-ND="$LOGROOT; uci set trafficctl.newdevice.enabled=1; uci set trafficctl.newdevice.limit_kbit=4000; uci commit trafficctl; mkdir -p \"\$W/root/etc/trafficctl\"; printf '02:00:00:00:00:12\n02:00:00:00:00:08\n' > \"\$W/root/etc/trafficctl/seen_macs\""
-NDF='tmp/dispatch.log,etc/trafficctl/seen_macs,tmp/trafficctl/activity.log,tmp/logger.log'
-LND='sed -e "s#$LEXEC/trafficctl-ratelimit.sh#$W/ndstub/trafficctl-ratelimit.sh#" -e "s#$LEXEC/trafficctl-shape.sh#$W/ndstub/trafficctl-shape.sh#" "$L/trafficctl/files/etc/hotplug.d/dhcp/99-trafficctl-newdevice" > "$W/nd-hook"; sh "$W/nd-hook"; echo done'
-NND='ln -sfn "$W/ndstub" "$W/root/usr/libexec/trafficctl"; tctl newdevice; echo done'
+ND="$LOGROOT; uci set trafficctl.newdevice.enabled=1; uci set trafficctl.newdevice.limit_kbit=4000; uci commit trafficctl; mkdir -p \"\$W/root/etc/trafficctl\" \"\$W/root/tmp/nft-netdev\"; printf '02:00:00:00:00:12\n02:00:00:00:00:08\n' > \"\$W/root/etc/trafficctl/seen_macs\"; st_init; : > \"\$W/cmd/conntrack.default\""
+NDF='tmp/writes.log,etc/trafficctl/seen_macs,tmp/trafficctl/activity.log,tmp/logger.log,etc/trafficctl/rules.json,etc/trafficctl/shapes.json'
+LND='sh "$L5/trafficctl/files/etc/hotplug.d/dhcp/99-trafficctl-newdevice"; echo done'
+NND='tctl newdevice; echo done'
 NEWMAC='ACTION=add MACADDR=02:00:00:00:00:99 IPADDR=192.168.0.99 HOSTNAME=newbie'
 
 # ── telegram bot ──
@@ -264,6 +267,24 @@ L5HOOK='ACTION=ifup INTERFACE=lan sh "$L5/trafficctl/files/etc/hotplug.d/iface/9
 # Saved limits for targets that also have rules from before v1.13.2 live:
 # those are not the restore's, and stay.
 RLLEGREC="$RLLEG; $PERSIST; printf '[{\"type\":\"ratelimit\",\"ip\":\"192.168.0.109\",\"param\":\"4000\"},{\"type\":\"ratelimit\",\"ip\":\"10.0.20.0/24\",\"param\":\"3000\",\"mode\":\"each\"}]' > \"\$W/root/etc/trafficctl/rules.json\"; $FORGET"
+
+# The shaper: a stateful tc and `ip link` (tests/lib/tc-htb.sh, st_init) on
+# the fixture's devices, its shapes.json as captured (1:3, 1:4 and 1:5 taken).
+# stt prints what tc holds afterwards. sttnf leaves the u32 filters out, for
+# the cases with more than one shape: v1.30.x deleted filters by prio, so
+# each shape it added removed the filters of the ones before it, and only the
+# last stayed in force; the port deletes a filter by its handle.
+STSET="$LOGROOT; st_init; : > \"\$W/cmd/conntrack.default\""
+STW="$WR,etc/trafficctl/shapes.json"
+L5SH='sh "$L5EXEC/trafficctl-shape.sh"'
+# A shape v1.30.6 placed itself.
+STON="$STSET; sh \"\$L5EXEC/trafficctl-shape.sh\" add 192.168.0.109 5000 >/dev/null; $FORGET"
+STNOPERSIST='uci set trafficctl.main.persist_rules=0; uci commit trafficctl'
+# OLDSHAPES less its negative rate: v1.30.6's restore handed that record to
+# trafficctl-shape.sh, which refused it with exit 0, so no failure was logged;
+# the port logs it as not restored, and its exit status says a record failed
+# (tests/test_shape.sh).
+OLDSHAPES5='printf "[{\"ip\":\"192.168.0.3\",\"rate_kbit\":2000},{\"ip\":\"192.168.0.109\",\"rate_kbit\":1000,\"classid\":\"1:4\"},{\"ip\":\"x\",\"rate_kbit\":5}]" > "$W/root/etc/trafficctl/shapes.json"'
 
 CASES="
 subnets | json | router-24.10 | trafficctl-subnets.sh | tctl subnets
@@ -465,6 +486,22 @@ rl-restore-live-1.1 | text+$RLW | router-24.10 | sh:NFT_EMU=1.1 $L5HOOK; echo rc
 rl-restore-legacy-live | text+$RLW | router-24.10 | sh:$L5HOOK; echo rc=\$?; $RLT | tctl restore >/dev/null; echo rc=\$?; $RLT | $RLLEGREC
 rl-restore-fails | text+$RLW | router-24.10 | sh:NFT_FAIL_CHAINS=ul_lan3 $L5HOOK; echo rc=\$?; $RLT | NFT_FAIL_CHAINS=ul_lan3 tctl restore >/dev/null; echo rc=\$?; $RLT | $RLBOOT
 newdevice-old | text+$NDF | router-24.10 | sh:ACTION=old MACADDR=02:00:00:00:00:99 IPADDR=192.168.0.99 HOSTNAME=x; export ACTION MACADDR IPADDR HOSTNAME; $LND | ACTION=old MACADDR=02:00:00:00:00:99 IPADDR=192.168.0.99 HOSTNAME=x; export ACTION MACADDR IPADDR HOSTNAME; $NND | $ND
+shape-add-existing | text+$STW | router-24.10 | sh:$L5SH add 192.168.0.109 3000; echo rc=\$?; stt | tctl shape add 192.168.0.109 3000; echo rc=\$?; stt | $STSET
+shape-add-new | text+$STW | router-24.10 | sh:$L5SH add 192.168.0.50 5000 lbl; echo rc=\$?; stt | tctl shape add 192.168.0.50 5000 lbl; echo rc=\$?; stt | $STSET
+shape-add-asym | text+$STW | router-24.10 | sh:$L5SH add 192.168.0.50 8000 lbl 1000; echo rc=\$?; stt | tctl shape add 192.168.0.50 8000 lbl 1000; echo rc=\$?; stt | $STSET
+shape-add-first | text+$STW | router-24.10 | sh:$L5SH add 192.168.0.50 8000; echo rc=\$?; stt | tctl shape add 192.168.0.50 8000; echo rc=\$?; stt | $STSET; $NOSHAPES
+shape-readd | text+$STW | router-24.10 | sh:$L5SH add 192.168.0.109 7000 x 700; echo rc=\$?; stt | tctl shape add 192.168.0.109 7000 x 700; echo rc=\$?; stt | $STON
+shape-remove | text+$STW | router-24.10 | sh:$L5SH remove 192.168.0.109; echo rc=\$?; stt | tctl shape remove 192.168.0.109; echo rc=\$?; stt | $STON
+shape-remove-none | text | router-24.10 | sh:$L5SH remove 192.168.0.77 x; echo rc=\$?; stt | tctl shape remove 192.168.0.77 x; echo rc=\$?; stt | $STSET
+shape-remove-legacy | text+$STW | router-24.10 | sh:$L5SH remove 192.168.0.3; echo rc=\$?; stt | tctl shape remove 192.168.0.3; echo rc=\$?; stt | $STSET; $OLDSHAPES
+shape-status | text | router-24.10 | sh:$L5SH status 192.168.0.109; echo rc=\$?; $L5SH status 192.168.0.77; echo rc=\$? | tctl shape status 192.168.0.109; echo rc=\$?; tctl shape status 192.168.0.77; echo rc=\$? | $STON
+shape-sqm | text+$STW | router-24.10 | sh:htbmsg $L5SH add 192.168.0.50 5000; echo rc=\$?; stt | tctl shape add 192.168.0.50 5000; echo rc=\$?; stt | $LOGROOT; TC_ROOT_br_lan=cake st_init
+shape-no-ifb | text+$STW | router-24.10 | sh:TC_NO_IFB=1 $L5SH add 192.168.0.50 5000 lbl 1000; echo rc=\$?; stt | TC_NO_IFB=1 tctl shape add 192.168.0.50 5000 lbl 1000; echo rc=\$?; stt | $STSET
+shape-usage | text+$STW | router-24.10 | sh:$L5SH; echo rc=\$?; $L5SH add; echo rc=\$?; $L5SH add 192.168.0.300 500; echo rc=\$?; $L5SH add 192.168.0.50 010; echo rc=\$?; $L5SH add 192.168.0.50 abc; echo rc=\$?; $L5SH add 192.168.0.50 0; echo rc=\$?; $L5SH remove; echo rc=\$?; $L5SH status; echo rc=\$?; $L5SH bogus 192.168.0.50; echo rc=\$? | tctl shape; echo rc=\$?; tctl shape add; echo rc=\$?; tctl shape add 192.168.0.300 500; echo rc=\$?; tctl shape add 192.168.0.50 010; echo rc=\$?; tctl shape add 192.168.0.50 abc; echo rc=\$?; tctl shape add 192.168.0.50 0; echo rc=\$?; tctl shape remove; echo rc=\$?; tctl shape status; echo rc=\$?; tctl shape bogus 192.168.0.50; echo rc=\$? | $STSET
+shape-restore | text+$STW | router-24.10 | sh:$L5HOOK >/dev/null; echo rc=\$?; sttnf | tctl restore >/dev/null; echo rc=\$?; sttnf | $STSET; $STNOPERSIST
+shape-restore-twice | text+$STW | router-24.10 | sh:$L5HOOK >/dev/null; $L5HOOK >/dev/null; echo rc=\$?; sttnf | tctl restore >/dev/null; tctl restore >/dev/null; echo rc=\$?; sttnf | $STSET; $STNOPERSIST
+shape-restore-old | text+$STW | router-24.10 | sh:$L5HOOK >/dev/null; sttnf | tctl restore >/dev/null; sttnf | $STSET; $STNOPERSIST; $OLDSHAPES5
+shape-restore-no-ifb | text+$STW | router-24.10 | sh:TC_NO_IFB=1 $L5HOOK >/dev/null; echo rc=\$?; sttnf | TC_NO_IFB=1 tctl restore >/dev/null; echo rc=\$?; sttnf | $STSET; $STNOPERSIST
 "
 
 # ── telegram bot ── the setups run at case time (msg, cbq, upd, $W)
@@ -681,6 +718,16 @@ if [ "\$c" = nft ] && [ -d "$W/root/tmp/nft-netdev" ]; then
             esac
             NFT_STATE="$W/root/tmp/nft-netdev" NFT_LOG= exec sh "$UC_TESTLIB/nft-netdev.sh" "\$@" ;;
     esac
+fi
+# The shaper's tc and ip link meet a stateful stand-in once a case has made
+# one (st_init). The filter deletes are not logged: v1.30.x deleted by prio,
+# the port by handle (see STSET), and the state each leaves is compared.
+if [ -d "$W/root/tmp/tc-htb" ] && { [ "\$c" = tc ] || [ "\$c \$1" = "ip link" ]; }; then
+    case " \$* " in
+        *" show "*|*" filter del "*) ;;
+        *) echo "\$c \$*" >> "$W/root/tmp/writes.log" ;;
+    esac
+    TC_STATE="$W/root/tmp/tc-htb" TC_LOG= exec sh "$UC_TESTLIB/tc-htb.sh" "\$c" "\$@"
 fi
 if [ "\$c" = nft ] && [ -f "$W/root/tmp/nft.state" ]; then
     case " \$* " in
@@ -911,12 +958,6 @@ portfw-persist-mixed | text+$PFWF | router-24.10 | sh:lpfw limit forward tcp 192
 portfw-bad | text+$PFWF | router-24.10 | sh:lpfw; lpfw pause; lpfw pause forward icmp 192.168.0.140 80; lpfw pause forward tcp 1.2.3 80; lpfw pause forward tcp 192.168.0.140 0; lpfw pause forward tcp 192.168.0.140 9-8; lpfw pause x tcp - 80; lpfw limit forward tcp 192.168.0.140 80 | npfw; npfw pause; npfw pause forward icmp 192.168.0.140 80; npfw pause forward tcp 1.2.3 80; npfw pause forward tcp 192.168.0.140 0; npfw pause forward tcp 192.168.0.140 9-8; npfw pause x tcp - 80; npfw limit forward tcp 192.168.0.140 80 | $PFWENV
 "
 # ── end PR7 ─────────────────────────────────────────────────────────────────
-# The default limit's two appliers, for the newdevice cases.
-mkdir -p "$W/ndstub"
-for s in trafficctl-ratelimit.sh trafficctl-shape.sh; do
-    printf '#!/bin/sh\necho "%s $* via=$TCTL_VIA src=$TCTL_SRC" >> "%s/root/tmp/dispatch.log"\n' "$s" "$W" > "$W/ndstub/$s"
-done
-chmod +x "$W/ndstub/"*
 # A recorded agent feed, read by both netify sides when a case writes it.
 export TCTL_NETIFY_FEED="$W/root/tmp/feed"
 
@@ -954,6 +995,26 @@ with_files() {   # with_files <out> <comma list>: append root files, masked
 }
 
 trim() { printf '%s' "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
+
+# The shaper cases' tc (see STSET): the fixture's devices, then what tc holds.
+st_init() {
+    mkdir -p "$W/root/tmp/tc-htb"
+    TC_STATE="$W/root/tmp/tc-htb" sh "$UC_TESTLIB/tc-htb.sh" init br-lan lan2 lan3 lan4 phy0-ap0 phy1-ap0 wan
+}
+stt() { echo "--- tc"; TC_STATE="$W/root/tmp/tc-htb" sh "$UC_TESTLIB/tc-htb.sh" dump; }
+sttnf() { stt | grep -v '^  filter '; }
+# v1.30.0 named "a custom HTB tree" among the root qdiscs it declines; an HTB
+# root is in fact reused or replaced, so shape.uc no longer says so (an
+# intentional difference). For the legacy side only, the new wording.
+htbmsg() {
+    local r
+    "$@" > "$W/htbmsg.out"; r=$?
+    sed 's#SQM/cake or a custom HTB tree#SQM/cake or another non-HTB qdisc#' "$W/htbmsg.out"
+    return $r
+}
+# shape-remove-none compares the reply and the tc state, not the write log:
+# v1.30.0 ran its deletes on the class derived from an address with no
+# record, which can be another device's; shape.uc runs none (intentional).
 
 # For sh: cases. total_since is "now" for a device first seen in this run,
 # and the two sides do not run in the same second.

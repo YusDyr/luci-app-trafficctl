@@ -88,13 +88,13 @@ luci-app-trafficctl/                     # repository
 │       │   ├── config/trafficctl        # UCI config (the conffile)
 │       │   ├── init.d/                  # trafficctl-telegram, trafficctl-history, trafficctl-cut
 │       │   └── hotplug.d/
-│       │       ├── iface/99-trafficctl-shapes      # Restore on boot (blocks, limits via `trafficctl restore`)
+│       │       ├── iface/99-trafficctl-shapes      # Restore on boot (blocks, limits, shapes via `trafficctl restore`)
 │       │       └── dhcp/99-trafficctl-newdevice    # New-device detection: `trafficctl newdevice`
 │       ├── lib/upgrade/keep.d/trafficctl          # /etc/trafficctl/ kept across sysupgrade
 │       ├── usr/sbin/trafficctl          # The CLI (ucode): subnets, names, rdns, rdns-refresh, ifaces, bytes, totals,
 │       │                                #   ratelimit-stats, shape-stats, rules, summary, device, metrics, netify,
 │       │                                #   block, unblock, macfilter-add, macfilter-remove, newdevice, restore,
-│       │                                #   cut, portfw, history, ratelimit
+│       │                                #   cut, portfw, history, ratelimit, shape
 │       ├── usr/share/ucode/trafficctl/
 │       │   ├── lib.uc                   # Shared helpers: uci/ubus, commands, JSON, validation, files, log
 │       │   ├── net.uc                   # Subnets, interface roles, reverse DNS, byte samples, totals
@@ -103,7 +103,8 @@ luci-app-trafficctl/                     # repository
 │       │   ├── cut.uc                   # Global internet cut: nft -f ruleset, state, keeper loop
 │       │   ├── portfw.uc                # Port-forward list, pause, limit (inet tctl_pfw)
 │       │   ├── history.uc               # Usage history store: flush, keeper, read, periods, prune
-│       │   └── limit.uc                 # Per-device limiter (netdev tm_ratelimit), its restore
+│       │   ├── limit.uc                 # Per-device limiter (netdev tm_ratelimit), its restore
+│       │   └── shape.uc                 # Shaper (tc/HTB, IFB), shapes.json, its restore
 │       ├── usr/libexec/trafficctl/
 │       │   ├── trafficctl-fw.sh         # Firewall abstraction (sourced)
 │       │   ├── trafficctl-summary.sh    # Wrapper: `trafficctl summary` (all-device summary)
@@ -113,7 +114,7 @@ luci-app-trafficctl/                     # repository
 │       │   ├── trafficctl-ifaces.sh     # Wrapper for `trafficctl ifaces`
 │       │   ├── trafficctl-block.sh      # Wrapper: `trafficctl block`
 │       │   ├── trafficctl-unblock.sh    # Wrapper: `trafficctl unblock`
-│       │   ├── trafficctl-shape.sh      # tc/HTB shaping
+│       │   ├── trafficctl-shape.sh      # Wrapper: `trafficctl shape` (tc/HTB shaping)
 │       │   ├── trafficctl-shape-stats.sh      # Wrapper: `trafficctl shape-stats`
 │       │   ├── trafficctl-ratelimit.sh  # Wrapper: `trafficctl ratelimit` (nft policer)
 │       │   ├── trafficctl-ratelimit-stats.sh  # Wrapper: `trafficctl ratelimit-stats`
@@ -207,10 +208,10 @@ ssh root@192.168.0.1 '/usr/sbin/trafficctl summary' | python3 -m json.tool
 ssh root@192.168.0.1 '/usr/sbin/trafficctl device 192.168.0.111 all' | python3 -m json.tool
 
 # Shaping
-ssh root@192.168.0.1 '/usr/libexec/trafficctl/trafficctl-shape.sh add 192.168.0.100 5000 test'
-ssh root@192.168.0.1 '/usr/libexec/trafficctl/trafficctl-shape.sh status 192.168.0.100'
-ssh root@192.168.0.1 'trafficctl shape-stats' | python3 -m json.tool
-ssh root@192.168.0.1 '/usr/libexec/trafficctl/trafficctl-shape.sh remove 192.168.0.100'
+ssh root@192.168.0.1 '/usr/sbin/trafficctl shape add 192.168.0.100 5000 test'
+ssh root@192.168.0.1 '/usr/sbin/trafficctl shape status 192.168.0.100'
+ssh root@192.168.0.1 '/usr/sbin/trafficctl shape-stats' | python3 -m json.tool
+ssh root@192.168.0.1 '/usr/sbin/trafficctl shape remove 192.168.0.100'
 
 # Verify kernel state
 ssh root@192.168.0.1 'tc -s class show dev br-lan'
@@ -270,14 +271,25 @@ bash tests/test_newdevice.sh          # DHCP hook: seen-MAC ledger, default limi
 bash tests/test_persistence.sh        # rules.json bytes, the shared lock, restore after boot
 bash tests/test_rl_lookup.sh          # Rate limit read-back: units, prefixes, ratelimit-stats
 bash tests/test_shape_lookup.sh       # Shape classid lookup, shape-stats
+bash tests/test_shape.sh              # Shaper: filters of other shapes kept, classids, SQM, no IFB, shapes.json, restore
 bash tests/test_subnet_limits.sh      # Subnet limits: stats, persisted mode, the restore hook
 bash tests/test_rpcd_contract.sh      # every rpc.declare in the views against the plugin's list
 bash tests/test_telegram_bot.sh       # Telegram bot: commands, callbacks, cache, validation
 bash tests/test_portfw.sh             # Port-forward control, port ranges, exact comments
 bash tests/test_cut.sh                # Global cut: refusals, rule order, keeper, persistence
 bash tests/test_history.sh            # History store: flush, cursors, interface series, keeper, guard, ISO weeks
-bash tests/equiv.sh                   # ucode output == the v1.30.0 shell output, rpcd methods included
+bash tests/equiv.sh                   # ucode output == the v1.30.0 shell output (limiter, shaper: v1.30.6), rpcd methods included
 ```
+
+The writers' tests meet stateful stand-ins instead of recorded output:
+`tests/lib/nft-fw4.uc` (`inet fw4 forward`), `tests/lib/nft-netdev.sh`
+(`netdev tm_ratelimit`) and `tests/lib/tc-htb.sh` (tc and `ip link` for the
+shaper: HTB classes, leaves, u32 filters, ingress and mirred, an IFB). Each
+keeps the kernel behaviour the code depends on; for tc that is a u32 delete
+by prio with no handle removing every filter of that prio, a class a filter
+still uses refusing deletion, and a root qdisc the shaper did not make.
+`tests/lib/shape_env.sh` builds a scratch router around tc-htb.sh for the
+shaper tests (`st_net`, `st_run`, `st_dump`).
 
 Four further tests only run inside the OpenWrt rootfs containers that
 `compat.yml` builds, because they install a real package — they fail on a
@@ -318,7 +330,7 @@ their own — everything else is reached through `workflow_call`:
 | `tests.yml` | called by `ci.yml` | Unit, mock, E2E, security, and build tests |
 | `shellcheck.yml` | called by `ci.yml` | ShellCheck (`-S warning`) on every script with a shell shebang |
 | `eslint.yml` | called by `ci.yml` | ESLint on the frontend — `ecmaVersion: 5` plus `no-restricted-syntax`, so ES6 syntax fails the build |
-| `compat.yml` | PR, called by `auto-release.yml` | OpenWrt rootfs compatibility (52 version/arch combos); installs the built package and tests upgrades; job `live-ratelimit` runs `tools/ci/live-ratelimit.sh` (the ucode limiter on real nft, a bridge with two dummy ports, a private ubusd) on 22.03.7 and 25.12.4 |
+| `compat.yml` | PR, called by `auto-release.yml` | OpenWrt rootfs compatibility (52 version/arch combos); installs the built package and tests upgrades; job `live-ratelimit` runs `tools/ci/live-ratelimit.sh` (the ucode limiter on real nft, a bridge with two dummy ports, a private ubusd) on 22.03.7 and 25.12.4, job `live-shape` runs `tools/ci/live-shape.sh` (the ucode shaper on real tc/HTB/u32/mirred and an IFB, the same bridge) on both |
 | `auto-release.yml` | push to main | Waits for `ci.yml` **and** `compat.yml`, then bumps the version, tags, builds and publishes; job `pages` then rebuilds the signed opkg/apk feed on GitHub Pages with `tools/build-feed.sh` |
 
 The nesting is why the leaf workflows carry no `push`/`pull_request` triggers.

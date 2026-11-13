@@ -103,6 +103,7 @@ define Package/trafficctl/install
 	# PR8 history
 	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/history.uc $(1)/usr/share/ucode/trafficctl/
 	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/limit.uc $(1)/usr/share/ucode/trafficctl/
+	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/shape.uc $(1)/usr/share/ucode/trafficctl/
 	$(INSTALL_DIR) $(1)/usr/libexec/trafficctl
 	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-block.sh $(1)/usr/libexec/trafficctl/
 	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-bytes.sh $(1)/usr/libexec/trafficctl/

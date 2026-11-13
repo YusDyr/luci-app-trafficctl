@@ -260,15 +260,9 @@ writers 6 6 "six of each at once"
 # That asymmetry is now harmless because the flag defaults on, but it is still
 # the shape of the original bug, so both halves are pinned: if the shape
 # restore ever grows a persist guard, shapes stop coming back for anyone who
-# turned the flag off, and that is a regression in the other direction.
-shapes_block=$(awk '/^# Restore shaping rules/ { f = 1 } f { print } f && /^fi$/ { exit }' "$HOOK")
-case "$shapes_block" in
-    *tctl_persist_enabled*)
-        FAIL=$((FAIL + 1))
-        printf "FAIL: shape restore is now gated on persist_rules — shapes used to come back regardless\n"
-        ;;
-    *) PASS=$((PASS + 1)) ;;
-esac
+# turned the flag off, and that is a regression in the other direction. The
+# shapes half is `trafficctl restore` now, run with persist_rules off in
+# tests/test_shape.sh; the port-forward half is still the hook's.
 
 rules_block=$(awk '/^# Restore port-forward controls/ { f = 1 } f { print } f && /^fi$/ { exit }' "$HOOK")
 case "$rules_block" in

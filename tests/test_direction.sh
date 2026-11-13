@@ -9,18 +9,15 @@
 PASS=0
 FAIL=0
 
-BIN="$(cd "$(dirname "$0")/.." && pwd)/trafficctl/files/usr/libexec/trafficctl"
 
-# The limiter is `trafficctl ratelimit` (ucode); the shaper is still the shell
-# script, run with its own fakes below.
+# The limiter and the shaper are `trafficctl ratelimit` and `trafficctl shape`
+# (ucode), against tests/lib/shape_env.sh: a stateful netdev table and tc.
 # shellcheck source=tests/lib/ucode.sh
 . "$(dirname "$0")/lib/ucode.sh"
-# shellcheck source=tests/lib/limit_env.sh
-. "$UC_TESTLIB/limit_env.sh"
+# shellcheck source=tests/lib/shape_env.sh
+. "$UC_TESTLIB/shape_env.sh"
 TMPDIR="$UC_TMP/shaper"
-SHBIN="$TMPDIR/bin"
-mkdir -p "$SHBIN"
-TC_LOG="$TMPDIR/tc.log"
+mkdir -p "$TMPDIR"
 
 assert_eq() {
     local desc="$1" expected="$2" actual="$3"
@@ -45,7 +42,7 @@ assert_contains() {
 # br-lan is a bridge with two physical ports. Ingress hooks must land on the
 # PORTS: a netdev ingress hook bound to the bridge itself never sees bridged
 # traffic, which is how upload limiting silently did nothing.
-lt_net br-lan lan1 lan2
+st_net br-lan lan1 lan2
 
 # ── WAN device resolution ────────────────────────────────────────────────────
 # The old code fell back to the literal string "wan", which is an interface
@@ -210,82 +207,9 @@ assert_contains "limiter: no netdev family: refused with the package to install"
 assert_contains "limiter: no netdev family: logged with nft's error" \
     'rate limit: cannot create nft table netdev tm_ratelimit (kmod-nft-netdev missing?): Error: Could not process rule: Operation not supported' "$(cat "$LOGGER_LOG")"
 
-# ── shaper mocks ─────────────────────────────────────────────────────────────
-cat > "$SHBIN/uci" <<'MOCK'
-#!/bin/sh
-case "$3" in
-    network.wan.device) echo "eth1" ;;
-    network.lan.device) echo "br-lan" ;;
-    # Patterns quoted: [0] is a glob character class otherwise, so these
-    # would never match the literal uci key.
-    "firewall.@zone[0].name") echo "lan" ;;
-    "firewall.@zone[0].network") echo "lan" ;;
-    *) exit 1 ;;
-esac
-MOCK
-
-cat > "$SHBIN/ubus" <<'MOCK'
-#!/bin/sh
-case "$2" in
-    network.interface.wan) echo '{"l3_device":"eth1"}' ;;
-    *) echo '{"l3_device":"br-lan","ipv4-address":[{"address":"192.168.1.1","mask":24}]}' ;;
-esac
-MOCK
-
-# Parses its stdin rather than hardcoding, so the wan/lan distinction survives.
-cat > "$SHBIN/jsonfilter" <<'MOCK'
-#!/bin/sh
-input=$(cat)
-case "$2" in
-    '@.l3_device') echo "$input" | sed -n 's/.*"l3_device":"\([^"]*\)".*/\1/p' ;;
-    '@["ipv4-address"][0].address') echo "$input" | sed -n 's/.*"address":"\([^"]*\)".*/\1/p' ;;
-    '@["ipv4-address"][0].mask') echo "$input" | sed -n 's/.*"mask":\([0-9]*\).*/\1/p' ;;
-esac
-MOCK
-
-IP_LOG="$TMPDIR/ip.log"
-cat > "$SHBIN/ip" <<MOCK
-#!/bin/sh
-echo "\$*" >> "$IP_LOG"
-case "\$*" in
-    "link show tctl-ifb0") exit 1 ;;   # not created yet
-esac
-exit 0
-MOCK
-
-cat > "$SHBIN/nft" <<MOCK
-#!/bin/sh
-echo "\$*" >> "$NFT_LOG"
-case "\$*" in
-    "list tables") echo "table inet fw4" ;;
-esac
-exit 0
-MOCK
-
-cat > "$SHBIN/tc" <<MOCK
-#!/bin/sh
-echo "\$*" >> "$TC_LOG"
-case "\$*" in
-    "class show dev tctl-ifb0") echo "class htb 1:1 root rate 1000Mbit" ;;
-    *"class show"*) exit 0 ;;
-esac
-exit 0
-MOCK
-
-chmod +x "$SHBIN"/*
-
-mkdir -p "$TMPDIR/sys/class/net/eth1" "$TMPDIR/sys/class/net/br-lan/brif/lan1" \
-         "$TMPDIR/sys/class/net/br-lan/brif/lan2"
-export TCTL_SYSFS_NET="$TMPDIR/sys/class/net"
-
 # ── shaper: both directions ──────────────────────────────────────────────────
-: > "$TC_LOG"
-SHAPE="$TMPDIR/shape.sh"
-sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" \
-    -e "s|SHAPES_FILE=\"/etc/trafficctl/shapes.json\"|SHAPES_FILE=\"$TMPDIR/shapes.json\"|" \
-    -e "s|/sys/class/net/|$TMPDIR/sys/class/net/|g" \
-    "$BIN/trafficctl-shape.sh" > "$SHAPE"
-OUT=$(PATH="$SHBIN:$PATH" sh "$SHAPE" add 192.168.1.50 5000 2>&1)
+st_reset
+OUT=$(st_run add 192.168.1.50 5000)
 TC=$(cat "$TC_LOG")
 
 assert_contains "shaper: add reports success" '"ok":true' "$OUT"
@@ -294,7 +218,7 @@ assert_contains "shaper: says both directions" 'both directions' "$OUT"
 # Minors are allocated, not derived from the address: deriving them put
 # 192.168.0.1 on the reserved root class 1:1 and collided across subnets.
 # The first shape on an empty router therefore gets the lowest free minor, 1:2.
-CID=$(sed -n 's/.*"ip":"192.168.1.50","rate_kbit":5000,"classid":"\(1:[0-9a-f]*\)".*/\1/p' "$TMPDIR/shapes.json")
+CID=$(sed -n 's/.*"ip":"192.168.1.50","rate_kbit":5000,"classid":"\(1:[0-9a-f]*\)".*/\1/p' "$SHAPES")
 assert_eq "shaper: allocates the lowest free minor" "1:2" "$CID"
 assert_contains "shaper: download class on LAN device" \
     "class add dev br-lan parent 1:1 classid $CID htb rate 5000kbit" "$TC"
@@ -309,14 +233,16 @@ assert_contains "shaper: upload class on the IFB device" \
 assert_contains "shaper: upload filter matches src on IFB" \
     "filter add dev tctl-ifb0 parent 1:0 prio 10 protocol ip u32 match ip src 192.168.1.50/32" "$TC"
 
-IPL=$(cat "$IP_LOG")
-assert_contains "shaper: IFB device created" "link add name tctl-ifb0 type ifb" "$IPL"
-assert_contains "shaper: IFB device brought up" "link set tctl-ifb0 up" "$IPL"
+assert_contains "shaper: IFB device created" "ip link add name tctl-ifb0 type ifb" "$TC"
+assert_contains "shaper: IFB device brought up" "ip link set tctl-ifb0 up" "$TC"
 
 assert_contains "shaper: ingress qdisc on first bridge port" \
     "qdisc add dev lan1 handle ffff: ingress" "$TC"
 assert_contains "shaper: ingress mirrored into the IFB" \
     "action mirred egress redirect dev tctl-ifb0" "$TC"
+assert_contains "shaper: and from the second port too" "dev lan2 root noqueue
+  ingress
+  mirred to tctl-ifb0" "$(st_dump)"
 
 if printf '%s' "$TC" | grep -q "filter add dev eth1 .*match ip src"; then
     FAIL=$((FAIL + 1))
@@ -327,12 +253,14 @@ fi
 
 # ── shaper: removal clears both ──────────────────────────────────────────────
 : > "$TC_LOG"
-PATH="$SHBIN:$PATH" sh "$SHAPE" remove 192.168.1.50 >/dev/null 2>&1
+st_run remove 192.168.1.50 >/dev/null
 TC=$(cat "$TC_LOG")
 assert_contains "shaper: removes LAN class" "class del dev br-lan classid $CID" "$TC"
 assert_contains "shaper: removes IFB class" "class del dev tctl-ifb0 classid $CID" "$TC"
-assert_contains "shaper: removes upload filter" \
-    "filter del dev tctl-ifb0 parent 1:0 prio 10 protocol ip u32 match ip src 192.168.1.50/32" "$TC"
+assert_contains "shaper: removes the upload filter by its handle" \
+    "filter del dev tctl-ifb0 parent 1:0 prio 10 handle 800::800 protocol ip u32" "$TC"
+assert_eq "shaper: no class or filter of it is left on either device" "" \
+    "$(st_dump | grep -E "class $CID |flowid $CID")"
 
 # ── subnet / whole-network targets ───────────────────────────────────────────
 

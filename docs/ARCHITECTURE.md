@@ -44,7 +44,7 @@ graph TD
             BLK["trafficctl-block.sh = trafficctl block<br/>(ucode)"]
             UBK["trafficctl-unblock.sh = trafficctl unblock<br/>(ucode)"]
             RL["trafficctl-ratelimit.sh = trafficctl ratelimit<br/>(ucode)"]
-            SH["trafficctl-shape.sh"]
+            SH["trafficctl-shape.sh = trafficctl shape<br/>(ucode)"]
             MFA["trafficctl-macfilter-add.sh = trafficctl macfilter-add<br/>(ucode)"]
             MFR["trafficctl-macfilter-remove.sh = trafficctl macfilter-remove<br/>(ucode)"]
             CUT["trafficctl-cut.sh = trafficctl cut<br/>(global cut, procd keeper, ucode)"]
@@ -53,7 +53,7 @@ graph TD
 
         subgraph "Kernel Subsystems"
             NFT["nftables<br/>(inet fw4 forward,<br/>netdev tm_ratelimit,<br/>inet tctl_cut, inet tctl_pfw)"]
-            TC["tc<br/>(HTB qdisc on br-lan)"]
+            TC["tc<br/>(HTB on br-lan and tctl-ifb0)"]
             CTMOD["/proc/net/nf_conntrack"]
             IW["iw + brctl<br/>(WiFi/bridge detection)"]
             HOSTAPD["hostapd_cli<br/>(WiFi deny ACL + deauth)"]
@@ -87,8 +87,8 @@ graph TD
 
     MFA & MFR --> HOSTAPD
 
-    SH -->|"save_shape()"| SHAPES
-    HOTPLUG -->|"on ifup lan"| SH
+    SH -->|"save()"| SHAPES
+    HOTPLUG -->|"on ifup lan: trafficctl restore"| SH
 ```
 
 ---
@@ -155,22 +155,23 @@ sequenceDiagram
 sequenceDiagram
     participant B as Browser
     participant R as rpcd
-    participant SH as trafficctl-shape.sh
+    participant SH as trafficctl shape (shape.uc)
     participant TC as tc kernel
     participant FS as shapes.json
 
     B->>R: shape_add(ip, 10000, label)
-    R->>SH: exec add ip 10000 label
-    SH->>TC: ensure root HTB qdisc
+    R->>SH: trafficctl shape add ip 10000 label
+    SH->>TC: ensure root HTB qdisc (LAN device, IFB)
+    SH->>TC: tc filter del ... handle <its own> (by handle, never by prio)
     SH->>TC: tc class add ... rate 10000kbit
     SH->>TC: tc qdisc add ... fq_codel
-    SH->>TC: tc filter add ... match ip dst
+    SH->>TC: tc filter add ... match ip dst (LAN), match ip src (IFB)
     SH->>FS: write {ip, rate_kbit, classid, rate_kbit_up} to shapes.json
     SH-->>B: {"ok":true, "msg":"..."}
 
     Note over TC,FS: On reboot...
-    FS->>SH: hotplug reads shapes.json
-    SH->>TC: restore all tc classes
+    FS->>SH: trafficctl restore (ifup lan) reads shapes.json
+    SH->>TC: every record again, quietly
 ```
 
 ---
@@ -204,6 +205,16 @@ behind `trafficctl ratelimit`:
 | `limit.remove_legacy` | a limit from before v1.13.2, commented after the caller's label (`rl_ratelimit_tg` from the bot): only the rules naming exactly this target, `ip daddr` for download and `ip saddr` for upload, then their meters |
 | `limit.restore` | the `ratelimit` records of `rules.json`, part of `trafficctl restore` on `ifup lan`; a limit still live is replaced, a record that fails is logged and the rest go on |
 
+The shaper is `trafficctl/files/usr/share/ucode/trafficctl/shape.uc`
+behind `trafficctl shape`:
+
+| Function | Implementation |
+|----------|----------------|
+| `shape.apply` | the classid from `shapes.json` or `alloc_classid`; the root HTB (`ensure_root`, declined over a foreign root qdisc), then class, fq_codel leaf and `u32 match ip dst` filter on the LAN device; with an IFB, the same on `tctl-ifb0` with `match ip src`, fed by `mirred` from every bridge port's ingress (`limit.ingress_devices`); then the record |
+| `shape.remove` | filters, leaf and class on both devices (the derived classid for a record from before allocation), then the record |
+| `detach` | a shape's u32 filters **by handle**, found in `tc filter show`: a delete by prio with no handle removes every filter of that prio on the device, which up to v1.30.x left only the last shape applied in force |
+| `shape.restore` | every record of `shapes.json`, part of `trafficctl restore` on `ifup lan`, whatever `persist_rules` says; nothing in the activity log |
+
 The block itself is ucode since the CLI took over `block`/`unblock`:
 `ctl.block_add` inserts `ip saddr <ip> counter drop comment "tctl_block_<slug>"`
 and, with a MAC, `meta nfproto ipv6 ether saddr <mac> counter drop comment
@@ -213,7 +224,7 @@ deletes by handle after reading the chain with `nft -j`.
 
 ### Reading the rules back (ucode)
 
-The shaper writer stays shell. Everything that reads the limiter's and the shaper's rules back for a
+Everything that reads the limiter's and the shaper's rules back for a
 report (`trafficctl ratelimit-stats`, `shape-stats`, `rules`) is in
 `trafficctl/files/usr/share/ucode/trafficctl/ctl.uc`:
 
@@ -236,7 +247,7 @@ report (`trafficctl ratelimit-stats`, `shape-stats`, `rules`) is in
   `5ms`), which would change the reported figure.
 
 `tools/ci/live-readers.sh` (the `live-readers` job in `compat.yml`) builds real
-blocks, limits and shapes with the shell writers in the 22.03.7 and 25.12.4
+blocks, limits and shapes with the current writers in the 22.03.7 and 25.12.4
 rootfs and compares the v1.30.0 readers with the CLI on that state. The
 bridge has two dummy ports, so the upload rules land on more than one
 `ul_<port>` chain. The container runs on the CI host's kernel, which has the
@@ -425,9 +436,9 @@ The WiFi deny is `trafficctl macfilter-add` / `macfilter-remove` (`ctl.macfilter
 | WiFi MAC filtering | Always | `uci commit wireless` | Committed to `/etc/config/wireless` |
 | Usage history | When `history.enabled` | `<history.dir>/<period>.tsv`, `<period>.if.tsv` | Durable per-period device and interface totals |
 
-The hotplug script triggers on `ACTION=ifup` and `INTERFACE=lan`, with a readiness loop (waits up to 10s for tc to be available on the bridge device). When `persist_rules` is enabled, blocks and ratelimits are saved/removed from `/etc/trafficctl/rules.json` alongside shape operations.
+The hotplug script triggers on `ACTION=ifup` and `INTERFACE=lan`, with a readiness loop (waits up to 10s for tc to be available on the bridge device), and runs `trafficctl restore`: the blocks, the limits and the shapes, each half in its own `try`, so one that fails does not keep the others from coming back. When `persist_rules` is enabled, blocks and ratelimits are saved/removed from `/etc/trafficctl/rules.json`; shapes always go to `shapes.json`.
 
-The saved blocks come back through `trafficctl restore` (`ctl.restore`). At boot `ifup lan` can come before fw4 has loaded its ruleset, so it waits up to 10 s for `inet fw4`; a block already in the chain (lan going up again without a fw4 reload) is not inserted twice, and a record whose address does not validate is logged and skipped while the rest are restored. The limiter and port-forward records are still restored by the hook's shell loop.
+The saved blocks come back through `trafficctl restore` (`ctl.restore`). At boot `ifup lan` can come before fw4 has loaded its ruleset, so it waits up to 10 s for `inet fw4`; a block already in the chain (lan going up again without a fw4 reload) is not inserted twice, and a record whose address does not validate is logged and skipped while the rest are restored. The limits (`limit.restore`) and the shapes (`shape.restore`) come back through the same command; the port-forward records are still restored by the hook's shell loop.
 
 `rules.json` has a shell writer (the limiter, `tctl_persist_*`) and a ucode one (the block, `lib.persist_save`/`persist_remove`). Both take the mkdir lock `/tmp/trafficctl_rules.lock.d`, wait 5 s for it and then take it over from a holder that was killed, and write byte-identical records, so either may run while the other is mid-write.
 
@@ -502,5 +513,5 @@ Telegram API  ←──curl long poll──  trafficctl-telegram.uc (procd)
 - Label/comment sanitization: `tr -cd 'a-zA-Z0-9_.-'` strips injection characters.
 - Protocol parameter: `case` whitelist (`tcp|udp|all`), not interpolated.
 - No user-supplied strings are passed to shell eval.
-- File locking for concurrent `shapes.json` writes.
+- File locking for concurrent `shapes.json` writes (the mkdir lock `/tmp/trafficctl_shapes.lock.d`, shared with the shell shaper of older releases).
 - Telegram bot token stored in UCI with file mode 0600; token is masked in rpcd responses (`***`).
