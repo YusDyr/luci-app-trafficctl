@@ -169,7 +169,8 @@ I hope it turns out as useful for you as it has been for me.
 - **Live Speed Polling** -- Optional polling with configurable interval (Off/1/2/5/10/30s) and averaging window (5s-5min); shows sparkline per device with spike filtering. Both can be stored as router-wide defaults via UCI (`poll_interval`, `avg_window`) for browsers that have not chosen their own.
 - **Reverse DNS** -- Optional hostname resolution for external destination IPs with in-memory cache (no repeated lookups).
 - **Searchable Device Picker** -- Command palette (search by name, IP, or MAC) with recent devices quick-access bar stored in localStorage.
-- **Telegram Bot** -- Optional bot for remote control: device list, block/unblock, rate limit, shape traffic, new device notifications. Runs on the router via long polling, no external server needed.
+- **Telegram Bot** -- Optional bot for remote control: device list, block/unblock, rate limit, shape traffic. Runs on the router via long polling, no external server needed.
+- **Notifications** -- New device, known device back online, limit applied, block applied and internet cut, sent to Telegram, ntfy, a webhook or email (msmtp), each sender with its own events (Status > Traffic Control > Notifications). Every event is also a ubus event (`ubus listen trafficctl.notify`) and runs the scripts in `/etc/hotplug.d/trafficctl/`, for your own automation. See [docs/API.md](docs/API.md#notifications).
 - **New Device Detection** -- Discovers new devices via three sources: ARP table, DHCP leases, Wi-Fi station list. Instant DHCP hotplug trigger for near-realtime alerts.
 - **Activity Logging** -- Configurable logging of all actions (blocks, ratelimits, shapes, config changes) to a local file and/or syslog. Includes source IP, username, and trigger (LuCI/Telegram/CLI).
 - **Default Limit for New Devices** -- Optionally rate-limit or shape a device the first time it appears on the network (Settings > New Device Defaults). Off by default. Switching it on records the devices already present, so only genuinely new ones are affected, and a device that already carries a limit is never overridden.
@@ -200,7 +201,8 @@ I hope it turns out as useful for you as it has been for me.
 | `iw-full` | Interface detection | WiFi band identification |
 | `bridge-utils` | Interface detection | LAN port identification (brctl) |
 | `hostapd-utils` | WiFi MAC filtering | Optional for the `trafficctl` backend, so it installs on wired-only builds; `luci-app-trafficctl` still pulls it in. Without it a WiFi block is a temporary (one hour) hostapd ban |
-| `curl` + `jsonfilter` | Telegram bot | jsonfilter is part of base OpenWrt |
+| `curl` + `jsonfilter` | Telegram bot, notifications | jsonfilter is part of base OpenWrt |
+| `msmtp` | Email notifications | Optional; configure `/etc/msmtprc` |
 | `rpcd-mod-rrdns` | Reverse DNS | Included with `rpcd`; enables rDNS in LuCI, Telegram, and CLI |
 
 ## Compatibility
@@ -442,7 +444,8 @@ firewall/tc state — they disappear on the next reboot. To clear them
 immediately before removing the package, unblock/unlimit the affected devices
 from the dashboard first, or reboot the router after uninstalling.
 
-If you also enabled the Telegram bot, stop it before removing:
+If you also enabled the Telegram bot, stop it before removing (the package
+removal stops the notification watcher, `trafficctl-notify`, itself):
 
 ```sh
 /etc/init.d/trafficctl-telegram stop
@@ -559,6 +562,18 @@ opkg install curl
 2. Send any message to your bot and find your chat ID via `https://api.telegram.org/bot<TOKEN>/getUpdates`.
 3. In LuCI, expand **Settings > Telegram Bot**, enter token and chat ID, click **Test**, then **Save**.
 4. In Telegram, send `/devices` to see the device list with action buttons.
+5. Which events reach the chat, and the new device message, are set on the **Notifications** tab (Telegram card). The bot does not have to run for notifications.
+
+### Notifications (optional)
+
+On **Status > Traffic Control > Notifications**, switch on a sender (Telegram, ntfy, webhook, email), pick its events, fill in its fields and click **Save**, then **Send test**. The device scan behind "New device" and "Known device online" runs as `/etc/init.d/trafficctl-notify` only while some sender (or a hotplug script) takes those events.
+
+A script in `/etc/hotplug.d/trafficctl/` gets every event, with `ACTION` set to the event name:
+
+```sh
+# /etc/hotplug.d/trafficctl/10-log
+[ "$ACTION" = new_device ] && logger -t my-hook "new device $MAC $IP $NAME"
+```
 
 ---
 
@@ -653,6 +668,8 @@ The frontend talks to a thin rpcd dispatcher over ubus. The Telegram bot provide
 | `trafficctl/files/usr/libexec/trafficctl/trafficctl-fw.sh` | Firewall abstraction layer (sourced) |
 | `trafficctl/files/usr/libexec/trafficctl/trafficctl-telegram.sh` | Telegram bot daemon (long polling) |
 | `trafficctl/files/etc/init.d/trafficctl-telegram` | procd init script for the bot |
+| `trafficctl/files/usr/share/ucode/trafficctl/notify.uc` | Notification events and senders (ubus, hotplug, Telegram, ntfy, webhook, mail) |
+| `trafficctl/files/etc/init.d/trafficctl-notify` | procd init script for the new/known device scan |
 | `trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes` | Boot persistence for tc + block + ratelimit rules |
 | `trafficctl/files/etc/hotplug.d/dhcp/99-trafficctl-newdevice` | Instant new-device detection via DHCP events |
 | `trafficctl/files/www/cgi-bin/trafficctl-metrics` | Prometheus scrape endpoint (CGI) |

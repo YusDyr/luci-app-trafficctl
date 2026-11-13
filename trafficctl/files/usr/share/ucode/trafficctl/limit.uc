@@ -35,6 +35,7 @@
 import { stat, lsdir } from 'fs';
 import * as lib from 'trafficctl.lib';
 import * as net from 'trafficctl.net';
+import * as notify from 'trafficctl.notify';
 
 const RULES = '/etc/trafficctl/rules.json';
 const SYSFS = '/sys/class/net';
@@ -536,6 +537,9 @@ function ratelimit(args) {
 	// What was applied is recorded here, once: the activity log, and the
 	// place any other announcement of the change belongs.
 	lib.log('ratelimit_set', ip, rates, via, src);
+	// Not from restore(), which calls add() directly; the ifup hook also sets
+	// TCTL_NOTIFY=0 for everything it runs.
+	notify.emit_action('limit_applied', { ip, rate_kbit: rk, rate_kbit_up: uk, mode: 'limiter' });
 	// A flow the NSS firmware already accelerates is not checked against a
 	// rule that came after it.
 	lib.nss_defunct();

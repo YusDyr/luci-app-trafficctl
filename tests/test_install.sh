@@ -137,6 +137,8 @@ for f in \
   /etc/hotplug.d/dhcp/99-trafficctl-newdevice \
   /etc/hotplug.d/iface/99-trafficctl-shapes \
   /etc/init.d/trafficctl-telegram \
+  /etc/init.d/trafficctl-notify \
+  /usr/share/ucode/trafficctl/notify.uc \
   /lib/upgrade/keep.d/trafficctl \
   /www/cgi-bin/trafficctl-metrics; do
   [ -f "$f" ] || { echo "MISSING: $f"; exit 1; }
@@ -147,6 +149,7 @@ for s in \
   /usr/libexec/trafficctl/trafficctl-*.sh \
   /etc/hotplug.d/dhcp/99-trafficctl-newdevice \
   /etc/hotplug.d/iface/99-trafficctl-shapes \
+  /etc/init.d/trafficctl-notify \
   /etc/init.d/trafficctl-telegram; do
   ash -n "$s" || { echo "SYNTAX ERROR: $s"; exit 1; }
 done
@@ -156,6 +159,7 @@ for s in \
   /usr/sbin/trafficctl \
   /usr/libexec/trafficctl/trafficctl-*.sh \
   /usr/libexec/rpcd/luci.trafficctl \
+  /etc/init.d/trafficctl-notify \
   /etc/init.d/trafficctl-telegram; do
   [ -x "$s" ] || { echo "NOT EXECUTABLE: $s"; exit 1; }
 done
@@ -175,6 +179,15 @@ for c in "/usr/sbin/trafficctl metrics" /usr/libexec/trafficctl/trafficctl-metri
     out=$($c 2>&1)
     case "$out" in "# trafficctl metrics are disabled"*) ;; *) echo "CLI FAILED: $c printed: $out"; exit 1 ;; esac
 done
+# The postinst moved the config to the notification layout (or found it
+# there), and with no Telegram bot set up nothing wants the device scan, so
+# the watcher service stays down.
+out=$(/usr/sbin/trafficctl notify migrate 2>&1)
+case "$out" in '{"ok":true,'*) ;; *) echo "CLI FAILED: notify migrate printed: $out"; exit 1 ;; esac
+[ "$(uci -q get trafficctl.notify.scan)" = auto ] || { echo "CONFIG: trafficctl.notify.scan is not auto"; exit 1; }
+if /usr/sbin/trafficctl notify wanted >/dev/null 2>&1; then
+    echo "CLI FAILED: notify wanted on a router with no sender set up"; exit 1
+fi
 # ── PR7: cut and portfw. Status only reads (no rule, no keeper), and a
 #    container without nf_tables still answers with JSON.
 for c in "/usr/sbin/trafficctl cut status" "/usr/libexec/trafficctl/trafficctl-cut.sh status"; do
@@ -267,6 +280,8 @@ for f in \
   /usr/libexec/trafficctl/trafficctl-fw.sh \
   /etc/config/trafficctl \
   /etc/init.d/trafficctl-telegram \
+  /etc/init.d/trafficctl-notify \
+  /usr/share/ucode/trafficctl/notify.uc \
   /etc/hotplug.d/iface/99-trafficctl-shapes \
   /lib/upgrade/keep.d/trafficctl \
   /www/cgi-bin/trafficctl-metrics; do
@@ -324,6 +339,7 @@ for f in \
   /www/luci-static/resources/view/trafficctl/status.js \
   /www/luci-static/resources/view/trafficctl/status.css \
   /etc/init.d/trafficctl-telegram \
+  /etc/init.d/trafficctl-notify \
   /www/cgi-bin/trafficctl-metrics; do
   [ -f "$f" ] && { echo "REMOVAL FAILED: $f still exists"; exit 1; }
 done

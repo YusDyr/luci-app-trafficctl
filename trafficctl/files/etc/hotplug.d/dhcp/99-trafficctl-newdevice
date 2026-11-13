@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=dash
 # Triggered by dnsmasq on DHCP events (add/old/del), with ACTION, MACADDR,
-# IPADDR and HOSTNAME in the environment: the Telegram bot's new-device
-# notification and the default limit for a device seen for the first time.
+# IPADDR and HOSTNAME in the environment: the new-device notification
+# (`trafficctl notify dhcp`) and the default limit for a device seen for the first time.
 # `trafficctl newdevice` (trafficctl.ctl) does both. hotplug-call sources this
 # in a subshell, so the variables are handed on explicitly.
 

@@ -99,6 +99,7 @@ chmod +x "$BE_DATA/usr/libexec/trafficctl/trafficctl-"*.sh "$BE_DATA/usr/sbin/tr
 chmod +x "$BE_DATA/www/cgi-bin/trafficctl-metrics"
 [ -d "$BE_DATA/etc/init.d" ] && chmod +x "$BE_DATA/etc/init.d/"*
 [ -d "$BE_DATA/etc/hotplug.d" ] && find "$BE_DATA/etc/hotplug.d" -type f -exec chmod +x {} +
+[ -d "$BE_DATA/etc/uci-defaults" ] && chmod +x "$BE_DATA/etc/uci-defaults/"*
 
 # --- Conffiles (embedded in lib/apk/packages for APK protected-paths) ---
 # Only list files that ship in the package; shapes.json / telegram_known.json
@@ -132,9 +133,21 @@ if [ -z "${IPKG_INSTROOT}" ]; then
     # Each service follows its uci flag, so what runs now is what runs after
     # the next reboot: enabled in rc.d and started when the flag is 1, left
     # alone when it is 0.
+    # The Telegram options of releases up to 1.30.x move to the notification
+    # senders (once: only while the 'notify' section is missing).
+    if [ -x /usr/sbin/trafficctl ]; then
+        /usr/sbin/trafficctl notify migrate >/dev/null 2>&1 || true
+    fi
+    # Restarted, not started: a bot of a release up to 1.30.x runs the device
+    # scan itself, which the notification watcher took over.
     if [ -x /etc/init.d/trafficctl-telegram ] && [ "$(uci -q get trafficctl.telegram.enabled)" = "1" ]; then
         /etc/init.d/trafficctl-telegram enable 2>/dev/null || true
-        /etc/init.d/trafficctl-telegram start 2>/dev/null || true
+        /etc/init.d/trafficctl-telegram restart 2>/dev/null || true
+    fi
+    # The watcher decides for itself whether anything wants the scan.
+    if [ -x /etc/init.d/trafficctl-notify ]; then
+        /etc/init.d/trafficctl-notify enable 2>/dev/null || true
+        /etc/init.d/trafficctl-notify restart 2>/dev/null || true
     fi
     # A sampler started by a release up to 1.28.0 still calls the helpers at
     # /usr/local/bin, which this upgrade removed; restart it onto the new path.
@@ -165,6 +178,10 @@ cat > "$BE_SCRIPTS/pre-deinstall" <<'SCRIPT'
 if [ -z "${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-telegram ]; then
     /etc/init.d/trafficctl-telegram stop 2>/dev/null || true
     /etc/init.d/trafficctl-telegram disable 2>/dev/null || true
+fi
+if [ -z "${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-notify ]; then
+    /etc/init.d/trafficctl-notify stop 2>/dev/null || true
+    /etc/init.d/trafficctl-notify disable 2>/dev/null || true
 fi
 # Fail open. A global internet cut left engaged by a package that is going away
 # is a lockout with no UI left to undo it.

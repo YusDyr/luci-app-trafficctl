@@ -114,6 +114,18 @@ for m in $WRITE_LIST; do
 done
 assert_eq "acl: no mutating method also appears in the read ACL" "" "$OFFENDERS"
 
+# No direct uci grant: no view reads or writes uci (everything goes through
+# luci.trafficctl, which masks the bot token, the ntfy token and the webhook
+# auth as ***). A read grant on trafficctl handed those secrets to any
+# read-only user in clear text, one on wireless the WiFi keys; a write grant
+# set options past the plugin's validation (log_file, max_lines).
+assert_eq "acl: no uci access at all, read or write" "" \
+    "$(jq -r '.[] | [.read.uci, .write.uci] | map(select(. != null)) | .[]' "$ACL_FILE")"
+VIEWS="$(dirname "$ROOT")/htdocs/luci-static/resources/view/trafficctl"
+assert_eq "acl: the views are where this looks" yes "$([ -f "$VIEWS/status.js" ] && echo yes)"
+assert_eq "acl: and no view needs it (no uci module, no form.Map)" "" \
+    "$(grep -lE "'require uci'|form\.Map|uci\.(load|get|set|sections)" "$VIEWS"/*.js 2>/dev/null)"
+
 # ════════════════════════════════════════════════════════════════════════════
 # 3. Shaper classids are allocated, not derived from the address
 # ════════════════════════════════════════════════════════════════════════════
@@ -239,41 +251,8 @@ assert_not_contains "shaper: never deletes the foreign root qdisc" "qdisc del de
 # port, tests/test_block.sh ("regressions").
 
 # ════════════════════════════════════════════════════════════════════════════
-# 7. Telegram bot token never appears in fake-curl argv (goes via stdin)
-# ════════════════════════════════════════════════════════════════════════════
-# (Covered end-to-end against tg_api/tg_send in test_security.sh; repeated
-# here narrowly against trafficctl-telegram-test.sh's independent tg call
-# path, which has its own curl invocation.)
-
-cat > "$MOCKBIN/uci" <<'MOCK'
-#!/bin/sh
-echo "OpenWrt"
-MOCK
-CURL_ARGV="$TMPDIR/curl_argv2.log"
-CURL_STDIN="$TMPDIR/curl_stdin2.log"
-: > "$CURL_ARGV"; : > "$CURL_STDIN"
-cat > "$MOCKBIN/curl" <<MOCK
-#!/bin/sh
-echo "\$*" >> "$CURL_ARGV"
-cat >> "$CURL_STDIN"
-echo '{"ok":true}'
-MOCK
-cat > "$MOCKBIN/jsonfilter" <<'MOCK'
-#!/bin/sh
-exit 1
-MOCK
-cat > "$MOCKBIN/ip" <<'MOCK'
-#!/bin/sh
-exit 1
-MOCK
-chmod +x "$MOCKBIN/uci" "$MOCKBIN/curl" "$MOCKBIN/jsonfilter" "$MOCKBIN/ip"
-
-PATH="$MOCKBIN:$PATH" sh "$BIN/trafficctl-telegram-test.sh" "999999:SECRETTOKENVALUE" "12345" >/dev/null 2>&1
-assert_not_contains "telegram-test.sh: bot token absent from curl argv" \
-    "SECRETTOKENVALUE" "$(cat "$CURL_ARGV")"
-assert_contains "telegram-test.sh: bot token present on curl's stdin (--config -)" \
-    "SECRETTOKENVALUE" "$(cat "$CURL_STDIN")"
-
+# 7. telegram-test keeps the bot token out of curl's argv: tests/test_notify.sh
+#    (the command is `trafficctl telegram-test` now).
 # ════════════════════════════════════════════════════════════════════════════
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"

@@ -177,6 +177,35 @@ fw_run block 192.168.1.20 tg >/dev/null
 assert_contains "block via the bot writes the same comment" '"tctl_block_192_168_1_20"' "$(fw_rules)"
 fw_flush
 
+# ── the block_applied notification ──────────────────────────────────────────
+# v1.30.0's trafficctl-block.sh announced each new block; the port fires the
+# same event, once per block that went in, never for a refusal or a repeat.
+fw_flush
+fw_events_on
+fw_clear
+fw_run block 192.168.1.50 >/dev/null
+assert_eq "event: a new block fires block_applied, kind internet, via/src defaulted" \
+    "ACTION=block_applied IP=192.168.1.50 KIND=internet MAC=aa:bb:cc:dd:ee:50 SRC=local VIA=cli" \
+    "$(cat "$EVENTS_LOG")"
+fw_clear
+fw_run block 192.168.1.50 >/dev/null
+assert_eq "event: an address already blocked fires nothing" "" "$(cat "$EVENTS_LOG")"
+fw_flush
+fw_clear
+TCTL_VIA=luci TCTL_SRC=192.168.1.7 fw_run block 192.168.1.50 >/dev/null
+assert_eq "event: via and src are the caller's" \
+    "ACTION=block_applied IP=192.168.1.50 KIND=internet MAC=aa:bb:cc:dd:ee:50 SRC=192.168.1.7 VIA=luci" \
+    "$(cat "$EVENTS_LOG")"
+fw_clear
+fw_run block 'bad;ip' >/dev/null
+fw_run block 192.168.1.254 >/dev/null
+assert_eq "event: a refused block fires nothing" "" "$(cat "$EVENTS_LOG")"
+fw_clear
+fw_run unblock 192.168.1.50 >/dev/null
+assert_eq "event: unblock fires nothing" "" "$(cat "$EVENTS_LOG")"
+fw_events_off
+fw_flush
+
 # ── Qualcomm NSS (issue #81) ────────────────────────────────────────────────
 # An accelerated flow never meets the Linux stack: the block is installed and
 # does nothing for it, so the reply says so, and the flows ECM holds are

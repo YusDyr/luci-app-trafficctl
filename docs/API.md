@@ -133,10 +133,21 @@ method because it returns the contents of the configured log file.
 | `netify_collect` | `trafficctl netify collect` (ucode) | `secs` (1–30, default 3) | write |
 | `config_set` | (in plugin) | `enabled`, `default_mode`, `sw`, `hw`, `poll_interval`, `avg_window` (all optional) | write |
 | `telegram_config_set` | (in plugin) | `enabled`, `bot_token`, `chat_id`, `poll_interval`, `notify_new_device`, `notify_known_device`, `control_enabled`, `notify_template`, `btn_block_inet`, `btn_block_wifi`, `btn_limiter`, `btn_shaper` | write |
-| `telegram_test` | `trafficctl-telegram-test.sh` | `bot_token`, `chat_id`, `message` — the token goes to the plugin's wrapping shell on stdin, which exports it as `TCTL_TG_TOKEN` for the script; it is never in an argument list | write |
+| `telegram_test` | `trafficctl telegram-test` (ucode) | `bot_token`, `chat_id`, `message` — the token goes to the plugin's wrapping shell on stdin, which exports it as `TCTL_TG_TOKEN` for the command; it is never in an argument list | write |
+| `notify_config_get` | (in plugin) | (none) — the Notifications tab: `enabled`, `scan`, `scan_interval`, `scan_wanted`, `events`, `types`, `msmtp`, `hotplug_scripts`, `bot_token_set`, `bot_chat_id`, `senders` (secrets as `***` plus `<option>_set`) | read |
+| `notify_config_set` | (in plugin) | `sender` (a type or a section name; empty = the global options), `enabled`, `events`, `scan`, `scan_interval`, and the sender's own options (see [Notifications](#notifications)) | write |
+| `notify_test` | `trafficctl notify test` (ucode) | `sender` | write |
 | `logging_config_set` | (in plugin) | `enabled`, `log_file`, `max_lines`, `syslog`, `log_blocks`, `log_ratelimits`, `log_shapes`, `log_telegram`, `log_config`, `persist_rules` (stored as `main.persist_rules`) | write |
 | `newdevice_config_set` | (in plugin) | `enabled`, `limit_kbit`, `limit_mode` (`limiter`\|`shaper`) | write |
 | `activity_log` | (in plugin) | `lines` (default 50, capped at 1000) | write |
+
+`notify_config_set` runs `trafficctl notify migrate` first, validates every
+value before it writes any, refuses to switch on a sender that lacks what it
+needs (`telegram needs a bot token and a chat id`, `mail needs msmtp`, ...),
+then commits, enables `/etc/init.d/trafficctl-notify` and restarts it. Since
+1.31 `telegram_config_get` reads `notify_new_device`, `notify_known_device` and
+`notify_template` back from the `notify_telegram` sender once it exists, and
+`telegram_config_set` writes them there.
 
 `telegram_config_set` keeps `/etc/init.d/trafficctl-telegram` enabled in rc.d
 while `telegram.enabled` is 1 and disabled while it is 0, then reloads the bot.
@@ -1084,6 +1095,145 @@ degraded `ban` path is available and every block reports `ok:false`.
 
 ---
 
+## Notifications
+
+`trafficctl.notify` (`/usr/share/ucode/trafficctl/notify.uc`) turns what
+happens on the router into events, and hands each event to three consumers:
+
+1. **ubus**: event `trafficctl.notify` with `{ "event", "time", ...fields }`,
+   always (`ubus listen trafficctl.notify`).
+2. **hotplug**: every script in `/etc/hotplug.d/trafficctl/` through
+   `hotplug-call trafficctl`, with `ACTION=<event>`, `TIME=<epoch>` and each
+   field upper-cased (`IP`, `MAC`, `RATE_KBIT`, ...), always.
+3. **senders**: each enabled sender subscribed to the event, unless
+   `notify.enabled` is `0` (that switch silences the senders only).
+
+Steps 2 and 3 run in a detached `trafficctl notify dispatch`: the command that
+caused the event never waits on the network.
+
+| Event | Emitted by | Fields |
+|-------|------------|--------|
+| `new_device` | the device scan, the DHCP hotplug | `mac`, `ip`, `name`, `link` |
+| `known_device` | the device scan (a known MAC back online) | `mac`, `ip`, `name`, `link` |
+| `limit_applied` | `trafficctl ratelimit` (`limit.uc`), `trafficctl-shape.sh add` | `ip`, `rate_kbit`, `rate_kbit_up`, `mode` (`limiter`\|`shaper`) |
+| `block_applied` | `trafficctl block`, `trafficctl macfilter-add` (when the deny took) | `ip`, `mac`, `kind` (`internet`\|`wifi`) |
+| `cut_engaged` | `trafficctl cut engage` (not its boot restore) | `duration` (seconds left, `0` = indefinite), `persist` |
+
+Putting saved rules back is not an event: the `ifup lan` restore hook sets
+`TCTL_NOTIFY=0`, which `tctl_notify` and `notify.emit_action` honour, so a
+reboot sends no "Limit applied" per device. A block already in place, an
+unblock and a refused action send nothing either.
+
+Every event also carries `via` (`luci`, `telegram`, `cli`) and `src` (the
+caller's address or `local`). Unknown fields are dropped, and so is a text
+field with a control character or over 256 bytes, or a number field that is
+not a number.
+
+### Senders
+
+One uci section per sender, of type `notify_<type>`, each with `enabled` and
+`list events` (unset: every event):
+
+```
+config notify 'notify'
+	option enabled '1'          # 0: senders off; ubus and hotplug still get every event
+	option scan 'auto'          # 1, 0, or auto: only when something wants new_device/known_device
+	option scan_interval '30'   # seconds, 0 or 10..86400
+
+config notify_telegram 'notify_telegram'
+	option enabled '1'
+	list events 'new_device'
+	option template ''          # new_device message, {{ name }} {{ ip }} ... ; empty = built-in
+	# bot_token, chat_id: optional, default to the bot's (trafficctl.telegram)
+
+config notify_ntfy 'notify_ntfy'
+	option server 'https://ntfy.sh'
+	option topic 'my-router'
+	option token ''             # optional access token
+	option priority '3'         # 1..5
+
+config notify_webhook 'notify_webhook'
+	option url 'https://example.com/hook'
+	option auth ''              # optional Authorization header value
+
+config notify_mail 'notify_mail'
+	list to 'me@example.com'
+	option from ''
+	option account ''           # msmtp account, needs msmtp and /etc/msmtprc
+```
+
+- **telegram**: `sendMessage` with HTML; values are HTML-escaped. Sends only:
+  the bot is a separate service.
+- **ntfy**: a JSON publish (`topic`, `title`, `message`, `priority`, `tags`).
+- **webhook**: a JSON POST of `event`, `time`, `router`, `title`, `text` and the
+  event's fields; any 2xx is success.
+- **mail**: a plain-text message through `msmtp`.
+
+Tokens and URLs go to curl as a config file on stdin, never in an argument
+list (`ps` shows argv to every local user). The LuCI ACL grants no direct uci
+access: the views read the settings through `luci.trafficctl`, which shows
+every token and `auth` as `***`.
+
+Delivery is one attempt per event and sender: there is no retry, rate limit or
+coalescing, so a sender that answers 429 (Telegram's flood limit, ntfy's
+quota) loses that message, and a burst of events is a burst of requests. The
+scan sends synchronously; a config change restarts `trafficctl-notify`, and a
+send in flight at that moment is lost with it.
+
+### The device scan
+
+`new_device` and `known_device` come from a scan of the neighbour table, the
+DHCP leases and the WiFi station lists every `scan_interval` seconds, run by
+`/etc/init.d/trafficctl-notify` (`trafficctl notify watch`). The service starts
+only when `trafficctl notify wanted` says something listens: `scan '1'`, or
+`auto` with a sender taking either event, or a hotplug script. The DHCP hotplug
+(`/etc/hotplug.d/dhcp/99-trafficctl-newdevice`) reports a new lease at once
+through `trafficctl notify dhcp`. The scan keeps the bot's state files:
+`/etc/trafficctl/telegram_known.json` (the known-device ledger; a missing or
+empty one is seeded from what is on the network, so switching notifications on
+does not report the whole LAN) and `/tmp/trafficctl_tg_online`. The scan and
+`notify dhcp` see a new device at the same time; each checks the ledger again
+under `/tmp/.trafficctl_known.lock` before adding it, and only the one that
+added it sends `new_device`. When the lock cannot be had within 10 s nothing
+is written, and the device is reported at its next sighting.
+
+### CLI
+
+```
+trafficctl notify emit <event> [key=value...]      # ubus now, the rest in the background
+trafficctl notify dispatch <event> [key=value...]  # hotplug and senders now: [{sender,type,ok,msg}]
+trafficctl notify scan                             # one scan pass: {ok,new,online,devices}
+trafficctl notify watch                            # scan forever (the service)
+trafficctl notify wanted                           # exit 0 when the scan is needed
+trafficctl notify dhcp <mac> [ip] [name]           # new_device for an unknown MAC
+trafficctl notify migrate                          # the bot's old options to notify_telegram
+trafficctl notify test <sender>                    # a test message through one sender
+```
+
+Shell scripts emit through `tctl_notify <event> key=value...`
+(`trafficctl-fw.sh`), the ucode action code through
+`notify.emit_action(ev, fields)`; both add `via` and `src` (`TCTL_VIA`,
+`TCTL_SRC`) and never fail the action.
+
+### Migration
+
+Up to 1.30 the bot's section held `notify_new_device`, `notify_known_device`
+and `notify_template`. `trafficctl notify migrate` (run by the postinst and by
+`/etc/uci-defaults/80_trafficctl-notify`, and by `notify_config_set`) creates
+the `notify` section once and, when there is no `notify_telegram` yet, moves
+those options into one: the events that were on, `enabled` as the bot's
+`enabled` (off when no event was on), the template. It removes the old
+options. Until it has run, the old options act as a Telegram sender, so
+notifications keep working mid-upgrade.
+
+A downgrade to 1.30.x does not move them back: 1.30's bot finds no
+`notify_new_device`, `notify_known_device` or `notify_template` and sends no
+device notifications, with the built-in message, until they are set again
+(`uci set trafficctl.telegram.notify_new_device=1`, and the template copied
+from `notify_telegram.template`).
+
+---
+
 ## Telegram Bot
 
 ### trafficctl-telegram.sh
@@ -1111,14 +1261,23 @@ Bot daemon using Telegram long polling. Runs under procd.
 | `act:back` | Return to device list |
 
 **Known devices file:** `/etc/trafficctl/telegram_known.json` -- tracks MACs for new device notifications.
+Since 1.31 the scan behind those notifications is `trafficctl notify watch`
+(see [Notifications](#notifications)); the bot no longer runs it.
 
-### trafficctl-telegram-test.sh
+### trafficctl-telegram-test.sh (`trafficctl telegram-test`)
 
 ```
-trafficctl-telegram-test.sh <token> <chat_id>
+trafficctl telegram-test <token> <chat_id> [message]
+TCTL_TG_TOKEN=<token> trafficctl telegram-test - <chat_id> [message]
 ```
 
-Validates token format and chat_id, sends a test message. Returns `{"ok":true,"msg":"..."}`.
+Validates token format and chat_id, sends a test message (`message` is a
+template, filled with sample values). Returns `{"ok":true,"msg":"..."}`, exit 0
+either way. The script is a wrapper for the ucode command. Differences from
+v1.30.0: `{{ wan_ip }}` reads the WAN interface (v1.30.0's lookup was a
+jsonfilter syntax error and always fell back to the route's source address),
+the request body goes to curl on stdin instead of argv, and an API error text
+is JSON-escaped in the reply.
 
 ---
 

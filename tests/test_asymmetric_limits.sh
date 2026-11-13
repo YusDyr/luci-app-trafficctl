@@ -385,6 +385,44 @@ INTERFACE=lan ACTION=ifup run "$TMP/hotplug" >/dev/null 2>&1
 assert_contains "shape restore re-applies the download ceiling" "rate 20000kbit" "$(cat "$TC_LOG")"
 assert_contains "shape restore re-applies the upload ceiling" "rate 2000kbit" "$(cat "$TC_LOG")"
 
+# A restore puts back what was there: no "Limit applied" per device on every
+# boot. The same shaper call made by hand does announce itself.
+NOTIFY_CALLS="$TMP/notify.calls"
+printf '#!/bin/sh\necho "$*" >> "%s"\n' "$NOTIFY_CALLS" > "$TMP/notify-cli"
+chmod +x "$TMP/notify-cli"
+export TCTL_NOTIFY_CLI="$TMP/notify-cli"
+printf '[{"type":"ratelimit","ip":"192.168.1.93","param":"8000","mode":"each"}]' > "$RULES"
+INTERFACE=lan ACTION=ifup run "$TMP/hotplug" >/dev/null 2>&1
+assert_eq "restore: the shape and the limit put back announce nothing" "" "$(cat "$NOTIFY_CALLS" 2>/dev/null)"
+run "$TMP/shape.sh" add 192.168.1.94 20000 shape_192.168.1.94 >/dev/null 2>&1
+assert_contains "restore: a shape added by hand still announces itself" "limit_applied ip=192.168.1.94" "$(cat "$NOTIFY_CALLS" 2>/dev/null)"
+assert_contains "restore: ...with the shaper as its mode" "mode=shaper" "$(cat "$NOTIFY_CALLS" 2>/dev/null)"
+unset TCTL_NOTIFY_CLI
+printf '[]' > "$RULES"
+
+# The limiter is ucode (limit.uc): its event goes out through notify.uc.
+lt_reset
+lt_events_on
+rl 192.168.1.95 8000 rl_test each 800 >/dev/null
+assert_eq "limiter: a limit set by hand announces itself, with both rates" \
+    "ACTION=limit_applied IP=192.168.1.95 MODE=limiter RATE_KBIT=8000 RATE_KBIT_UP=800 SRC=local VIA=cli" "$(cat "$EVENTS_LOG")"
+: > "$EVENTS_LOG"
+rl 192.168.1.96 8000 rl_test each >/dev/null
+assert_contains "limiter: a symmetric limit gives the same rate up" "RATE_KBIT_UP=8000" "$(cat "$EVENTS_LOG")"
+: > "$EVENTS_LOG"
+rl 192.168.1.96 0 rl_test >/dev/null
+rl 192.168.1.97 abc rl_test >/dev/null
+assert_eq "limiter: a removal or a refused rate announces nothing" "" "$(cat "$EVENTS_LOG")"
+TCTL_NOTIFY=0 rl 192.168.1.98 8000 rl_test each >/dev/null
+assert_eq "limiter: TCTL_NOTIFY=0 (the ifup hook) keeps it quiet" "" "$(cat "$EVENTS_LOG")"
+lt_reset
+printf '[{"type":"ratelimit","ip":"192.168.1.99","param":"8000","mode":"each"}]' > "$RULES"
+lt_run restore >/dev/null
+assert_contains "limiter: the restore puts the limit back" "rl_ratelimit_192_168_1_99" "$(lt_table)"
+assert_eq "limiter: ...and announces nothing, even with events wanted" "" "$(cat "$EVENTS_LOG")"
+lt_events_off
+lt_reset
+
 # ════════════════════════════════════════════════════════════════════════════
 # 5. The rpcd surface
 # ════════════════════════════════════════════════════════════════════════════

@@ -78,6 +78,7 @@ define Package/trafficctl/install
 	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/net.uc $(1)/usr/share/ucode/trafficctl/
 	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/report.uc $(1)/usr/share/ucode/trafficctl/
 	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/ctl.uc $(1)/usr/share/ucode/trafficctl/
+	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/notify.uc $(1)/usr/share/ucode/trafficctl/
 	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/cut.uc $(1)/usr/share/ucode/trafficctl/
 	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/portfw.uc $(1)/usr/share/ucode/trafficctl/
 	# PR8 history
@@ -115,7 +116,10 @@ define Package/trafficctl/install
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) ./files/etc/init.d/trafficctl-cut $(1)/etc/init.d/
 	$(INSTALL_BIN) ./files/etc/init.d/trafficctl-history $(1)/etc/init.d/
+	$(INSTALL_BIN) ./files/etc/init.d/trafficctl-notify $(1)/etc/init.d/
 	$(INSTALL_BIN) ./files/etc/init.d/trafficctl-telegram $(1)/etc/init.d/
+	$(INSTALL_DIR) $(1)/etc/uci-defaults
+	$(INSTALL_BIN) ./files/etc/uci-defaults/80_trafficctl-notify $(1)/etc/uci-defaults/
 	$(INSTALL_DIR) $(1)/etc/hotplug.d/dhcp
 	$(INSTALL_DATA) ./files/etc/hotplug.d/dhcp/99-trafficctl-newdevice $(1)/etc/hotplug.d/dhcp/
 	$(INSTALL_DIR) $(1)/etc/hotplug.d/iface
@@ -178,9 +182,21 @@ if [ -z "$${IPKG_INSTROOT}" ]; then
 	if [ -f /var/run/trafficctl/cut.state ] && [ -x /etc/init.d/trafficctl-cut ]; then
 		/etc/init.d/trafficctl-cut restart 2>/dev/null || true
 	fi
+	# The Telegram options of releases up to 1.30.x move to the notification
+	# senders (once: only while the 'notify' section is missing).
+	if [ -x /usr/sbin/trafficctl ]; then
+		/usr/sbin/trafficctl notify migrate >/dev/null 2>&1 || true
+	fi
+	# Restarted, not started: a bot of a release up to 1.30.x runs the device
+	# scan itself, which the notification watcher took over.
 	if [ -x /etc/init.d/trafficctl-telegram ] && [ "$$(uci -q get trafficctl.telegram.enabled)" = "1" ]; then
 		/etc/init.d/trafficctl-telegram enable 2>/dev/null || true
-		/etc/init.d/trafficctl-telegram start 2>/dev/null || true
+		/etc/init.d/trafficctl-telegram restart 2>/dev/null || true
+	fi
+	# The watcher decides for itself whether anything wants the scan.
+	if [ -x /etc/init.d/trafficctl-notify ]; then
+		/etc/init.d/trafficctl-notify enable 2>/dev/null || true
+		/etc/init.d/trafficctl-notify restart 2>/dev/null || true
 	fi
 	if [ -x /etc/init.d/trafficctl-history ]; then
 		if [ "$$(uci -q get trafficctl.history.enabled)" = "1" ]; then

@@ -152,6 +152,10 @@ jobs:
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_rl_lookup.sh
       - name: Reader tests (exact comments, nft 1.1 meters)
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_readers.sh
+      # Events, senders, the device scan, migration, the Notifications tab's
+      # methods and telegram-test (trafficctl.notify).
+      - name: Notification tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_notify.sh
       - name: rpcd plugin tests
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_rpcd.sh
       # Every rpc.declare in the views against the plugin's list.

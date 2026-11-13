@@ -12,6 +12,7 @@ import * as net from 'trafficctl.net';
 import * as ctl from 'trafficctl.ctl';
 import * as limit from 'trafficctl.limit';
 import * as report from 'trafficctl.report';
+import * as notify from 'trafficctl.notify';
 // ── PR7: cut, portfw ──
 import * as cut from 'trafficctl.cut';
 import * as portfw from 'trafficctl.portfw';
@@ -29,6 +30,8 @@ function result(r) {
 	return r.ok ? 0 : 1;
 }
 
+const NOTIFY_USAGE = 'usage: trafficctl notify emit <event> [key=value...]|dispatch <event> [key=value...]|' +
+	'scan|watch|wanted|dhcp <mac> [ip] [name]|migrate|test <sender>';
 // ── PR7: cut, portfw ──
 // { reply, rc } of a command that may print nothing (cut restore, tick,
 // keeper) or exit non-zero after a reply (cut tick's 2).
@@ -172,6 +175,45 @@ const commands = {
 		return r.rc;
 	},
 
+	// ── notifications (trafficctl.notify) ──
+	notify: (args) => {
+		let sub = shift(args);
+		switch (sub) {
+		case 'emit':
+			return result(notify.emit(args[0], notify.parse_kv(slice(args, 1))));
+		case 'dispatch': {
+			let f = notify.parse_kv(slice(args, 1));
+			out(notify.dispatch(args[0], f, lib.valid_int(f.time ?? '', 0)));
+			return 0;
+		}
+		case 'scan':
+			out({ ok: true, ...notify.scan() });
+			return 0;
+		case 'watch':
+			notify.watch();
+			return 0;
+		case 'wanted': {
+			let w = notify.scan_wanted();
+			out({ ok: w });
+			return w ? 0 : 1;
+		}
+		case 'dhcp':
+			return result(notify.dhcp(args[0], args[1], args[2]));
+		case 'migrate':
+			return result(notify.migrate());
+		case 'test':
+			return result(notify.test(args[0]));
+		default:
+			return result({ ok: false, msg: NOTIFY_USAGE });
+		}
+	},
+
+	// Always exit 0, as the script did: the reply says what happened.
+	'telegram-test': (args) => {
+		out(notify.telegram_test(args));
+		return 0;
+	},
+	// ── end notifications ──
 	// ── PR7: cut, portfw ──
 	cut: (args) => reply(cut.main(args)),
 
@@ -195,7 +237,6 @@ const commands = {
 const LEGACY = {
 	bytes: 'trafficctl-bytes.sh',
 	shape: 'trafficctl-shape.sh',
-	'telegram-test': 'trafficctl-telegram-test.sh',
 	totals: 'trafficctl-totals.sh',
 };
 

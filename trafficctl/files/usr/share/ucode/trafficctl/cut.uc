@@ -23,6 +23,7 @@
 import { dirname } from 'fs';
 import * as lib from 'trafficctl.lib';
 import * as net from 'trafficctl.net';
+import * as notify from 'trafficctl.notify';
 
 const COMMENT = 'tctl_cut';
 const RUN_DIR = '/var/run/trafficctl';
@@ -345,6 +346,8 @@ function engage_now(expires, persist, quiet) {
 	soft(() => log('cut', 'expires=' + expires + ' persist=' + persist));
 	if (quiet)
 		return { reply: null, rc: 0 };
+	// A restore after a reboot is quiet and is not a new cut.
+	notify.emit_action('cut_engaged', { duration: (int(expires) > 0) ? int(expires) - now() : 0, persist });
 	let msg = 'internet cut for all devices' + ct, r;
 	try {
 		r = status_reply(msg);
