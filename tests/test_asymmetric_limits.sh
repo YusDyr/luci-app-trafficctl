@@ -441,6 +441,7 @@ function fmtRate(kbit) {
     if (mbit >= 1) return (mbit % 1 === 0 ? mbit.toFixed(0) : mbit.toFixed(1)) + ' Mbit/s';
     return kbit + ' kbit/s';
 }
+var RPC_INT_MAX = 2147483647;   // status.js's own, outside the slice
 var _hidden = true, _upUnit = 'mbit';
 var upInput = { value: '' };
 var upRow = { classList: { contains: function () { return _hidden; } } };
@@ -459,6 +460,7 @@ var out = [
     probe(false, 'mbit', '2'),      // 2 Mbit -> 2000 kbit
     probe(false, 'kbit', '800'),    // 800 kbit stays 800
     probe(false, 'mbit', '1.5'),    // fractional Mbit rounds
+    probe(false, 'mbit', '3000000'), // past int32 kbit: capped, so the backend answers
     rateLabel('8000', ''),          // symmetric label
     rateLabel('8000', '8000'),      // explicitly equal is still one figure
     rateLabel('20000', '2000')      // asymmetric label
@@ -467,7 +469,7 @@ console.log(out);
 NODE
     got=$(node "$TMP/ui_run.js" 2>&1)
     assert_eq "the upload reader distinguishes empty from zero, and converts units" \
-        "||||2000|800|1500|8 Mbit/s|8 Mbit/s|20 Mbit/s down / 2 Mbit/s up" \
+        "||||2000|800|1500|2147483647|8 Mbit/s|8 Mbit/s|20 Mbit/s down / 2 Mbit/s up" \
         "$got"
 else
     printf 'skip: no node, not exercising the frontend slices\n'

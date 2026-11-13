@@ -352,8 +352,7 @@ function init_script(name, actions) {
 	let p = '/etc/init.d/' + name;
 	if (!lib.is_file(p))
 		return;
-	let q = lib.q(lib.path(p));
-	lib.sh('(' + join('; ', map(actions, (a) => q + ' ' + lib.q(a))) + ') &');
+	lib.sh('for a in ' + lib.qv(actions) + '; do ' + lib.q(lib.path(p)) + ' "$a"; done &');
 }
 
 // ── uci ─────────────────────────────────────────────────────────────────────
