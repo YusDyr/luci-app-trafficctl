@@ -79,6 +79,8 @@ define Package/trafficctl/install
 	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/report.uc $(1)/usr/share/ucode/trafficctl/
 	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/ctl.uc $(1)/usr/share/ucode/trafficctl/
 	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/notify.uc $(1)/usr/share/ucode/trafficctl/
+	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/cut.uc $(1)/usr/share/ucode/trafficctl/
+	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/portfw.uc $(1)/usr/share/ucode/trafficctl/
 	$(INSTALL_DIR) $(1)/usr/libexec/trafficctl
 	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-block.sh $(1)/usr/libexec/trafficctl/
 	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-bytes.sh $(1)/usr/libexec/trafficctl/
@@ -146,6 +148,10 @@ endef
 # removed and records nothing until the next reboot. Restarting it picks up
 # the new init script.
 #
+# The cut keeper is restarted when a cut is engaged: one started by an older
+# release runs that release's code (a shell loop until 1.30.x) until it ends,
+# and procd only starts the new command, `trafficctl cut keeper`, on a restart.
+#
 # trafficctl_mon: releases up to 1.30.x built this nft table for a per-device
 # byte counter under flow offload. No kernel accepted its dynamic counter maps,
 # so it was often left half-built, a forward chain with nothing reading it.
@@ -170,6 +176,9 @@ if [ -z "$${IPKG_INSTROOT}" ]; then
 	# Releases up to 1.30.1 gave the cut keeper START=95, so rc.d may
 	# still link it for boot. It is started on demand only.
 	rm -f /etc/rc.d/S95trafficctl-cut /etc/rc.d/K10trafficctl-cut
+	if [ -f /var/run/trafficctl/cut.state ] && [ -x /etc/init.d/trafficctl-cut ]; then
+		/etc/init.d/trafficctl-cut restart 2>/dev/null || true
+	fi
 	# The Telegram options of releases up to 1.30.x move to the notification
 	# senders (once: only while the 'notify' section is missing).
 	if [ -x /usr/sbin/trafficctl ]; then
@@ -200,11 +209,15 @@ endef
 
 # Fail open on removal. A global internet cut left engaged by a package that is
 # going away is a lockout with no UI left to undo it: the drop rule would sit
-# in nftables with nothing on the router admitting to owning it.
+# in nftables with nothing on the router admitting to owning it. The release
+# needs ucode and every module to load, so its effect is then made sure of
+# without them: no state for a keeper to re-assert from, and no table.
 define Package/trafficctl/prerm
 #!/bin/sh
-if [ -z "$${IPKG_INSTROOT}" ] && [ -x /usr/libexec/trafficctl/trafficctl-cut.sh ]; then
-	/usr/libexec/trafficctl/trafficctl-cut.sh release >/dev/null 2>&1 || true
+if [ -z "$${IPKG_INSTROOT}" ]; then
+	/usr/sbin/trafficctl cut release >/dev/null 2>&1 || true
+	rm -f /var/run/trafficctl/cut.state /etc/trafficctl/cut.state
+	nft delete table inet tctl_cut 2>/dev/null || true
 fi
 exit 0
 endef

@@ -136,6 +136,11 @@ if [ -z "${IPKG_INSTROOT}" ]; then
     # Releases up to 1.30.1 gave the cut keeper START=95, so rc.d may
     # still link it for boot. It is started on demand only.
     rm -f /etc/rc.d/S95trafficctl-cut /etc/rc.d/K10trafficctl-cut
+    # An engaged cut's keeper runs the old release's code; restart it onto
+    # `trafficctl cut keeper`.
+    if [ -f /var/run/trafficctl/cut.state ] && [ -x /etc/init.d/trafficctl-cut ]; then
+        /etc/init.d/trafficctl-cut restart 2>/dev/null || true
+    fi
     # Each service follows its uci flag, so what runs now is what runs after
     # the next reboot: enabled in rc.d and started when the flag is 1, left
     # alone when it is 0.
@@ -182,8 +187,12 @@ fi
 # Fail open. A global internet cut left engaged by a package that is going away
 # is a lockout with no UI left to undo it — the rule would sit in nftables with
 # nothing on the router admitting to owning it.
-if [ -z "${IPKG_INSTROOT}" ] && [ -x /usr/libexec/trafficctl/trafficctl-cut.sh ]; then
-    /usr/libexec/trafficctl/trafficctl-cut.sh release >/dev/null 2>&1 || true
+# The release needs ucode; whatever it managed, no state is left for a keeper
+# to re-assert from, and no table.
+if [ -z "${IPKG_INSTROOT}" ]; then
+    /usr/sbin/trafficctl cut release >/dev/null 2>&1 || true
+    rm -f /var/run/trafficctl/cut.state /etc/trafficctl/cut.state
+    nft delete table inet tctl_cut 2>/dev/null || true
 fi
 if [ -z "${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-cut ]; then
     /etc/init.d/trafficctl-cut stop 2>/dev/null || true

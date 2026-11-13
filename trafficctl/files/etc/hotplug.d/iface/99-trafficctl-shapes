@@ -148,6 +148,6 @@ fi
 # leaves a file in /etc, so the file's existence is the consent. The restore
 # path honours the original deadline and refuses to restart the clock.
 if [ -f /etc/trafficctl/cut.state ]; then
-    /usr/libexec/trafficctl/trafficctl-cut.sh restore >/dev/null 2>&1 || \
+    /usr/sbin/trafficctl cut restore >/dev/null 2>&1 || \
         logger -t trafficctl "Failed to restore the global internet cut"
 fi
