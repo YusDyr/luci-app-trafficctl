@@ -38,6 +38,8 @@ const USAGE = 'usage: trafficctl-cut.sh engage <seconds|0> [persist] | release |
 const NO_NFT = 'global cut needs nftables (fw4); nft cannot list inet tables here';
 const NO_LAN = 'no LAN interfaces found — refusing, a cut with no LAN to spare would black-hole the LAN too';
 const NO_RULE = 'failed to install the cut rule';
+const BAD_DEV = 'a LAN interface name has characters an nft ruleset cannot quote safely — refusing';
+const NO_STATE = 'failed to record the cut state — the rule was taken down again';
 const TPROXY = 'this router intercepts traffic with a transparent proxy (TPROXY — podkop/sing-box, ' +
 	'passwall or similar), and the prerouting chain could not be installed on this kernel (no nft_fib?). ' +
 	'A forward-only cut would miss proxied traffic while reporting success, so it is refused rather than faked.';
@@ -77,6 +79,16 @@ function coverage(d) {
 	if (!present(d))
 		return 'none';
 	return (index(d, 'hook prerouting') >= 0) ? 'full' : 'forward';
+}
+
+// Interface names go into the ruleset text between quotes, so a name that
+// could close the quote or start a new statement is not used at all. Linux
+// allows nearly any byte in a name; OpenWrt's are well inside this set.
+function safe_devs(devs) {
+	for (let d in devs)
+		if (type(d) != 'string' || !match(d, /^[A-Za-z0-9._@-]+$/))
+			return false;
+	return true;
 }
 
 function lan_set(devs) {
@@ -146,6 +158,8 @@ function remove_rule() {
 }
 
 function install(devs) {
+	if (!safe_devs(devs))
+		return false;
 	if (load(ruleset(devs, 'full')) && verify('full'))
 		return true;
 	remove_rule();
@@ -282,12 +296,24 @@ function release(quiet) {
 	return quiet ? null : status_reply('internet restored for all devices');
 }
 
+// One step after the cut is in place: an exception is logged, not raised.
+function soft(fn) {
+	try {
+		fn();
+	}
+	catch (e) {
+		warn(sprintf('trafficctl cut: %s\n', e.message));
+	}
+}
+
 function engage_now(expires, persist, quiet) {
 	if (!supported())
 		return fail(NO_NFT);
 	let devs = net.lan_devices();
 	if (!length(devs))
 		return fail(NO_LAN);
+	if (!safe_devs(devs))
+		return fail(BAD_DEV);
 	if (!install(devs)) {
 		remove_rule();
 		return fail(NO_RULE);
@@ -297,15 +323,37 @@ function engage_now(expires, persist, quiet) {
 		return fail(TPROXY);
 	}
 	let t = now();
-	state_write(STATE, expires, persist, t);
-	if (persist == '1')
-		state_write(PSTATE, expires, persist, t);
-	else
-		lib.remove(PSTATE);
-	let ct = flush_conntrack() ? '' : NO_CT;
-	keeper_start();
-	log('cut', 'expires=' + expires + ' persist=' + persist);
-	return { reply: quiet ? null : status_reply('internet cut for all devices' + ct), rc: 0 };
+	// From here the rule is live. Without the state nothing would ever
+	// release it, so a state that cannot be written takes it down again.
+	if (!state_write(STATE, expires, persist, t) || !active()) {
+		remove_rule();
+		return fail(NO_STATE);
+	}
+	// The cut is engaged now, and every step after this one is reported as
+	// such whatever it does: a failure reply for a live cut is a cut the UI
+	// does not show. The keeper goes first, because the deadline depends
+	// on it.
+	soft(keeper_start);
+	soft(() => {
+		if (persist == '1')
+			state_write(PSTATE, expires, persist, t);
+		else
+			lib.remove(PSTATE);
+	});
+	let ct = NO_CT;
+	soft(() => { if (flush_conntrack()) ct = ''; });
+	soft(() => log('cut', 'expires=' + expires + ' persist=' + persist));
+	if (quiet)
+		return { reply: null, rc: 0 };
+	let msg = 'internet cut for all devices' + ct, r;
+	try {
+		r = status_reply(msg);
+	}
+	catch (e) {
+		warn(sprintf('trafficctl cut: %s\n', e.message));
+		r = { ok: true, active: true, rule_present: true, msg };
+	}
+	return { reply: r, rc: 0 };
 }
 
 // A rule in place with no state behind it holds the internet off with
@@ -329,8 +377,10 @@ function restore() {
 		lib.remove(PSTATE);
 		return { reply: null, rc: 0 };
 	}
-	let exp = state_get(PSTATE, 'expires_at') ?? '0';
-	if (expired(PSTATE)) {
+	let exp = state_get(PSTATE, 'expires_at');
+	// A deadline that cannot be read is taken as passed: restored as
+	// "never", it would hold the internet off with no end at all.
+	if (exp == null || expired(PSTATE)) {
 		lib.remove(PSTATE);
 		logger('global internet cut expired while down — not restored');
 		return { reply: null, rc: 0 };
@@ -351,8 +401,14 @@ function tick() {
 	}
 	if (!present()) {
 		let devs = net.lan_devices();
-		if (length(devs) && install(devs))
-			logger('global internet cut re-asserted after the rule disappeared');
+		if (length(devs) && install(devs)) {
+			// A release that gave up waiting for the lock may have run in
+			// the meantime: a rule with no state behind it goes again.
+			if (!active())
+				remove_rule();
+			else
+				logger('global internet cut re-asserted after the rule disappeared');
+		}
 	}
 	return 0;
 }
@@ -364,6 +420,10 @@ function status() {
 	}
 	if (active() && !keeper_running())
 		keeper_start();
+	// A rule nothing claims, e.g. re-installed by a tick that a release
+	// waiting past the lock raced: nothing else would ever take it away.
+	if (!active() && present())
+		remove_rule();
 	return status_reply('');
 }
 

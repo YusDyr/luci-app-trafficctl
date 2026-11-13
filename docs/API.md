@@ -831,6 +831,19 @@ prerm runs `trafficctl cut release`, then removes both state files and the
 table itself: a cut left behind by a removed package is a lockout with no UI
 to undo it, and the release needs every ucode module to load.
 
+**By hand.** If `trafficctl cut release` itself fails (a broken ucode
+install, a module that no longer loads), the router stays reachable over SSH,
+because traffic addressed to it is accepted ahead of the drop. Two commands
+end the cut without any of this code:
+
+```sh
+/etc/init.d/trafficctl-cut stop
+nft delete table inet tctl_cut; rm -f /var/run/trafficctl/cut.state /etc/trafficctl/cut.state
+```
+
+Removing the state files matters as much as the table: a keeper or the next
+`ifup lan` would otherwise put the cut back.
+
 ---
 
 ### trafficctl-portfw.sh (`trafficctl portfw`)

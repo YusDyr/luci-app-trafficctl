@@ -614,6 +614,63 @@ echo 'oifname != { "br-lan" } counter drop comment "tctl_cut"' > "$CHAIN"
 run_cut tick >/dev/null
 assert_eq "orphaned rule: a tick with no state removes it" "no" "$(has_chain)"
 
+# ── PR7 review: status takes an orphaned rule down too ──
+# A release that waited past the lock can run while a tick re-installs the
+# rule, and the keeper is gone after the release: status is what is left.
+reset_state
+echo 'oifname != { "br-lan" } counter drop comment "tctl_cut"' > "$CHAIN"
+OUT=$(run_cut status)
+assert_eq "orphaned rule: status with no state removes it" "no" "$(has_chain)"
+assert_contains "orphaned rule: and reports it gone" '"active":false,"rule_present":false' "$OUT"
+
+# ── PR7 review: an engaged cut is never reported as a failure ──
+# The keeper cannot be started and conntrack is unavailable: the rule and the
+# state are in place, so the reply says engaged.
+reset_state
+mv "$ROOT/etc/init.d/trafficctl-cut" "$TMP/init.saved"
+printf '#!/bin/sh\nexit 1\n' > "$ROOT/etc/init.d/trafficctl-cut"
+chmod +x "$ROOT/etc/init.d/trafficctl-cut"
+touch "$NETFAKE/no_conntrack"
+OUT=$(run_cut engage 900 0)
+assert_contains "engage: a keeper that will not start does not turn a live cut into ok:false" '"ok":true,"active":true,"rule_present":true' "$OUT"
+assert_contains "engage: the conntrack failure is only a note" "conntrack unavailable" "$OUT"
+rm -f "$NETFAKE/no_conntrack"
+mv "$TMP/init.saved" "$ROOT/etc/init.d/trafficctl-cut"
+
+# ...and a state that cannot be written takes the rule down again: a live
+# rule with no state would be a cut nothing ever releases.
+reset_state
+mkdir -p "$STATE"
+OUT=$(run_cut engage 900 0)
+assert_contains "engage: an unwritable state is a failure" '"ok":false' "$OUT"
+assert_contains "engage: and says why" "failed to record the cut state" "$OUT"
+assert_eq "engage: and leaves no rule behind" "no" "$(has_chain)"
+rmdir "$STATE"
+
+# ── PR7 review: interface names are quoted into nft text, so only safe ones ──
+reset_state
+cp "$UBUSDIR/network.interface@dump.json" "$TMP/dump.saved"
+cat > "$UBUSDIR/network.interface@dump.json" <<'JSON'
+{"interface":[
+ {"interface":"lan","up":true,"device":"br-lan","l3_device":"br-lan\" } accept; flush ruleset; #","ipv4-address":[{"address":"192.168.1.1","mask":24}]},
+ {"interface":"wan","up":true,"device":"eth1","l3_device":"eth1","ipv4-address":[{"address":"203.0.113.2","mask":24}]}
+]}
+JSON
+OUT=$(run_cut engage 900 0)
+assert_contains "unsafe device name: engage refuses" '"ok":false' "$OUT"
+assert_contains "unsafe device name: says why" "cannot quote safely" "$OUT"
+assert_eq "unsafe device name: installs no rule" "no" "$(has_chain)"
+assert_eq "unsafe device name: nothing is loaded into nft" "0" "$(grep -c '^nft -f' "$NETFAKE/calls")"
+mkdir -p "$(dirname "$STATE")"
+printf 'expires_at=0\npersist=0\nstarted_at=1\n' > "$STATE"
+run_cut tick >/dev/null
+assert_eq "unsafe device name: a tick does not re-assert with it either" "no" "$(has_chain)"
+cp "$TMP/dump.saved" "$UBUSDIR/network.interface@dump.json"
+reset_state
+OUT=$(run_cut engage 900 0)
+assert_contains "safe device names (letters, digits, . _ @ -) still engage" '"ok":true' "$OUT"
+# ── end PR7 review ──
+
 # ════════════════════════════════════════════════════════════════════════════
 # v1.30 state, and the integers it could not keep
 # ════════════════════════════════════════════════════════════════════════════
@@ -633,6 +690,24 @@ assert_contains "a leading zero in the state is still a JSON number" '"started_a
 printf 'expires_at=junk\npersist=0\nstarted_at=1\n' > "$STATE"
 OUT=$(run_cut status)
 assert_contains "an unreadable deadline is never taken as expired" '"active":true' "$OUT"
+
+# ── PR7 review: a persisted deadline that cannot be read is not restored ──
+# Restored, it would be an indefinite cut: "never" is how 0 reads.
+for bad in junk 9999999999999999; do
+    reset_state
+    mkdir -p "$(dirname "$PSTATE")"
+    printf 'expires_at=%s\npersist=1\nstarted_at=1699999000\n' "$bad" > "$PSTATE"
+    run_cut restore >/dev/null
+    assert_eq "restore: deadline $bad is not restored" "no" "$(has_chain)"
+    assert_eq "restore: deadline $bad is discarded" "no" "$([ -f "$PSTATE" ] && echo yes || echo no)"
+done
+
+# Decimal, on every ucode the CI runs: the shell's $(( now + 060 )) was octal.
+reset_state
+OUT=$(run_cut engage 060 0)
+assert_contains "engage 060: accepted" '"ok":true' "$OUT"
+assert_contains "engage 060: sixty seconds, not octal 48" '"expires_at":1700000060,"remaining":60' "$OUT"
+# ── end PR7 review ──
 
 # ════════════════════════════════════════════════════════════════════════════
 # Wiring — a method rpcd does not list is a method that does not exist
