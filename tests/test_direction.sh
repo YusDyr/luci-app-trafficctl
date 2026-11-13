@@ -257,6 +257,7 @@ st_run remove 192.168.1.50 >/dev/null
 TC=$(cat "$TC_LOG")
 assert_contains "shaper: removes LAN class" "class del dev br-lan classid $CID" "$TC"
 assert_contains "shaper: removes IFB class" "class del dev tctl-ifb0 classid $CID" "$TC"
+# By handle: without one, u32 deletes every prio-10 filter on the device.
 assert_contains "shaper: removes the upload filter by its handle" \
     "filter del dev tctl-ifb0 parent 1:0 prio 10 handle 800::800 protocol ip u32" "$TC"
 assert_eq "shaper: no class or filter of it is left on either device" "" \

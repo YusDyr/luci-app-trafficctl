@@ -272,6 +272,7 @@ bash tests/test_persistence.sh        # rules.json bytes, the shared lock, resto
 bash tests/test_rl_lookup.sh          # Rate limit read-back: units, prefixes, ratelimit-stats
 bash tests/test_shape_lookup.sh       # Shape classid lookup, shape-stats
 bash tests/test_shape.sh              # Shaper: filters of other shapes kept, classids, SQM, no IFB, shapes.json, restore
+bash tests/test_shape_filters.sh      # Several shapes keep their filters (stateful tc, tests/lib/tc-htb.sh)
 bash tests/test_subnet_limits.sh      # Subnet limits: stats, persisted mode, the restore hook
 bash tests/test_rpcd_contract.sh      # every rpc.declare in the views against the plugin's list
 bash tests/test_telegram_bot.sh       # Telegram bot: commands, callbacks, cache, validation
