@@ -24,8 +24,8 @@
 #
 # Case lines: name | mode | fixture | legacy | new [| setup]
 #   legacy  a script under usr/libexec/trafficctl and its arguments, or
-#           fw:<shell> to run <shell> after sourcing the CURRENT trafficctl-fw.sh
-#           (whose shell helpers must stay equal to the ucode ones), or
+#           fw:<shell> to run <shell> after sourcing v1.30.0's trafficctl-fw.sh,
+#           or
 #           sh:<shell> to run <shell> as it is (legacy_tot is the legacy
 #           totals script, masked prints a command's JSON with fresh epochs
 #           masked)
@@ -532,7 +532,7 @@ EOF
 CASES="$CASES${BOT_CASES//\$BOTF/$BOTF}
 "
 # ── end telegram bot ──
-# ── PR8 history (`trafficctl history`, history.uc) ──────────────────────────
+# ── history (`trafficctl history`, history.uc) ──────────────────────────────
 # Both sides write the default store, /etc/trafficctl/history, which the
 # rewrite and TCTL_ROOT both put in the case's root. The new side's `flush`
 # runs `history flush-now` as a guarded child through the root's CLI, so hcli
@@ -653,11 +653,10 @@ history-usage | text | router-24.10 | sh:lh bogus; echo rc=\$?; lh; echo rc=\$? 
 history-period-ids | text | router-24.10 | sh:pids legacy | pids new | $HISTON
 "
 CASES="$CASES$HIST_CASES"
-# ── end PR8 history ──────────────────────────────────────────────────────────
 
 command -v jq >/dev/null || { echo "FAIL: jq is required" >&2; exit 1; }
 
-# ── legacy backend, and the current fw.sh ───────────────────────────────────
+# ── legacy backend, and the current tree ────────────────────────────────────
 if ! git -C "$UC_REPO" rev-parse -q --verify "refs/tags/$LEGACY_TAG" >/dev/null; then
     git -C "$UC_REPO" fetch -q --depth=1 origin "refs/tags/$LEGACY_TAG:refs/tags/$LEGACY_TAG" ||
         { echo "FAIL: cannot get $LEGACY_TAG" >&2; exit 1; }
@@ -864,7 +863,7 @@ grep -q "^SCRIPTS=\"$BSTUB\"" "$UC_TMP/lbot.sh" && grep -q "^\. $BSTUB/functions
 # ── end telegram bot ──
 chmod +x "$W/bin/"*
 
-# ── PR7: cut, portfw ────────────────────────────────────────────────────────
+# ── cut, portfw ─────────────────────────────────────────────────────────────
 # Both commands change nft state, which a replayed fixture cannot follow: a
 # case that makes root/netfake gets tests/lib/netfake.sh for nft and
 # conntrack instead, and its calls log is the record of what each side did to
@@ -910,6 +909,11 @@ cat > "$W/pfw-rules.json" <<'JSON'
 [{"type":"block","ip":"192.168.0.5","param":""},{"type":"ratelimit","ip":"10.0.20.0/24","param":"5000","mode":"each","param_up":"1000"},{"type":"pfw_pause","ip":"forward/tcp/192.168.0.140/80","param":"1"},{"type":"pfw_limit","ip":"forward/udp/192.168.0.109/27015-27030","param":"8000"}]
 JSON
 PFWRULES='mkdir -p "$W/root/etc/trafficctl"; cp "$W/pfw-rules.json" "$W/root/etc/trafficctl/rules.json"'
+# Port controls as v1.30.0 saved them, for the restore after a reboot: an open
+# port under its "local" key, and in the bad file records the hook skipped
+# (no rate, rate 0) or failed on (an address that is none).
+PFWONLY='mkdir -p "$W/root/etc/trafficctl"; printf "%s" "[{\"type\":\"pfw_pause\",\"ip\":\"forward/tcp/192.168.0.140/80\",\"param\":\"1\"},{\"type\":\"pfw_limit\",\"ip\":\"forward/udp/192.168.0.109/27015-27030\",\"param\":\"8000\"},{\"type\":\"pfw_pause\",\"ip\":\"input/udp/local/51820\",\"param\":\"1\"}]" > "$W/root/etc/trafficctl/rules.json"'
+PFWBAD='mkdir -p "$W/root/etc/trafficctl"; printf "%s" "[{\"type\":\"pfw_limit\",\"ip\":\"forward/tcp/192.168.0.140/80\",\"param\":\"0\"},{\"type\":\"pfw_limit\",\"ip\":\"forward/tcp/192.168.0.140/81\",\"param\":\"\"},{\"type\":\"pfw_pause\",\"ip\":\"forward/tcp/1.2.3/80\",\"param\":\"1\"},{\"type\":\"pfw_pause\",\"ip\":\"forward/udp/192.168.0.109/27015\",\"param\":\"1\"}]" > "$W/root/etc/trafficctl/rules.json"'
 PFWSEED='nft add table inet tctl_pfw; nft add chain inet tctl_pfw pfw_forward x; nft add rule inet tctl_pfw pfw_forward ip daddr 192.168.0.140 tcp dport 80 counter drop comment \"tctl_pfw_pause_tcp_192.168.0.140_80\"; nft add rule inet tctl_pfw pfw_forward ip daddr 192.168.0.109 udp dport 27015-27030 limit rate over 1000 kbytes/second counter drop comment \"tctl_pfw_limit_udp_192.168.0.109_27015-27030\"; : > "$W/root/netfake/calls"'
 CASES+="
 cut-status-off | json | router-24.10 | sh:lcut status | ncut status | $CUTENV
@@ -956,8 +960,13 @@ portfw-limit-input | text | router-24.10 | sh:lpfw limit input udp - 51820 800 |
 portfw-persist | text+$PFWF | router-24.10 | sh:lpfw pause forward tcp 192.168.0.140 80; lpfw limit forward tcp 192.168.0.140 80 900; lpfw resume forward tcp 192.168.0.140 80 | npfw pause forward tcp 192.168.0.140 80; npfw limit forward tcp 192.168.0.140 80 900; npfw resume forward tcp 192.168.0.140 80 | $PFWENV; $PERSIST
 portfw-persist-mixed | text+$PFWF | router-24.10 | sh:lpfw limit forward tcp 192.168.0.140 80 900; lpfw limit forward udp 192.168.0.109 27015-27030 0; lpfw resume forward tcp 192.168.0.140 80; lpfw pause forward tcpudp 192.168.0.109 27015-27030 | npfw limit forward tcp 192.168.0.140 80 900; npfw limit forward udp 192.168.0.109 27015-27030 0; npfw resume forward tcp 192.168.0.140 80; npfw pause forward tcpudp 192.168.0.109 27015-27030 | $PFWENV; $PERSIST; $PFWSEED; $PFWRULES
 portfw-bad | text+$PFWF | router-24.10 | sh:lpfw; lpfw pause; lpfw pause forward icmp 192.168.0.140 80; lpfw pause forward tcp 1.2.3 80; lpfw pause forward tcp 192.168.0.140 0; lpfw pause forward tcp 192.168.0.140 9-8; lpfw pause x tcp - 80; lpfw limit forward tcp 192.168.0.140 80 | npfw; npfw pause; npfw pause forward icmp 192.168.0.140 80; npfw pause forward tcp 1.2.3 80; npfw pause forward tcp 192.168.0.140 0; npfw pause forward tcp 192.168.0.140 9-8; npfw pause x tcp - 80; npfw limit forward tcp 192.168.0.140 80 | $PFWENV
+restore-ports | text+$PFWF | router-24.10 | sh:$LHOOK; echo rc=\$?; nft list table inet tctl_pfw | tctl restore >/dev/null; echo rc=\$?; nft list table inet tctl_pfw | $PFWENV; $PERSIST; $PFWONLY
+restore-ports-off | text+$PFWF | router-24.10 | sh:$LHOOK; echo rc=\$?; nft list table inet tctl_pfw | tctl restore >/dev/null; echo rc=\$?; nft list table inet tctl_pfw | $PFWENV; $PFWONLY; uci set trafficctl.main.persist_rules=0; uci commit trafficctl
+restore-ports-bad | text+$PFWF,tmp/logger.log | router-24.10 | sh:$LHOOK; echo rc=\$?; nft list table inet tctl_pfw | tctl restore >/dev/null; echo rc=\$?; nft list table inet tctl_pfw | $PFWENV; $PERSIST; $PFWBAD
+restore-cut | text+$CUTF | router-24.10 | sh:TCTL_NOW=$CUT_T0 $LHOOK; echo rc=\$?; lcut status | TCTL_NOW=$CUT_T0 tctl restore >/dev/null; echo rc=\$?; ncut status | $CUTENV; $CUTPSTATE
+restore-cut-persist-off | text+$CUTF | router-24.10 | sh:TCTL_NOW=$CUT_T0 $LHOOK; echo rc=\$?; lcut status | TCTL_NOW=$CUT_T0 tctl restore >/dev/null; echo rc=\$?; ncut status | $CUTENV; $CUTPSTATE; uci set trafficctl.main.persist_rules=0; uci commit trafficctl
+restore-cut-none | text+$CUTF | router-24.10 | sh:TCTL_NOW=$CUT_T0 $LHOOK; echo rc=\$?; lcut status | TCTL_NOW=$CUT_T0 tctl restore >/dev/null; echo rc=\$?; ncut status | $CUTENV
 "
-# ── end PR7 ─────────────────────────────────────────────────────────────────
 # A recorded agent feed, read by both netify sides when a case writes it.
 export TCTL_NETIFY_FEED="$W/root/tmp/feed"
 
@@ -1020,7 +1029,7 @@ htbmsg() {
 # and the two sides do not run in the same second.
 legacy_tot() { sh "$LEXEC/trafficctl-totals.sh" "$@"; }
 # The new side's root: the CLI the reports spawn (the spawn log), and the
-# current scripts the ported code still runs, rewritten like the legacy ones.
+# current libexec (the bot's entry point), rewritten like the legacy one.
 cli_root() {
     mkdir -p "$W/root/usr/sbin" "$W/root/usr/libexec"
     ln -sfn "$CEXEC" "$W/root/usr/libexec/trafficctl"
@@ -1070,7 +1079,7 @@ while IFS='|' read -r name mode fixture legacy new setup; do
     # rewrite does for the scripts' own default.
     sed -i "s|'/tmp/trafficctl/|'$W/root/tmp/trafficctl/|" "$W/root/etc/config/trafficctl"
     case "$legacy" in
-        fw:*) PATH="$W/bin:$PATH" sh -c ". '$CEXEC/trafficctl-fw.sh'; ${legacy#fw:}" ;;
+        fw:*) PATH="$W/bin:$PATH" sh -c ". '$LEXEC/trafficctl-fw.sh'; ${legacy#fw:}" ;;
         sh:*) (export PATH="$W/bin:$PATH"; eval "${legacy#sh:}") ;;
         *) (export PATH="$W/bin:$PATH"; eval "sh \"\$LEXEC\"/$legacy") ;;
     esac > "$W/legacy.out" 2> "$W/legacy.err"

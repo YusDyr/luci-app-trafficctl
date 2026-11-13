@@ -245,14 +245,13 @@ CUT="/usr/sbin/trafficctl cut release"
 assert_contains "trafficctl Makefile prerm releases the cut" "$CUT" "$BE_MK_PRERM"
 assert_contains "trafficctl build-ipk.sh prerm releases the cut" "$CUT" "$BE_IPK_PRERM"
 assert_contains "trafficctl build-apk.sh pre-deinstall releases the cut" "$CUT" "$BE_APK_PREDEL"
-# ── PR7: the release needs ucode and every module to load, so its effect is
-#    made sure of without them too: no state left, no table.
+# The release needs ucode and every module to load, so its effect is
+# made sure of without them too: no state left, no table.
 for s in "$BE_MK_PRERM" "$BE_IPK_PRERM" "$BE_APK_PREDEL"; do
     assert_contains "prerm: the cut state goes even if the release failed" \
         "rm -f /var/run/trafficctl/cut.state /etc/trafficctl/cut.state" "$s"
     assert_contains "prerm: and so does the table" "nft delete table inet tctl_cut 2>/dev/null || true" "$s"
 done
-# ── end PR7
 
 # 8. The cut keeper is never started at boot. default_postinst runs `enable` on
 #    every init script, and rc.common's enable links S<START>/K<STOP>, so the
@@ -439,15 +438,14 @@ for f in "$TMP/trafficctl.postinst" "$TMP/ipk.postinst" "$TMP/apk.postinst"; do
     assert_eq "$n, no old nft table: the steps after it still run" 1 "$(calls 'trafficctl-history restart')"
     assert_eq "$n, nft is asked for nothing else" 1 "$(grep -c '^nft ' "$FAKE/calls")"
 
-    # ── PR7: a keeper started by the old release runs the old code until it
-    #    ends; a restart puts procd's `trafficctl cut keeper` in its place.
-    #    No cut, no keeper: it is started on demand only.
+    # A keeper started by the old release runs the old code until it
+    # ends; a restart puts procd's `trafficctl cut keeper` in its place.
+    # No cut, no keeper: it is started on demand only.
     run_postinst "$f" 0 0 0 "" 0 1
     assert_eq "$n, cut engaged: the keeper is restarted onto the new code" 1 "$(calls 'trafficctl-cut restart')"
     assert_eq "$n, cut engaged: the postinst succeeds" 0 "$(cat "$FAKE/rc")"
     run_postinst "$f" 0 0 0 "" 0 0
     assert_eq "$n, no cut: the keeper is not started" 0 "$(grep -c '^trafficctl-cut ' "$FAKE/calls")"
-    # ── end PR7
 
     # Unpacking into an image: no services and no rc.d of ours to manage.
     mkdir -p "$TMP/img/etc/config"

@@ -220,7 +220,7 @@ fw_cfg 0
 assert_eq "restore, persistence off: nothing restored" '{"ok":true,"restored":0,"failed":0}' "$(fw_run restore)"
 assert_eq "restore, persistence off: the chain is untouched" "" "$(fw_rules)"
 fw_cfg 1
-assert_eq "restore: both blocks back" '{"ok":true,"restored":2,"failed":0}' "$(fw_run restore)"
+assert_eq "restore: both blocks back, and the port pause" '{"ok":true,"restored":3,"failed":0}' "$(fw_run restore)"
 assert_eq "restore: with the comment from the address, as the block writes it" \
     'ip saddr 192.168.1.62 counter drop comment "tctl_block_192_168_1_62"
 ip saddr 192.168.1.60 counter drop comment "tctl_block_192_168_1_60"' "$(fw_rules)"

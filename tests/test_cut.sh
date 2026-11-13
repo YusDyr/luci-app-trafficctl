@@ -614,7 +614,7 @@ echo 'oifname != { "br-lan" } counter drop comment "tctl_cut"' > "$CHAIN"
 run_cut tick >/dev/null
 assert_eq "orphaned rule: a tick with no state removes it" "no" "$(has_chain)"
 
-# ── PR7 review: status takes an orphaned rule down too ──
+# ── status takes an orphaned rule down too ──
 # A release that waited past the lock can run while a tick re-installs the
 # rule, and the keeper is gone after the release: status is what is left.
 reset_state
@@ -623,7 +623,7 @@ OUT=$(run_cut status)
 assert_eq "orphaned rule: status with no state removes it" "no" "$(has_chain)"
 assert_contains "orphaned rule: and reports it gone" '"active":false,"rule_present":false' "$OUT"
 
-# ── PR7 review: an engaged cut is never reported as a failure ──
+# ── an engaged cut is never reported as a failure ──
 # The keeper cannot be started and conntrack is unavailable: the rule and the
 # state are in place, so the reply says engaged.
 reset_state
@@ -647,7 +647,7 @@ assert_contains "engage: and says why" "failed to record the cut state" "$OUT"
 assert_eq "engage: and leaves no rule behind" "no" "$(has_chain)"
 rmdir "$STATE"
 
-# ── PR7 review: interface names are quoted into nft text, so only safe ones ──
+# ── interface names are quoted into nft text, so only safe ones ──
 reset_state
 cp "$UBUSDIR/network.interface@dump.json" "$TMP/dump.saved"
 cat > "$UBUSDIR/network.interface@dump.json" <<'JSON'
@@ -669,7 +669,6 @@ cp "$TMP/dump.saved" "$UBUSDIR/network.interface@dump.json"
 reset_state
 OUT=$(run_cut engage 900 0)
 assert_contains "safe device names (letters, digits, . _ @ -) still engage" '"ok":true' "$OUT"
-# ── end PR7 review ──
 
 # ════════════════════════════════════════════════════════════════════════════
 # v1.30 state, and the integers it could not keep
@@ -691,7 +690,7 @@ printf 'expires_at=junk\npersist=0\nstarted_at=1\n' > "$STATE"
 OUT=$(run_cut status)
 assert_contains "an unreadable deadline is never taken as expired" '"active":true' "$OUT"
 
-# ── PR7 review: a persisted deadline that cannot be read is not restored ──
+# ── a persisted deadline that cannot be read is not restored ──
 # Restored, it would be an indefinite cut: "never" is how 0 reads.
 for bad in junk 9999999999999999; do
     reset_state
@@ -707,7 +706,6 @@ reset_state
 OUT=$(run_cut engage 060 0)
 assert_contains "engage 060: accepted" '"ok":true' "$OUT"
 assert_contains "engage 060: sixty seconds, not octal 48" '"expires_at":1700000060,"remaining":60' "$OUT"
-# ── end PR7 review ──
 
 # ════════════════════════════════════════════════════════════════════════════
 # Wiring — a method rpcd does not list is a method that does not exist

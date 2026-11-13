@@ -23,7 +23,7 @@ All packages are released in lockstep with the same PKG_VERSION.
   and the metrics CGI. Its Makefile lists every file by name;
   `tests/test_package_split.sh` checks that list against `files/`. The same
   Makefile builds `trafficctl-telegram`, the bot (`telegram.uc`, its entry
-  point, the wrapper and its init script), with `DEPENDS:=+trafficctl +curl`.
+  point and its init script), with `DEPENDS:=+trafficctl +curl`.
 - `luci-app-trafficctl/`: the web interface (`luci.mk`). Owns the views, the
   rpcd plugin, menu.d, acl.d and po/.
   `LUCI_DEPENDS:=+trafficctl +trafficctl-telegram ...`.
@@ -47,7 +47,7 @@ qualify the WiFi block button.
 ```
 trafficctl/
   Makefile                                  — OpenWrt package Makefile (package.mk, explicit INSTALL_* per file)
-  files/usr/sbin/trafficctl                 — ucode CLI: subnets, names, rdns, rdns-refresh, ifaces, bytes, totals, ratelimit-stats, shape-stats, rules, summary, device, metrics, netify, block, unblock, macfilter-add, macfilter-remove, newdevice, restore, cut, portfw, history, ratelimit, shape, notify, telegram-test (more move here)
+  files/usr/sbin/trafficctl                 — ucode CLI: subnets, names, rdns, rdns-refresh, ifaces, bytes, totals, ratelimit-stats, shape-stats, rules, summary, device, metrics, netify, block, unblock, macfilter-add, macfilter-remove, newdevice, restore, cut, portfw, history, ratelimit, shape, notify, telegram, telegram-test
   files/usr/share/ucode/trafficctl/
     lib.uc                                  — Shared ucode helpers; its header is the API doc
     net.uc                                  — Subnets, interface roles, reverse DNS, byte samples, lifetime totals
@@ -61,31 +61,7 @@ trafficctl/
     notify.uc                               — Notification events (ubus trafficctl.notify, hotplug.d/trafficctl) and senders (telegram, ntfy, webhook, mail); the device scan
     telegram.uc                             — Telegram bot (package trafficctl-telegram): commands, device menu, actions through the CLI
   files/usr/libexec/trafficctl/
-    trafficctl-fw.sh                        — Shared library (nft helpers, validation, persistence)
-    trafficctl-summary.sh                   — Wrapper: `trafficctl summary` (all devices, JSON array; the LuCI poll)
-    trafficctl-device.sh                    — Wrapper: `trafficctl device` (per-device detail + connections)
-    trafficctl-block.sh                     — Wrapper: `trafficctl block` (block internet, nft)
-    trafficctl-unblock.sh                   — Wrapper: `trafficctl unblock`
-    trafficctl-cut.sh                       — Wrapper: `trafficctl cut` (global internet cut, all devices, timed auto-revert)
-    trafficctl-macfilter-add.sh             — Wrapper: `trafficctl macfilter-add` (WiFi MAC deny, hostapd_cli, no wifi reload)
-    trafficctl-macfilter-remove.sh          — Wrapper: `trafficctl macfilter-remove` (WiFi MAC allow)
-    trafficctl-names.sh                     — Wrapper: `trafficctl names` (aliases in /etc/trafficctl/names)
-    trafficctl-rdns-refresh.sh              — Wrapper: `trafficctl rdns-refresh` (PTR cache /tmp/trafficctl_rdns_cache)
-    trafficctl-metrics.sh                   — Wrapper: `trafficctl metrics` (Prometheus/OpenMetrics exporter, stdout)
-    trafficctl-netify.sh                    — Wrapper: `trafficctl netify` (optional netifyd DPI app labels: status/collect/list/raw)
-    trafficctl-portfw.sh                    — Wrapper: `trafficctl portfw` (port-forward/open-port list + inbound pause/limit)
-    trafficctl-ratelimit.sh                 — Wrapper: `trafficctl ratelimit` (nft policing, drop-based)
-    trafficctl-ratelimit-stats.sh           — Wrapper: `trafficctl ratelimit-stats` (limiter counters)
-    trafficctl-shape.sh                     — Wrapper: `trafficctl shape` (tc/HTB shaping, queue-based)
-    trafficctl-shape-stats.sh               — Wrapper: `trafficctl shape-stats` (shaper counters)
-    trafficctl-bytes.sh                     — Wrapper: `trafficctl bytes` (per-device byte counters, one sample, not a total)
-    trafficctl-totals.sh                    — Wrapper: `trafficctl totals` (monotonic lifetime totals; the ONLY accumulator, UI + Prometheus share its store)
-    trafficctl-rdns.sh                      — Wrapper: `trafficctl rdns`
-    trafficctl-history.sh                   — Wrapper: `trafficctl history` (usage history store; the keeper is `trafficctl history keeper`)
-    trafficctl-rules.sh                     — Wrapper: `trafficctl rules` (every restriction, online or not; live + saved state; "Rules" tab)
     trafficctl-telegram.uc                  — The bot's process (imports lib + telegram only); run by its init script and `trafficctl telegram`
-    trafficctl-telegram.sh                  — Wrapper: `trafficctl telegram`
-    trafficctl-telegram-test.sh             — Wrapper: `trafficctl telegram-test` (send a test message to Telegram)
   files/etc/config/trafficctl                — UCI config (conffile, installed 0600)
   files/etc/init.d/
     trafficctl-telegram                     — procd init script for the bot (package trafficctl-telegram)
@@ -94,7 +70,7 @@ trafficctl/
     trafficctl-notify                       — procd service for the new/known device scan (`trafficctl notify watch`), only when wanted
   files/etc/uci-defaults/80_trafficctl-notify — `trafficctl notify migrate` (the bot's notification options to notify_telegram)
   files/etc/hotplug.d/
-    iface/99-trafficctl-shapes              — Restore on boot (ifup lan): blocks, rate limits and shapes via `trafficctl restore`, then port-forward controls and a kept cut
+    iface/99-trafficctl-shapes              — Restore on boot (ifup lan): `trafficctl restore` (blocks, rate limits, shapes, port-forward controls, a kept cut)
     dhcp/99-trafficctl-newdevice            — New device detection via DHCP events: runs `trafficctl newdevice`
   files/lib/upgrade/keep.d/trafficctl       — /etc/trafficctl/ kept across sysupgrade
   files/www/cgi-bin/trafficctl-metrics      — Prometheus scrape endpoint (CGI)
@@ -133,10 +109,10 @@ docs/
 - On 2022-12 `unshift()` on an empty array leaves it empty: prepend with
   `[ x, ...arr ]`.
 - `/etc/trafficctl/rules.json` is written by `lib.persist_save`/
-  `persist_remove` only. The shell `tctl_persist_*` in `trafficctl-fw.sh`
-  have no caller left and stay until that file goes; both take the mkdir lock
-  `/tmp/trafficctl_rules.lock.d` and write the same bytes (compact, keys in
-  the order type, ip, param, mode, param_up), so a downgrade still reads it.
+  `persist_remove` only. They take v1.30's mkdir lock
+  `/tmp/trafficctl_rules.lock.d` and write its bytes (compact, keys in the
+  order type, ip, param, mode, param_up): a 1.30.x writer still running
+  during the upgrade shares the lock, and a downgrade reads the file.
 - The modules cache the uci cursor, the ubus connection and the interface
   dump for one run. A long-running caller calls `net.reset()` per request.
 - JSON output goes through `lib.to_json`, which keeps the shell backend's
@@ -157,11 +133,13 @@ docs/
 
 ## Shell Script Conventions
 
+The shell left is the hotplug hooks, the init scripts, uci-defaults, the
+metrics CGI and the package scripts; everything else is ucode.
+
 - Shebang: `#!/bin/sh`
-- All scripts output JSON to stdout
-- Validate IPs with `tctl_validate_ip` from trafficctl-fw.sh
+- A hook hands over to the CLI (`exec /usr/sbin/trafficctl <command>`) rather
+  than doing the work itself
 - Use `2>/dev/null` on commands that may fail (nft, tc)
-- Filter `dig` output: `grep -v '^;;'` to remove error messages
 
 ## Releases & Changelog
 
@@ -197,8 +175,9 @@ scp does NOT work to the router. Deploy files like this:
 
 ```sh
 ssh root@192.168.0.1 sh -c '"cat > /path/to/file"' < local/file
-# For scripts, also chmod:
-ssh root@192.168.0.1 sh -c '"cat > /usr/libexec/trafficctl/script.sh && chmod +x /usr/libexec/trafficctl/script.sh"' < trafficctl/files/usr/libexec/trafficctl/script.sh
+# A module, and the CLI (also chmod):
+ssh root@192.168.0.1 sh -c '"cat > /usr/share/ucode/trafficctl/limit.uc"' < trafficctl/files/usr/share/ucode/trafficctl/limit.uc
+ssh root@192.168.0.1 sh -c '"cat > /usr/sbin/trafficctl && chmod +x /usr/sbin/trafficctl"' < trafficctl/files/usr/sbin/trafficctl
 # Frontend:
 ssh root@192.168.0.1 sh -c '"cat > /www/luci-static/resources/view/trafficctl/status.js"' < luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js
 ssh root@192.168.0.1 sh -c '"cat > /www/luci-static/resources/view/trafficctl/status.css"' < luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.css
@@ -212,7 +191,7 @@ ssh root@192.168.0.1 sh -c '"cat > /www/luci-static/resources/view/trafficctl/st
 - WiFi MAC filter: `hostapd_cli deny_acl ADD_MAC` + `deauthenticate` (no wifi reload)
 - Limit targets may be a host, a CIDR (`10.0.20.0/24`), or `all`. Mode `each` (default for any block wider than /32) gives every address its own bucket via an nft `meter` keyed by address; `shared` caps the block in aggregate — a shared cap lets one device starve the rest, hence the default. **One meter per chain**, `tctl_m_<slug>_<chain>` (`limit.uc`): nftables 1.0 (22.03) binds a meter to the rule that declares it, so the old per-target name failed with "Resource busy" on every port after the first while the limit was reported applied; nftables 1.1 keeps a meter as a named set after its rules go, so `limit.remove` deletes the sets the removed rules named. A device that refuses its rule does not undo the others: the rules that went in stay, and the device and nft's reason are logged and reported (`ul_err`/`dl_err` of `limit.add`, `"partial":true`, `PARTIAL:` in `msg`); `ok` is false only when nothing went in. Re-applying, or the next `ifup lan`, fills the missing device in
 - Limits and shapes are **bidirectional**: the limiter polices download at LAN **egress** on the bridge (`ip daddr`, chain `dl_<landev>`) — at WAN ingress a reply is still addressed to the router's masqueraded WAN address, since conntrack only restores the client address in prerouting, which runs after the netdev ingress hook (WAN ingress remains a fallback for kernels < 5.16 without the egress hook) and upload at LAN ingress (`ip saddr`, one `ul_<dev>` chain per device). The two hooks are asymmetric and both halves matter: **a netdev ingress hook bound to a bridge never sees bridged traffic** — packets are received on the bridge's ports — so `limit.ingress_devices` (the shaper uses it too) expands bridges to their `brif/*` ports; hooking `br-lan` matches nothing. **Egress is the mirror image**: the IP stack transmits to `br-lan`, so an egress hook on a PORT never fires for routed traffic and must bind the bridge itself (verified on kernel 6.12: br-lan egress counted every packet, ports counted none). `TCTL_SYSFS_NET` overrides the sysfs root for tests; the shaper builds a matching HTB class on the LAN device (`match ip dst`, download) and on an **IFB device** fed by `mirred` from LAN-side ingress (`match ip src`, upload). Upload must NOT be shaped at WAN egress: POSTROUTING has already masqueraded the source to the router's WAN address there, so a per-client src filter matches nothing. Needs `kmod-ifb`; without it the shaper applies download only and says so. Policing upload on the way *in* is what makes it work for routed/downstream clients. Both halves must be removed together
-- tc/HTB shaping: the classid minor is **allocated**, not derived from the address, and persisted in `shapes.json` next to the rate. Deriving it from the last two octets (the original `1:<hex(o3*256+o4)>`) put `192.168.0.1` on the reserved root class `1:1` — so shaping it ran `tc class del ... 1:1` and tore down every other device's shape — put `x.x.255.254` on the default class `1:fffe`, and collided across subnets (`192.168.1.50` and `10.0.1.50` both mapped to `1:132`), which matters because routed/downstream clients live in other subnets. `lookup_classid` reads the recorded minor, `alloc_classid` hands out the lowest free one in 2..65533 (checking both the persisted file and live `tc` state), and `legacy_classid` reproduces the old derivation for the single purpose of cleaning up shapes persisted before the upgrade. Every reader maps address→classid purely from `shapes.json` (all record forms, `rate_kbit_up` included; a pre-allocation record maps to its derived class): `tctl_shape_classmap` (`trafficctl-fw.sh`) for the shell readers, `shape_classmap` (`ctl.uc`, JSON-parsed) for the ucode ones. `trafficctl shape-stats` skips classes it does not know rather than reconstructing an address, and the summary's `shape_kbit` looks the class up instead of deriving it. The shaper itself is `shape.uc` (`trafficctl shape`); `shapes.json` keeps the bytes and the mkdir lock `/tmp/trafficctl_shapes.lock.d` of the shell writer, so a downgrade still reads it
+- tc/HTB shaping: the classid minor is **allocated**, not derived from the address, and persisted in `shapes.json` next to the rate. Deriving it from the last two octets (the original `1:<hex(o3*256+o4)>`) put `192.168.0.1` on the reserved root class `1:1` — so shaping it ran `tc class del ... 1:1` and tore down every other device's shape — put `x.x.255.254` on the default class `1:fffe`, and collided across subnets (`192.168.1.50` and `10.0.1.50` both mapped to `1:132`), which matters because routed/downstream clients live in other subnets. `lookup_classid` reads the recorded minor, `alloc_classid` hands out the lowest free one in 2..65533 (checking both the persisted file and live `tc` state), and `legacy_classid` reproduces the old derivation for the single purpose of cleaning up shapes persisted before the upgrade. Every reader maps address→classid purely from `shapes.json` (all record forms, `rate_kbit_up` included; a pre-allocation record maps to its derived class): `shape_classmap` (`ctl.uc`, JSON-parsed). `trafficctl shape-stats` skips classes it does not know rather than reconstructing an address, and the summary's `shape_kbit` looks the class up instead of deriving it. The shaper itself is `shape.uc` (`trafficctl shape`); `shapes.json` keeps the bytes and the mkdir lock `/tmp/trafficctl_shapes.lock.d` of the shell writer, so a downgrade still reads it
 - A shape's u32 filters are deleted **by handle** (`shape.uc` `detach`, the handles read from `tc filter show`). A `tc filter del ... prio 10` with a match but no handle deletes every filter of that prio on the device: up to v1.30.x every shape added (the add detaches first) or removed took the filters of all the other shapes with it, and only the last one applied was in force, while their classes stayed and the UI showed them shaped. `tests/lib/tc-htb.sh` keeps that kernel behaviour, `tools/ci/live-shape.sh` checks it on a real kernel
 - Reserved HTB classids: `1:1` (root), `1:fffe` (default) — never allocated
 - `ensure_root` (`shape.uc`) only replaces a root qdisc it recognises as default (`pfifo_fast`, `fq_codel`, `noqueue`, `mq`, …) or HTB, which it takes for its own tree: an HTB root with a class `1:1` is reused, one without is replaced, so a foreign HTB hierarchy is not protected. Anything else — cake from SQM, HFSC — is somebody's QoS setup, so shaping declines instead of silently deleting it
@@ -224,7 +203,7 @@ ssh root@192.168.0.1 sh -c '"cat > /www/luci-static/resources/view/trafficctl/st
 - Persistent blocks/ratelimits stored in `/etc/trafficctl/rules.json` (when `persist_rules` enabled)
 - Note: Only `/etc/config/trafficctl` is tracked as a conffile for package upgrades. The runtime state under `/etc/trafficctl/` (names, shapes.json, rules.json, telegram_known.json) is not a conffile but IS listed in `trafficctl/files/lib/upgrade/keep.d/trafficctl`, because default sysupgrade preserves `/etc/config/*` only — without that file every device alias and shaping rule was lost on a firmware upgrade
 - The config file holds the Telegram bot token and the metrics token, so it is kept at mode 0600. `uci` rewrites the file at the default mode on every commit, hence the single `lib.commit()` (`trafficctl/files/usr/share/ucode/trafficctl/lib.uc`) that re-applies the mode after each one. On ucode 2022-12 a named `cursor.commit()` fails with EINVAL, so it saves the deltas and commits that one config with the uci CLI. A commit that fails drops what it staged and returns false; every rpcd setter then replies `ok:false` instead of claiming the change
-- Activity logging: `trafficctl.logging.log_file` is constrained to `/tmp/trafficctl/*` or `/var/log/*` and `max_lines` to 20..100000 (`tctl_validate_log_file` / `tctl_log_max_lines`). The path is both an append target and a `tail`+`mv` rotation target, so an unconstrained value gave the write ACL an arbitrary root file read (via `activity_log`) and truncate — `max_lines=1` rounded the rotation keep-count to zero and emptied whatever the path pointed at. `activity_log` is a **write** method for that reason
+- Activity logging: `trafficctl.logging.log_file` is constrained to `/tmp/trafficctl/*` or `/var/log/*` and `max_lines` to 20..100000 (`lib.valid_log_file` / `log_max_lines`). The path is both an append target and a `tail`+`mv` rotation target, so an unconstrained value gave the write ACL an arbitrary root file read (via `activity_log`) and truncate — `max_lines=1` rounded the rotation keep-count to zero and emptied whatever the path pointed at. `activity_log` is a **write** method for that reason
 - Global internet cut (all devices at once): own nft table `inet tctl_cut` with TWO chains, loaded as one atomic `nft -f` transaction. Own table because fw4 rebuilds `inet fw4` on every reload and the `ifup lan` restore hook does not fire for that — a rule placed there lapses silently while the UI still reads ON, which for this control is the worst failure. **The primary chain is at `prerouting` priority -300, not `forward`**: a forward rule only sees traffic the router FORWARDS, and on a router running a transparent proxy (podkop/sing-box, passwall, homeproxy) TPROXY intercepts at prerouting and delivers the packet LOCALLY — client→router is `input`, router→internet is `output`, neither leg is forwarded, so a forward-only cut misses the bulk of the traffic while reporting success. -300 (`raw`) is ahead of conntrack (-200), `mangle` (-150) and `dstnat` (-100) where those proxies hook. The forward chain at -190 is kept as a second layer. Locally-originated traffic never traverses prerouting, so the proxy's own outbound path, the router's tunnels and its DNS are untouched. **Rule order is a safety property**: `fib daddr type { local, broadcast, multicast } accept` comes FIRST, before anything that trusts the LAN device list, so LuCI/SSH/DNS/DHCP survive even if that list is wrong — a prerouting drop without that escape hatch is a total LAN lockout, which is also why the install must be atomic (rule-by-rule would apply the accepts that parse plus the drop). Interface matching rather than addresses so IPv4 **and** IPv6 are cut by the same rules (the per-device block is `ip saddr` and v4-only); at prerouting there is no `oifname` yet, so `fib daddr . iif oifname` asks the FIB the same question. Inbound port forwards are deliberately left alone. **Refuses to engage when no LAN device can be resolved** — the drop-all it would otherwise build black-holes the LAN too. `cut_coverage` reports `full`/`forward` from live kernel state; on a kernel without `nft_fib` the forward-only fallback is taken, and if a `tproxy` rule is detected in the ruleset that fallback **refuses** rather than installing a cut that misses proxied traffic. Engaged state lives in tmpfs (`/var/run/trafficctl/cut.state`): it is the one control that can lock out its own operator, so a reboot must clear it. "Keep after reboot" is its **own** opt-in writing `/etc/trafficctl/cut.state`, never the global `persist_rules` flag, restored on `ifup lan` at the original absolute deadline; deliberately not in `keep.d`. Auto-revert is enforced both by the procd keeper (`/etc/init.d/trafficctl-cut` runs `trafficctl cut keeper`, 5s tick, also re-asserts the rule; whether it runs is asked of procd, not pgrep) and independently by `cut_status`, which is why that is a **write** method. After loading, the prerouting chain is listed back and kept only if its FIRST rule is the router-local accept. The prerm runs `trafficctl cut release` and then removes the state files and the table without ucode, so a broken install cannot leave a cut behind
 - Port-forward control: own nft table `inet tctl_pfw`, chains at forward/input priority -190 (post-DNAT, before the flowtable offload rule); pause = drop rule + conntrack flush, limit = `limit rate over` drop. Rule comments `tctl_pfw_<pause|limit>_<proto>_<ip|local>_<port>` are the source of truth for state, matched whole with their quotes (port 80 is not 8080). Open ports are commented `local`; v1.30 wrote `-` there, and such rules are still read and removed
 - Device names: manual alias (`/etc/trafficctl/names`) > DHCP lease > cached reverse DNS. Routed devices have no lease here, so PTR (or an alias) is their only name source; `trafficctl.main.rdns_server` is a space-separated resolver list tried before the system resolver — point it at the downstream router. Lookups never block a poll: the summary reads the cache and spawns `trafficctl rdns-refresh` detached (max 8 IPs/poll, TTL `rdns_ttl`, `-` = negative cache)

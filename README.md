@@ -486,7 +486,7 @@ filesystem, then restart rpcd:
 scp -r trafficctl/files/* root@router:/
 scp -r luci-app-trafficctl/root/* root@router:/
 scp -r luci-app-trafficctl/htdocs/luci-static root@router:/www/
-ssh root@router 'chmod +x /usr/libexec/trafficctl/trafficctl-*.sh /usr/libexec/rpcd/luci.trafficctl && /etc/init.d/rpcd restart'
+ssh root@router 'chmod +x /usr/sbin/trafficctl /usr/libexec/trafficctl/trafficctl-telegram.uc /usr/libexec/rpcd/luci.trafficctl && /etc/init.d/rpcd restart'
 ```
 
 ### Required packages
@@ -672,15 +672,14 @@ The frontend talks to a thin rpcd dispatcher over ubus. The Telegram bot provide
 | `luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl` | rpcd backend — JSON-RPC dispatch |
 | `luci-app-trafficctl/root/usr/share/rpcd/acl.d/` | ACL permissions |
 | `trafficctl/Makefile` | Backend package (`trafficctl`), installs everything under `trafficctl/files/` |
-| `trafficctl/files/usr/libexec/trafficctl/trafficctl-*.sh` | Backend scripts (monitoring + control) |
-| `trafficctl/files/usr/libexec/trafficctl/trafficctl-fw.sh` | Firewall abstraction layer (sourced) |
+| `trafficctl/files/usr/sbin/trafficctl` | The backend's CLI (ucode): every monitoring and control command, JSON on stdout |
+| `trafficctl/files/usr/share/ucode/trafficctl/*.uc` | Its modules: lib, net, ctl, report, limit, shape, portfw, cut, history, notify |
 | `trafficctl/files/usr/share/ucode/trafficctl/telegram.uc` | Telegram bot (long polling): commands, device menu, actions (package `trafficctl-telegram`) |
 | `trafficctl/files/usr/libexec/trafficctl/trafficctl-telegram.uc` | The bot's entry point, run by its init script and by `trafficctl telegram` |
-| `trafficctl/files/usr/libexec/trafficctl/trafficctl-telegram.sh` | Wrapper: `trafficctl telegram` |
 | `trafficctl/files/etc/init.d/trafficctl-telegram` | procd init script for the bot |
 | `trafficctl/files/usr/share/ucode/trafficctl/notify.uc` | Notification events and senders (ubus, hotplug, Telegram, ntfy, webhook, mail) |
 | `trafficctl/files/etc/init.d/trafficctl-notify` | procd init script for the new/known device scan |
-| `trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes` | Boot persistence for tc + block + ratelimit rules |
+| `trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes` | Boot persistence: runs `trafficctl restore` (blocks, limits, shapes, port controls, a kept cut) |
 | `trafficctl/files/etc/hotplug.d/dhcp/99-trafficctl-newdevice` | Instant new-device detection via DHCP events |
 | `trafficctl/files/www/cgi-bin/trafficctl-metrics` | Prometheus scrape endpoint (CGI) |
 | `Makefile` | OpenWrt package build |
