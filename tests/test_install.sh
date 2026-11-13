@@ -104,32 +104,14 @@ for f in \
   /usr/share/ucode/trafficctl/report.uc \
   /usr/share/ucode/trafficctl/cut.uc \
   /usr/share/ucode/trafficctl/portfw.uc \
-  /usr/libexec/trafficctl/trafficctl-cut.sh \
-  /usr/libexec/trafficctl/trafficctl-portfw.sh \
+  /usr/share/ucode/trafficctl/ctl.uc \
+  /usr/share/ucode/trafficctl/limit.uc \
+  /usr/share/ucode/trafficctl/shape.uc \
+  /usr/share/ucode/trafficctl/history.uc \
   /etc/init.d/trafficctl-cut \
-  /usr/libexec/trafficctl/trafficctl-summary.sh \
-  /usr/libexec/trafficctl/trafficctl-fw.sh \
-  /usr/libexec/trafficctl/trafficctl-device.sh \
-  /usr/libexec/trafficctl/trafficctl-names.sh \
-  /usr/libexec/trafficctl/trafficctl-subnets.sh \
-  /usr/libexec/trafficctl/trafficctl-ifaces.sh \
-  /usr/libexec/trafficctl/trafficctl-rdns-refresh.sh \
-  /usr/libexec/trafficctl/trafficctl-telegram.sh \
+  /etc/init.d/trafficctl-history \
   /usr/libexec/trafficctl/trafficctl-telegram.uc \
   /usr/share/ucode/trafficctl/telegram.uc \
-  /usr/libexec/trafficctl/trafficctl-telegram-test.sh \
-  /usr/libexec/trafficctl/trafficctl-block.sh \
-  /usr/libexec/trafficctl/trafficctl-unblock.sh \
-  /usr/libexec/trafficctl/trafficctl-ratelimit.sh \
-  /usr/libexec/trafficctl/trafficctl-ratelimit-stats.sh \
-  /usr/libexec/trafficctl/trafficctl-shape.sh \
-  /usr/libexec/trafficctl/trafficctl-shape-stats.sh \
-  /usr/libexec/trafficctl/trafficctl-bytes.sh \
-  /usr/libexec/trafficctl/trafficctl-totals.sh \
-  /usr/libexec/trafficctl/trafficctl-rdns.sh \
-  /usr/libexec/trafficctl/trafficctl-rules.sh \
-  /usr/libexec/trafficctl/trafficctl-macfilter-add.sh \
-  /usr/libexec/trafficctl/trafficctl-macfilter-remove.sh \
   /usr/libexec/rpcd/luci.trafficctl \
   /www/luci-static/resources/view/trafficctl/status.js \
   /www/luci-static/resources/view/trafficctl/status.css \
@@ -146,41 +128,61 @@ for f in \
   [ -f "$f" ] || { echo "MISSING: $f"; exit 1; }
 done
 
-# Verify syntax for all shell scripts
+# The shell scripts of 1.30.x in /usr/libexec/trafficctl are gone; only the
+# bot's ucode entry is left there.
+for s in /usr/libexec/trafficctl/*.sh; do
+  [ -e "$s" ] && { echo "LEFT OVER: $s (removed in 2.0.0)"; exit 1; }
+done
+
+# What is still shell: the init scripts, the hooks and the CGI.
 for s in \
-  /usr/libexec/trafficctl/trafficctl-*.sh \
   /etc/hotplug.d/dhcp/99-trafficctl-newdevice \
   /etc/hotplug.d/iface/99-trafficctl-shapes \
+  /etc/init.d/trafficctl-cut \
+  /etc/init.d/trafficctl-history \
   /etc/init.d/trafficctl-notify \
-  /etc/init.d/trafficctl-telegram; do
+  /etc/init.d/trafficctl-telegram \
+  /www/cgi-bin/trafficctl-metrics; do
   ash -n "$s" || { echo "SYNTAX ERROR: $s"; exit 1; }
+done
+
+# Every ucode file compiles on this release's own interpreter: a construct
+# the 2022-12 parser does not know fails here, not on the first call. `-c`
+# compiles a module only through an import (one on its own is refused for
+# its export), so the entry points are compiled: the CLI imports every
+# backend module, the bot entry telegram.uc.
+for s in /usr/sbin/trafficctl /usr/libexec/trafficctl/trafficctl-telegram.uc; do
+  ucode -c -o /dev/null "$s" || { echo "UCODE COMPILE ERROR: $s"; exit 1; }
+done
+for m in /usr/share/ucode/trafficctl/*.uc; do
+  m=${m##*/}; m=${m%.uc}
+  grep -q "from 'trafficctl\.$m'" /usr/sbin/trafficctl /usr/libexec/trafficctl/trafficctl-telegram.uc ||
+    { echo "UCODE COMPILE: trafficctl.$m is imported by neither entry point, so it was not compiled"; exit 1; }
 done
 
 # Verify execute bit on files that are called directly (not via sh)
 for s in \
   /usr/sbin/trafficctl \
-  /usr/libexec/trafficctl/trafficctl-*.sh \
+  /usr/libexec/trafficctl/trafficctl-telegram.uc \
   /usr/libexec/rpcd/luci.trafficctl \
+  /www/cgi-bin/trafficctl-metrics \
+  /etc/init.d/trafficctl-cut \
+  /etc/init.d/trafficctl-history \
   /etc/init.d/trafficctl-notify \
   /etc/init.d/trafficctl-telegram; do
   [ -x "$s" ] || { echo "NOT EXECUTABLE: $s"; exit 1; }
 done
 
 # The ucode CLI runs on this release's own interpreter and finds its modules
-# on the default search path, directly and through the old script names.
-# None of these needs a running ubusd.
-for c in "/usr/sbin/trafficctl names list" "/usr/libexec/trafficctl/trafficctl-names.sh list"; do
-    out=$($c 2>&1)
-    [ "$out" = "[]" ] || { echo "CLI FAILED: $c printed: $out"; exit 1; }
-done
+# on the default search path. None of these needs a running ubusd.
+out=$(/usr/sbin/trafficctl names list 2>&1)
+[ "$out" = "[]" ] || { echo "CLI FAILED: trafficctl names list printed: $out"; exit 1; }
 for c in subnets ifaces bytes totals "totals --all" summary "netify list"; do
     out=$(/usr/sbin/trafficctl $c 2>&1)
     case "$out" in "["*"]") ;; *) echo "CLI FAILED: trafficctl $c printed: $out"; exit 1 ;; esac
 done
-for c in "/usr/sbin/trafficctl metrics" /usr/libexec/trafficctl/trafficctl-metrics.sh; do
-    out=$($c 2>&1)
-    case "$out" in "# trafficctl metrics are disabled"*) ;; *) echo "CLI FAILED: $c printed: $out"; exit 1 ;; esac
-done
+out=$(/usr/sbin/trafficctl metrics 2>&1)
+case "$out" in "# trafficctl metrics are disabled"*) ;; *) echo "CLI FAILED: trafficctl metrics printed: $out"; exit 1 ;; esac
 # The postinst moved the config to the notification layout (or found it
 # there), and with no Telegram bot set up nothing wants the device scan, so
 # the watcher service stays down.
@@ -190,33 +192,21 @@ case "$out" in '{"ok":true,'*) ;; *) echo "CLI FAILED: notify migrate printed: $
 if /usr/sbin/trafficctl notify wanted >/dev/null 2>&1; then
     echo "CLI FAILED: notify wanted on a router with no sender set up"; exit 1
 fi
-# ── PR7: cut and portfw. Status only reads (no rule, no keeper), and a
-#    container without nf_tables still answers with JSON.
-for c in "/usr/sbin/trafficctl cut status" "/usr/libexec/trafficctl/trafficctl-cut.sh status"; do
-    out=$($c 2>&1)
-    case "$out" in '{"ok":true,"active":false,'*) ;; *) echo "CLI FAILED: $c printed: $out"; exit 1 ;; esac
-done
-for c in "/usr/sbin/trafficctl portfw list" "/usr/libexec/trafficctl/trafficctl-portfw.sh list"; do
-    out=$($c 2>&1)
-    case "$out" in "["*"]") ;; *) echo "CLI FAILED: $c printed: $out"; exit 1 ;; esac
-done
-# ── end PR7
+# Cut and port forwards: status only reads (no rule, no keeper), and a
+# container without nf_tables still answers with JSON.
+out=$(/usr/sbin/trafficctl cut status 2>&1)
+case "$out" in '{"ok":true,"active":false,'*) ;; *) echo "CLI FAILED: trafficctl cut status printed: $out"; exit 1 ;; esac
+out=$(/usr/sbin/trafficctl portfw list 2>&1)
+case "$out" in "["*"]") ;; *) echo "CLI FAILED: trafficctl portfw list printed: $out"; exit 1 ;; esac
 if /usr/sbin/trafficctl bogus >/dev/null 2>&1; then
     echo "CLI FAILED: an unknown command exited 0"; exit 1
 fi
 
-# PR8 history
-# history.uc, its init script and the old script name, which is a shim now.
-for f in /usr/share/ucode/trafficctl/history.uc /etc/init.d/trafficctl-history \
-         /usr/libexec/trafficctl/trafficctl-history.sh; do
-    [ -f "$f" ] || { echo "MISSING: $f"; exit 1; }
-done
+# History: the init script runs the ucode keeper.
 grep -q '/usr/sbin/trafficctl history keeper' /etc/init.d/trafficctl-history ||
     { echo "INIT FAILED: trafficctl-history does not run the ucode keeper"; exit 1; }
-for c in "/usr/sbin/trafficctl history status" "/usr/libexec/trafficctl/trafficctl-history.sh status"; do
-    out=$($c 2>&1)
-    case "$out" in '{"enabled":false,'*'}') ;; *) echo "CLI FAILED: $c printed: $out"; exit 1 ;; esac
-done
+out=$(/usr/sbin/trafficctl history status 2>&1)
+case "$out" in '{"enabled":false,'*'}') ;; *) echo "CLI FAILED: trafficctl history status printed: $out"; exit 1 ;; esac
 out=$(/usr/sbin/trafficctl history periods 2>&1)
 [ "$out" = "[]" ] || { echo "CLI FAILED: trafficctl history periods printed: $out"; exit 1; }
 /usr/sbin/trafficctl history validate-dir /mnt/usb ||
@@ -224,7 +214,6 @@ out=$(/usr/sbin/trafficctl history periods 2>&1)
 if /usr/sbin/trafficctl history validate-dir /etc; then
     echo "CLI FAILED: validate-dir accepted /etc"; exit 1
 fi
-# end PR8 history
 
 # The rpcd plugin is ucode too: its signature table, a read that needs only
 # uci, and the version, read from this package manager's database (never
@@ -279,7 +268,7 @@ owner_of() {
 for f in \
   /usr/sbin/trafficctl \
   /usr/share/ucode/trafficctl/lib.uc \
-  /usr/libexec/trafficctl/trafficctl-fw.sh \
+  /usr/share/ucode/trafficctl/ctl.uc \
   /etc/config/trafficctl \
   /etc/init.d/trafficctl-notify \
   /usr/share/ucode/trafficctl/notify.uc \
@@ -291,7 +280,6 @@ for f in \
 done
 for f in \
   /etc/init.d/trafficctl-telegram \
-  /usr/libexec/trafficctl/trafficctl-telegram.sh \
   /usr/libexec/trafficctl/trafficctl-telegram.uc \
   /usr/share/ucode/trafficctl/telegram.uc; do
   o=$(owner_of "$f")
@@ -342,9 +330,6 @@ esac
 for f in \
   /usr/sbin/trafficctl \
   /usr/share/ucode/trafficctl/lib.uc \
-  /usr/libexec/trafficctl/trafficctl-summary.sh \
-  /usr/libexec/trafficctl/trafficctl-fw.sh \
-  /usr/libexec/trafficctl/trafficctl-block.sh \
   /usr/libexec/rpcd/luci.trafficctl \
   /www/luci-static/resources/view/trafficctl/status.js \
   /www/luci-static/resources/view/trafficctl/status.css \

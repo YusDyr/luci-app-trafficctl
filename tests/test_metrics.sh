@@ -257,13 +257,10 @@ metrics_config enabled 0
 OUT=$(run_metrics)
 assert_contains "enabled 0 is disabled too" "metrics are disabled" "$OUT"
 
-# ── the CLI and the shim ────────────────────────────────────────────────────
-# The command and the old script path reach the same exporter.
+# ── the CLI ─────────────────────────────────────────────────────────────────
 metrics_config enabled 0
 OUT=$(TCTL_ROOT="$ROOT" tctl metrics)
 assert_contains "trafficctl metrics runs the exporter" "metrics are disabled" "$OUT"
-assert_contains "the old script is a shim for it" 'exec /usr/sbin/trafficctl metrics "$@"' \
-    "$(cat "$UC_REPO/trafficctl/files/usr/libexec/trafficctl/trafficctl-metrics.sh")"
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

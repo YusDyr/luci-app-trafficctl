@@ -3,85 +3,16 @@
 # shellcheck shell=dash
 # Restore persistent rules after LAN interface comes up
 
-. /usr/libexec/trafficctl/trafficctl-fw.sh
-
 [ "$ACTION" = "ifup" ] && [ "$INTERFACE" = "lan" ] || exit 0
 
-# Everything below puts back what was there before: no "Limit applied" or
-# "Internet blocked" notification per device on every boot or ifup.
-export TCTL_NOTIFY=0
-
-RULES_FILE="/etc/trafficctl/rules.json"
-
-# Wait for network stack to be ready (up to 10 seconds)
-tries=0
-while ! tc qdisc show dev "$(tctl_get_lan_device)" >/dev/null 2>&1; do
-    tries=$((tries + 1))
-    [ "$tries" -ge 20 ] && break
-    sleep 0.5 2>/dev/null || sleep 1
-done
-
-# Saved blocks and rate limits (persist_rules) and every shape (shapes.json,
-# always saved): `trafficctl restore` waits up to 10 seconds for fw4, which
-# at boot can load its ruleset after ifup lan, replaces a limit or a shape
-# still live from before (an ifup without a reboot), and logs each one it
-# could not put back, or put back only on some devices.
-/usr/sbin/trafficctl restore >/dev/null 2>&1
-
-# Restore port-forward controls (if persist enabled); blocks, rate limits and
-# shapes went back above
-if [ -f "$RULES_FILE" ] && tctl_persist_enabled; then
-    # How many records there are comes from the file, not from a constant.
-    # `seq 0 99` stopped at the hundredth, so every rule past it was silently
-    # not restored: present in rules.json, shown by the UI as persisted, and
-    # absent from the kernel after a reboot (#108). Raising 99 to a bigger
-    # number would only move the cliff. The absent-record sentinel below is
-    # what ends the loop, exactly as it did before.
-    #
-    # (The line that used to sit here piped '@[*]' into a loop whose body was
-    # `true` — an abandoned attempt at this same iteration that did nothing.)
-    # Advanced at the TOP, so there is exactly one increment and `continue`
-    # below cannot skip it. With the increment at the bottom, a record that
-    # has a type but no ip — a truncated or hand-edited file — would spin the
-    # loop forever on the same index, inside a boot hook. That is a worse
-    # failure than the one being fixed here.
-    idx=-1
-    while :; do
-        idx=$((idx + 1))
-        type=$(jsonfilter -i "$RULES_FILE" -e "@[$idx].type" 2>/dev/null)
-        [ -z "$type" ] && break
-        ip=$(jsonfilter -i "$RULES_FILE" -e "@[$idx].ip" 2>/dev/null)
-        param=$(jsonfilter -i "$RULES_FILE" -e "@[$idx].param" 2>/dev/null)
-        [ -z "$ip" ] && continue
-
-        case "$type" in
-            pfw_pause|pfw_limit)
-                # ip field is a composite key: scope/proto/ip|local/port
-                _scope=${ip%%/*}; _rest=${ip#*/}
-                _proto=${_rest%%/*}; _rest=${_rest#*/}
-                _pip=${_rest%%/*}; _pport=${_rest#*/}
-                [ "$_pip" = "local" ] && _pip="-"
-                if [ "$type" = "pfw_pause" ]; then
-                    /usr/libexec/trafficctl/trafficctl-portfw.sh pause "$_scope" "$_proto" "$_pip" "$_pport" >/dev/null 2>&1 || \
-                        logger -t trafficctl "Failed to restore port pause for $_pport"
-                elif [ -n "$param" ] && [ "$param" != "0" ]; then
-                    /usr/libexec/trafficctl/trafficctl-portfw.sh limit "$_scope" "$_proto" "$_pip" "$_pport" "$param" >/dev/null 2>&1 || \
-                        logger -t trafficctl "Failed to restore port limit for $_pport"
-                fi
-                ;;
-        esac
-    done
-fi
-
-# Restore a global internet cut the operator explicitly asked to keep.
+# `trafficctl restore` waits up to 10 seconds for the LAN device and for fw4,
+# which at boot can load its ruleset after ifup lan, then puts back the saved
+# blocks, rate limits and port controls (persist_rules), every shape
+# (shapes.json, always saved) and a global cut engaged with "keep after
+# reboot". A limit or a shape still live from before (an ifup without a
+# reboot) is replaced; each record it could not put back is logged.
 #
-# Guarded on the cut's OWN opt-in, not on tctl_persist_enabled: the global
-# persist_rules flag exists so per-device rate limits survive a reboot, and
-# inheriting a persistent internet kill from it would be a lockout reached
-# through an unrelated decision. Only a cut engaged with "keep after reboot"
-# leaves a file in /etc, so the file's existence is the consent. The restore
-# path honours the original deadline and refuses to restart the clock.
-if [ -f /etc/trafficctl/cut.state ]; then
-    /usr/sbin/trafficctl cut restore >/dev/null 2>&1 || \
-        logger -t trafficctl "Failed to restore the global internet cut"
-fi
+# TCTL_NOTIFY=0: it puts back what was there before, so no "Limit applied" or
+# "Internet blocked" notification per device on every boot or ifup.
+# hotplug-call sources this in a subshell, so the exec ends only that.
+exec env TCTL_NOTIFY=0 /usr/sbin/trafficctl restore >/dev/null 2>&1

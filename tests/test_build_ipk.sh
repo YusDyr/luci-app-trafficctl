@@ -90,17 +90,23 @@ for s in postinst prerm; do
     assert_eq "be: $s present" "yes" "$([ -f "$TMPDIR/be/ctrl/$s" ] && echo yes || echo no)"
 done
 assert_contains "be: postinst removes the opkg backup" "$(cat "$TMPDIR/be/ctrl/postinst")" "trafficctl-opkg.backup"
-assert_contains "be: summary script" "$DATA" "usr/libexec/trafficctl/trafficctl-summary.sh"
+assert_contains "be: the CLI" "$DATA" "usr/sbin/trafficctl$"
+assert_contains "be: its modules" "$DATA" "usr/share/ucode/trafficctl/report.uc"
+assert_not_contains "be: no shell scripts in usr/libexec (gone in 2.0.0)" "$DATA" "usr/libexec/trafficctl/.*\.sh$"
 assert_contains "be: hotplug script" "$DATA" "etc/hotplug.d/iface/99-trafficctl-shapes"
 assert_contains "be: init script" "$DATA" "etc/init.d/trafficctl-notify"
 assert_not_contains "be: no bot (trafficctl-telegram)" "$DATA" 'trafficctl-telegram\(\.sh\|\.uc\)*$'
 assert_not_contains "be: no bot module" "$DATA" "telegram.uc"
-assert_contains "be: the notification test sender stays" "$DATA" "usr/libexec/trafficctl/trafficctl-telegram-test.sh"
 assert_contains "be: config" "$DATA" "etc/config/trafficctl$"
 assert_contains "be: keep.d" "$DATA" "lib/upgrade/keep.d/trafficctl$"
 assert_contains "be: metrics cgi" "$DATA" "www/cgi-bin/trafficctl-metrics"
 assert_not_contains "be: no rpcd plugin" "$DATA" "usr/libexec/rpcd/"
 assert_not_contains "be: no frontend" "$DATA" "luci-static"
+mkdir -p "$TMPDIR/be/data"
+tar xzf "$TMPDIR/be/data.tar.gz" -C "$TMPDIR/be/data"
+for f in usr/sbin/trafficctl www/cgi-bin/trafficctl-metrics etc/init.d/trafficctl-notify; do
+    assert_eq "be: $f is executable" yes "$([ -x "$TMPDIR/be/data/$f" ] && echo yes || echo no)"
+done
 
 # ── trafficctl-telegram ───────────────────────────────────────────────────────
 unpack "$TG_IPK" tg
@@ -117,11 +123,11 @@ for s in preinst postinst prerm; do
     assert_eq "tg: $s present" "yes" "$([ -f "$TMPDIR/tg/ctrl/$s" ] && echo yes || echo no)"
 done
 assert_eq "tg: the bot's files and their directories" \
-    "./etc/init.d/trafficctl-telegram ./usr/libexec/trafficctl/trafficctl-telegram.sh ./usr/libexec/trafficctl/trafficctl-telegram.uc ./usr/share/ucode/trafficctl/telegram.uc" \
+    "./etc/init.d/trafficctl-telegram ./usr/libexec/trafficctl/trafficctl-telegram.uc ./usr/share/ucode/trafficctl/telegram.uc" \
     "$(grep -v '/$' "$TMPDIR/tg/data.list" | grep -vx '\.' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
 mkdir -p "$TMPDIR/tg/data"
 tar xzf "$TMPDIR/tg/data.tar.gz" -C "$TMPDIR/tg/data"
-for f in etc/init.d/trafficctl-telegram usr/libexec/trafficctl/trafficctl-telegram.sh usr/libexec/trafficctl/trafficctl-telegram.uc; do
+for f in etc/init.d/trafficctl-telegram usr/libexec/trafficctl/trafficctl-telegram.uc; do
     assert_eq "tg: $f is executable" yes "$([ -x "$TMPDIR/tg/data/$f" ] && echo yes || echo no)"
 done
 

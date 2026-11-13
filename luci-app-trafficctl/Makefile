@@ -33,6 +33,10 @@ LUCI_DESCRIPTION:=Per-device traffic monitoring, rate limiting (nftables), \
 # after 1.30.x (it was part of trafficctl). The Settings panel configures it,
 # and with it here an upgrade from 1.30.x keeps a bot that was running.
 LUCI_DEPENDS:=+trafficctl +trafficctl-telegram +conntrack +curl +tc +iw +kmod-nft-netdev +firewall4 +ucode +ucode-mod-fs +ucode-mod-uci +ucode-mod-ubus +hostapd-utils +luci-base +rpcd
+# Versioned: the rpcd plugin of this release calls the ucode backend, which a
+# trafficctl up to 1.30.x does not have (and 1.30.x's plugin sources
+# trafficctl-fw.sh, which 2.0.0 removed). luci.mk turns this into EXTRA_DEPENDS.
+LUCI_EXTRA_DEPENDS:=trafficctl (>=$(PKG_VERSION))
 LUCI_PKGARCH:=all
 
 include $(TOPDIR)/feeds/luci/luci.mk
@@ -59,7 +63,7 @@ include $(TOPDIR)/feeds/luci/luci.mk
 #
 # The config mode, the services and the cut release on removal belong to the
 # backend and live in ../trafficctl/Makefile.
-define Package/$(PKG_NAME)/postinst
+define Package/luci-app-trafficctl/postinst
 #!/bin/sh
 if [ -z "$${IPKG_INSTROOT}" ]; then
 	if [ -f /etc/config/trafficctl ]; then

@@ -58,7 +58,9 @@ for ip in 192.168.1.1 10.0.0.1 255.255.255.255 0.0.0.0; do
 done
 for ip in '' abc.def.ghi.jkl 256.1.1.1 1.1.1.999 192.168.1 '192.168.1.1 ; rm -rf /' \
           192.168.1.0/24 192.168.1.1. 1.2.3.4.5 1111.1.1.1 ' 1.2.3.4' '1.2.3.4
-'; do
+' '192.168.1.1|cat /etc/passwd' '$(whoami).168.1.1' '`id`.1.1.1' '192.168.1.1&& cat /etc/shadow' \
+          '192.168.1.1>/tmp/hacked' '192.168.1.1
+rm -rf /'; do
     assert_eq "invalid IP '$ip'" "false" "$(lib valid_ip "$(js "$ip")")"
 done
 assert_eq "valid_ip: a number is not an address" "false" "$(lib valid_ip 1)"
@@ -305,10 +307,15 @@ assert_contains "log: they become spaces" "target=10.0.0.9 [trafficctl] forged d
 printf "config logging 'logging'\n\toption enabled '1'\n\toption log_file '/etc/passwd'\n" > "$R/etc/config/trafficctl"
 lib log '"shape"' '"10.2.0.1"'
 assert_contains "log: a path outside the log dirs falls back to the default" "10.2.0.1" "$(cat "$LOG")"
-for f in /etc/passwd /tmp/trafficctl/../x /tmp/trafficctl/ '/var/log/a b' /var/log/x/..; do
+# With the cases tests/test_regressions.sh ran against the shell's
+# tctl_validate_log_file until 2.0.0.
+for f in /etc/passwd /tmp/trafficctl/../x /tmp/trafficctl/ '/var/log/a b' /var/log/x/.. \
+         /etc/shadow /etc/config/network /tmp/trafficctl/../../etc/shadow /tmp/trafficctl/.. \
+         '/tmp/trafficctl/x;rm -rf /' '/tmp/trafficctl/*' '/tmp/trafficctl/$(whoami)' '/tmp/trafficctl/`id`'; do
     assert_eq "valid_log_file: '$f' refused" "false" "$(lib valid_log_file "$(js "$f")")"
 done
 assert_eq "valid_log_file: /var/log/x.log" "true" "$(lib valid_log_file '"/var/log/x.log"')"
+assert_eq "valid_log_file: /tmp/trafficctl/activity.log" "true" "$(lib valid_log_file '"/tmp/trafficctl/activity.log"')"
 rm -f "$R/etc/config/trafficctl"
 lib log '"shape"' '"10.3.0.1"'
 assert_not_contains "log: off unless enabled" "10.3.0.1" "$(cat "$LOG")"

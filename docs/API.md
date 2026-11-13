@@ -1,12 +1,12 @@
 # API Reference
 
-All backend functionality is exposed through the `/usr/sbin/trafficctl` CLI and the shell scripts in `/usr/libexec/trafficctl/trafficctl-*.sh` it runs for the commands not yet ported to ucode. The LuCI frontend calls them via JSON-RPC through the rpcd plugin at `/usr/libexec/rpcd/luci.trafficctl`, an exec plugin written in ucode: it handles the settings, their validation, the activity log and the device names itself, and runs `trafficctl <command>` for everything else, with every argument quoted and the caller (`TCTL_VIA`, `TCTL_SRC`, `TCTL_USER`) in the environment.
+All backend functionality is exposed through the `/usr/sbin/trafficctl` CLI, written in ucode. Up to 1.30.x it was a set of shell scripts, `/usr/libexec/trafficctl/trafficctl-<command>.sh`; from 2.0.0 they are gone, and `trafficctl <command>` takes the same arguments. The LuCI frontend calls them via JSON-RPC through the rpcd plugin at `/usr/libexec/rpcd/luci.trafficctl`, an exec plugin written in ucode: it handles the settings, their validation, the activity log and the device names itself, and runs `trafficctl <command>` for everything else, with every argument quoted and the caller (`TCTL_VIA`, `TCTL_SRC`, `TCTL_USER`) in the environment.
 
 ---
 
 ## Common Conventions
 
-- **Input validation**: scripts that take an address validate it with regex + octet range (0–255, no leading zeros: `010.0.0.1` is refused) via `tctl_validate_ip`; `tctl_validate_target` additionally accepts a CIDR (prefix length without a leading zero) or `all`.
+- **Input validation**: commands that take an address validate it with regex + octet range (0–255, no leading zeros: `010.0.0.1` is refused) via `lib.valid_ip`; `lib.valid_target` additionally accepts a CIDR (prefix length without a leading zero) or `all`.
 - **Error format**: `{"ok":false,"msg":"Human-readable error message"}`
 - **Success format (actions)**: `{"ok":true,"msg":"Human-readable success message"}`
 - **Rate units**: All rate values are in **kbit/s** (kilobits per second).
@@ -58,12 +58,12 @@ the same bypass as having no rule, reached more slowly. A MAC does not rotate.
   reply says so.
 - **A client with no DHCP lease and no neighbour entry** (`extra_subnets`, a
   static route, anything behind a downstream router) has no MAC visible to this
-  router. `tctl_lookup_mac` **fails** rather than guessing; the IPv4 rules are
+  router. `net.lookup_mac` **fails** rather than guessing; the IPv4 rules are
   applied unchanged and the reply carries `"ipv6":false` plus an explicit
   *"IPv4 only: no MAC known…"* in `msg`. Installing nothing and reporting
   success is the failure this issue was about.
 - **A downstream router** is excluded even when its MAC *is* known
-  (`tctl_ip_is_nexthop`): its MAC is the source of every packet it forwards, so
+  (`net.ip_is_nexthop`): its MAC is the source of every packet it forwards, so
   a MAC-keyed rule would hit every client behind it. Reported the same way,
   naming the reason.
 
@@ -101,7 +101,7 @@ method because it returns the contents of the configured log file.
 |--------|--------|--------|-----|
 | `summary` | `trafficctl summary` (ucode) | (none) | read |
 | `device` | `trafficctl device` (ucode) | `ip`, `proto` | read |
-| `bytes` | `trafficctl-totals.sh` | (none) | read |
+| `bytes` | `trafficctl totals` (ucode) | (none) | read |
 | `ifaces` | `trafficctl ifaces` (ucode) | (none) | read |
 | `rdns` | `trafficctl rdns` (ucode) | `ip` | read |
 | `ratelimit_stats` | `trafficctl ratelimit-stats` (ucode) | (none) | read |
@@ -203,22 +203,18 @@ methods; the `read` methods are the dashboard's polls.
 
 ---
 
-## Query Scripts
+## Query Commands
 
-`trafficctl-subnets.sh`, `trafficctl-names.sh`, `trafficctl-rdns.sh`,
-`trafficctl-rdns-refresh.sh`, `trafficctl-ifaces.sh`, `trafficctl-bytes.sh`,
-`trafficctl-totals.sh`, `trafficctl-ratelimit-stats.sh`,
-`trafficctl-shape-stats.sh`, `trafficctl-rules.sh`, `trafficctl-summary.sh`,
-`trafficctl-device.sh`, `trafficctl-metrics.sh` and `trafficctl-netify.sh` are
-two-line wrappers for the ucode CLI: `/usr/sbin/trafficctl
+`/usr/sbin/trafficctl
 subnets|names|rdns|rdns-refresh|ifaces|bytes|totals|ratelimit-stats|shape-stats|rules|summary|device|metrics|netify`
-takes the same arguments and prints the same bytes (differences listed under
-each command). The metrics CGI (`/www/cgi-bin/trafficctl-metrics`) checks the
-token, then execs `trafficctl metrics`. `bytes-nft` and its wrapper
-are gone (see `trafficctl-bytes.sh` below). The byte commands print their arrays
+takes the arguments of v1.30's `/usr/libexec/trafficctl/trafficctl-<command>.sh`
+and prints the same bytes (differences listed under each command). Those
+scripts are gone from 2.0.0. The metrics CGI (`/www/cgi-bin/trafficctl-metrics`)
+checks the token, then execs `trafficctl metrics`. `bytes-nft` is gone too (see
+`trafficctl bytes` below). The byte commands print their arrays
 sorted by address, where the shell printed awk hash order.
 
-### trafficctl-summary.sh (`trafficctl summary`)
+### trafficctl summary
 
 Returns a summary of all active LAN devices with traffic control status and connection type.
 
@@ -272,7 +268,7 @@ Returns a summary of all active LAN devices with traffic control status and conn
 
 ---
 
-### trafficctl-device.sh (`trafficctl device`)
+### trafficctl device
 
 Returns detailed connection information for a single device.
 
@@ -339,16 +335,16 @@ single-WAN, or policy-routing that doesn't restore the connmark such as podkop)
 
 `oif` is the **uci interface name** (`wan2`, `Finland`) — what the user called the
 network — and `oif_dev` is the kernel device the route resolved to (`eth2`, `awg3`).
-The name comes from the role map `trafficctl-ifaces.sh` memoizes in
+The name comes from the role map `trafficctl ifaces` memoizes in
 `/tmp/trafficctl_ifroles`; a device with no uci interface gets its device name in
 both fields. The table shows the device next to the name only when they differ.
 
 ---
 
-### trafficctl-bytes.sh (`trafficctl bytes`)
+### trafficctl bytes
 
 Returns raw byte counters for bandwidth speed calculation. These are a *sample*,
-not a lifetime total — see `trafficctl-totals.sh` below.
+not a lifetime total — see `trafficctl totals` below.
 
 **Arguments:** None
 
@@ -403,7 +399,7 @@ conntrack always has the split; `-1` comes from `totals` (below).
 
 ---
 
-### trafficctl-totals.sh (`trafficctl totals`)
+### trafficctl totals
 
 Wraps `trafficctl bytes` with a **monotonic per-device accumulator** — the
 lifetime totals behind both the LuCI Bytes / TCP / UDP columns and the
@@ -484,11 +480,11 @@ accumulated history and stay exact.
 
 ---
 
-### trafficctl-ifaces.sh
+### trafficctl ifaces
 
 Returns per-interface byte counters from `/proc/net/dev`, with a role map, for
 the global (bmon-style) overview. Rates are **not** computed here — the frontend
-diffs two samples the same way it does for `trafficctl-bytes.sh`, so the script
+diffs two samples the same way it does for `trafficctl bytes`, so the command
 is stateless and one sample is cheap.
 
 **Arguments:** None
@@ -527,7 +523,7 @@ router correct:
    `phy0-ap0` are ports of `br-lan` and report the very same bytes the bridge
    reports; naming cannot tell them apart from top-level devices, so
    enslavement is read from `/sys/class/net/<dev>/master`.
-1. A device trafficctl already monitors as a LAN (`tctl_get_lan_devices`) is `lan`.
+1. A device trafficctl already monitors as a LAN (`net.lan_devices`) is `lan`.
 2. A tunnel-named device is `vpn`, **even when it holds the default route**.
    On a WireGuard/AmneziaWG full-tunnel setup the default route is via `awg0`
    while the physical uplink still carries every byte encapsulated; calling the
@@ -544,9 +540,8 @@ WAN. Multi-WAN responses are **not** summed by the frontend: on a failover pair
 that double-counts, and on two independent uplinks the sum describes neither
 link (see issue #28).
 
-**Caching:** the role map is the expensive part (sourcing `trafficctl-fw.sh`
-runs `nft list tables`; `tctl_lan_subnets` forks ubus and jsonfilter per
-network), so it is memoized in `/tmp/trafficctl_ifroles` with a 60 s TTL and the
+**Caching:** the role map is the expensive part (`net.lan_subnets` asks ubus
+and uci about every network), so it is memoized in `/tmp/trafficctl_ifroles` with a 60 s TTL and the
 poll path reads only `/proc/net/dev` plus that file. An interface missing from a
 still-fresh cache triggers one rebuild and a re-emit inside the same invocation,
 so a tunnel coming up is classified on the next poll rather than up to a minute
@@ -555,7 +550,7 @@ later. Overridable for testing via `TCTL_IFROLE_CACHE`, `TCTL_IFROLE_TTL`,
 
 ---
 
-### trafficctl-ratelimit-stats.sh
+### trafficctl ratelimit-stats
 
 `trafficctl ratelimit-stats`. Returns drop counters from the nftables
 rate-limiter.
@@ -591,7 +586,7 @@ Returns `[]` if no rate limits are active.
 
 ---
 
-### trafficctl-shape-stats.sh
+### trafficctl shape-stats
 
 `trafficctl shape-stats`. Returns tc/HTB class statistics for all shaped
 devices, read from the text of `tc -s class show` and `tc -s qdisc show` (one
@@ -618,7 +613,7 @@ Returns `[]` if tc is not installed or no HTB qdisc exists. All 15 fields:
 
 ---
 
-### trafficctl-rdns.sh
+### trafficctl rdns
 
 Reverse DNS lookup for a single IP. Used by the Telegram bot and the rpcd `rdns` ubus
 method. The LuCI frontend uses `network.rrdns.lookup` directly for batch resolution.
@@ -636,7 +631,7 @@ Uses `ubus call network.rrdns lookup` (rpcd-mod-rrdns, ships with rpcd) with Bus
 
 ---
 
-### trafficctl-rules.sh
+### trafficctl rules
 
 `trafficctl rules [list]`. Every restriction the app holds, whether or not the device is online: internet
 blocks, speed limits (subnets and `all` included), shapes and WiFi deny-list
@@ -686,7 +681,7 @@ and the two are merged:
   has a conntrack entry or a REACHABLE/DELAY/PROBE/PERMANENT neighbour entry.
 - `name` follows the usual order: alias, DHCP lease, cached PTR.
 - `wifi` records are keyed on the MAC, and `enforcement` uses the words of
-  `trafficctl-macfilter-add.sh` (below), plus `unknown` when the radio state
+  `trafficctl macfilter-add` (below), plus `unknown` when the radio state
   cannot be read. `applied` is `null` then.
 - A radio with `macfilter=allow` blocks every device missing from its list, which
   cannot be enumerated: only their number is reported, in `wifi_allow_ifaces`.
@@ -694,12 +689,11 @@ and the two are merged:
 
 ---
 
-## Action Scripts
+## Action Commands
 
-### trafficctl-block.sh / trafficctl-unblock.sh
+### trafficctl block / trafficctl unblock
 
-Block/unblock a device's internet access. Both scripts are wrappers for
-`trafficctl block` / `trafficctl unblock` (ucode); the reply, the rule text
+Block/unblock a device's internet access. The reply, the rule text
 and the `rules.json` record are those of v1.30.0 (`tests/equiv.sh`).
 
 **Arguments:** `<ip> [label]`
@@ -728,11 +722,10 @@ no MAC can be keyed on — see [Address family coverage](#address-family-coverag
 
 ---
 
-### trafficctl-cut.sh (`trafficctl cut`)
+### trafficctl cut
 
 Cut internet access for **every** device at once while the LAN keeps working.
-`trafficctl/files/usr/share/ucode/trafficctl/cut.uc`; the script is a shim
-that runs `/usr/sbin/trafficctl cut`. Ruleset text, state files and replies are
+`trafficctl/files/usr/share/ucode/trafficctl/cut.uc`. Ruleset text, state files and replies are
 those of v1.30.0's shell script, so a cut engaged by either is seen and
 released by the other (`tools/ci/live-cut.sh` checks this on a real kernel).
 
@@ -868,11 +861,10 @@ Removing the state files matters as much as the table: a keeper or the next
 
 ---
 
-### trafficctl-portfw.sh (`trafficctl portfw`)
+### trafficctl portfw
 
 Inbound control of port forwards and open ports (the "Port Forwards" tab).
-`trafficctl/files/usr/share/ucode/trafficctl/portfw.uc`; the script is a shim
-that runs `/usr/sbin/trafficctl portfw`.
+`trafficctl/files/usr/share/ucode/trafficctl/portfw.uc`.
 
 **Arguments:** `list` · `pause|resume <forward|input> <tcp|udp|tcpudp> <ip|-> <port>` ·
 `limit <forward|input> <tcp|udp|tcpudp> <ip|-> <port> <rate_kbit>`
@@ -900,8 +892,8 @@ form are still read, and removed by a resume or a new limit.
 ### trafficctl ratelimit
 
 Set or remove a rate limit (policer, both directions). The ucode CLI,
-`trafficctl/files/usr/share/ucode/trafficctl/limit.uc`;
-`trafficctl-ratelimit.sh` is a wrapper that runs it with the same arguments.
+`trafficctl/files/usr/share/ucode/trafficctl/limit.uc`. It takes the
+arguments of v1.30's `trafficctl-ratelimit.sh`.
 
 **Arguments:** `<target> <rate_kbit> [label] [each|shared] [upload_kbit]`
 
@@ -940,10 +932,10 @@ trafficctl ratelimit 192.168.20.0/24 0 "iot-cap"
 **Two constraints worth knowing before relying on a subnet limit:**
 
 - **The subnet has to be one this router monitors.** The policing hooks are
-  attached to the devices that `tctl_lan_subnets` resolves, which skips
+  attached to the devices that `net.lan_subnets` resolves, which skips
   `wan`/`wan6` and any zone other than `lan` with `masq=1`. A guest VLAN
   isolated with `masq 1` is therefore not covered: the rule is accepted and
-  never matches a packet. `trafficctl-subnets.sh` lists what is covered, and
+  never matches a packet. `trafficctl subnets` lists what is covered, and
   the dashboard warns when a target falls outside it.
 
 **Partial results are kept and reported.** The download rule goes on the
@@ -1007,7 +999,7 @@ limit on `192.168.1.10` alone.
 
 ---
 
-### trafficctl-subnets.sh
+### trafficctl subnets
 
 Lists the subnets a limit can actually be enforced on: directly connected LANs,
 plus subnets routed via a LAN next-hop and any `trafficctl.main.extra_subnets`.
@@ -1034,8 +1026,8 @@ neither.
 ### trafficctl shape
 
 Set, remove or show a shape (tc/HTB, a queue, both directions). The ucode CLI,
-`trafficctl/files/usr/share/ucode/trafficctl/shape.uc`;
-`trafficctl-shape.sh` is a wrapper that runs it with the same arguments.
+`trafficctl/files/usr/share/ucode/trafficctl/shape.uc`. It takes the
+arguments of v1.30's `trafficctl-shape.sh`.
 
 **Arguments:** `<add|remove|status> <ip> [rate_kbit] [label] [upload_kbit]`
 
@@ -1104,16 +1096,15 @@ log. The hook no longer has a shape loop of its own.
   record with an invalid rate, which the shell handed to the shaper and
   dropped without a word. Its exit status is 1 when a record failed.
 - The default limit for new devices (`trafficctl newdevice`, mode `shaper`)
-  applies the shape in process instead of running `trafficctl-shape.sh`.
+  applies the shape in process instead of running v1.30's `trafficctl-shape.sh`.
 
 ---
 
-### trafficctl-macfilter-add.sh / trafficctl-macfilter-remove.sh
+### trafficctl macfilter-add / trafficctl macfilter-remove
 
-Block/unblock a device from WiFi (MAC filter). Both scripts are wrappers for
-`trafficctl macfilter-add` / `macfilter-remove` (ucode).
+Block/unblock a device from WiFi (MAC filter).
 
-**Arguments:** `<ip>`; the remove script also takes `<mac>`. A device that has
+**Arguments:** `<ip>`; `macfilter-remove` also takes `<mac>`. A device that has
 been offline long enough has no lease or neighbour entry left to find its MAC
 by, and the deny list is keyed on the MAC.
 
@@ -1177,7 +1168,7 @@ caused the event never waits on the network.
 | `cut_engaged` | `trafficctl cut engage` (not its boot restore) | `duration` (seconds left, `0` = indefinite), `persist` |
 
 Putting saved rules back is not an event: the `ifup lan` restore hook sets
-`TCTL_NOTIFY=0`, which `tctl_notify` and `notify.emit_action` honour, so a
+`TCTL_NOTIFY=0`, which `notify.emit_action` honours, so a
 reboot sends no "Limit applied" per device. A block already in place, an
 unblock and a refused action send nothing either.
 
@@ -1267,10 +1258,8 @@ trafficctl notify migrate                          # the bot's old options to no
 trafficctl notify test <sender>                    # a test message through one sender
 ```
 
-Shell scripts emit through `tctl_notify <event> key=value...`
-(`trafficctl-fw.sh`), the ucode action code through
-`notify.emit_action(ev, fields)`; both add `via` and `src` (`TCTL_VIA`,
-`TCTL_SRC`) and never fail the action.
+The action code emits through `notify.emit_action(ev, fields)`, which adds
+`via` and `src` (`TCTL_VIA`, `TCTL_SRC`) and never fails the action.
 
 ### Migration
 
@@ -1303,8 +1292,8 @@ Bot daemon using Telegram long polling, in ucode (`trafficctl.telegram`,
 `/usr/share/ucode/trafficctl/telegram.uc`). It is its own process,
 `/usr/libexec/trafficctl/trafficctl-telegram.uc`, which imports only `lib` and
 the bot, so the resident bot does not load the CLI's other modules; procd runs
-that file (`/etc/init.d/trafficctl-telegram`), and `trafficctl telegram` and
-`trafficctl-telegram.sh` run it too. Without the package, `trafficctl telegram`
+that file (`/etc/init.d/trafficctl-telegram`), and `trafficctl telegram` runs
+it too. Without the package, `trafficctl telegram`
 replies `{"ok":false,"msg":"trafficctl-telegram is not installed"}`, exit 1.
 
 It reads `trafficctl.telegram` (`enabled`, `bot_token`, `chat_id`,
@@ -1365,7 +1354,7 @@ for new device notifications. Since 1.31 the scan behind those notifications
 is `trafficctl notify watch` (see [Notifications](#notifications)); the bot no
 longer runs it, and notifications do not need the bot package.
 
-### trafficctl-telegram-test.sh (`trafficctl telegram-test`)
+### trafficctl telegram-test
 
 ```
 trafficctl telegram-test <token> <chat_id> [message]
@@ -1374,7 +1363,7 @@ TCTL_TG_TOKEN=<token> trafficctl telegram-test - <chat_id> [message]
 
 Validates token format and chat_id, sends a test message (`message` is a
 template, filled with sample values). Returns `{"ok":true,"msg":"..."}`, exit 0
-either way. The script is a wrapper for the ucode command. Differences from
+either way. Differences from
 v1.30.0: `{{ wan_ip }}` reads the WAN interface (v1.30.0's lookup was a
 jsonfilter syntax error and always fell back to the route's source address),
 the request body goes to curl on stdin instead of argv, and an API error text

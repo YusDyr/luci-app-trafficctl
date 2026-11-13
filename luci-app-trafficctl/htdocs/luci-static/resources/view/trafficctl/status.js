@@ -258,7 +258,7 @@ function fmtBytes(b) {
 	return (b/1073741824).toFixed(2) + ' GB';
 }
 // The Bytes / TCP / UDP columns show a LIFETIME total accumulated on the
-// router by trafficctl-totals.sh, not the live conntrack sums they used to
+// router by `trafficctl totals`, not the live conntrack sums they used to
 // show. conntrack only accounts for flows that still exist, so the old numbers
 // collapsed to absurdities like "2 bytes" the moment a device went briefly
 // idle — that is issue #26.
@@ -788,7 +788,7 @@ function renderFullGraph(history, limitKbit, width, height) {
 // LAN bridges and the VPN tunnels, and who is responsible for it.
 //
 // Every number here comes from a source that already existed — per-interface
-// kernel counters (trafficctl-ifaces.sh) and the per-device speed map the
+// kernel counters (`trafficctl ifaces`) and the per-device speed map the
 // summary table is already computing — so nothing new is collected or stored
 // on the router.
 
@@ -3079,7 +3079,7 @@ return view.extend({
 						time: now
 					};
 
-					// Lifetime totals, accumulated by trafficctl-totals.sh.
+					// Lifetime totals, accumulated by `trafficctl totals`.
 					// The proto fields arrive as -1 when the router has no
 					// split for them (a total from the old nft counter maps),
 					// and that -1 is carried through untouched so the cell can say so
@@ -4096,7 +4096,7 @@ return view.extend({
 				cutPanel.appendChild(E('div', {'class': 'tc-cut__row'}, [
 					E('span', {'class': 'tc-cut__icon'}, '⊘'),
 					E('span', {'class': 'tc-c-muted'},
-						_('Global internet cut needs nftables (fw4). This router is running iptables.'))
+						_('Global internet cut needs nftables (fw4), and nft cannot list its tables on this router.'))
 				]));
 				return;
 			}

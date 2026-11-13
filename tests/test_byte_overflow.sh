@@ -42,7 +42,7 @@ PASS=0
 FAIL=0
 
 REPO_ROOT="$UC_REPO"
-BIN="$REPO_ROOT/trafficctl/files/usr/libexec/trafficctl"
+F="$REPO_ROOT/trafficctl/files"
 
 TMP="$UC_TMP/overflow"
 mkdir -p "$TMP"
@@ -240,7 +240,8 @@ assert_contains "netify: the per-app byte total is exact" "\"name\":\"big\",\"by
     "$(cat "$BE_ROOT/tmp/trafficctl_netify.json" 2>/dev/null)"
 : > "$BE_CT"
 
-SCRIPTS=$(find "$BIN" -name 'trafficctl-*.sh' | sort)
+# The shell 2.0.0 still ships: hooks, init scripts, uci-defaults, the CGI.
+SCRIPTS=$(find "$F/etc/hotplug.d" "$F/etc/init.d" "$F/etc/uci-defaults" "$F/www/cgi-bin" -type f | sort)
 assert_eq "found the shipped scripts to scan" "0" \
     "$([ -n "$SCRIPTS" ] && echo 0 || echo 1)"
 

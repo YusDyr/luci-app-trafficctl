@@ -158,7 +158,7 @@ I hope it turns out as useful for you as it has been for me.
 - **Traffic Shaping (Queue)** -- tc/HTB classes on the LAN bridge with fq_codel leaf qdiscs. Queues excess traffic instead of dropping, providing smoother throughput.
 - **Separate Upload and Download Ceilings** -- Both the shaper and the limiter take an upload ceiling of its own: click **⇅ Split up/down** in the Speed Limit panel, type the upload speed and pick the download one (or press Enter). The device's status line and the Limit column then show both, e.g. `↓ 10 Mbit/s / ↑ 2 Mbit/s`. Without a split, upload gets the same ceiling as download.
 - **Rate Limiting (Policer)** -- nftables packet dropping when a device exceeds the configured rate. Instant enforcement, no queuing. Unlike the shaper it owns no qdisc, so it works on a router already running SQM/cake — where the shaper deliberately declines rather than tear down somebody else's QoS, and says so.
-- **Subnet / VLAN Limits** -- A limit can target a whole subnet (`192.168.20.0/24`) or the entire network, not only one device. Two readings of "20 Mbit for the IoT VLAN" are both available and are chosen explicitly: **each** gives every device its own 20 Mbit bucket, **shared** gives the whole VLAN one 20 Mbit bucket *between them* — the aggregate cap. Pick a monitored subnet from the target chips in the Speed Limit panel (select "All active devices" first); active subnet limits are listed there with their drop counters and a Remove button. Subnets the router does not monitor are flagged rather than silently accepted: a firewall zone other than `lan` with `masq=1` — the usual way to isolate a guest VLAN — is excluded from monitoring, and a limit on it would never match a packet. From the CLI: `trafficctl-ratelimit.sh 192.168.20.0/24 20000 "iot-cap" shared`.
+- **Subnet / VLAN Limits** -- A limit can target a whole subnet (`192.168.20.0/24`) or the entire network, not only one device. Two readings of "20 Mbit for the IoT VLAN" are both available and are chosen explicitly: **each** gives every device its own 20 Mbit bucket, **shared** gives the whole VLAN one 20 Mbit bucket *between them* — the aggregate cap. Pick a monitored subnet from the target chips in the Speed Limit panel (select "All active devices" first); active subnet limits are listed there with their drop counters and a Remove button. Subnets the router does not monitor are flagged rather than silently accepted: a firewall zone other than `lan` with `masq=1` — the usual way to isolate a guest VLAN — is excluded from monitoring, and a limit on it would never match a packet. From the CLI: `trafficctl ratelimit 192.168.20.0/24 20000 "iot-cap" shared`.
 - **Internet Blocking** -- Layer 3 drop rules per device. Connections are killed immediately and counter stats are tracked.
 - **Global Internet Cut** -- One control that takes every device off the internet while the LAN keeps working, for plugging in a new device and configuring it locally before it is allowed out. Timed by default (15 min / 1 h / 4 h, or until you switch it back), so it reverts by itself. Devices keep reaching each other and the router, so LuCI stays available from the LAN; remote access that lands on a LAN host first (Tailscale on a NAS, a tunnel from a LAN box) stops while it is on. Traffic is stopped on the way in, at prerouting, so a transparent proxy running on the router (podkop/sing-box, passwall) cannot carry it out either — and the router's own traffic, including that proxy's outbound path, is untouched. It does **not** survive a reboot unless you tick "Keep after reboot".
 - **WiFi MAC Filtering** -- Block any device from associating with WiFi via hostapd_cli deny ACL. Only the target client is deauthenticated -- no wifi reload, other clients stay connected. Works across all radio interfaces (2.4 GHz, 5 GHz, 6 GHz) automatically.
@@ -486,7 +486,7 @@ filesystem, then restart rpcd:
 scp -r trafficctl/files/* root@router:/
 scp -r luci-app-trafficctl/root/* root@router:/
 scp -r luci-app-trafficctl/htdocs/luci-static root@router:/www/
-ssh root@router 'chmod +x /usr/libexec/trafficctl/trafficctl-*.sh /usr/libexec/rpcd/luci.trafficctl && /etc/init.d/rpcd restart'
+ssh root@router 'chmod +x /usr/sbin/trafficctl /usr/libexec/trafficctl/trafficctl-telegram.uc /usr/libexec/rpcd/luci.trafficctl && /etc/init.d/rpcd restart'
 ```
 
 ### Required packages
@@ -672,15 +672,14 @@ The frontend talks to a thin rpcd dispatcher over ubus. The Telegram bot provide
 | `luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl` | rpcd backend — JSON-RPC dispatch |
 | `luci-app-trafficctl/root/usr/share/rpcd/acl.d/` | ACL permissions |
 | `trafficctl/Makefile` | Backend package (`trafficctl`), installs everything under `trafficctl/files/` |
-| `trafficctl/files/usr/libexec/trafficctl/trafficctl-*.sh` | Backend scripts (monitoring + control) |
-| `trafficctl/files/usr/libexec/trafficctl/trafficctl-fw.sh` | Firewall abstraction layer (sourced) |
+| `trafficctl/files/usr/sbin/trafficctl` | The backend's CLI (ucode): every monitoring and control command, JSON on stdout |
+| `trafficctl/files/usr/share/ucode/trafficctl/*.uc` | Its modules: lib, net, ctl, report, limit, shape, portfw, cut, history, notify |
 | `trafficctl/files/usr/share/ucode/trafficctl/telegram.uc` | Telegram bot (long polling): commands, device menu, actions (package `trafficctl-telegram`) |
 | `trafficctl/files/usr/libexec/trafficctl/trafficctl-telegram.uc` | The bot's entry point, run by its init script and by `trafficctl telegram` |
-| `trafficctl/files/usr/libexec/trafficctl/trafficctl-telegram.sh` | Wrapper: `trafficctl telegram` |
 | `trafficctl/files/etc/init.d/trafficctl-telegram` | procd init script for the bot |
 | `trafficctl/files/usr/share/ucode/trafficctl/notify.uc` | Notification events and senders (ubus, hotplug, Telegram, ntfy, webhook, mail) |
 | `trafficctl/files/etc/init.d/trafficctl-notify` | procd init script for the new/known device scan |
-| `trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes` | Boot persistence for tc + block + ratelimit rules |
+| `trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes` | Boot persistence: runs `trafficctl restore` (blocks, limits, shapes, port controls, a kept cut) |
 | `trafficctl/files/etc/hotplug.d/dhcp/99-trafficctl-newdevice` | Instant new-device detection via DHCP events |
 | `trafficctl/files/www/cgi-bin/trafficctl-metrics` | Prometheus scrape endpoint (CGI) |
 | `Makefile` | OpenWrt package build |

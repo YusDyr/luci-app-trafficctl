@@ -89,7 +89,7 @@ heredoc() {
 
 BE_MK_POSTINST=$(mk_section "$BE_MAKEFILE" 'Package/trafficctl/postinst')
 BE_MK_PRERM=$(mk_section "$BE_MAKEFILE" 'Package/trafficctl/prerm')
-FE_MK_POSTINST=$(mk_section "$FE_MAKEFILE" 'Package/$(PKG_NAME)/postinst')
+FE_MK_POSTINST=$(mk_section "$FE_MAKEFILE" 'Package/luci-app-trafficctl/postinst')
 FE_MK_PRERM=$(mk_section "$FE_MAKEFILE" 'Package/$(PKG_NAME)/prerm')
 BE_IPK_POSTINST=$(heredoc "$IPK" '$BE_CTRL/postinst')
 BE_IPK_PRERM=$(heredoc "$IPK" '$BE_CTRL/prerm')
@@ -124,6 +124,20 @@ assert_nonempty "build-ipk.sh writes a trafficctl-telegram prerm" "$TG_IPK_PRERM
 assert_nonempty "build-apk.sh writes a trafficctl-telegram pre-upgrade" "$TG_APK_PREUPG"
 assert_nonempty "build-apk.sh writes a trafficctl-telegram post-install" "$TG_APK_POSTINST"
 assert_nonempty "build-apk.sh writes a trafficctl-telegram pre-deinstall" "$TG_APK_PREDEL"
+
+# ── trafficctl: a web interface left at 1.30.x ─────────────────────────────
+
+# luci-app-trafficctl 1.30.x depends on any trafficctl, and its rpcd plugin
+# sources trafficctl-fw.sh, gone in 2.0.0: every builder's postinst says so.
+old_luci_hint() { # <name> <script>
+    assert_contains "$1 detects a 1.30.x rpcd plugin" \
+        "grep -q 'trafficctl-fw.sh' /usr/libexec/rpcd/luci.trafficctl" "$2"
+    assert_contains "$1 tells to upgrade luci-app-trafficctl" \
+        "upgrade luci-app-trafficctl too" "$2"
+}
+old_luci_hint "trafficctl/Makefile postinst" "$BE_MK_POSTINST"
+old_luci_hint "build-ipk.sh trafficctl postinst" "$BE_IPK_POSTINST"
+old_luci_hint "build-apk.sh trafficctl post-install" "$BE_APK_POSTINST"
 
 # ── luci-app-trafficctl ─────────────────────────────────────────────────────
 
@@ -245,14 +259,13 @@ CUT="/usr/sbin/trafficctl cut release"
 assert_contains "trafficctl Makefile prerm releases the cut" "$CUT" "$BE_MK_PRERM"
 assert_contains "trafficctl build-ipk.sh prerm releases the cut" "$CUT" "$BE_IPK_PRERM"
 assert_contains "trafficctl build-apk.sh pre-deinstall releases the cut" "$CUT" "$BE_APK_PREDEL"
-# ── PR7: the release needs ucode and every module to load, so its effect is
-#    made sure of without them too: no state left, no table.
+# The release needs ucode and every module to load, so its effect is
+# made sure of without them too: no state left, no table.
 for s in "$BE_MK_PRERM" "$BE_IPK_PRERM" "$BE_APK_PREDEL"; do
     assert_contains "prerm: the cut state goes even if the release failed" \
         "rm -f /var/run/trafficctl/cut.state /etc/trafficctl/cut.state" "$s"
     assert_contains "prerm: and so does the table" "nft delete table inet tctl_cut 2>/dev/null || true" "$s"
 done
-# ── end PR7
 
 # 8. The cut keeper is never started at boot. default_postinst runs `enable` on
 #    every init script, and rc.common's enable links S<START>/K<STOP>, so the
@@ -376,6 +389,8 @@ FAKECLI
 echo "ubus \$*" >> "$FAKE/calls"
 FAKEUBUS
     chmod +x "$FAKE/bin/ubus"
+    printf '#!/bin/sh\necho "logger $*" >> "%s/calls"\n' "$FAKE" > "$FAKE/bin/logger"
+    chmod +x "$FAKE/bin/logger"
     # The bot's boot links, as an install with the bot enabled has them.
     : > "$FAKE/rc.d/S99trafficctl-telegram"
     : > "$FAKE/rc.d/K10trafficctl-telegram"
@@ -385,10 +400,14 @@ FAKEUBUS
     # An engaged cut, as its state file says.
     mkdir -p "$FAKE/run"
     [ "${7:-0}" = 1 ] && : > "$FAKE/run/cut.state"
+    # OLD_LUCI=1: the rpcd plugin of luci-app-trafficctl 1.30.x is installed.
+    mkdir -p "$FAKE/rpcd"
+    [ "${OLD_LUCI:-0}" = 1 ] && echo '. /usr/libexec/trafficctl/trafficctl-fw.sh' > "$FAKE/rpcd/luci.trafficctl"
     sed -e "s|/etc/init.d/|$FAKE/etc/init.d/|g" -e "s|/etc/config/|$FAKE/etc/config/|g" \
-        -e "s|/etc/rc.d/|$FAKE/rc.d/|g" -e "s|/var/run/trafficctl/|$FAKE/run/|g" -e "s|/usr/sbin/trafficctl|$FAKE/bin/trafficctl|g" "$1" > "$FAKE/postinst"
+        -e "s|/etc/rc.d/|$FAKE/rc.d/|g" -e "s|/var/run/trafficctl/|$FAKE/run/|g" -e "s|/usr/sbin/trafficctl|$FAKE/bin/trafficctl|g" \
+        -e "s|/usr/libexec/rpcd/|$FAKE/rpcd/|g" "$1" > "$FAKE/postinst"
     # shellcheck disable=SC2086 # SHELL_CMD may be "busybox ash"
-    IPKG_INSTROOT="${5:-}" PATH="$FAKE/bin:$PATH" ${SHELL_CMD:-sh} "$FAKE/postinst" >/dev/null 2>&1
+    IPKG_INSTROOT="${5:-}" PATH="$FAKE/bin:$PATH" ${SHELL_CMD:-sh} "$FAKE/postinst" >"$FAKE/out" 2>&1
     echo "$?" > "$FAKE/rc"
 }
 calls() { grep -c -x "$1" "$FAKE/calls"; }
@@ -409,6 +428,15 @@ for f in "$TMP/trafficctl.postinst" "$TMP/ipk.postinst" "$TMP/apk.postinst"; do
     assert_eq "$n: the notification watcher is restarted" 1 "$(calls 'trafficctl-notify restart')"
     assert_eq "$n, history.enabled=1: the sampler is enabled in rc.d" yes "$(in_rcd trafficctl-history)"
     assert_eq "$n, history.enabled=1: the sampler is restarted" 1 "$(calls 'trafficctl-history restart')"
+
+    assert_eq "$n, no 1.30.x web interface: no upgrade hint" 0 \
+        "$(grep -c 'upgrade luci-app-trafficctl too' "$FAKE/out")"
+    OLD_LUCI=1 run_postinst "$f" 1 1 0
+    assert_eq "$n, a 1.30.x web interface left: the postinst says to upgrade it" 1 \
+        "$(grep -c 'upgrade luci-app-trafficctl too' "$FAKE/out")"
+    assert_eq "$n, a 1.30.x web interface left: the hint goes to the log too" 1 \
+        "$(grep -c '^logger -t trafficctl .*upgrade luci-app-trafficctl too' "$FAKE/calls")"
+    assert_eq "$n, a 1.30.x web interface left: the postinst succeeds" 0 "$(cat "$FAKE/rc")"
 
     NO_BOT=1 run_postinst "$f" 1 1 0
     assert_eq "$n, the bot not installed: a running one is stopped" 1 \
@@ -439,15 +467,14 @@ for f in "$TMP/trafficctl.postinst" "$TMP/ipk.postinst" "$TMP/apk.postinst"; do
     assert_eq "$n, no old nft table: the steps after it still run" 1 "$(calls 'trafficctl-history restart')"
     assert_eq "$n, nft is asked for nothing else" 1 "$(grep -c '^nft ' "$FAKE/calls")"
 
-    # ── PR7: a keeper started by the old release runs the old code until it
-    #    ends; a restart puts procd's `trafficctl cut keeper` in its place.
-    #    No cut, no keeper: it is started on demand only.
+    # A keeper started by the old release runs the old code until it
+    # ends; a restart puts procd's `trafficctl cut keeper` in its place.
+    # No cut, no keeper: it is started on demand only.
     run_postinst "$f" 0 0 0 "" 0 1
     assert_eq "$n, cut engaged: the keeper is restarted onto the new code" 1 "$(calls 'trafficctl-cut restart')"
     assert_eq "$n, cut engaged: the postinst succeeds" 0 "$(cat "$FAKE/rc")"
     run_postinst "$f" 0 0 0 "" 0 0
     assert_eq "$n, no cut: the keeper is not started" 0 "$(grep -c '^trafficctl-cut ' "$FAKE/calls")"
-    # ── end PR7
 
     # Unpacking into an image: no services and no rc.d of ours to manage.
     mkdir -p "$TMP/img/etc/config"

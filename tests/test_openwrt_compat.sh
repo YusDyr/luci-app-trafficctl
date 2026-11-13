@@ -62,16 +62,16 @@ if [ -z "$SHELL_CMD" ]; then
 fi
 echo "Using POSIX shell for syntax/bashism checks: $SHELL_CMD"
 
-for script in "$REPO_ROOT"/trafficctl/files/usr/libexec/trafficctl/trafficctl-*.sh; do
-    name=$(basename "$script")
+# The shell left in 2.0.0: hotplug hooks, init scripts, uci-defaults and the
+# metrics CGI. The backend itself is ucode (tests/test_install.sh compiles it).
+F="$REPO_ROOT/trafficctl/files"
+SH_SCRIPTS="$F/etc/hotplug.d/iface/99-trafficctl-shapes $F/etc/hotplug.d/dhcp/99-trafficctl-newdevice
+$(ls "$F"/etc/init.d/* "$F"/etc/uci-defaults/*) $F/www/cgi-bin/trafficctl-metrics"
+for script in $SH_SCRIPTS; do
+    name=${script#"$F"/}
     # shellcheck disable=SC2086 # SHELL_CMD may be "busybox ash", intentionally split
     assert_ok "syntax: $name" $SHELL_CMD -n "$script"
 done
-
-# shellcheck disable=SC2086
-assert_ok "syntax: hotplug" $SHELL_CMD -n "$REPO_ROOT/trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes"
-# shellcheck disable=SC2086
-assert_ok "syntax: init.d/trafficctl-telegram" $SHELL_CMD -n "$REPO_ROOT/trafficctl/files/etc/init.d/trafficctl-telegram"
 
 # ── No bashisms (check common ones) ───────────────────────────────────────
 
@@ -99,7 +99,7 @@ check_bashism() {
     PASS=$((PASS + 1))
 }
 
-for script in "$REPO_ROOT"/trafficctl/files/usr/libexec/trafficctl/trafficctl-*.sh; do
+for script in $SH_SCRIPTS; do
     check_bashism "$script"
 done
 # The rpcd plugin is ucode, not a shell script: tests/test_rpcd.sh runs it.
@@ -129,10 +129,9 @@ if [ -f "$BE_IPK" ] && [ -f "$TG_IPK" ] && [ -f "$IPK" ]; then
     TG_FILES=$(tar tzf "$TMPDIR/tg/data.tar.gz")
     FE_FILES=$(tar tzf "$TMPDIR/fe/data.tar.gz")
     for expected in \
-        "be usr/libexec/trafficctl/trafficctl-summary.sh" \
-        "be usr/libexec/trafficctl/trafficctl-device.sh" \
-        "be usr/libexec/trafficctl/trafficctl-fw.sh" \
-        "tg usr/libexec/trafficctl/trafficctl-telegram.sh" \
+        "be usr/sbin/trafficctl" \
+        "be usr/share/ucode/trafficctl/lib.uc" \
+        "be usr/share/ucode/trafficctl/report.uc" \
         "tg usr/libexec/trafficctl/trafficctl-telegram.uc" \
         "tg usr/share/ucode/trafficctl/telegram.uc" \
         "be etc/hotplug.d/iface/99-trafficctl-shapes" \
@@ -176,8 +175,11 @@ fi
 
 # ── Script permissions ─────────────────────────────────────────────────────
 
-for script in "$REPO_ROOT"/trafficctl/files/usr/libexec/trafficctl/trafficctl-*.sh; do
-    assert_ok "executable: $(basename "$script")" test -x "$script"
+# The hotplug hooks are sourced by hotplug-call, not run, and are installed
+# with INSTALL_DATA: no exec bit to check there.
+for script in $(ls "$F"/etc/init.d/* "$F"/etc/uci-defaults/*) "$F/www/cgi-bin/trafficctl-metrics" \
+              "$F/usr/sbin/trafficctl" "$F/usr/libexec/trafficctl/trafficctl-telegram.uc"; do
+    assert_ok "executable: ${script#"$F"/}" test -x "$script"
 done
 assert_ok "executable: rpcd" test -x "$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
 assert_ok "executable: init.d" test -x "$REPO_ROOT/trafficctl/files/etc/init.d/trafficctl-telegram"

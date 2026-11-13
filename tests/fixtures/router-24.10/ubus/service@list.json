@@ -5,7 +5,7 @@
 				"running": true,
 				"pid": 23034,
 				"command": [
-					"/usr/libexec/trafficctl/trafficctl-telegram.sh"
+					"/usr/libexec/trafficctl/trafficctl-telegram.uc"
 				],
 				"term_timeout": 5,
 				"respawn": {

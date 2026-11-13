@@ -9,7 +9,7 @@
 // holds, whether or not the device is online. The Devices tab is built from
 // live connections, so a device that went offline took its restrictions out
 // of sight with it while they kept applying. The list comes from
-// trafficctl-rules.sh, which reads the kernel and the saved state; edits and
+// `trafficctl rules`, which reads the kernel and the saved state; edits and
 // removals go through the same rpcd methods the Devices tab uses.
 
 (function() {

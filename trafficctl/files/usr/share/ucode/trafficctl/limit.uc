@@ -478,7 +478,7 @@ function ratelimit(args) {
 	if (up == '')
 		up = rate;
 	if (ip == '' || rate == '')
-		return fail('usage: trafficctl-ratelimit.sh <target> <rate_kbit> [label] [each|shared]');
+		return fail('usage: trafficctl ratelimit <target> <rate_kbit> [label] [each|shared]');
 	// Here and not at the callers: rpcd, the bot and the CLI all land here.
 	if (rate != '0' && valid_rate(rate) == null)
 		return fail(sprintf('invalid rate: expected whole kbit/s, 1 to %d', MAX_KBIT));

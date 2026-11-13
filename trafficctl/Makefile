@@ -1,11 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # The backend of luci-app-trafficctl: the trafficctl CLI and its ucode
-# modules, the helper scripts, the init scripts, the
-# hotplug hooks, the config and the metrics CGI. Everything except the LuCI
-# view and its rpcd plugin, which stay in ../luci-app-trafficctl, so the
-# backend can run (notifications, Prometheus exporter, the helpers from a
-# shell) on a router without LuCI.
+# modules, the init scripts, the hotplug hooks, the config and the metrics
+# CGI. Everything except the LuCI view and its rpcd plugin, which stay in
+# ../luci-app-trafficctl, so the backend can run (notifications, Prometheus
+# exporter, `trafficctl <command>` from a shell) on a router without LuCI.
+#
+# Releases up to 1.30.x shipped the commands as shell scripts in
+# /usr/libexec/trafficctl; 2.0.0 removes them. A cron line or a script that
+# called one runs `trafficctl <command>` instead, with the same arguments and
+# the same JSON on stdout.
 #
 # The Telegram bot is a second package from this Makefile, trafficctl-telegram:
 # a resident process that a router without a bot should not carry.
@@ -56,6 +60,9 @@ define Package/trafficctl-telegram
   TITLE:=Telegram bot for trafficctl
   URL:=https://github.com/YusDyr/luci-app-trafficctl
   DEPENDS:=+trafficctl +curl
+  # Versioned, so the opkg/apk solver never pairs this bot with a trafficctl
+  # older than its own release (1.30.x has no trafficctl.uc for it to call).
+  EXTRA_DEPENDS:=trafficctl (>=$(PKG_VERSION))
   PKGARCH:=all
 endef
 
@@ -100,36 +107,9 @@ define Package/trafficctl/install
 	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/notify.uc $(1)/usr/share/ucode/trafficctl/
 	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/cut.uc $(1)/usr/share/ucode/trafficctl/
 	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/portfw.uc $(1)/usr/share/ucode/trafficctl/
-	# PR8 history
 	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/history.uc $(1)/usr/share/ucode/trafficctl/
 	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/limit.uc $(1)/usr/share/ucode/trafficctl/
 	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/shape.uc $(1)/usr/share/ucode/trafficctl/
-	$(INSTALL_DIR) $(1)/usr/libexec/trafficctl
-	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-block.sh $(1)/usr/libexec/trafficctl/
-	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-bytes.sh $(1)/usr/libexec/trafficctl/
-	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-cut.sh $(1)/usr/libexec/trafficctl/
-	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-device.sh $(1)/usr/libexec/trafficctl/
-	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-fw.sh $(1)/usr/libexec/trafficctl/
-	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-history.sh $(1)/usr/libexec/trafficctl/
-	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-ifaces.sh $(1)/usr/libexec/trafficctl/
-	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-macfilter-add.sh $(1)/usr/libexec/trafficctl/
-	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-macfilter-remove.sh $(1)/usr/libexec/trafficctl/
-	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-metrics.sh $(1)/usr/libexec/trafficctl/
-	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-names.sh $(1)/usr/libexec/trafficctl/
-	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-netify.sh $(1)/usr/libexec/trafficctl/
-	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-portfw.sh $(1)/usr/libexec/trafficctl/
-	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-ratelimit-stats.sh $(1)/usr/libexec/trafficctl/
-	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-ratelimit.sh $(1)/usr/libexec/trafficctl/
-	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-rdns-refresh.sh $(1)/usr/libexec/trafficctl/
-	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-rdns.sh $(1)/usr/libexec/trafficctl/
-	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-rules.sh $(1)/usr/libexec/trafficctl/
-	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-shape-stats.sh $(1)/usr/libexec/trafficctl/
-	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-shape.sh $(1)/usr/libexec/trafficctl/
-	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-subnets.sh $(1)/usr/libexec/trafficctl/
-	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-summary.sh $(1)/usr/libexec/trafficctl/
-	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-telegram-test.sh $(1)/usr/libexec/trafficctl/
-	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-totals.sh $(1)/usr/libexec/trafficctl/
-	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-unblock.sh $(1)/usr/libexec/trafficctl/
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_CONF) ./files/etc/config/trafficctl $(1)/etc/config/
 	$(INSTALL_DIR) $(1)/etc/init.d
@@ -165,11 +145,11 @@ endef
 # enables every init script on a fresh install, and the flag check in each
 # service keeps that harmless.
 #
-# The history sampler is a long-running loop that calls its sibling scripts by
-# absolute path. Releases up to 1.28.0 installed them under /usr/local/bin, so
-# a sampler started by one of those keeps calling paths the upgrade has just
-# removed and records nothing until the next reboot. Restarting it picks up
-# the new init script.
+# The history sampler is a long-running loop. One started by a release up to
+# 1.30.x is a shell loop that calls the scripts in /usr/libexec/trafficctl
+# (under /usr/local/bin up to 1.28.0) by absolute path, which this upgrade
+# removes: it would record nothing until the next reboot. Restarting it picks
+# up the new init script, `trafficctl history keeper`.
 #
 # The cut keeper is restarted when a cut is engaged: one started by an older
 # release runs that release's code (a shell loop until 1.30.x) until it ends,
@@ -201,6 +181,14 @@ if [ -z "$${IPKG_INSTROOT}" ]; then
 	rm -f /etc/rc.d/S95trafficctl-cut /etc/rc.d/K10trafficctl-cut
 	if [ -f /var/run/trafficctl/cut.state ] && [ -x /etc/init.d/trafficctl-cut ]; then
 		/etc/init.d/trafficctl-cut restart 2>/dev/null || true
+	fi
+	# A luci-app-trafficctl up to 1.30.x depends on any trafficctl, so this
+	# package can be upgraded on its own; that web interface's rpcd plugin
+	# sources trafficctl-fw.sh, which 2.0.0 removed, and every page fails.
+	if grep -q 'trafficctl-fw.sh' /usr/libexec/rpcd/luci.trafficctl 2>/dev/null; then
+		_m="The installed luci-app-trafficctl predates trafficctl 2.0.0 and does not work with it: upgrade luci-app-trafficctl too (opkg upgrade luci-app-trafficctl, or apk upgrade luci-app-trafficctl) unless this run already does"
+		echo "$$_m"
+		logger -t trafficctl "$$_m" 2>/dev/null || true
 	fi
 	# The Telegram options of releases up to 1.30.x move to the notification
 	# senders (once: only while the 'notify' section is missing).
@@ -279,7 +267,6 @@ define Package/trafficctl-telegram/install
 	$(INSTALL_DIR) $(1)/usr/share/ucode/trafficctl
 	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/telegram.uc $(1)/usr/share/ucode/trafficctl/
 	$(INSTALL_DIR) $(1)/usr/libexec/trafficctl
-	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-telegram.sh $(1)/usr/libexec/trafficctl/
 	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-telegram.uc $(1)/usr/libexec/trafficctl/
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) ./files/etc/init.d/trafficctl-telegram $(1)/etc/init.d/

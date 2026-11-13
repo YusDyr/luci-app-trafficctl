@@ -6,6 +6,8 @@
 //
 //   main(args)   list | pause|resume <forward|input> <tcp|udp|tcpudp> <ip|-> <port>
 //                | limit <...> <rate_kbit>: { reply, rc }
+//   restore()    the pfw_pause and pfw_limit records of rules.json, put back
+//                on ifup lan while persist_rules is on: { ok, restored, failed }
 //
 // Own table inet tctl_pfw, chains at forward/input priority -190 (after DNAT,
 // before fw4's flow offload rule). A rule's comment,
@@ -20,9 +22,9 @@ import * as ctl from 'trafficctl.ctl';
 const CHAINS = [ 'pfw_forward', 'pfw_input' ];
 const RATE_MAX_KBIT = 100000000;
 
-const USAGE = 'usage: trafficctl-portfw.sh <list|pause|resume|limit> ...';
-const USAGE_PAUSE = 'usage: trafficctl-portfw.sh pause|resume <forward|input> <tcp|udp|tcpudp> <ip|-> <port>';
-const USAGE_LIMIT = 'usage: trafficctl-portfw.sh limit <forward|input> <tcp|udp|tcpudp> <ip|-> <port> <rate_kbit>';
+const USAGE = 'usage: trafficctl portfw <list|pause|resume|limit> ...';
+const USAGE_PAUSE = 'usage: trafficctl portfw pause|resume <forward|input> <tcp|udp|tcpudp> <ip|-> <port>';
+const USAGE_LIMIT = 'usage: trafficctl portfw limit <forward|input> <tcp|udp|tcpudp> <ip|-> <port> <rate_kbit>';
 
 function str(v) {
 	return (v == null) ? '' : '' + v;
@@ -432,4 +434,74 @@ function main(args) {
 	}
 }
 
-export { main, valid_port };
+// ── restore after boot (the port half of the iface hotplug hook) ────────────
+
+const RULES = '/etc/trafficctl/rules.json';
+
+// The record's ip is the key scope/proto/ip|local/port, cut as the hook's
+// ${x%%/*} and ${x#*/} cut it: a part with no '/' left is the whole rest.
+function key_parts(k) {
+	let parts = [];
+	for (let i = 0; i < 3; i++) {
+		let j = index(k, '/');
+		push(parts, (j < 0) ? k : substr(k, 0, j));
+		k = (j < 0) ? k : substr(k, j + 1);
+	}
+	push(parts, k);
+	return parts;
+}
+
+// A value as jsonfilter printed it to the hook.
+function field(v) {
+	return (v == null || type(v) == 'object' || type(v) == 'array') ? '' : '' + v;
+}
+
+function restore() {
+	let res = { ok: true, restored: 0, failed: 0 };
+	if (!lib.persist_enabled())
+		return res;
+	let d;
+	try {
+		d = json(lib.readfile(RULES) ?? '');
+	}
+	catch (e) {
+		return res;
+	}
+	// The hook read @[0], @[1], ... until a record had no type. The records
+	// are read once: each restore rewrites rules.json, which made the hook's
+	// index skip one record and apply another twice.
+	for (let r in (type(d) == 'array') ? d : []) {
+		let t = (type(r) == 'object') ? field(r.type) : '';
+		if (t == '')
+			break;
+		let ip = field(r.ip), param = field(r.param);
+		if (ip == '' || (t != 'pfw_pause' && t != 'pfw_limit'))
+			continue;
+		let k = key_parts(ip);
+		if (k[2] == 'local')
+			k[2] = '-';
+		// A limit with no rate has nothing to restore: skipped, not a
+		// failure (v1.30's hook logged one, as it did for the limiter).
+		if (t == 'pfw_limit' && (param == '' || param == '0'))
+			continue;
+		let what = (t == 'pfw_pause') ? 'pause' : 'limit';
+		let argv = (t == 'pfw_pause') ? [ 'pause', ...k ] : [ 'limit', ...k, param ];
+		let rc;
+		try {
+			rc = main(argv).rc;
+		}
+		catch (e) {
+			rc = 1;
+		}
+		if (rc == 0)
+			res.restored++;
+		else {
+			res.failed++;
+			lib.logger('Failed to restore port ' + what + ' for ' + k[3]);
+		}
+	}
+	res.ok = (res.failed == 0);
+	return res;
+}
+
+export { main, valid_port, restore };

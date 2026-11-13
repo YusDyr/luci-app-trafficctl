@@ -27,13 +27,11 @@ PASS=0
 FAIL=0
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="$REPO/trafficctl/files/usr/libexec/trafficctl"
 RPCD="$REPO/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
 
 # The limiter and the shaper are `trafficctl ratelimit` and `trafficctl shape`,
 # their restore `trafficctl restore` (ucode, tests/lib/shape_env.sh, with a
-# stateful tc); fw.sh's persistence and rate helpers are still shell, run with
-# the fakes in $SHBIN. Both write the one rules.json, $RULES.
+# stateful tc). Both write the one rules.json, $RULES.
 # shellcheck source=tests/lib/ucode.sh
 . "$(dirname "$0")/lib/ucode.sh"
 # shellcheck source=tests/lib/shape_env.sh
@@ -42,8 +40,7 @@ lt_cfg 1
 st_net br-lan lan1
 printf '[]' > "$RULES"
 TMP="$UC_TMP/asym"
-SHBIN="$TMP/bin"
-mkdir -p "$SHBIN"
+mkdir -p "$TMP"
 
 assert_eq() {
     local desc="$1" expected="$2" actual="$3"
@@ -75,132 +72,10 @@ assert_not_contains() {
     fi
 }
 
-# ── mocks ───────────────────────────────────────────────────────────────────
 
-cat > "$SHBIN/uci" <<'MOCK'
-#!/bin/sh
-case "$3" in
-    network.lan.device) echo "br-lan" ;;
-    network.wan.device) echo "eth1" ;;
-    "firewall.@zone[0].name")    echo "lan" ;;
-    "firewall.@zone[0].network") echo "lan" ;;
-    "firewall.@zone[1].name")    echo "wan" ;;
-    "firewall.@zone[1].network") echo "wan" ;;
-    trafficctl.main.persist_rules) [ -f "$TCTL_TEST_PERSIST" ] && echo "1" || exit 1 ;;
-    *) exit 1 ;;
-esac
-MOCK
-
-cat > "$SHBIN/ubus" <<'MOCK'
-#!/bin/sh
-case "$2" in
-    network.interface.wan) echo '{"l3_device":"eth1"}' ;;
-    *) echo '{"l3_device":"br-lan","ipv4-address":[{"address":"192.168.1.1","mask":24}]}' ;;
-esac
-MOCK
-
-cat > "$SHBIN/jsonfilter" <<'MOCK'
-#!/bin/sh
-file=""; expr=""
-while [ $# -gt 0 ]; do
-    case "$1" in
-        -i) file="$2"; shift 2 ;;
-        -e) expr="$2"; shift 2 ;;
-        *)  shift ;;
-    esac
-done
-if [ -n "$file" ]; then
-    [ -f "$file" ] || exit 1
-    input=$(cat "$file")
-else
-    input=$(cat)
-fi
-case "$expr" in
-    '@.l3_device') echo "$input" | sed -n 's/.*"l3_device":"\([^"]*\)".*/\1/p' ;;
-    '@["ipv4-address"][0].address') echo "$input" | sed -n 's/.*"address":"\([^"]*\)".*/\1/p' ;;
-    '@["ipv4-address"][0].mask') echo "$input" | sed -n 's/.*"mask":\([0-9]*\).*/\1/p' ;;
-    '@.'*)
-        key=${expr#@.}
-        printf '%s' "$input" | sed -n "s/.*\"$key\":\([0-9][0-9]*\).*/\1/p" | head -1
-        ;;
-    '@[*].ip')
-        printf '%s' "$input" | tr ',' '\n' | sed -n 's/.*"ip":"\([^"]*\)".*/\1/p'
-        ;;
-    "@[@.ip='"*"']."*)
-        want=$(echo "$expr" | sed -n "s/^@\[@\.ip='\([^']*\)'\]\..*/\1/p")
-        key=$(echo "$expr" | sed -n "s/^@\[@\.ip='[^']*'\]\.\(.*\)$/\1/p")
-        printf '%s' "$input" | awk -v w="$want" -v k="$key" '
-        {
-            gsub(/^\[/, ""); gsub(/\]$/, "")
-            n = split($0, a, "},{")
-            for (i = 1; i <= n; i++) {
-                s = a[i]
-                if (s !~ "\"ip\":\"" w "\",") continue
-                if (match(s, "\"" k "\":[0-9]+")) {
-                    t = substr(s, RSTART, RLENGTH)
-                    sub("\"" k "\":", "", t)
-                    print t
-                }
-                exit
-            }
-        }'
-        ;;
-    '@[*]') printf '%s' "$input" | awk '{ n = split($0, a, "},{"); for (i = 1; i <= n; i++) print i }' ;;
-    '@['*'].'*)
-        idx=$(echo "$expr" | sed -n 's/^@\[\([0-9]*\)\]\..*/\1/p')
-        key=$(echo "$expr" | sed -n 's/^@\[[0-9]*\]\.\(.*\)$/\1/p')
-        printf '%s' "$input" | awk -v n="$idx" -v k="$key" '
-        {
-            gsub(/^\[/, ""); gsub(/\]$/, "")
-            m = split($0, a, "},{")
-            if (n + 1 > m) exit
-            s = a[n + 1]
-            if (match(s, "\"" k "\":\"[^\"]*\"")) {
-                t = substr(s, RSTART, RLENGTH)
-                sub("\"" k "\":\"", "", t)
-                sub("\"$", "", t)
-                print t
-            }
-        }'
-        ;;
-esac
-MOCK
-
-cat > "$SHBIN/nft" <<MOCK
-#!/bin/sh
-printf '%s\n' "\$*" >> "$NFT_LOG"
-case "\$*" in
-    # fw.sh selects the nft backend only if this lists something.
-    "list tables") echo "table inet fw4" ;;
-esac
-exit 0
-MOCK
-
-for m in logger conntrack ip; do
-    printf '#!/bin/sh\nexit 0\n' > "$SHBIN/$m"
-done
-
-chmod +x "$SHBIN"/*
-
-export TCTL_TEST_PERSIST="$TMP/persist_on"
 mkdir -p "$TMP/sys/class/net/br-lan/brif/lan1"
 export TCTL_SYSFS_NET="$TMP/sys/class/net"
 
-# The shipped scripts name their state files by absolute path, as they must on
-# a router; rewrite those into the scratch directory rather than adding
-# test-only seams to production code.
-FW="$TMP/trafficctl-fw.sh"
-sed -e "s|TCTL_RULES_FILE=\"/etc/trafficctl/rules.json\"|TCTL_RULES_FILE=\"$RULES\"|" \
-    "$BIN/trafficctl-fw.sh" > "$FW"
-
-patch_script() {
-    sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FW|" \
-        -e "s|SHAPES_FILE=\"/etc/trafficctl/shapes.json\"|SHAPES_FILE=\"$SHAPES\"|" \
-        -e "s|SHAPES_FILE=\"/etc/trafficctl/shapes.json\"|SHAPES_FILE=\"$SHAPES\"|" \
-        -e "s|RULES_FILE=\"/etc/trafficctl/rules.json\"|RULES_FILE=\"$RULES\"|" \
-        "$1" > "$2"
-    chmod +x "$2"
-}
 rl() { lt_run ratelimit "$@"; }
 
 # The shaper's record readers, called directly (trafficctl.shape).
@@ -302,7 +177,6 @@ assert_contains "and it reports a single figure" "8000 kbit/s for" "$out"
 # 4. Persistence and the reboot restore
 # ════════════════════════════════════════════════════════════════════════════
 
-: > "$TCTL_TEST_PERSIST"
 printf '[]' > "$RULES"
 rl 192.168.1.80 8000 rl_test each 800 >/dev/null
 assert_contains "an asymmetric limit persists its upload rate" '"param_up":"800"' "$(cat "$RULES")"
@@ -542,13 +416,12 @@ assert_eq "every apply path sends null, not 0, when symmetric" "3" \
 # 7. Persisted records must not overwrite one another
 # ════════════════════════════════════════════════════════════════════════════
 #
-# tctl_persist_save replaces the record for one ip+type and keeps the rest. This
+# lib.persist_save replaces the record for one ip+type and keeps the rest. This
 # repository has shipped the undelimited version of that comparison twice — the
 # block comment that matched 192.168.1.1 inside 192.168.1.10, and the _ul rule
 # comment that is a prefix of _ul6 — so the case is pinned rather than reasoned
 # about, especially now that records carry an extra field.
 
-: > "$TCTL_TEST_PERSIST"
 printf '[]' > "$RULES"
 rl 192.168.1.10  4000 rl_test each     >/dev/null
 rl 192.168.1.100 5000 rl_test each     >/dev/null
@@ -572,8 +445,8 @@ assert_contains "the .10 neighbour is untouched" '"ip":"192.168.1.10","param":"4
 
 # ── and the REMOVAL side of the same comparison (#79) ──────────────────────
 #
-# tctl_persist_remove selects the record to drop with the same index() test
-# tctl_persist_save uses to select the one to replace, but until now only the
+# lib.persist_remove selects the record to drop with the same comparison
+# persist_save uses to select the one to replace, but until now only the
 # save side was pinned. The removal side is where a mis-selection is worse:
 # saving the wrong record leaves a visibly wrong rate, while removing the
 # wrong one silently deletes a limit that the next reboot then does not
@@ -600,21 +473,16 @@ assert_contains "and the one left is the longer address" '"ip":"192.168.1.100","
 # Rates are whole numbers
 # ════════════════════════════════════════════════════════════════════════════
 #
-# Shell arithmetic reads "abc" as 0 and "010" as octal. tctl_rate_bytes then
-# clamped the 0 to 1 byte/s, so a typo became a persisted near-total block
-# reported as {"ok":true}.
-
-printf '#!/bin/sh\necho "$*" >> "%s"\nexit 0\n' "$LOGGER_LOG" > "$SHBIN/logger"
-chmod +x "$SHBIN/logger"
-: > "$TCTL_TEST_PERSIST"
+# Shell arithmetic reads "abc" as 0 and "010" as octal. v1.30's
+# tctl_rate_bytes then clamped the 0 to 1 byte/s, so a typo became a persisted
+# near-total block reported as {"ok":true}. limit.valid_rate keeps the cases
+# main's tctl_validate_rate refused.
 
 for r in 1 5000 100000000; do
-    assert_eq "tctl_validate_rate accepts $r" "0" \
-        "$(PATH="$SHBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; tctl_validate_rate '$r'; echo \$?")"
+    assert_eq "valid_rate accepts $r" "$r" "$(tcall trafficctl.limit valid_rate "\"$r\"")"
 done
 for r in '' 0 abc 1.5 010 -5 1e3 ' 5' 100000001 999999999999999999999; do
-    assert_eq "tctl_validate_rate refuses '$r'" "1" \
-        "$(PATH="$SHBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; tctl_validate_rate '$r'; echo \$?")"
+    assert_eq "valid_rate refuses '$r'" "" "$(tcall trafficctl.limit valid_rate "\"$r\"")"
 done
 
 printf '[]' > "$RULES"
@@ -685,121 +553,13 @@ hook '[{"type":"ratelimit","ip":"192.168.1.98","param":"5000"}]'
 assert_not_contains "restore: a limit that loaded logs nothing" 'Failed to restore' "$(cat "$LOGGER_LOG")"
 assert_contains "restore: and its rule is there" 'ip daddr 192.168.1.98' "$(cat "$NFT_LOG")"
 
-# ── BusyBox awk must not wipe rules.json ──────────────────────────────────
-# tctl_persist_save and tctl_persist_remove split the file on "},{". POSIX
-# awk (and BusyBox awk) treat that third argument as an ERE, and BusyBox
-# rejects the string as "Invalid contents of {}". awk then prints nothing,
-# the output redirect produces an empty .tmp, and a bare mv replaces
-# rules.json with an empty file. GNU awk and mawk often accept the same
-# string, so a suite running only on those would stay green with the bug
-# still present. The tests below run the real functions (via the already
-# rewritten $FW), once per awk on the box, including BusyBox when it is
-# installed (CI installs busybox-static).
-
-# Static: both functions must use the regex literal, not the string. This
-# is the part that does not depend on which awk the runner has.
-sep_hits=$(grep -cF -- 'n=split($0, items, /\},\{/)' "$BIN/trafficctl-fw.sh" || true)
-assert_eq "both persist rewrite functions split on the regex literal /\\},\\{/" "2" "$sep_hits"
-string_hits=$(grep -cF -- 'split($0, items, "},{"' "$BIN/trafficctl-fw.sh" || true)
-assert_eq "neither persist rewrite function splits on the string },{" "0" "$string_hits"
-
-# Both functions must refuse to mv an empty tmp over the saved file.
-guard_hits=$(grep -cF -- '[ -s "$tmp" ]' "$BIN/trafficctl-fw.sh" || true)
-assert_eq "both persist rewrite functions keep the file unless awk wrote something" "2" "$guard_hits"
-
-AWKS=""
-for cand in gawk mawk awk; do
-    command -v "$cand" >/dev/null 2>&1 && AWKS="$AWKS $cand"
-done
-if command -v busybox >/dev/null 2>&1 && busybox awk 'BEGIN{}' 2>/dev/null; then
-    AWKS="$AWKS busybox-awk"
-fi
-echo "awk implementations under test:$AWKS"
-
-run_persist() { # <awk-impl> <shell snippet>
-    local impl="$1" shim="$TMP/persist-awk"
-    mkdir -p "$shim"
-    case "$impl" in
-        busybox-awk) printf '#!/bin/sh\nexec busybox awk "$@"\n' > "$shim/awk" ;;
-        *) printf '#!/bin/sh\nexec %s "$@"\n' "$(command -v "$impl")" > "$shim/awk" ;;
-    esac
-    chmod +x "$shim/awk"
-    PATH="$shim:$SHBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; $2"
-}
-
-persist_count() {
-    grep -o '"type":"block"' | wc -l | tr -d ' '
-}
-
-for a in $AWKS; do
-    printf '[]\n' > "$RULES"
-    run_persist "$a" 'tctl_persist_save block 192.0.2.10 lab && tctl_persist_save block 192.0.2.11 lab && tctl_persist_save block 192.0.2.10 other'
-    rc=$?
-    rules=$(cat "$RULES")
-    assert_eq "$a: saving a new block and replacing an existing one leaves two records" "2" "$(printf '%s' "$rules" | persist_count)"
-    assert_eq "$a: persist_save exits 0" "0" "$rc"
-    case "$rules" in
-        *'"ip":"192.0.2.10"'*'"param":"other"'*|*'"param":"other"'*'"ip":"192.0.2.10"'*) PASS=$((PASS + 1)) ;;
-        *) FAIL=$((FAIL + 1)); printf "FAIL: %s: replaced record should carry the new param\n  in: %s\n" "$a" "$rules" ;;
-    esac
-    case "$rules" in
-        *'"ip":"192.0.2.11"'*) PASS=$((PASS + 1)) ;;
-        *) FAIL=$((FAIL + 1)); printf "FAIL: %s: neighbour record was lost\n  in: %s\n" "$a" "$rules" ;;
-    esac
-
-    run_persist "$a" 'tctl_persist_remove block 192.0.2.10'
-    rc=$?
-    rules=$(cat "$RULES")
-    assert_eq "$a: removing one block leaves its neighbour" "1" "$(printf '%s' "$rules" | persist_count)"
-    assert_eq "$a: persist_remove exits 0" "0" "$rc"
-    case "$rules" in
-        *'"ip":"192.0.2.11"'*) PASS=$((PASS + 1)) ;;
-        *) FAIL=$((FAIL + 1)); printf "FAIL: %s: neighbour was dropped with the removed record\n  in: %s\n" "$a" "$rules" ;;
-    esac
-    case "$rules" in
-        *'"ip":"192.0.2.10"'*) FAIL=$((FAIL + 1)); printf "FAIL: %s: removed record is still present\n  in: %s\n" "$a" "$rules" ;;
-        *) PASS=$((PASS + 1)) ;;
-    esac
-
-    # Removing the last record must write [] , not an empty file.
-    run_persist "$a" 'tctl_persist_remove block 192.0.2.11'
-    rules=$(cat "$RULES")
-    assert_eq "$a: removing the last record leaves an empty array, not an empty file" "[]" "$rules"
-
-    # A previously clobbered (zero-length) file must be recoverable.
-    : > "$RULES"
-    run_persist "$a" 'tctl_persist_save block 192.0.2.12 lab'
-    rc=$?
-    rules=$(cat "$RULES")
-    assert_eq "$a: persist_save recovers a zero-length rules.json" "0" "$rc"
-    assert_eq "$a: the recovered file has the new record" "1" "$(printf '%s' "$rules" | persist_count)"
-done
-
-# The mv guard: a failing awk must not replace a populated file. PATH is
-# set so `awk` is a stub that exits 1 and prints nothing.
-printf '[{"type":"block","ip":"192.0.2.10","param":"lab"}]\n' > "$RULES"
-before=$(cat "$RULES")
-shim="$TMP/awkfail"
-mkdir -p "$shim"
-printf '#!/bin/sh\nexit 1\n' > "$shim/awk"
-chmod +x "$shim/awk"
-PATH="$shim:$SHBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; tctl_persist_save block 192.0.2.99 lab" >/dev/null 2>&1
-rc=$?
-after=$(cat "$RULES")
-assert_eq "a failing awk leaves persist_save unsuccessful" "1" "$rc"
-assert_eq "a failing awk does not replace a populated rules.json" "$before" "$after"
-if [ -f "${RULES}.tmp" ]; then
-    FAIL=$((FAIL + 1))
-    printf "FAIL: persist_save left a .tmp behind after awk failed\n"
-else
-    PASS=$((PASS + 1))
-fi
-
-PATH="$shim:$SHBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; tctl_persist_remove block 192.0.2.10" >/dev/null 2>&1
-rc=$?
-after=$(cat "$RULES")
-assert_eq "a failing awk leaves persist_remove unsuccessful" "1" "$rc"
-assert_eq "a failing awk does not empty rules.json on remove" "$before" "$after"
+# ── rules.json is JSON-edited ─────────────────────────────────────────────
+# v1.30's shell writers split the file with awk, and BusyBox awk wiped it
+# (main's fix: the /\},\{/ split and the empty-output guard). lib.persist_save
+# and persist_remove split the text on "},{" the same way (lib.uc
+# rules_others), in ucode, so no awk is involved, and write through a
+# temporary file renamed over rules.json. A zero-length file, the last record
+# removed and a failed write are pinned in tests/test_persistence.sh.
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

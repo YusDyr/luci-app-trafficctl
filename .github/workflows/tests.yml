@@ -13,33 +13,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      # The runner has gawk and mawk, both 64-bit clean on "%d". The byte
-      # overflow the exporter hits is a busybox-awk behaviour, so without
-      # busybox here test_byte_overflow.sh passes whether or not the bug is
-      # present. mawk is pulled in for the same reason test_changelog_gen.sh
-      # wants several awks: the interpreters disagree.
+      # test_changelog_gen.sh runs the release-notes awk under every awk on
+      # the box, busybox's and mawk included: the interpreters disagree.
       - name: Install extra awk implementations
         run: sudo apt-get install -y --no-install-recommends busybox-static mawk
-      - name: Shell unit tests
-        run: bash tests/test_fw.sh
       - name: Security tests
         run: bash tests/test_security.sh
       # Slices the CIDR helpers out of status.js and runs them under node —
       # the only frontend logic with a wrong answer an operator cannot see.
       - name: Subnet target warning (frontend slices)
         run: bash tests/test_subnet_ui.sh
-      # Cross-checks the offload modes the shell can emit against the badge
+      # Cross-checks the offload modes net.uc can report against the badge
       # table in status.js, and pins the Telegram preset button rendering.
       - name: Offload badge / preset button rendering
         run: bash tests/test_offload_ui.sh
       # The upload row was built but never attached to the panel (#66).
       - name: Split up/down control and split ceiling display
         run: bash tests/test_split_ui.sh
-      # PR8 history
       # The History view's verdicts and fields against history.uc's replies.
       - name: History view tests
         run: bash tests/test_history_ui.sh
-      # end PR8 history
       - name: Postinst parity tests
         run: bash tests/test_postinst_parity.sh
       # trafficctl/Makefile lists its files by name; this compares the list
@@ -60,7 +53,7 @@ jobs:
       - name: IPK build test
         run: bash tests/test_build_ipk.sh
 
-  # The ucode backend: its unit tests, and its output against the legacy
+  # The ucode backend: its unit tests, and its output against v1.30.0's
   # shell one (tests/equiv.sh), on the oldest and the newest ucode we support.
   # A missing ucode fails the job.
   ucode-tests:
@@ -107,7 +100,7 @@ jobs:
       - name: Netify (DPI) integration tests
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_netify.sh
       # The limiter, block and shaper readers (trafficctl.ctl), read from the
-      # nft -j output of both nft versions; the shell helpers beside them too.
+      # nft -j output of both nft versions.
       - name: Block/unblock tests
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_block.sh
       - name: IPv6 block tests
@@ -116,7 +109,7 @@ jobs:
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_macfilter.sh
       - name: New device default-limit tests
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_newdevice.sh
-      # The limiter (trafficctl.limit) and the shaper beside it, still shell.
+      # The limiter (trafficctl.limit) and the shaper (trafficctl.shape).
       - name: Bidirectional limit/shape tests
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_direction.sh
       - name: Per-chain limiter meters on a multi-port bridge
@@ -163,18 +156,14 @@ jobs:
       # Every rpc.declare in the views against the plugin's list.
       - name: rpcd contract tests
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_rpcd_contract.sh
-      # ── PR7: cut, portfw ──
       - name: Port-forward control tests
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_portfw.sh
       - name: Global internet cut tests
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_cut.sh
-      # ── end PR7 ──
-      # PR8 history
       # The history store (history.uc): flush, cursors, the interface series,
       # the keeper, the flush guard and the ISO week against date(1).
       - name: History tests
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_history.sh
-      # end PR8 history
       - name: Equivalence tests
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/equiv.sh
 

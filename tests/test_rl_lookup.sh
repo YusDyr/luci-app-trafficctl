@@ -22,7 +22,6 @@
 PASS=0
 FAIL=0
 
-BIN="$(cd "$(dirname "$0")/.." && pwd)/trafficctl/files/usr/libexec/trafficctl"
 
 # shellcheck source=tests/lib/ucode.sh
 . "$(dirname "$0")/lib/ucode.sh"
@@ -120,7 +119,6 @@ STATS=$(PATH="$MOCKBIN:$PATH" TCTL_ROOT="$TMPDIR/root" tctl ratelimit-stats bogu
 mkdir -p "$TMPDIR/none"; printf '#!/bin/sh\necho "Error: No such file or directory" >&2\nexit 1\n' > "$TMPDIR/none/nft"; chmod +x "$TMPDIR/none/nft"
 assert_eq "stats: no table is an empty array" "[]" "$(PATH="$TMPDIR/none:$PATH" TCTL_ROOT="$TMPDIR/root" tctl ratelimit-stats 2>/dev/null)"
 assert_contains "stats: arguments are ignored, as by the shell script" '"ip":"192.168.1.8"' "$STATS"
-assert_eq "shim: the script is the CLI command" 'exec /usr/sbin/trafficctl ratelimit-stats "$@"' "$(tail -n 1 "$BIN/trafficctl-ratelimit-stats.sh")"
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

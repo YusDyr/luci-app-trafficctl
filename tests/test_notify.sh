@@ -641,10 +641,10 @@ OUT=$(tgt "$TOKEN" 1 'Hi {{ name }} on {{router}}')
 assert_eq "telegram-test: a custom message gets the sample values" "Hi TestDevice on OpenWrt" "$(body 3 text)"
 
 # ── the call sites ───────────────────────────────────────────────────────────
-# Each event is raised by the code that does the action, shell or ucode. A
+# Each event is raised by the code that does the action. A
 # port of that code that drops the call would lose the event silently, so the
 # action code (not notify.uc, not comments) must still carry every call: the
-# call itself, tctl_notify or emit_action with the event and its kind, not a
+# call itself, emit_action with the event and its kind, not a
 # log line that names the event. Comment lines are dropped and each file is
 # read as one line, so a call spread over several lines still counts. The
 # behaviour behind each call is tested where the action is: test_block.sh,
@@ -652,7 +652,7 @@ assert_eq "telegram-test: a custom message gets the sample values" "Hi TestDevic
 ACT_SRC="$UC_REPO/trafficctl/files"
 call_site() {   # call_site <name> <ERE>
     local f files=()
-    for f in "$ACT_SRC"/usr/libexec/trafficctl/*.sh "$ACT_SRC"/usr/share/ucode/trafficctl/*.uc \
+    for f in "$ACT_SRC"/usr/sbin/trafficctl "$ACT_SRC"/usr/share/ucode/trafficctl/*.uc \
         "$ACT_SRC"/etc/hotplug.d/dhcp/99-trafficctl-newdevice; do
         [ "$(basename "$f")" = notify.uc ] || files+=("$f")
     done
@@ -669,32 +669,17 @@ ea() {   # ea <event> [<field>: <value>]: emit_action('<event>', { ... <field>: 
     [ -n "$2" ] && printf ", *\\\\{[^}]*%s: *'%s'" "$2" "$3"
 }
 call_site "an internet block raises block_applied" \
-    "tctl_notify +block_applied[^;)]*kind=internet|$(ea block_applied kind internet)"
+    "$(ea block_applied kind internet)"
 call_site "a WiFi deny raises block_applied" \
-    "tctl_notify +block_applied[^;)]*kind=wifi|$(ea block_applied kind wifi)"
+    "$(ea block_applied kind wifi)"
 call_site "a limiter raises limit_applied" \
-    "tctl_notify +limit_applied[^;)]*mode=limiter|$(ea limit_applied mode limiter)"
+    "$(ea limit_applied mode limiter)"
 call_site "a shaper raises limit_applied" \
-    "tctl_notify +limit_applied[^;)]*mode=shaper|$(ea limit_applied mode shaper)"
-call_site "an engaged cut raises cut_engaged" "tctl_notify +cut_engaged|$(ea cut_engaged)"
+    "$(ea limit_applied mode shaper)"
+call_site "an engaged cut raises cut_engaged" "$(ea cut_engaged)"
 call_site "a DHCP event reaches the device scan" "trafficctl notify dhcp|'notify', *'dhcp'"
-# The shell call sites through tctl_notify reach the CLI (TCTL_NOTIFY_CLI).
-CALLS="$UC_TMP/notify_cli.log"
-printf '#!/bin/sh\necho "$*" >> "%s"\n' "$CALLS" > "$MOCKBIN/notify-cli"
-chmod +x "$MOCKBIN/notify-cli"
-TCTL_NOTIFY_CLI="$MOCKBIN/notify-cli" TCTL_VIA=luci TCTL_SRC=192.168.1.2 \
-    sh -c '. "$1"; tctl_notify block_applied ip=192.168.1.9 kind=internet' _ \
-    "$ACT_SRC/usr/libexec/trafficctl/trafficctl-fw.sh" 2>/dev/null
-assert_eq "tctl_notify: hands the event to notify emit with the caller" \
-    "notify emit block_applied ip=192.168.1.9 kind=internet via=luci src=192.168.1.2" "$(cat "$CALLS" 2>/dev/null)"
-rm -f "$CALLS"
-TCTL_NOTIFY=0 TCTL_NOTIFY_CLI="$MOCKBIN/notify-cli" \
-    sh -c '. "$1"; tctl_notify limit_applied ip=192.168.1.9 mode=shaper' _ \
-    "$ACT_SRC/usr/libexec/trafficctl/trafficctl-fw.sh" 2>/dev/null
-assert_eq "tctl_notify: TCTL_NOTIFY=0 (a restore) sends nothing" "" "$(cat "$CALLS" 2>/dev/null)"
-
-# The ucode call sites go through notify.emit_action: the caller from the
-# environment, as tctl_notify adds it.
+# The call sites go through notify.emit_action: the caller from the
+# environment, as v1.30's tctl_notify added it.
 reset "config notify 'notify'
 	option enabled '0'"
 mkdir -p "$TCTL_ROOT/etc/hotplug.d/trafficctl"

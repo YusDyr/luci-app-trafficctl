@@ -416,8 +416,8 @@ msgstr "完全控制"
 msgid "Gbit/s"
 msgstr "Gbit/s"
 
-msgid "Global internet cut needs nftables (fw4). This router is running iptables."
-msgstr "全局断网需要 nftables（fw4）。此路由器正在运行 iptables。"
+msgid "Global internet cut needs nftables (fw4), and nft cannot list its tables on this router."
+msgstr "全局断网需要 nftables（fw4），但此路由器上的 nft 无法列出其表。"
 
 msgid "Graph"
 msgstr "图表"

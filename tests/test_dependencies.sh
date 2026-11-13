@@ -103,7 +103,10 @@ esac
 
 # Verify deps were actually pulled in
 echo "=== Verifying deps installed ==="
-for dep in trafficctl trafficctl-telegram luci-app-trafficctl conntrack curl kmod-nft-netdev rpcd luci-base; do
+# The backend is ucode from 2.0.0: the interpreter and the three modules it
+# imports must come with it.
+for dep in trafficctl trafficctl-telegram luci-app-trafficctl conntrack curl kmod-nft-netdev rpcd luci-base \
+           ucode ucode-mod-fs ucode-mod-uci ucode-mod-ubus; do
     case "$PKG" in
         *.ipk)
             if opkg list-installed | grep -q "^$dep "; then

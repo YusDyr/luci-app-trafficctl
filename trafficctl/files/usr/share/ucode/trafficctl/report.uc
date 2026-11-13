@@ -22,9 +22,7 @@
 import * as lib from 'trafficctl.lib';
 import * as net from 'trafficctl.net';
 import * as ctl from 'trafficctl.ctl';
-// ── PR7: portfw ──
 import * as portfw from 'trafficctl.portfw';
-// ── end PR7 ──
 import { stat, lsdir, writefile, readfile } from 'fs';
 
 const CLI = '/usr/sbin/trafficctl';
@@ -624,7 +622,7 @@ function summary() {
 
 // ── device ──────────────────────────────────────────────────────────────────
 
-const DEVICE_USAGE = 'usage: trafficctl-device.sh <ip> [--rdns] [--proto tcp|udp|all]';
+const DEVICE_USAGE = 'usage: trafficctl device <ip> [--rdns] [--proto tcp|udp|all]';
 const SERVICES = { '80': 'http', '443': 'https', '53': 'dns', '22': 'ssh', '123': 'ntp',
 	'5353': 'mdns', '21': 'ftp', '25': 'smtp', '993': 'imaps', '8080': 'http-alt' };
 const META_STATES = { ESTABLISHED: true, TIME_WAIT: true, SYN_SENT: true, CLOSE_WAIT: true };
@@ -916,7 +914,7 @@ function device(args) {
 // field extraction, which tolerates any framing, and both the aggregator's
 // {"stats":[...]} records and v4's raw per-flow records are taken.
 
-const NETIFY_USAGE = 'usage: trafficctl-netify.sh status|collect [secs]|list|raw [secs]';
+const NETIFY_USAGE = 'usage: trafficctl netify status|collect [secs]|list|raw [secs]';
 
 function netify_enabled() {
 	return lib.uci_get('trafficctl', 'main', 'netify_enabled') != '0';
@@ -1296,7 +1294,7 @@ function metrics(src) {
 			'# TYPE trafficctl_portfw_limit_kbit gauge\n',
 			'# HELP trafficctl_portfw_bytes Bytes currently accounted per port forward.\n',
 			'# TYPE trafficctl_portfw_bytes gauge\n');
-		// PR7: in process, the port-forward list is ucode now.
+		// In process: the port-forward list is ucode too.
 		let text = source_text(src.portfw ?? (() => portfw.main([ 'list' ]).reply));
 		for (let l in json_lines(text)) {
 			if (jstr(l, 'id') == '')

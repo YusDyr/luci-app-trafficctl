@@ -12,7 +12,7 @@ PKG_NAME="luci-app-trafficctl"
 BE_NAME="trafficctl"
 TG_NAME="trafficctl-telegram"
 # The bot's files under trafficctl/files (Package/trafficctl-telegram/install).
-TG_FILES="usr/share/ucode/trafficctl/telegram.uc usr/libexec/trafficctl/trafficctl-telegram.sh usr/libexec/trafficctl/trafficctl-telegram.uc etc/init.d/trafficctl-telegram"
+TG_FILES="usr/share/ucode/trafficctl/telegram.uc usr/libexec/trafficctl/trafficctl-telegram.uc etc/init.d/trafficctl-telegram"
 PKG_VERSION="${1:-1.0.0}"
 PKG_RELEASE="${2:-1}"
 
@@ -99,7 +99,7 @@ BE_DATA="$WORKDIR/backend-data"
 mkdir -p "$BE_DATA"
 cp -a "$BACKEND_SRC/files/"* "$BE_DATA/"
 
-chmod +x "$BE_DATA/usr/libexec/trafficctl/trafficctl-"*.sh "$BE_DATA/usr/sbin/trafficctl"
+chmod +x "$BE_DATA/usr/sbin/trafficctl"
 chmod +x "$BE_DATA/www/cgi-bin/trafficctl-metrics"
 [ -d "$BE_DATA/etc/init.d" ] && chmod +x "$BE_DATA/etc/init.d/"*
 [ -d "$BE_DATA/etc/hotplug.d" ] && find "$BE_DATA/etc/hotplug.d" -type f -exec chmod +x {} +
@@ -133,6 +133,14 @@ if [ -z "${IPKG_INSTROOT}" ]; then
     # `trafficctl cut keeper`.
     if [ -f /var/run/trafficctl/cut.state ] && [ -x /etc/init.d/trafficctl-cut ]; then
         /etc/init.d/trafficctl-cut restart 2>/dev/null || true
+    fi
+    # A luci-app-trafficctl up to 1.30.x depends on any trafficctl, so this
+    # package can be upgraded on its own; that web interface's rpcd plugin
+    # sources trafficctl-fw.sh, which 2.0.0 removed, and every page fails.
+    if grep -q 'trafficctl-fw.sh' /usr/libexec/rpcd/luci.trafficctl 2>/dev/null; then
+        _m="The installed luci-app-trafficctl predates trafficctl 2.0.0 and does not work with it: upgrade luci-app-trafficctl too (opkg upgrade luci-app-trafficctl, or apk upgrade luci-app-trafficctl) unless this run already does"
+        echo "$_m"
+        logger -t trafficctl "$_m" 2>/dev/null || true
     fi
     # Each service follows its uci flag, so what runs now is what runs after
     # the next reboot: enabled in rc.d and started when the flag is 1, left

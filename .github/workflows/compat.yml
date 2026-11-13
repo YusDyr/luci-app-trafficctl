@@ -372,7 +372,7 @@ jobs:
           sudo chown -R "$(id -u)" "$RUNNER_TEMP/out"
           tools/ci/live-compare.sh "$RUNNER_TEMP/out" "${{ matrix.nft }}"
 
-  # ── PR7: the global cut on a real kernel ──
+  # ── the global cut on a real kernel ──
   # A cut engaged by v1.30.0's trafficctl-cut.sh is released by
   # `trafficctl cut` and the other way round, the router-local accept is the
   # first prerouting rule nft lists back whoever installed it, and with no LAN
@@ -406,7 +406,6 @@ jobs:
           docker run --rm --cap-add NET_ADMIN --tmpfs /work:size=300m,exec \
             -v "$PWD:/src:ro" -v "$RUNNER_TEMP/legacy/trafficctl/files:/legacy:ro" \
             --entrypoint /bin/sh "$IMAGE" /src/tools/ci/live-cut.sh
-  # ── end PR7 ──
 
   # ──────────────────────────────────────────────────────────────────────────
   # Live limiter: real nft against the runner's kernel, in the OpenWrt rootfs,
@@ -476,7 +475,7 @@ jobs:
   # Verifies pre-upgrade/post-upgrade hooks, config file preservation.
   # ──────────────────────────────────────────────────────────────────────────
   upgrade:
-    name: Upgrade ${{ matrix.version }}
+    name: Upgrade ${{ matrix.version }}${{ matrix.label }}
     runs-on: ubuntu-latest
     needs: build-packages
     # build-packages is SKIPPED in the reuse case, and a job with an unmet
@@ -487,12 +486,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Only test IPK upgrade for now — APK releases prior to the fix in
-        # this branch are broken (issue #7), so APK upgrade is gated on a
-        # known-good baseline being released first.
+        # One row per package manager and the oldest supported image, plus
+        # the backend upgraded alone first (backend_first): a web interface up
+        # to 1.30.x depends on any trafficctl, so opkg and apk allow that, and
+        # the postinst has to say to upgrade luci-app-trafficctl too.
         include:
+          - { version: "22.03.7", image: "x86-64-v22.03.7", format: "ipk" }
           - { version: "23.05.6", image: "x86-64-v23.05.6", format: "ipk" }
           - { version: "24.10.6", image: "x86-64-v24.10.6", format: "ipk" }
+          - { version: "24.10.6", image: "x86-64-v24.10.6", format: "ipk", backend_first: "1", label: " (backend first)" }
+          - { version: "25.12.4", image: "x86-64-v25.12.4", format: "apk" }
+          - { version: "25.12.4", image: "x86-64-v25.12.4", format: "apk", backend_first: "1", label: " (backend first)" }
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -554,14 +558,18 @@ jobs:
             sleep $((attempt * 5))
           done
           [ "$pulled" = "1" ] || { echo "::error::Could not pull $IMAGE after 3 attempts"; exit 1; }
+          FMT="${{ matrix.format }}"
           # shellcheck disable=SC2086 # OLD_PKGS is a list of package files
-          docker run --rm \
+          # NET_ADMIN: the old release writes a block and a port pause, which
+          # the new one must restore on ifup lan and remove.
+          docker run --rm --cap-add NET_ADMIN \
+            -e UPGRADE_BACKEND_FIRST="${{ matrix.backend_first || '0' }}" \
             --entrypoint /bin/sh \
             -v "$PWD/dist:/dist" \
             -v "$PWD/dist-old:/dist-old" \
             -v "$PWD/tests:/tests" \
             "$IMAGE" \
-            /tests/test_upgrade.sh $OLD_PKGS -- /dist/trafficctl.ipk /dist/trafficctl-telegram.ipk /dist/luci-app-trafficctl.ipk
+            /tests/test_upgrade.sh $OLD_PKGS -- "/dist/trafficctl.$FMT" "/dist/trafficctl-telegram.$FMT" "/dist/luci-app-trafficctl.$FMT"
 
   # ──────────────────────────────────────────────────────────────────────────
   # Dependencies — verify install fails cleanly when deps are missing, and

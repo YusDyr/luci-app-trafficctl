@@ -23,7 +23,7 @@ JS="$REPO_ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/
 # own files, so a future move has to update this rather than quietly
 # skipping half the checks.
 SETTINGS_JS="$REPO_ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/settings.js"
-FW="$REPO_ROOT/trafficctl/files/usr/libexec/trafficctl/trafficctl-fw.sh"
+NET="$REPO_ROOT/trafficctl/files/usr/share/ucode/trafficctl/net.uc"
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
@@ -41,12 +41,21 @@ assert_eq() {
 # --- every mode the backend can emit must have a badge label ---------------
 #
 # Read both sides out of the real files rather than restating them here, so
-# that adding a mode to the shell and forgetting the UI fails this test.
+# that adding a mode to the backend and forgetting the UI fails this test.
 
-awk '/^tctl_get_offload_mode\(\)/ { inf = 1 }
+# net.uc's offload_mode() returns 'none', or 'hardware'/'software' with
+# '-counter' appended when the flowtable counts: every literal it builds
+# from, combined.
+awk '/^function offload_mode\(\)/ { inf = 1 }
      inf && /^}/ { exit }
-     inf { print }' "$FW" \
-    | grep -oE 'echo "[a-z-]+"' | sed 's/echo "//; s/"//' | sort -u > "$TMP/modes"
+     inf { print }' "$NET" > "$TMP/offload_mode.uc"
+{
+    grep -q "return 'none';" "$TMP/offload_mode.uc" && echo none
+    for base in $(grep -oE "'(hardware|software)'" "$TMP/offload_mode.uc" | tr -d "'" | sort -u); do
+        echo "$base"
+        grep -qF "'-counter'" "$TMP/offload_mode.uc" && echo "$base-counter"
+    done
+} | sort -u > "$TMP/modes"
 
 awk '/var modeLabels = \{/ { inl = 1; next }
      inl && /^[[:space:]]*\};/ { exit }

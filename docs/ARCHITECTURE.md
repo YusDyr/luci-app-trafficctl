@@ -28,27 +28,27 @@ graph TD
             RPC["/usr/libexec/rpcd/luci.trafficctl<br/>(JSON-RPC dispatch)"]
         end
 
-        subgraph "Query Scripts — /usr/libexec/trafficctl/"
-            SUM["trafficctl-summary.sh = trafficctl summary<br/>(all active devices, ucode)"]
-            DEV["trafficctl-device.sh = trafficctl device<br/>(per-device connections, ucode)"]
-            TOT["trafficctl-totals.sh = trafficctl totals<br/>(monotonic lifetime totals, ucode)"]
-            BYT["trafficctl-bytes.sh = trafficctl bytes<br/>(conntrack byte counters, ucode)"]
-            IFA["trafficctl-ifaces.sh<br/>(per-interface counters + role map)"]
-            RLS["trafficctl-ratelimit-stats.sh = trafficctl ratelimit-stats<br/>(nft drop counters, ucode)"]
-            SHS["trafficctl-shape-stats.sh = trafficctl shape-stats<br/>(tc class stats, ucode)"]
-            RDNS["trafficctl-rdns.sh<br/>(reverse DNS — Telegram/CLI)"]
-            HIST["trafficctl-history.sh = trafficctl history<br/>(usage history store + keeper, ucode)"]
+        subgraph "Queries — /usr/sbin/trafficctl (ucode)"
+            SUM["trafficctl summary<br/>(all active devices)"]
+            DEV["trafficctl device<br/>(per-device connections)"]
+            TOT["trafficctl totals<br/>(monotonic lifetime totals)"]
+            BYT["trafficctl bytes<br/>(conntrack byte counters)"]
+            IFA["trafficctl ifaces<br/>(per-interface counters + role map)"]
+            RLS["trafficctl ratelimit-stats<br/>(nft drop counters)"]
+            SHS["trafficctl shape-stats<br/>(tc class stats)"]
+            RDNS["trafficctl rdns<br/>(reverse DNS — Telegram/CLI)"]
+            HIST["trafficctl history<br/>(usage history store + keeper)"]
         end
 
-        subgraph "Action Scripts — /usr/libexec/trafficctl/"
-            BLK["trafficctl-block.sh = trafficctl block<br/>(ucode)"]
-            UBK["trafficctl-unblock.sh = trafficctl unblock<br/>(ucode)"]
-            RL["trafficctl-ratelimit.sh = trafficctl ratelimit<br/>(ucode)"]
-            SH["trafficctl-shape.sh = trafficctl shape<br/>(ucode)"]
-            MFA["trafficctl-macfilter-add.sh = trafficctl macfilter-add<br/>(ucode)"]
-            MFR["trafficctl-macfilter-remove.sh = trafficctl macfilter-remove<br/>(ucode)"]
-            CUT["trafficctl-cut.sh = trafficctl cut<br/>(global cut, procd keeper, ucode)"]
-            PFW["trafficctl-portfw.sh = trafficctl portfw<br/>(port-forward pause/limit, ucode)"]
+        subgraph "Actions — /usr/sbin/trafficctl (ucode)"
+            BLK["trafficctl block"]
+            UBK["trafficctl unblock"]
+            RL["trafficctl ratelimit"]
+            SH["trafficctl shape"]
+            MFA["trafficctl macfilter-add"]
+            MFR["trafficctl macfilter-remove"]
+            CUT["trafficctl cut<br/>(global cut, procd keeper)"]
+            PFW["trafficctl portfw<br/>(port-forward pause/limit)"]
         end
 
         subgraph "Kernel Subsystems"
@@ -102,7 +102,7 @@ sequenceDiagram
     participant B as Browser
     participant R as rpcd
     participant S as trafficctl summary
-    participant BY as trafficctl-totals.sh
+    participant BY as trafficctl totals
 
     B->>R: summary()
     R->>S: exec
@@ -131,7 +131,7 @@ sequenceDiagram
     participant B as Browser
     participant R as rpcd
     participant D as trafficctl device
-    participant DNS as trafficctl-rdns.sh
+    participant DNS as trafficctl rdns
 
     B->>R: device(ip, proto)
     R->>D: exec ip proto
@@ -176,26 +176,24 @@ sequenceDiagram
 
 ---
 
-## Firewall Functions
+## Backend Modules
 
-The file `trafficctl-fw.sh` is sourced by all scripts and provides firewall functions:
-
-```sh
-. /usr/libexec/trafficctl/trafficctl-fw.sh
-
-# TCTL_FW is the constant "nft"
-```
+The backend is one ucode CLI, `/usr/sbin/trafficctl`, over the modules in
+`/usr/share/ucode/trafficctl/` (`lib`, `net`, `ctl`, `report`, `limit`,
+`shape`, `portfw`, `cut`, `history`, `notify`, `telegram`). Up to 1.30.x it
+was shell: one script per command in `/usr/libexec/trafficctl/` and the
+sourced `trafficctl-fw.sh`. Those are gone from 2.0.0.
 
 ### Key Functions
 
 | Function | Implementation |
 |----------|----------------|
-| `tctl_get_wan_device` | `uci get network.wan.device` (fallback to `.ifname`) |
-| `tctl_get_lan_device` | `uci get network.lan.device` (fallback to `.ifname`) |
-| `tctl_validate_ip` | regex + octet range check, no leading zeros |
-| `tctl_get_wifi_interfaces` | `uci show wireless` parsing |
+| `limit.wan_device` | the WAN's `l3_device` from ubus, then `network.wan.device`/`.ifname` from uci, then the default route |
+| `net.lan_device` | `network.lan.device` from uci (fallback to `.ifname`, then `br-lan`) |
+| `lib.valid_ip` | dotted quad, octet range check, no leading zeros; refuses a NUL byte |
+| `report.wifi_ifaces` | the `wifi-iface` sections of `/etc/config/wireless` with their MAC filter |
 
-The limiter is ucode too, `trafficctl/files/usr/share/ucode/trafficctl/limit.uc`
+The limiter is `trafficctl/files/usr/share/ucode/trafficctl/limit.uc`
 behind `trafficctl ratelimit`:
 
 | Function | Implementation |
@@ -370,10 +368,10 @@ The frontend uses independent polling loops:
 
 | Poll | Interval | Script | Purpose |
 |------|----------|--------|---------|
-| Bytes | Configurable (default 2s, 1s–5s, or off) | `trafficctl-totals.sh` | Bandwidth speed = delta bytes / delta time, **and** the cumulative Bytes/TCP/UDP columns. This poll is also what advances the lifetime totals — with the page closed and no Prometheus scraper, they stand still |
-| Interfaces | Same tick as Bytes, only while the Overview panel is open | `trafficctl-ifaces.sh` | Per-interface throughput for the global overview. Deliberately has no timer of its own, so it inherits the Poll interval |
-| Drops | 5s | `trafficctl-ratelimit-stats.sh` | nft policer drop counters |
-| Shape stats | 5s | `trafficctl-shape-stats.sh` | tc class stats (backlog, drops, overlimits) |
+| Bytes | Configurable (default 2s, 1s–5s, or off) | `trafficctl totals` | Bandwidth speed = delta bytes / delta time, **and** the cumulative Bytes/TCP/UDP columns. This poll is also what advances the lifetime totals — with the page closed and no Prometheus scraper, they stand still |
+| Interfaces | Same tick as Bytes, only while the Overview panel is open | `trafficctl ifaces` | Per-interface throughput for the global overview. Deliberately has no timer of its own, so it inherits the Poll interval |
+| Drops | 5s | `trafficctl ratelimit-stats` | nft policer drop counters |
+| Shape stats | 5s | `trafficctl shape-stats` | tc class stats (backlog, drops, overlimits) |
 | Summary | On-demand / auto-refresh (5s–60s) | `trafficctl summary` | Full device list refresh. The reverse-DNS refresh and the DPI collection it starts run detached and never hold up the poll |
 
 ### Speed Calculation
@@ -442,11 +440,11 @@ The WiFi deny is `trafficctl macfilter-add` / `macfilter-remove` (`ctl.macfilter
 | WiFi MAC filtering | Always | `uci commit wireless` | Committed to `/etc/config/wireless` |
 | Usage history | When `history.enabled` | `<history.dir>/<period>.tsv`, `<period>.if.tsv` | Durable per-period device and interface totals |
 
-The hotplug script triggers on `ACTION=ifup` and `INTERFACE=lan`, with a readiness loop (waits up to 10s for tc to be available on the bridge device), and runs `trafficctl restore`: the blocks, the limits and the shapes, each half in its own `try`, so one that fails does not keep the others from coming back. When `persist_rules` is enabled, blocks and ratelimits are saved/removed from `/etc/trafficctl/rules.json`; shapes always go to `shapes.json`.
+The hotplug script triggers on `ACTION=ifup` and `INTERFACE=lan`, with a readiness loop (waits up to 10s for tc to be available on the bridge device), and runs `trafficctl restore`: the blocks, the limits, the shapes, the port-forward controls and a kept cut, each in its own `try`, so one that fails does not keep the others from coming back. When `persist_rules` is enabled, blocks and ratelimits are saved/removed from `/etc/trafficctl/rules.json`; shapes always go to `shapes.json`.
 
-The saved blocks come back through `trafficctl restore` (`ctl.restore`). At boot `ifup lan` can come before fw4 has loaded its ruleset, so it waits up to 10 s for `inet fw4`; a block already in the chain (lan going up again without a fw4 reload) is not inserted twice, and a record whose address does not validate is logged and skipped while the rest are restored. The limits (`limit.restore`) and the shapes (`shape.restore`) come back through the same command; the port-forward records are still restored by the hook's shell loop.
+The saved blocks come back through `trafficctl restore` (`ctl.restore`). At boot `ifup lan` can come before fw4 has loaded its ruleset, so it waits up to 10 s for `inet fw4`; a block already in the chain (lan going up again without a fw4 reload) is not inserted twice, and a record whose address does not validate is logged and skipped while the rest are restored. The limits (`limit.restore`), the shapes (`shape.restore`), the port-forward records (`portfw.restore`) and a cut kept across the reboot (`cut restore`, at its original deadline) come back through the same command. Up to 1.30.x the hook restored the port controls and the cut itself.
 
-`rules.json` has a shell writer (the limiter, `tctl_persist_*`) and a ucode one (the block, `lib.persist_save`/`persist_remove`). Both take the mkdir lock `/tmp/trafficctl_rules.lock.d`, wait 5 s for it and then take it over from a holder that was killed, and write byte-identical records, so either may run while the other is mid-write.
+`rules.json` is written by `lib.persist_save`/`persist_remove` only. They take v1.30's mkdir lock `/tmp/trafficctl_rules.lock.d`, wait 5 s for it and then take it over from a holder that was killed, and write v1.30's bytes, so a 1.30.x writer still running during the upgrade and a downgrade both work with the file.
 
 The DHCP hook (`dhcp/99-trafficctl-newdevice`) runs `trafficctl newdevice` with dnsmasq's `ACTION`, `MACADDR`, `IPADDR` and `HOSTNAME`: the Telegram new-device queue, then the default limit through the seen-MAC ledger `/etc/trafficctl/seen_macs` (seeded on the first run, which applies nothing; a MAC is marked before the limit is applied). A device that already has a limit, live or saved, is left alone.
 

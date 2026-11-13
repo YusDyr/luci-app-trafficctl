@@ -165,7 +165,7 @@ reset_state
 OUT=$(run_cut)
 assert_contains "no subcommand is rejected" '"ok":false' "$OUT"
 assert_contains "no subcommand: the usage keeps the script's wording" \
-    'usage: trafficctl-cut.sh engage <seconds|0> [persist] | release | status | restore' "$OUT"
+    'usage: trafficctl cut engage <seconds|0> [persist] | release | status | restore' "$OUT"
 
 OUT=$(run_cut engage abc)
 assert_contains "engage: a non-numeric duration is rejected" '"ok":false' "$OUT"
@@ -614,7 +614,7 @@ echo 'oifname != { "br-lan" } counter drop comment "tctl_cut"' > "$CHAIN"
 run_cut tick >/dev/null
 assert_eq "orphaned rule: a tick with no state removes it" "no" "$(has_chain)"
 
-# ── PR7 review: status takes an orphaned rule down too ──
+# ── status takes an orphaned rule down too ──
 # A release that waited past the lock can run while a tick re-installs the
 # rule, and the keeper is gone after the release: status is what is left.
 reset_state
@@ -623,7 +623,7 @@ OUT=$(run_cut status)
 assert_eq "orphaned rule: status with no state removes it" "no" "$(has_chain)"
 assert_contains "orphaned rule: and reports it gone" '"active":false,"rule_present":false' "$OUT"
 
-# ── PR7 review: an engaged cut is never reported as a failure ──
+# ── an engaged cut is never reported as a failure ──
 # The keeper cannot be started and conntrack is unavailable: the rule and the
 # state are in place, so the reply says engaged.
 reset_state
@@ -647,7 +647,7 @@ assert_contains "engage: and says why" "failed to record the cut state" "$OUT"
 assert_eq "engage: and leaves no rule behind" "no" "$(has_chain)"
 rmdir "$STATE"
 
-# ── PR7 review: interface names are quoted into nft text, so only safe ones ──
+# ── interface names are quoted into nft text, so only safe ones ──
 reset_state
 cp "$UBUSDIR/network.interface@dump.json" "$TMP/dump.saved"
 cat > "$UBUSDIR/network.interface@dump.json" <<'JSON'
@@ -669,7 +669,6 @@ cp "$TMP/dump.saved" "$UBUSDIR/network.interface@dump.json"
 reset_state
 OUT=$(run_cut engage 900 0)
 assert_contains "safe device names (letters, digits, . _ @ -) still engage" '"ok":true' "$OUT"
-# ── end PR7 review ──
 
 # ════════════════════════════════════════════════════════════════════════════
 # v1.30 state, and the integers it could not keep
@@ -691,7 +690,7 @@ printf 'expires_at=junk\npersist=0\nstarted_at=1\n' > "$STATE"
 OUT=$(run_cut status)
 assert_contains "an unreadable deadline is never taken as expired" '"active":true' "$OUT"
 
-# ── PR7 review: a persisted deadline that cannot be read is not restored ──
+# ── a persisted deadline that cannot be read is not restored ──
 # Restored, it would be an indefinite cut: "never" is how 0 reads.
 for bad in junk 9999999999999999; do
     reset_state
@@ -707,7 +706,6 @@ reset_state
 OUT=$(run_cut engage 060 0)
 assert_contains "engage 060: accepted" '"ok":true' "$OUT"
 assert_contains "engage 060: sixty seconds, not octal 48" '"expires_at":1700000060,"remaining":60' "$OUT"
-# ── end PR7 review ──
 
 # ════════════════════════════════════════════════════════════════════════════
 # Wiring — a method rpcd does not list is a method that does not exist
@@ -730,54 +728,48 @@ assert_contains "init: procd runs the ucode keeper" \
     "procd_set_param command /usr/sbin/trafficctl cut keeper" "$(cat "$INIT")"
 assert_contains "init: the instance procd is asked about is named cut" \
     "procd_open_instance cut" "$(cat "$INIT")"
-assert_eq "shim: trafficctl-cut.sh hands over to the CLI" \
-    "$(printf '#!/bin/sh\nexec /usr/sbin/trafficctl cut "$@"')" \
-    "$(cat "$REPO_ROOT/trafficctl/files/usr/libexec/trafficctl/trafficctl-cut.sh")"
 
 # ── The boot hook ───────────────────────────────────────────────────────────
 #
 # GUARD: the restore must key off the cut's OWN state file, never off the
-# global persist_rules flag. The hotplug script restores blocks and rate limits
-# inside an `if ... tctl_persist_enabled` block; if the cut were restored from
-# in there, anybody who enabled that flag for their rate limits would get a
-# persistent internet kill out of an unrelated decision. Asserted by running
-# the hook with persist_rules OFF and a cut state file present: the cut must
-# still come back, which can only happen from outside that block.
-BIN="$REPO_ROOT/trafficctl/files/usr/libexec/trafficctl"
+# global persist_rules flag: anybody who enabled that flag for their rate
+# limits would otherwise get a persistent internet kill out of an unrelated
+# decision. The ifup hook runs `trafficctl restore`, which restores the records
+# persist_rules keeps and then, on its own, a kept cut. Asserted with
+# persist_rules OFF and a cut state file present: the cut must still come back.
 HOTPLUG="$REPO_ROOT/trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes"
-HP="$TMP/hotplug"
-CUT_CALL_LOG="$TMP/cutcall.log"
-sed -e "s|\\. /usr/libexec/trafficctl/trafficctl-fw.sh|. $BIN/trafficctl-fw.sh|" \
-    -e "s|/usr/sbin/trafficctl cut|$MOCKBIN/cut-stub|" \
-    -e "s|/etc/trafficctl/cut.state|$PSTATE|" \
-    "$HOTPLUG" > "$HP"
-assert_contains "hotplug: the restore is the CLI's" "$MOCKBIN/cut-stub restore" "$(cat "$HP")"
-
-cat > "$MOCKBIN/cut-stub" <<MOCK
-#!/bin/sh
-echo "\$*" >> "$CUT_CALL_LOG"
-exit 0
-MOCK
+assert_contains "hotplug: the restore is the CLI's" "/usr/sbin/trafficctl restore" "$(cat "$HOTPLUG")"
+# `trafficctl restore` waits for the LAN qdisc first.
 printf '#!/bin/sh\nexit 0\n' > "$MOCKBIN/tc"
-# The hook's own uci reads: persist_rules is explicitly OFF here.
-printf '#!/bin/sh\ncase "$*" in *persist_rules*) echo 0 ;; *) exit 1 ;; esac\n' > "$MOCKBIN/uci"
-chmod +x "$MOCKBIN/cut-stub" "$MOCKBIN/tc" "$MOCKBIN/uci"
-
-run_hotplug() {
-    : > "$CUT_CALL_LOG"
-    PATH="$MOCKBIN:$PATH" ACTION=ifup INTERFACE=lan sh "$HP" >/dev/null 2>&1
-    cat "$CUT_CALL_LOG" 2>/dev/null
+chmod +x "$MOCKBIN/tc"
+run_restore() {
+    TCTL_ROOT="$ROOT" TCTL_NOW="$(cat "$CLOCK")" PATH="$MOCKBIN:$PATH" tctl restore 2>&1
 }
 
 reset_state
+write_config 900 0
 mkdir -p "$(dirname "$PSTATE")"
 printf 'expires_at=0\npersist=1\nstarted_at=1700000000\n' > "$PSTATE"
-assert_contains "hotplug: restores the cut even with persist_rules off" \
-    "restore" "$(run_hotplug)"
+OUT=$(run_restore)
+assert_eq "restore: puts the cut back even with persist_rules off" "yes" "$(has_chain)"
+assert_eq "restore: the cut is not a restored record" '{"ok":true,"restored":0,"failed":0}' "$OUT"
 
 # ...and with no state file there is nothing to restore, so it is not called.
-rm -f "$PSTATE"
-assert_empty "hotplug: no state file means the cut is not touched at all" "$(run_hotplug)"
+reset_state
+write_config 900 0
+OUT=$(run_restore)
+assert_eq "restore: no state file means the cut is not touched at all" "no" "$(has_chain)"
+assert_empty "restore: ...and nft is not asked about it" "$(grep tctl_cut "$NETFAKE/calls")"
+
+# A kept cut that cannot come back is a failure of the restore.
+reset_state
+write_config 900 0
+mkdir -p "$(dirname "$PSTATE")"
+printf 'expires_at=0\npersist=1\nstarted_at=1700000000\n' > "$PSTATE"
+: > "$ROOT/etc/config/firewall"
+OUT=$(run_restore)
+assert_eq "restore: a kept cut that fails counts as a failure" '{"ok":false,"restored":0,"failed":1}' "$OUT"
+assert_contains "restore: ...and says so in syslog" "Failed to restore the global internet cut" "$(cat "$LOGGER_LOG")"
 
 # A cut that outlives a firmware upgrade is strictly worse than one that
 # outlives a reboot, so its state deliberately is not preserved by sysupgrade.
