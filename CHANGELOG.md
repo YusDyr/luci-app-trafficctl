@@ -4,6 +4,21 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.30.5] - 2026-11-13
+
+### Bug Fixes
+- give each limiter chain its own meter and check every port ([#154](https://github.com/YusDyr/luci-app-trafficctl/issues/154)) ([e93ef32](https://github.com/YusDyr/luci-app-trafficctl/commit/e93ef32689136537cbe55c7e8af04ca28d1707ee))
+  In each mode the upload rule goes on every bridge port's ingress chain
+  and the download rule on every LAN device's egress chain, and every copy
+  carried the same meter name, tctl_u_<slug> / tctl_d_<slug>. nftables 1.0
+  (OpenWrt 22.03 ships 1.0.2) binds a meter to the one rule declaring it,
+  so the second port's rule failed with "Could not process rule: Resource
+  busy". The error went to /dev/null and ul_ok was set by the first port,
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.30.4...v1.30.5
+
+---
+
 ## [1.30.4] - 2026-11-12
 
 ### Bug Fixes
