@@ -3,7 +3,8 @@
 // real ubus semantics: unknown objects fail, undeclared arguments are refused.
 //
 // Usage: ucode -S ubus-mock.uc <socket> <dir> [log]
-//   <dir>/<object>@<method>.json  reply for that call (missing file: no object)
+//   <dir>/<object>@<method>.json  reply for that call (missing file: no object),
+//                                 read again on every call
 //   [log]                         one line per call: object method args-json
 
 let fs = require('fs');
@@ -54,11 +55,14 @@ let published = [];
 for (let obj in objects) {
 	let methods = {};
 	for (let method in objects[obj]) {
-		let reply = objects[obj][method], o = obj, me = method;
+		let o = obj, me = method, file = dir + '/' + obj + '@' + method + '.json';
 		methods[method] = {
 			args: argspec(obj, method),
 			call: function(req) {
 				log(o, me, req.args);
+				// Read per call, so a test can change a reply (procd's view
+				// of a service it starts and stops) while the mock runs.
+				let reply = json(fs.readfile(file) ?? 'null') ?? objects[o][me];
 				// procd filters "service list" by name itself.
 				if (o == 'service' && me == 'list' && req.args.name)
 					return exists(reply, req.args.name) ? { [req.args.name]: reply[req.args.name] } : {};

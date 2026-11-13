@@ -92,12 +92,15 @@ luci-app-trafficctl/                     # repository
 │       │       └── dhcp/99-trafficctl-newdevice    # New-device detection
 │       ├── lib/upgrade/keep.d/trafficctl          # /etc/trafficctl/ kept across sysupgrade
 │       ├── usr/sbin/trafficctl          # The CLI (ucode): subnets, names, rdns, rdns-refresh, ifaces, bytes, totals,
-│       │                                #   ratelimit-stats, shape-stats, rules, summary, device, metrics, netify
+│       │                                #   ratelimit-stats, shape-stats, rules, summary, device, metrics, netify,
+│       │                                #   cut, portfw
 │       ├── usr/share/ucode/trafficctl/
 │       │   ├── lib.uc                   # Shared helpers: uci/ubus, commands, JSON, validation, files, log
 │       │   ├── net.uc                   # Subnets, interface roles, reverse DNS, byte samples, totals
 │       │   ├── ctl.uc                   # Read-only nft/tc readers: limits, blocks, shapes, the Rules tab
-│       │   └── report.uc                # Summary, device detail, Prometheus exporter, netifyd DPI
+│       │   ├── report.uc                # Summary, device detail, Prometheus exporter, netifyd DPI
+│       │   ├── cut.uc                   # Global internet cut: nft -f ruleset, state, keeper loop
+│       │   └── portfw.uc                # Port-forward list, pause, limit (inet tctl_pfw)
 │       ├── usr/libexec/trafficctl/
 │       │   ├── trafficctl-fw.sh         # Firewall abstraction (sourced)
 │       │   ├── trafficctl-summary.sh    # Wrapper: `trafficctl summary` (all-device summary)
@@ -115,6 +118,8 @@ luci-app-trafficctl/                     # repository
 │       │   ├── trafficctl-macfilter-remove.sh
 │       │   ├── trafficctl-rdns.sh       # Wrapper for `trafficctl rdns`
 │       │   ├── trafficctl-rules.sh      # Wrapper: `trafficctl rules` (every restriction, online or not; "Rules" tab)
+│       │   ├── trafficctl-cut.sh        # Wrapper: `trafficctl cut` (global cut; the keeper is `trafficctl cut keeper`)
+│       │   ├── trafficctl-portfw.sh     # Wrapper: `trafficctl portfw` ("Port Forwards" tab)
 │       │   └── ...                      # the rest of the helpers
 │       └── www/cgi-bin/trafficctl-metrics          # Prometheus scrape endpoint
 ├── luci-app-trafficctl/                 # package luci-app-trafficctl: the web interface
@@ -227,7 +232,6 @@ Run all tests locally. These run on the host with fake `nft`/`tc`/`ip`/`uci`/
 ```sh
 bash tests/test_fw.sh                 # Firewall helper library
 bash tests/test_direction.sh          # Bidirectional limit/shape, classid allocation
-bash tests/test_portfw.sh             # Port-forward control, port ranges
 bash tests/test_netify.sh             # Netify (DPI) integration
 bash tests/test_openwrt_compat.sh     # BusyBox ash compatibility / no bashisms
 bash tests/test_security.sh           # Input validation and injection resistance
@@ -261,6 +265,8 @@ bash tests/test_rl_lookup.sh          # Rate limit read-back: units, prefixes, r
 bash tests/test_shape_lookup.sh       # Shape classid lookup, shape-stats
 bash tests/test_subnet_limits.sh      # Subnet limits: stats, persisted mode, the restore hook
 bash tests/test_rpcd_contract.sh      # every rpc.declare in the views against the plugin's list
+bash tests/test_portfw.sh             # Port-forward control, port ranges, exact comments
+bash tests/test_cut.sh                # Global cut: refusals, rule order, keeper, persistence
 bash tests/equiv.sh                   # ucode output == the v1.30.0 shell output, rpcd methods included
 ```
 
