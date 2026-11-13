@@ -266,9 +266,9 @@ assert_contains "subnet: defaults to per-device buckets" 'each' "$OUT"
 # A meter keyed by address gives each host its own bucket; a bare limit would
 # make one device able to starve the rest of the subnet.
 assert_contains "subnet: download meter keyed by daddr" \
-    "ip daddr 10.0.20.0/24 meter tctl_d_10_0_20_0_24 { ip daddr limit rate over 625000 bytes/second }" "$NFT"
+    "ip daddr 10.0.20.0/24 meter tctl_m_10_0_20_0_24_dl_br_lan { ip daddr limit rate over 625000 bytes/second }" "$NFT"
 assert_contains "subnet: upload meter keyed by saddr" \
-    "ip saddr 10.0.20.0/24 meter tctl_u_10_0_20_0_24 { ip saddr limit rate over 625000 bytes/second }" "$NFT"
+    "ip saddr 10.0.20.0/24 meter tctl_m_10_0_20_0_24_ul_lan1 { ip saddr limit rate over 625000 bytes/second }" "$NFT"
 
 : > "$NFT_LOG"
 OUT=$(PATH="$MOCKBIN:$PATH" sh "$RL" 10.0.20.0/24 5000 "" shared 2>&1)
@@ -281,7 +281,7 @@ OUT=$(PATH="$MOCKBIN:$PATH" sh "$RL" all 2000 2>&1)
 NFT=$(cat "$NFT_LOG")
 assert_contains "all: whole network accepted" '"ok":true' "$OUT"
 assert_contains "all: expands to 0.0.0.0/0 with per-device buckets" \
-    "ip saddr 0.0.0.0/0 meter tctl_u_0_0_0_0_0" "$NFT"
+    "ip saddr 0.0.0.0/0 meter tctl_m_0_0_0_0_0_ul_lan2" "$NFT"
 
 # A single host stays a plain per-host bucket.
 : > "$NFT_LOG"

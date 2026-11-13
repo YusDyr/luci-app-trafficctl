@@ -45,7 +45,9 @@ if [ "$TCTL_FW" = "nft" ]; then
         if (ip != "") {
             if (!(ip in seen)) { seen[ip] = 1; order[++n] = ip }
             # A meter keyed on the address is what makes the bucket per-device.
-            mode[ip] = (index($0, " meter ") > 0) ? "each" : "shared"
+            # nftables 1.1 lists it as a set update, "add @tctl_m_... { ... }";
+            # looking for " meter " alone reported every such limit as shared.
+            mode[ip] = (index($0, " meter ") > 0 || index($0, " add @") > 0) ? "each" : "shared"
             rate_of[ip] = rate
             pkts[ip] += packets
             byts[ip] += bytes
