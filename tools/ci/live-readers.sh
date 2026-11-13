@@ -9,8 +9,9 @@
 #   /out/new/<command>.json      /usr/sbin/trafficctl <command>
 #
 # After the comparison, blocks written by v1.30.0 and by the ucode CLI meet on
-# one chain (each removes the other's, restore reads v1.30.0's rules.json) and
-# the DHCP hook applies its default limit: /out/new/interop.txt.
+# one chain (each removes the other's, restore brings back a v1.30.0 block from
+# its rules.json record) and the DHCP hook applies its default limit:
+# /out/new/interop.txt.
 #
 # tools/ci/live-compare.sh compares them on the host. With capture, it also
 # writes what the kernel listed as replay fixtures for tests/equiv.sh and the
@@ -231,15 +232,20 @@ check v130-unblock-removes-new-block '[ "$(rules_of 192_168_0_54)" = 0 ]'
 /usr/sbin/trafficctl block 192.168.0.54 >/dev/null
 check v130-sees-new-block 'sh "$L/trafficctl-block.sh" 192.168.0.54 | grep -q "already blocked"'
 /usr/sbin/trafficctl unblock 192.168.0.54 >/dev/null
-# Restore after a reboot from a rules.json v1.30.0 wrote: the kernel lost the
-# block, restore puts both halves back and doubles none already there.
-sh "$L/trafficctl-block.sh" 192.168.0.55 >/dev/null
-check v130-saved-the-block 'grep -q "\"ip\":\"192.168.0.55\"" /etc/trafficctl/rules.json'
+# Restore after a reboot of a block v1.30.0 placed, from its rules.json
+# record: the kernel lost the block, restore puts both halves back and
+# doubles none already there.
+sh "$L/trafficctl-block.sh" 192.168.0.55 >/dev/null 2>&1
+# v1.30.0's own save fails on BusyBox awk ("bad regex '},{'", fixed in
+# v1.30.x), so the record is written by the shell writer the limiter still
+# uses: the same bytes v1.30.x saves.
+sh -c '. /usr/libexec/trafficctl/trafficctl-fw.sh; tctl_persist_save block 192.168.0.55 block_192.168.0.55'
+check shell-saved-the-block 'grep -qF "{\"type\":\"block\",\"ip\":\"192.168.0.55\",\"param\":\"block_192.168.0.55\"}" /etc/trafficctl/rules.json'
 for h in $(nft -a list chain inet fw4 forward | grep -E '"tctl_block_192_168_0_55(_mac)?"' | sed 's/.*# handle //'); do
     nft delete rule inet fw4 forward handle "$h"
 done
 /usr/sbin/trafficctl restore > "$OUT/new/restore.json"
-check restore-from-v130-rules-json '[ "$(rules_of 192_168_0_55)" = 2 ]'
+check restore-of-a-v130-block '[ "$(rules_of 192_168_0_55)" = 2 ]'
 check restore-doubles-nothing '[ "$(rules_of 192_168_0_50)" = 2 ] && [ "$(rules_of 192_168_0_5)" = 1 ]'
 # A label shared by two devices' pre-v1.13.2 blocks: unblocking one with that
 # label leaves the other (the shell lifted both).

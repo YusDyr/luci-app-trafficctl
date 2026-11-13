@@ -105,6 +105,7 @@ assert_contains "and names the uci command that fixes it" \
 # ── every losable apply path must carry it ────────────────────────────────
 # Counted rather than grepped for prose: adding a success message without the
 # qualifier should fail here too. The limiter emits 3 apply results.
+# shellcheck disable=SC2043  # one script left; the loop takes the next
 for pair in "trafficctl-ratelimit.sh:3"; do
     f=${pair%%:*}; want=${pair##*:}
     got=$(grep -c '\\"persist\\":\$PERSIST' "$BIN/$f")
@@ -227,17 +228,30 @@ rmdir "$LOCK" 2>/dev/null
 
 # Both writers at once: every record lands.
 rm -f "$RULES"
+WLOG="$ROOT/tmp/writers.log"
+: > "$WLOG"
 pids=""
 for i in 1 2 3 4 5 6; do
-    shw "tctl_persist_save ratelimit 10.1.0.$i 100" &
+    ( PATH="$MOCKBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; tctl_persist_save ratelimit 10.1.0.$i 100" \
+        >/dev/null 2>"$ROOT/tmp/sh.$i.err"; echo "sh $i rc=$?" >> "$WLOG" ) &
     pids="$pids $!"
-    ( ucw persist_save '"block"' "\"10.2.0.$i\"" '""' ) &
+    ( PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" tcall trafficctl.lib persist_save '"block"' "\"10.2.0.$i\"" '""' \
+        >/dev/null 2>"$ROOT/tmp/uc.$i.err"; echo "uc $i rc=$?" >> "$WLOG" ) &
     pids="$pids $!"
 done
 # shellcheck disable=SC2086
 wait $pids
-assert_eq "lock: twelve writers at once, twelve records" "12" \
-    "$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$RULES" 2>&1)"
+n=$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$RULES" 2>&1)
+assert_eq "lock: twelve writers at once, twelve records" "12" "$n"
+if [ "$n" != 12 ]; then
+    # A lost record is a timing fault: say which writer and what it saw.
+    cat "$RULES"; echo
+    sort "$WLOG"
+    for f in "$ROOT"/tmp/sh.*.err "$ROOT"/tmp/uc.*.err; do
+        [ -s "$f" ] && { echo "--- $f"; cat "$f"; }
+    done
+    ls -la "$ROOT/tmp" "$(dirname "$RULES")"
+fi
 
 # ── the restore path ──────────────────────────────────────────────────────
 # Shapes are restored unconditionally and blocks are restored behind the flag.

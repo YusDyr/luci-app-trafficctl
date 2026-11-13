@@ -36,6 +36,7 @@ MOCKBIN="$FW_T/bin"
 STATE="$FW_T/state"
 mkdir -p "$ROOT/etc/config" "$ROOT/etc/trafficctl" "$ROOT/tmp/.uci" "$MOCKBIN" "$STATE" "$FW_T/ubus"
 LEASES="$ROOT/tmp/dhcp.leases"
+# shellcheck disable=SC2034  # the suites that source this read it
 RULES="$ROOT/etc/trafficctl/rules.json"
 : > "$LEASES"
 

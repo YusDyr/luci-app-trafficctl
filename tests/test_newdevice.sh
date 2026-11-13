@@ -249,7 +249,7 @@ PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" ACTION=add MACADDR=aa:bb:cc:dd:ee:a1 IPA
 PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" ACTION=add MACADDR=aa:bb:cc:dd:ee:01 IPADDR=192.168.1.5 \
     tctl newdevice >/dev/null 2>&1
 # bash exports its own HOSTNAME; the hook hands dnsmasq's on, empty here.
-PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" ACTION=add MACADDR=aa:bb:cc:dd:ee:a2 HOSTNAME= \
+PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" ACTION=add MACADDR=aa:bb:cc:dd:ee:a2 HOSTNAME='' \
     tctl newdevice >/dev/null 2>&1
 assert_eq "telegram: an unknown MAC is queued, a known one is not; ? and unknown fill the gaps" \
     "$(printf 'aa:bb:cc:dd:ee:a1\t192.168.1.97\tlaptop\naa:bb:cc:dd:ee:a2\t?\tunknown')" "$(cat "$NOTIFY" 2>/dev/null)"
@@ -267,7 +267,7 @@ chmod +x "$MOCKBIN/tctl-stub"
 : > "$STATE/stub.log"
 ACTION=add MACADDR=aa:bb:cc:dd:ee:a3 IPADDR=192.168.1.98 HOSTNAME=tv sh "$HP"
 ACTION=old MACADDR=aa:bb:cc:dd:ee:a4 IPADDR=192.168.1.99 sh "$HP"
-ACTION=add MACADDR= IPADDR=192.168.1.99 sh "$HP"
+ACTION=add MACADDR='' IPADDR=192.168.1.99 sh "$HP"
 assert_eq "hotplug: passes an add event on with its environment, and nothing else" \
     "newdevice|add|aa:bb:cc:dd:ee:a3|192.168.1.98|tv" "$(cat "$STATE/stub.log")"
 
