@@ -1,6 +1,6 @@
 # API Reference
 
-All backend functionality is exposed through the `/usr/sbin/trafficctl` CLI and the shell scripts in `/usr/libexec/trafficctl/trafficctl-*.sh` it runs for the commands not yet ported to ucode. The LuCI frontend calls them via JSON-RPC through the rpcd plugin at `/usr/libexec/rpcd/luci.trafficctl`, an exec plugin written in ucode: it handles the settings, their validation, the activity log and the device names itself, and runs `trafficctl <command>` for everything else, with every argument quoted and the caller (`TCTL_VIA`, `TCTL_SRC`, `TCTL_USER`) in the environment.
+All backend functionality is exposed through the `/usr/sbin/trafficctl` CLI and the shell scripts in `/usr/libexec/trafficctl/trafficctl-*.sh` it runs for the commands not yet ported to ucode. The LuCI frontend calls them via JSON-RPC through the rpcd plugin at `/usr/share/rpcd/ucode/luci.trafficctl.uc`, a ucode script that rpcd-mod-ucode runs inside rpcd: it handles the settings, their validation, the activity log and the device names itself, and runs `trafficctl <command>` for everything else through rpcd's `file.exec`, as an argument list (no shell) with the caller (`TCTL_VIA`, `TCTL_SRC`, `TCTL_USER`) in the environment. Releases up to 1.30.x shipped it as an exec plugin at `/usr/libexec/rpcd/luci.trafficctl`.
 
 ---
 
@@ -188,18 +188,37 @@ files wherever it points. `prune` deletes only files named like a period
 **Failures.** A setter whose commit fails (a read-only or full overlay)
 replies `{"ok":false,"msg":"could not save the trafficctl settings"}` (or
 `firewall`), logs nothing and leaves nothing staged in `/tmp/.uci`; `cut_set`
-then engages nothing. A delegated command still running after 60 s is killed
-and the reply is `{"ok":false,"msg":"trafficctl <command> did not finish within
-60 s"}`; rpcd itself gives an exec plugin 120 s. Only the CLI process is
-killed: on 22.03 nothing can give it a process group of its own (busybox has
-no `setsid`, ash no job control without a terminal), so what it started runs
-to its end. A method that answers `{"result": ...}` keeps that key on an error
+then engages nothing.
+
+**Types.** rpcd checks every call against the types the plugin declares
+(`ubus -v list luci.trafficctl`) before the method runs: a string for an int,
+a string for a bool, a double, a `null`, an argument the method does not
+declare, or an int beyond 32 bits fails the whole call with `Invalid argument`
+(ubus status 2), and an unknown method with `Method not found`. The exec plugin
+of 1.30.x read the raw JSON and answered those with `ok:false` or coerced
+them. Leave an argument out to leave it unchanged (the views pass
+`undefined`, which LuCI drops, never `null`).
+
+**Delegated commands** run through rpcd's `file.exec`, as a deferred reply:
+rpcd keeps serving other calls meanwhile. A command still running after 60 s
+(`TCTL_CLI_TIMEOUT_MS`, at most 110 s) is killed by rpcd and the reply is
+`{"ok":false,"msg":"trafficctl <command> did not finish within 60 s"}`. rpcd
+gives every call its exec timeout (`rpcd -t`, 120 s by default) in total: with
+a shorter one the caller gets `Request timed out` (status 7) instead. Only the
+CLI process is killed: on 22.03 nothing can give it a process group of its own
+(busybox has no `setsid`, ash no job control without a terminal), so what it
+started runs to its end. `file.exec` takes at most 256 KiB of output: a longer
+reply is `{"ok":false,"msg":"trafficctl <command> printed more than rpcd takes
+(256 KiB)"}`, and `device` caps its connection list below that (see `device`).
+A method that answers `{"result": ...}` keeps that key on an error
 (`{"result":null,"ok":false,"msg":...}`), an internal one included.
 
-The plugin reads the whole of its stdin: rpcd writes the arguments and closes
-the pipe (checked against rpcd on 22.03 by `tests/test_install.sh`). It asks
-rpcd's session for the login name, for the activity log, only on the `write`
-methods; the `read` methods are the dashboard's polls.
+The plugin asks rpcd's session for the login name, for the activity log, only
+on the `write` methods; the `read` methods are the dashboard's polls. The
+lookup is a deferred call too: rpcd serves its own session object, and a
+plugin that waited on it in process would wait on itself. The plugin and the
+trafficctl modules it imports are loaded once, when rpcd starts: installing or
+upgrading either package restarts rpcd.
 
 ---
 
@@ -1384,4 +1403,4 @@ is JSON-escaped in the reply.
 
 ## rpcd ACL
 
-The ACL file at `/usr/share/rpcd/acl.d/luci-app-trafficctl.json` grants execution permissions. The rpcd backend at `/usr/libexec/rpcd/luci.trafficctl` handles method dispatch and parameter validation.
+The ACL file at `/usr/share/rpcd/acl.d/luci-app-trafficctl.json` grants execution permissions. The rpcd plugin at `/usr/share/rpcd/ucode/luci.trafficctl.uc` (rpcd-mod-ucode) handles method dispatch and parameter validation; rpcd checks the argument types first.

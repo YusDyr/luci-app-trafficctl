@@ -107,8 +107,8 @@ luci-app-trafficctl/
     portfw.js                               — "Port Forwards" tab (inbound traffic control)
     notify.js                               — "Notifications" tab (senders, their events, the device scan)
     status.css                              — Frontend styles (shared by both views)
-  root/usr/libexec/rpcd/
-    luci.trafficctl                         — rpcd exec plugin (ucode): settings, names, activity log in process; the rest via /usr/sbin/trafficctl
+  root/usr/share/rpcd/ucode/
+    luci.trafficctl.uc                      — rpcd plugin (rpcd-mod-ucode, runs inside rpcd): settings, names, activity log in process; the rest via /usr/sbin/trafficctl through file.exec
   root/usr/share/luci/menu.d/, root/usr/share/rpcd/acl.d/ — menu entry and ACL
   po/templates/trafficctl.pot               — i18n template, named after the domain `trafficctl` (regenerate: `python3 tools/genpot.py`)
   po/<lang>/trafficctl.po                   — translations; built into usr/lib/lua/luci/i18n/trafficctl.<code>.lmo
@@ -145,6 +145,15 @@ docs/
 - The rpcd plugin must reply with a JSON **object** (rpcd refuses a bare
   array): wrap with `{"result": ...}`. Each method's reply equals the v1.30.0
   shell plugin's (`tests/equiv.sh`).
+- The plugin runs inside rpcd (rpcd-mod-ucode), one VM for every call: state
+  is per request (`lib.reset()`, the caller in `x.who`), and anything slow
+  (conntrack, nft, tc, hostapd, curl, a sleep) goes to the CLI through a
+  deferred `file.exec` (`run_cli`), never in process: a blocked call blocks
+  all of rpcd. Never call an object rpcd serves itself (session, file, uci,
+  luci) synchronously: rpcd would wait on itself. Never `system()` with a
+  timeout in process (`lib.run` with a timeout): it blocks SIGCHLD and eats
+  rpcd's own child signals. rpcd validates every call against the declared
+  types; `tests/lib/rpcd.uc` runs the plugin as rpcd does, for the tests.
 
 ## JavaScript Conventions
 
