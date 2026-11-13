@@ -144,6 +144,8 @@ jobs:
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_shape_lookup.sh
       - name: Shaper tests (trafficctl shape, its restore, a stateful tc)
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_shape.sh
+      - name: Shaper filters (several shapes keep their u32 filters)
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_shape_filters.sh
       - name: Rate limit lookup tests (summary, device, stats)
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_rl_lookup.sh
       - name: Reader tests (exact comments, nft 1.1 meters)
