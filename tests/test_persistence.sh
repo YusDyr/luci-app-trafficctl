@@ -105,10 +105,20 @@ assert_contains "and names the uci command that fixes it" \
 # ── every losable apply path must carry it ────────────────────────────────
 # Counted rather than grepped for prose: adding a success message without the
 # qualifier should fail here too. The limiter emits 3 apply results.
+# The limiter builds its result fields once (FIELDS="...") and every apply
+# result starts with them: count those results with FIELDS spelled out.
+expand_fields() {   # expand_fields <script>
+    local l v
+    v=$(sed -n 's/^ *FIELDS="\(.*\)"$/\1/p' "$1" | head -1)
+    while IFS= read -r l; do
+        case "$l" in *'FIELDS="'*) continue ;; esac
+        printf '%s\n' "${l//\$FIELDS/$v}"
+    done < "$1"
+}
 # shellcheck disable=SC2043  # one script left; the loop takes the next
 for pair in "trafficctl-ratelimit.sh:3"; do
     f=${pair%%:*}; want=${pair##*:}
-    got=$(grep -c '\\"persist\\":\$PERSIST' "$BIN/$f")
+    got=$(expand_fields "$BIN/$f" | grep -c '\\"persist\\":\$PERSIST')
     assert_eq "$f reports persist on each of its apply results" "$want" "$got"
     if grep -q 'tctl_persist_note' "$BIN/$f"; then
         PASS=$((PASS + 1))

@@ -137,6 +137,16 @@ printf '' > "$ECM/ecm_db/defunct_all"
 # rather than shipping an unqualified claim. Checked per script because each
 # has its own set of partial-success messages. The block is `trafficctl block`
 # since the ucode port, run against an active ECM in tests/test_block.sh.
+# The limiter builds its result fields once (FIELDS="...") and every apply
+# result starts with them: count those results with FIELDS spelled out.
+expand_fields() {   # expand_fields <script>
+    local l v
+    v=$(sed -n 's/^ *FIELDS="\(.*\)"$/\1/p' "$1" | head -1)
+    while IFS= read -r l; do
+        case "$l" in *'FIELDS="'*) continue ;; esac
+        printf '%s\n' "${l//\$FIELDS/$v}"
+    done < "$1"
+}
 for f in trafficctl-ratelimit.sh trafficctl-shape.sh; do
     src="$BIN/$f"
     for fn in tctl_nss_status tctl_nss_defunct; do
@@ -156,12 +166,12 @@ for f in trafficctl-ratelimit.sh trafficctl-shape.sh; do
         trafficctl-ratelimit.sh) want=3 ;;
         trafficctl-shape.sh)     want=3 ;;
     esac
-    got=$(grep -c '\\"nss\\":\\"$NSS\\"' "$src")
+    got=$(expand_fields "$src" | grep -c '\\"nss\\":\\"$NSS\\"')
     assert_eq "$f reports nss on each of its apply results" "$want" "$got"
 
     # And every one of them carries the human-readable verdict too, so the
     # operator sees it in the notification and not only in the JSON.
-    bare=$(grep -n '\\"nss\\":\\"$NSS\\"' "$src" | grep -v 'NSSNOTE' | grep -v '\$NOTE')
+    bare=$(expand_fields "$src" | grep -n '\\"nss\\":\\"$NSS\\"' | grep -v 'NSSNOTE' | grep -v '\$NOTE')
     if [ -n "$bare" ]; then
         FAIL=$((FAIL + 1))
         printf "FAIL: %s reports nss as a field but omits the verdict from the message:\n%s\n" "$f" "$bare"
