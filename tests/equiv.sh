@@ -14,12 +14,11 @@
 # the directory root/tmp/nft-netdev, and a command with no recording succeeds
 # when cmd/<command>.default exists; every write lands in root/tmp/writes.log.
 #
-# The limiter is compared with v1.30.5 ($LEGACY5_TAG), not v1.30.0: 1.30.5
-# fixed it (#154: a meter per chain, partial success reported, the sets the
-# rules name removed, the restore replacing a live limit) and the port starts
-# from there. Not compared, because the port differs on purpose: removing a
-# limit whose rules carry a caller's label from before v1.13.2 (v1.30.5
-# deleted that label's rules on every device; tests/test_direction.sh).
+# The limiter is compared with main at #161 ($LEGACY5_REF), not v1.30.0:
+# v1.30.5 fixed it (#154: a meter per chain, partial success reported, the
+# sets the rules name removed, the restore replacing a live limit), and #161
+# stopped a removal from lifting other targets' limits that carry a caller's
+# label from before v1.13.2. The port starts from there.
 # Both sides see the real uci, ubus and jsonfilter binaries from build-ucode.sh;
 # logger is recorded to root/tmp/logger.log.
 #
@@ -44,7 +43,8 @@
 . "$(dirname "$0")/lib/ucode.sh"
 
 LEGACY_TAG=v1.30.0
-LEGACY5_TAG=v1.30.5
+# v1.30.5 plus #161, not released yet: the tag that carries it replaces this.
+LEGACY5_REF=f15f363e2ef8e07e0668f91a91c83a95e9a59002
 FIXTURES="$UC_REPO/tests/fixtures"
 W="$UC_TMP/work"
 L="$UC_TMP/legacy"
@@ -190,11 +190,26 @@ NEWMAC='ACTION=add MACADDR=02:00:00:00:00:99 IPADDR=192.168.0.99 HOSTNAME=newbie
 RL="$LOGROOT; mkdir -p \"\$W/root/tmp/nft-netdev\"; : > \"\$W/cmd/conntrack.default\"; rm -f \"\$W/root/etc/trafficctl/shapes.json\""
 RLW="$WR"
 RLT='nft -a list table netdev tm_ratelimit'
-# A limit placed by v1.30.5 itself.
+# A limit placed by the shell limiter itself.
 RLOLD="$RL; $PERSIST; sh \"\$L5EXEC/trafficctl-ratelimit.sh\" 192.168.0.109 5000 >/dev/null; sh \"\$L5EXEC/trafficctl-ratelimit.sh\" 192.168.0.0/24 2000 '' each >/dev/null; $FORGET"
 # Its rules.json after a reboot: the netdev table gone.
 RLBOOT="$RLOLD; rm -rf \"\$W/root/tmp/nft-netdev\"; mkdir -p \"\$W/root/tmp/nft-netdev\"; rm -f \"\$W/root/etc/trafficctl/shapes.json\""
 L5RL='sh "$L5EXEC/trafficctl-ratelimit.sh"'
+# Limits from before v1.13.2, commented after the caller's label: two hosts
+# and two subnets (each mode, a meter per target) from the bot, label tg, and
+# a tg rule naming 192.168.0.109 in the other direction.
+rlchain() { printf "nft add chain netdev tm_ratelimit %s '{ type filter hook %s device %s priority %s; }'" "$@"; }
+rlrule() { printf "nft add rule netdev tm_ratelimit %s '%s counter drop comment \"%s\"'" "$@"; }
+RATE='limit rate over 625000 bytes/second'
+RLLEG="$RL; $(rlchain dl_br_lan egress br-lan 0); $(rlchain ul_lan2 ingress lan2 -200)"
+for t in 192.168.0.109 192.168.0.110; do
+    RLLEG="$RLLEG; $(rlrule dl_br_lan "ip daddr $t $RATE" rl_ratelimit_tg); $(rlrule ul_lan2 "ip saddr $t $RATE" rl_ratelimit_tg_ul)"
+done
+RLLEG="$RLLEG; $(rlrule ul_lan2 "ip daddr 192.168.0.109 $RATE" rl_ratelimit_tg_ul)"
+for t in 10.0.20.0/24 10.0.30.0/24; do
+    m=$(printf '%s' "$t" | tr './' '__')
+    RLLEG="$RLLEG; $(rlrule dl_br_lan "ip daddr $t meter tctl_d_$m { ip daddr $RATE }" rl_ratelimit_tg)"
+done
 L5HOOK='ACTION=ifup INTERFACE=lan sh "$L5/trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes"'
 
 CASES="
@@ -377,6 +392,8 @@ rl-bad-rate | text+$RLW | router-24.10 | sh:$L5RL 192.168.0.109 010; echo rc=\$?
 rl-bad-up | text+$RLW | router-24.10 | sh:$L5RL 192.168.0.109 5000 x each 0; echo rc=\$? | tctl ratelimit 192.168.0.109 5000 x each 0; echo rc=\$? | $RL
 rl-bad-target | text+$RLW | router-24.10 | sh:$L5RL '10.0.0.0/99' 5000; echo rc=\$? | tctl ratelimit '10.0.0.0/99' 5000; echo rc=\$? | $RL
 rl-bad-mode | text+$RLW | router-24.10 | sh:$L5RL 192.168.0.109 5000 x bogus; echo rc=\$? | tctl ratelimit 192.168.0.109 5000 x bogus; echo rc=\$? | $RL
+rl-legacy-label | text+$RLW | router-24.10 | sh:$L5RL 192.168.0.109 0 tg; echo rc=\$?; $RLT | tctl ratelimit 192.168.0.109 0 tg; echo rc=\$?; $RLT | $RLLEG
+rl-legacy-each | text+$RLW | router-24.10 | sh:$L5RL 10.0.20.0/24 0 tg; echo rc=\$?; $RLT | tctl ratelimit 10.0.20.0/24 0 tg; echo rc=\$?; $RLT | $RLLEG
 rl-usage | text | router-24.10 | sh:$L5RL 192.168.0.109; echo rc=\$? | tctl ratelimit 192.168.0.109; echo rc=\$? | $RL
 rl-restore | text+$RLW | router-24.10 | sh:$L5HOOK; echo rc=\$?; $RLT | tctl restore >/dev/null; echo rc=\$?; $RLT | $RLBOOT
 rl-restore-live | text+$RLW | router-24.10 | sh:$L5HOOK; echo rc=\$?; $RLT | tctl restore >/dev/null; echo rc=\$?; $RLT | $RLOLD
@@ -395,12 +412,12 @@ if ! git -C "$UC_REPO" rev-parse -q --verify "refs/tags/$LEGACY_TAG" >/dev/null;
 fi
 mkdir -p "$L" "$C/trafficctl" "$W"
 git -C "$UC_REPO" archive "$LEGACY_TAG" trafficctl/files luci-app-trafficctl/root | tar -x -C "$L"
-if ! git -C "$UC_REPO" rev-parse -q --verify "refs/tags/$LEGACY5_TAG" >/dev/null; then
-    git -C "$UC_REPO" fetch -q --depth=1 origin "refs/tags/$LEGACY5_TAG:refs/tags/$LEGACY5_TAG" ||
-        { echo "FAIL: cannot get $LEGACY5_TAG" >&2; exit 1; }
+if ! git -C "$UC_REPO" rev-parse -q --verify "$LEGACY5_REF^{commit}" >/dev/null; then
+    git -C "$UC_REPO" fetch -q --depth=1 origin "$LEGACY5_REF" ||
+        { echo "FAIL: cannot get $LEGACY5_REF" >&2; exit 1; }
 fi
 mkdir -p "$L5"
-git -C "$UC_REPO" archive "$LEGACY5_TAG" trafficctl/files | tar -x -C "$L5"
+git -C "$UC_REPO" archive "$LEGACY5_REF" trafficctl/files | tar -x -C "$L5"
 L5EXEC="$L5/trafficctl/files/usr/libexec/trafficctl"
 cp -R "$UC_REPO/trafficctl/files" "$C/trafficctl/"
 LEXEC="$L/trafficctl/files/usr/libexec/trafficctl"

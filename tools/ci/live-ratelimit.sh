@@ -13,6 +13,10 @@
 # (5.16+), so download goes to dl_br_lan at LAN egress; the WAN-ingress
 # fallback that 22.03's own kernel (5.10) takes is covered by the unit tests.
 #
+# The limiter is the ucode CLI (`trafficctl ratelimit`, behind the
+# trafficctl-ratelimit.sh wrapper); it reads the interfaces from ubus, so a
+# private ubusd carries a recorded network.interface (tests/lib/ubus-mock.uc).
+#
 # Usage: live-ratelimit.sh [repository root, default /src]
 
 set -u
@@ -23,8 +27,20 @@ ok() { echo "ok: $*"; }
 bad() { echo "FAIL: $*"; FAILS=$((FAILS + 1)); }
 die() { echo "live-ratelimit: $*" >&2; exit 2; }
 
-mkdir -p /work/bin /var/lock /var/run /tmp/trafficctl /etc/trafficctl
+W=/work
+mkdir -p "$W/ubus" /var/lock /var/run/ubus /tmp/trafficctl /etc/trafficctl
 cp -R "$SRC/trafficctl/files/." / || die "cannot install the backend"
+
+# The ubus stand-in needs uloop in ucode.
+add() {
+    if command -v opkg >/dev/null 2>&1; then
+        opkg update >/dev/null 2>&1; opkg install "$@" >/dev/null 2>&1
+    else
+        apk update >/dev/null 2>&1; apk add "$@" >/dev/null 2>&1
+    fi
+}
+[ -e /usr/lib/ucode/uloop.so ] || add ucode-mod-uloop
+[ -e /usr/lib/ucode/uloop.so ] || die "no ucode-mod-uloop in the image"
 say "$(nft --version)"
 
 # ── br-lan with two ports, a WAN ─────────────────────────────────────────────
@@ -49,21 +65,21 @@ config interface 'wan'
 	option device 'wan'
 	option proto 'dhcp'
 EOF
-# No netifd in the container, so no network.interface on ubus.
-cat > /work/bin/ubus <<'EOF'
-#!/bin/sh
-case "$*" in
-    "call network.interface dump")
-        echo '{"interface":[{"interface":"lan","up":true,"l3_device":"br-lan","ipv4-address":[{"address":"192.168.0.1","mask":24}]},{"interface":"wan","up":true,"l3_device":"wan","ipv4-address":[{"address":"203.0.113.2","mask":24}]}]}' ;;
-    "call network.interface.lan status")
-        echo '{"up":true,"l3_device":"br-lan","ipv4-address":[{"address":"192.168.0.1","mask":24}]}' ;;
-    "call network.interface.wan status")
-        echo '{"up":true,"l3_device":"wan","ipv4-address":[{"address":"203.0.113.2","mask":24}]}' ;;
-    *) exit 1 ;;
-esac
+# No netifd in the container: a private ubusd on the default socket answers
+# for network.interface.
+cat > "$W/ubus/network.interface@dump.json" <<'EOF'
+{"interface":[{"interface":"lan","up":true,"device":"br-lan","l3_device":"br-lan","ipv4-address":[{"address":"192.168.0.1","mask":24}]},{"interface":"wan","up":true,"device":"wan","l3_device":"wan","ipv4-address":[{"address":"203.0.113.2","mask":24}]}]}
 EOF
-chmod +x /work/bin/ubus
-export PATH="/work/bin:$PATH"
+echo '{"up":true,"l3_device":"br-lan","ipv4-address":[{"address":"192.168.0.1","mask":24}]}' > "$W/ubus/network.interface.lan@status.json"
+echo '{"up":true,"l3_device":"wan","ipv4-address":[{"address":"203.0.113.2","mask":24}]}' > "$W/ubus/network.interface.wan@status.json"
+SOCK=/var/run/ubus/ubus.sock
+ubusd -s "$SOCK" &
+i=0
+until [ -S "$SOCK" ]; do i=$((i + 1)); [ "$i" -gt 10 ] && die "ubusd did not start"; sleep 1; done
+ucode -S "$SRC/tests/lib/ubus-mock.uc" "$SOCK" "$W/ubus" > "$W/mock.out" 2>&1 &
+i=0
+until grep -q '^ready$' "$W/mock.out"; do i=$((i + 1)); [ "$i" -gt 10 ] && die "ubus-mock did not start: $(cat "$W/mock.out")"; sleep 1; done
+uci -q get firewall.@zone[0].name | grep -qx lan || die "the image's firewall config has no lan zone first"
 
 # trafficctl-fw.sh picks nftables when any table exists; fw4 itself needs
 # netifd, and its forward chain is not what this checks.
@@ -152,6 +168,32 @@ if table | grep -q 'rl_ratelimit_10_0_40_0_24\|set tctl_u_10_0_40_0_24'; then
 else
     ok "legacy limit: rules and meter removed"
 fi
+
+# ── limits from before v1.13.2: one label comment on several targets ─────────
+# The bot's limits all read "rl_ratelimit_tg". Removing one target's goes by
+# the rules that name it; v1.30.5 and earlier lifted every target's.
+say "legacy label limits (rl_ratelimit_tg on two hosts)"
+nft add chain netdev tm_ratelimit dl_br_lan '{ type filter hook egress device br-lan priority 0; policy accept; }' \
+    || die "cannot create dl_br_lan"
+for h in 192.168.0.80 192.168.0.81; do
+    nft add rule netdev tm_ratelimit dl_br_lan "ip daddr $h limit rate over 62500 bytes/second counter drop comment \"rl_ratelimit_tg\"" \
+        || die "cannot write the legacy download rule"
+    nft add rule netdev tm_ratelimit ul_lan1 "ip saddr $h limit rate over 62500 bytes/second counter drop comment \"rl_ratelimit_tg_ul\"" \
+        || die "cannot write the legacy upload rule"
+done
+out=$(sh $S/trafficctl-ratelimit.sh 192.168.0.80 0 tg)
+echo "$out"
+case "$out" in
+    *'"ok":true'*) ok "legacy label: removal reported ok" ;;
+    *) bad "legacy label: removal not reported ok" ;;
+esac
+if table | grep -q 'ip [sd]addr 192\.168\.0\.80 '; then
+    bad "legacy label: this target's rules left"; table
+else
+    ok "legacy label: this target's rules removed"
+fi
+n=$(table | grep -c 'ip [sd]addr 192\.168\.0\.81 .*"rl_ratelimit_tg\(_ul\)\{0,1\}"')
+[ "$n" = 2 ] && ok "legacy label: the other target keeps both rules" || bad "legacy label: the other target has $n of 2 rules"
 
 echo
 [ "$FAILS" = 0 ] && echo "live-ratelimit: all checks passed" || echo "live-ratelimit: $FAILS failed"
