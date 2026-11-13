@@ -11,6 +11,10 @@ import * as lib from 'trafficctl.lib';
 import * as net from 'trafficctl.net';
 import * as ctl from 'trafficctl.ctl';
 import * as report from 'trafficctl.report';
+// ── PR7: cut, portfw ──
+import * as cut from 'trafficctl.cut';
+import * as portfw from 'trafficctl.portfw';
+// ── end PR7 ──
 
 function out(v) {
 	print(lib.to_json(v), '\n');
@@ -21,6 +25,15 @@ function result(r) {
 	return r.ok ? 0 : 1;
 }
 
+// ── PR7: cut, portfw ──
+// { reply, rc } of a command that may print nothing (cut restore, tick,
+// keeper) or exit non-zero after a reply (cut tick's 2).
+function reply(r) {
+	if (r.reply != null)
+		out(r.reply);
+	return r.rc;
+}
+// ── end PR7 ──
 // A command that keeps its script's exit status: { reply, rc }.
 function replied(r) {
 	out(r.reply);
@@ -134,15 +147,19 @@ const commands = {
 			out(r.out);
 		return r.rc;
 	},
+
+	// ── PR7: cut, portfw ──
+	cut: (args) => reply(cut.main(args)),
+
+	portfw: (args) => reply(portfw.main(args)),
+	// ── end PR7 ──
 };
 
 // Commands the shell scripts still serve: run with our arguments, stdin,
 // stdout and exit status, so a port only moves an entry up into commands.
 const LEGACY = {
 	bytes: 'trafficctl-bytes.sh',
-	cut: 'trafficctl-cut.sh',
 	history: 'trafficctl-history.sh',
-	portfw: 'trafficctl-portfw.sh',
 	ratelimit: 'trafficctl-ratelimit.sh',
 	shape: 'trafficctl-shape.sh',
 	'telegram-test': 'trafficctl-telegram-test.sh',
@@ -152,7 +169,8 @@ const LEGACY = {
 // What a caller expecting this command's shape can still parse.
 function fallback(cmd, args, msg) {
 	if (index([ 'subnets', 'ifaces', 'bytes', 'totals', 'ratelimit-stats', 'shape-stats', 'summary' ], cmd) >= 0 ||
-	    (cmd == 'names' && args[0] == 'list'))
+	    (cmd == 'names' && args[0] == 'list') ||
+	    (cmd == 'portfw' && args[0] == 'list'))
 		return [];
 	if (cmd == 'rdns')
 		return { ip: args[0] ?? '', host: '' };
