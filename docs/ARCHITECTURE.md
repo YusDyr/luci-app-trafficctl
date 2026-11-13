@@ -470,20 +470,23 @@ seconds:
 
 ## Telegram Bot
 
-Optional long-polling daemon (`trafficctl-telegram.sh`) running under procd.
+Optional long-polling daemon in ucode (`trafficctl.telegram`), its own package
+`trafficctl-telegram`. procd runs `/usr/libexec/trafficctl/trafficctl-telegram.uc`,
+a process that imports only `lib` and the bot, so the resident bot does not
+load the CLI's other modules; `trafficctl telegram` runs the same file.
 
 ```
-Telegram API  ←──curl long poll──  trafficctl-telegram.sh (procd)
+Telegram API  ←──curl long poll──  trafficctl-telegram.uc (procd)
                                         │
-                                        ├── trafficctl-summary.sh (device list)
-                                        ├── trafficctl-block.sh / unblock.sh
-                                        ├── trafficctl-macfilter-add/remove.sh
-                                        ├── trafficctl-ratelimit.sh (trafficctl ratelimit)
-                                        └── trafficctl-shape.sh
+                                        ├── trafficctl summary (device list)
+                                        ├── trafficctl block / unblock
+                                        ├── trafficctl macfilter-add / macfilter-remove
+                                        ├── trafficctl ratelimit
+                                        └── trafficctl shape
 ```
 
 - **Polling:** `getUpdates?timeout=N` acts as both fetch and sleep — no separate timer needed.
-- **Security:** Only responds to messages from the configured `chat_id`. Unauthorized messages are silently dropped.
+- **Security:** Only responds to messages from the configured `chat_id`. Unauthorized messages are silently dropped. Callback addresses and rates are validated before a command line is built, and the token reaches curl in a config on stdin, never in argv.
 - **Device cache:** Summary output is cached for 5 seconds in `/tmp/trafficctl_tg_devices.json`.
 - **Notifications:** since 1.31 the bot only takes commands. New device and known device messages come from `trafficctl.notify` (`notify.uc`): its device scan runs as `/etc/init.d/trafficctl-notify` and keeps the bot's ledger, `/etc/trafficctl/telegram_known.json`; the Telegram sender (`notify_telegram`) uses the bot's token and chat unless it has its own. Every event also goes out on ubus (`trafficctl.notify`) and to `/etc/hotplug.d/trafficctl/`. See `docs/API.md`, "Notifications".
 - **Configuration:** UCI section `trafficctl.telegram` with token, chat_id and button toggles. Token is masked (never returned to the frontend).

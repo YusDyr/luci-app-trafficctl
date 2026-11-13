@@ -107,29 +107,36 @@ done
 # ── IPK build and structure ────────────────────────────────────────────────
 
 cd "$REPO_ROOT" || exit 1
-# One path per line: trafficctl first, luci-app-trafficctl last.
+# One path per line: trafficctl first, trafficctl-telegram second,
+# luci-app-trafficctl last.
 IPK_OUT=$(./build-ipk.sh 0.0.0-test 1 2>/dev/null)
 BE_IPK=$(printf '%s\n' "$IPK_OUT" | head -1)
+TG_IPK=$(printf '%s\n' "$IPK_OUT" | sed -n 2p)
 IPK=$(printf '%s\n' "$IPK_OUT" | tail -1)
 assert_eq "trafficctl ipk builds" "yes" "$([ -f "$BE_IPK" ] && echo yes || echo no)"
+assert_eq "trafficctl-telegram ipk builds" "yes" "$([ -f "$TG_IPK" ] && echo yes || echo no)"
 assert_eq "luci-app-trafficctl ipk builds" "yes" "$([ -f "$IPK" ] && echo yes || echo no)"
 
-if [ -f "$BE_IPK" ] && [ -f "$IPK" ]; then
+if [ -f "$BE_IPK" ] && [ -f "$TG_IPK" ] && [ -f "$IPK" ]; then
     TMPDIR=$(mktemp -d)
-    mkdir -p "$TMPDIR/be" "$TMPDIR/fe"
+    mkdir -p "$TMPDIR/be" "$TMPDIR/tg" "$TMPDIR/fe"
     tar xzf "$REPO_ROOT/$BE_IPK" -C "$TMPDIR/be"
+    tar xzf "$REPO_ROOT/$TG_IPK" -C "$TMPDIR/tg"
     tar xzf "$REPO_ROOT/$IPK" -C "$TMPDIR/fe"
 
     # Verify all critical files, each in the package that owns it
     BE_FILES=$(tar tzf "$TMPDIR/be/data.tar.gz")
+    TG_FILES=$(tar tzf "$TMPDIR/tg/data.tar.gz")
     FE_FILES=$(tar tzf "$TMPDIR/fe/data.tar.gz")
     for expected in \
         "be usr/libexec/trafficctl/trafficctl-summary.sh" \
         "be usr/libexec/trafficctl/trafficctl-device.sh" \
         "be usr/libexec/trafficctl/trafficctl-fw.sh" \
-        "be usr/libexec/trafficctl/trafficctl-telegram.sh" \
+        "tg usr/libexec/trafficctl/trafficctl-telegram.sh" \
+        "tg usr/libexec/trafficctl/trafficctl-telegram.uc" \
+        "tg usr/share/ucode/trafficctl/telegram.uc" \
         "be etc/hotplug.d/iface/99-trafficctl-shapes" \
-        "be etc/init.d/trafficctl-telegram" \
+        "tg etc/init.d/trafficctl-telegram" \
         "be etc/config/trafficctl" \
         "be www/cgi-bin/trafficctl-metrics" \
         "fe usr/libexec/rpcd/luci.trafficctl" \
@@ -137,7 +144,11 @@ if [ -f "$BE_IPK" ] && [ -f "$IPK" ]; then
         "fe usr/share/luci/menu.d/luci-app-trafficctl.json" \
         "fe usr/share/rpcd/acl.d/luci-app-trafficctl.json"; do
         pkg=${expected%% *} path=${expected#* }
-        if [ "$pkg" = be ]; then files=$BE_FILES; name=trafficctl; else files=$FE_FILES; name=luci-app-trafficctl; fi
+        case "$pkg" in
+            be) files=$BE_FILES; name=trafficctl ;;
+            tg) files=$TG_FILES; name=trafficctl-telegram ;;
+            *) files=$FE_FILES; name=luci-app-trafficctl ;;
+        esac
         if echo "$files" | grep -q "$path"; then
             PASS=$((PASS + 1))
         else
@@ -154,6 +165,9 @@ if [ -f "$BE_IPK" ] && [ -f "$IPK" ]; then
     assert_ok "trafficctl conffiles has trafficctl" grep -q "/etc/config/trafficctl" "$TMPDIR/be/conffiles"
     assert_ok "trafficctl postinst is executable" test -x "$TMPDIR/be/postinst"
     assert_ok "luci-app control depends on trafficctl" grep -q "^Depends: trafficctl " "$TMPDIR/fe/control"
+    tar xzf "$TMPDIR/tg/control.tar.gz" -C "$TMPDIR/tg"
+    assert_ok "trafficctl-telegram control depends on trafficctl" grep -q "^Depends: trafficctl " "$TMPDIR/tg/control"
+    assert_ok "trafficctl-telegram postinst is executable" test -x "$TMPDIR/tg/postinst"
     assert_ok "luci-app postinst is executable" test -x "$TMPDIR/fe/postinst"
 
     cd "$REPO_ROOT" || exit 1

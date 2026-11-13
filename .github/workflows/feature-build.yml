@@ -4,11 +4,13 @@ name: Feature Build
 # floating pre-release so the download URLs stay stable across pushes.
 #
 # Release tag:  build-feature-<branch-slug>
-# Download URLs (both packages are needed: trafficctl is the backend,
-# luci-app-trafficctl the web interface):
+# Download URLs (all three packages are needed: trafficctl is the backend,
+# trafficctl-telegram the bot, luci-app-trafficctl the web interface):
 #   …/releases/download/build-feature-<slug>/trafficctl.ipk
+#   …/releases/download/build-feature-<slug>/trafficctl-telegram.ipk
 #   …/releases/download/build-feature-<slug>/luci-app-trafficctl.ipk
 #   …/releases/download/build-feature-<slug>/trafficctl.apk
+#   …/releases/download/build-feature-<slug>/trafficctl-telegram.apk
 #   …/releases/download/build-feature-<slug>/luci-app-trafficctl.apk
 
 on:
@@ -52,6 +54,7 @@ jobs:
         run: |
           ./build-ipk.sh "0.0.0-${{ steps.meta.outputs.sha }}" 0
           ln -f dist/trafficctl_*_all.ipk dist/trafficctl.ipk
+          ln -f dist/trafficctl-telegram_*_all.ipk dist/trafficctl-telegram.ipk
           ln -f dist/luci-app-trafficctl_*_all.ipk dist/luci-app-trafficctl.ipk
 
       - name: Upload IPK artifact
@@ -60,6 +63,7 @@ jobs:
           name: ipk
           path: |
             dist/trafficctl.ipk
+            dist/trafficctl-telegram.ipk
             dist/luci-app-trafficctl.ipk
 
   build-apk:
@@ -89,8 +93,9 @@ jobs:
       - name: Collect APK
         run: |
           # The SDK names them <name>-<version>.apk; "<name>-[0-9]*" keeps
-          # trafficctl from matching luci-app-trafficctl.
-          for pkg in trafficctl luci-app-trafficctl; do
+          # trafficctl from matching luci-app-trafficctl or trafficctl-telegram.
+          # trafficctl-telegram is built with trafficctl (one Makefile).
+          for pkg in trafficctl trafficctl-telegram luci-app-trafficctl; do
             APK=$(find bin/ -name "${pkg}-[0-9]*.apk" 2>/dev/null | head -1)
             if [ -z "$APK" ]; then
               echo "::error::$pkg APK not found in SDK output"
@@ -106,6 +111,7 @@ jobs:
           name: apk
           path: |
             trafficctl.apk
+            trafficctl-telegram.apk
             luci-app-trafficctl.apk
 
   publish:
@@ -137,8 +143,8 @@ jobs:
           BRANCH="${GITHUB_REF_NAME}"
           REPO="${GITHUB_REPOSITORY}"
 
-          gh release create "$TAG" dist/trafficctl.ipk dist/luci-app-trafficctl.ipk \
-            dist/trafficctl.apk dist/luci-app-trafficctl.apk \
+          gh release create "$TAG" dist/trafficctl.ipk dist/trafficctl-telegram.ipk dist/luci-app-trafficctl.ipk \
+            dist/trafficctl.apk dist/trafficctl-telegram.apk dist/luci-app-trafficctl.apk \
             --prerelease \
             --title "Dev: ${BRANCH} @ ${SHA}" \
             --notes "$(cat <<NOTES
@@ -150,21 +156,23 @@ jobs:
 
           | File | OpenWrt version | Command |
           |------|----------------|---------|
-          | \`trafficctl.ipk\` + \`luci-app-trafficctl.ipk\` | 22.03 – 24.10 | \`opkg install <url> <url>\` |
-          | \`trafficctl.apk\` + \`luci-app-trafficctl.apk\` | 25.12+ | \`apk add --allow-untrusted <url> <url>\` |
+          | \`trafficctl.ipk\` + \`trafficctl-telegram.ipk\` + \`luci-app-trafficctl.ipk\` | 22.03 – 24.10 | \`opkg install <url> <url> <url>\` |
+          | \`trafficctl.apk\` + \`trafficctl-telegram.apk\` + \`luci-app-trafficctl.apk\` | 25.12+ | \`apk add --allow-untrusted <url> <url> <url>\` |
 
           ### Install
 
-          Both packages in one command: trafficctl is the backend,
-          luci-app-trafficctl the web interface.
+          All three in one command: trafficctl is the backend,
+          trafficctl-telegram the bot, luci-app-trafficctl the web interface.
 
           \`\`\`sh
           # OpenWrt 22.03 – 24.10
           opkg install https://github.com/${REPO}/releases/download/${TAG}/trafficctl.ipk \\
+            https://github.com/${REPO}/releases/download/${TAG}/trafficctl-telegram.ipk \\
             https://github.com/${REPO}/releases/download/${TAG}/luci-app-trafficctl.ipk
 
           # OpenWrt 25.12+
           apk add --allow-untrusted https://github.com/${REPO}/releases/download/${TAG}/trafficctl.apk \\
+            https://github.com/${REPO}/releases/download/${TAG}/trafficctl-telegram.apk \\
             https://github.com/${REPO}/releases/download/${TAG}/luci-app-trafficctl.apk
           \`\`\`
           NOTES

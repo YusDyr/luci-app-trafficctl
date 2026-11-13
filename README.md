@@ -169,7 +169,7 @@ I hope it turns out as useful for you as it has been for me.
 - **Live Speed Polling** -- Optional polling with configurable interval (Off/1/2/5/10/30s) and averaging window (5s-5min); shows sparkline per device with spike filtering. Both can be stored as router-wide defaults via UCI (`poll_interval`, `avg_window`) for browsers that have not chosen their own.
 - **Reverse DNS** -- Optional hostname resolution for external destination IPs with in-memory cache (no repeated lookups).
 - **Searchable Device Picker** -- Command palette (search by name, IP, or MAC) with recent devices quick-access bar stored in localStorage.
-- **Telegram Bot** -- Optional bot for remote control: device list, block/unblock, rate limit, shape traffic. Runs on the router via long polling, no external server needed.
+- **Telegram Bot** -- Optional bot for remote control: device list, block/unblock, rate limit, shape traffic. Runs on the router via long polling, no external server needed. Package `trafficctl-telegram`.
 - **Notifications** -- New device, known device back online, limit applied, block applied and internet cut, sent to Telegram, ntfy, a webhook or email (msmtp), each sender with its own events (Status > Traffic Control > Notifications). Every event is also a ubus event (`ubus listen trafficctl.notify`) and runs the scripts in `/etc/hotplug.d/trafficctl/`, for your own automation. See [docs/API.md](docs/API.md#notifications).
 - **New Device Detection** -- Discovers new devices via three sources: ARP table, DHCP leases, Wi-Fi station list. Instant DHCP hotplug trigger for near-realtime alerts.
 - **Activity Logging** -- Configurable logging of all actions (blocks, ratelimits, shapes, config changes) to a local file and/or syslog. Includes source IP, username, and trigger (LuCI/Telegram/CLI).
@@ -293,30 +293,39 @@ devices) are family-independent and work regardless.
 > - OpenWrt **25.12+** and snapshot → download `.apk` (apk)
 > - Want upgrades through `opkg upgrade` / `apk upgrade`? Add the [package feed](#package-feed-recommended) instead
 
-The app is two packages, released together with the same version:
+The app is three packages, released together with the same version:
 
-- **`trafficctl`**: the backend. Helper scripts in `/usr/libexec/trafficctl/`,
-  `/etc/config/trafficctl`, the Telegram bot and history services, the hotplug
+- **`trafficctl`**: the backend. The `trafficctl` CLI and helper scripts,
+  `/etc/config/trafficctl`, the notification and history services, the hotplug
   hooks and the Prometheus CGI.
+- **`trafficctl-telegram`**: the Telegram bot (`/etc/init.d/trafficctl-telegram`).
+  It depends on `trafficctl`. Up to 1.30.x the bot was part of `trafficctl`.
 - **`luci-app-trafficctl`**: the web interface (LuCI views and the rpcd plugin).
-  It depends on `trafficctl`.
+  It depends on `trafficctl` and `trafficctl-telegram`.
+
+A router without LuCI needs only `trafficctl`, and `trafficctl-telegram` for
+the bot. Upgrading such a router from 1.30.x with only `trafficctl` stops the
+bot (the postinst says so in the system log): add `trafficctl-telegram` to the
+same command to keep it. To go back to 1.30.x, remove `trafficctl-telegram`
+first (`opkg remove trafficctl-telegram` / `apk del trafficctl-telegram`):
+1.30.x's single package holds the bot's files itself.
 
 Releases up to 1.28.x shipped both as `luci-app-trafficctl` alone. Upgrading
 from one of them moves the backend files into `trafficctl` and keeps your
 configuration. From the feed, `opkg upgrade luci-app-trafficctl` /
-`apk upgrade luci-app-trafficctl` does it. From downloaded files, install both
-files in one command, as below.
+`apk upgrade luci-app-trafficctl` does it. From downloaded files, install all
+of them in one command, as below.
 
 Each release includes multiple filenames for each package:
 
 | Asset name | Purpose |
 |-----------|---------|
-| `trafficctl.ipk`, `luci-app-trafficctl.ipk` | Stable download URLs (opkg) |
-| `trafficctl_all.ipk`, `luci-app-trafficctl_all.ipk` | Same files, OpenWrt naming convention |
-| `trafficctl_X.Y.Z-1_all.ipk`, `luci-app-trafficctl_X.Y.Z-1_all.ipk` | Same files, version-pinned |
-| `trafficctl.apk`, `luci-app-trafficctl.apk` | Stable download URLs (apk) |
-| `trafficctl_noarch.apk`, `luci-app-trafficctl_noarch.apk` | Same files, OpenWrt naming convention |
-| `trafficctl_X.Y.Z-r1_noarch.apk`, `luci-app-trafficctl_X.Y.Z-r1_noarch.apk` | Same files, version-pinned |
+| `trafficctl.ipk`, `trafficctl-telegram.ipk`, `luci-app-trafficctl.ipk` | Stable download URLs (opkg) |
+| `trafficctl_all.ipk`, `trafficctl-telegram_all.ipk`, `luci-app-trafficctl_all.ipk` | Same files, OpenWrt naming convention |
+| `trafficctl_X.Y.Z-1_all.ipk`, `trafficctl-telegram_X.Y.Z-1_all.ipk`, `luci-app-trafficctl_X.Y.Z-1_all.ipk` | Same files, version-pinned |
+| `trafficctl.apk`, `trafficctl-telegram.apk`, `luci-app-trafficctl.apk` | Stable download URLs (apk) |
+| `trafficctl_noarch.apk`, `trafficctl-telegram_noarch.apk`, `luci-app-trafficctl_noarch.apk` | Same files, OpenWrt naming convention |
+| `trafficctl_X.Y.Z-r1_noarch.apk`, `trafficctl-telegram_X.Y.Z-r1_noarch.apk`, `luci-app-trafficctl_X.Y.Z-r1_noarch.apk` | Same files, version-pinned |
 
 The "stable URL" links below always download from the latest release — the filename stays constant across versions.
 
@@ -350,7 +359,7 @@ apk add luci-app-trafficctl
 /etc/init.d/rpcd restart
 ```
 
-`luci-app-trafficctl` pulls in `trafficctl`. Translations install the same way
+`luci-app-trafficctl` pulls in `trafficctl` and `trafficctl-telegram`. Translations install the same way
 (`luci-i18n-trafficctl-zh-cn`). To upgrade later:
 `opkg update && opkg upgrade trafficctl luci-app-trafficctl`, or
 `apk update && apk upgrade trafficctl luci-app-trafficctl`.
@@ -377,14 +386,14 @@ The single-file methods below still work and need no feed.
 ### OpenWrt 25.12+ (.apk)
 
 **Option A — LuCI web UI:**
-1. Download [`trafficctl.apk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.apk) and [`luci-app-trafficctl.apk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.apk) to your computer
+1. Download [`trafficctl.apk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.apk), [`trafficctl-telegram.apk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-telegram.apk) and [`luci-app-trafficctl.apk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.apk) to your computer
 2. In LuCI: **System → Software → Upload Package...**
-3. Upload `trafficctl.apk` first, then `luci-app-trafficctl.apk`
+3. Upload `trafficctl.apk` first, then `trafficctl-telegram.apk`, then `luci-app-trafficctl.apk`
 
-**Option B — SSH (recommended):** both files in one command, `trafficctl` first:
+**Option B — SSH (recommended):** the three files in one command, `trafficctl` first:
 
 ```sh
-cd /tmp && wget -O trafficctl.apk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.apk && wget -O luci-app-trafficctl.apk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.apk && apk add --allow-untrusted trafficctl.apk luci-app-trafficctl.apk
+cd /tmp && wget -O trafficctl.apk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.apk && wget -O trafficctl-telegram.apk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-telegram.apk && wget -O luci-app-trafficctl.apk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.apk && apk add --allow-untrusted trafficctl.apk trafficctl-telegram.apk luci-app-trafficctl.apk
 # If you get "modified conffile" on upgrade, add `--force-maintainer` to override
 ```
 
@@ -401,30 +410,32 @@ cd /tmp && wget -O trafficctl.apk https://github.com/YusDyr/luci-app-trafficctl/
 ### OpenWrt 22.03 — 24.10 (.ipk)
 
 **Option A — LuCI web UI:**
-1. Download [`trafficctl.ipk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.ipk) and [`luci-app-trafficctl.ipk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk) to your computer
+1. Download [`trafficctl.ipk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.ipk), [`trafficctl-telegram.ipk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-telegram.ipk) and [`luci-app-trafficctl.ipk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk) to your computer
 2. In LuCI: **System → Software → Upload Package...**
-3. Upload `trafficctl.ipk` first, then `luci-app-trafficctl.ipk`
+3. Upload `trafficctl.ipk` first, then `trafficctl-telegram.ipk`, then `luci-app-trafficctl.ipk`
 
-**Option B — SSH** (requires HTTPS support — `libustream-wolfssl` or `libustream-openssl`). Both files in one command, `trafficctl` first:
+**Option B — SSH** (requires HTTPS support — `libustream-wolfssl` or `libustream-openssl`). The three files in one command, `trafficctl` first:
 
 ```sh
-opkg install https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk
+opkg install https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-telegram.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk
 ```
 
 **Option C — SSH from your machine:**
 
 ```sh
-ssh root@router 'opkg install https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk'
+ssh root@router 'opkg install https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-telegram.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk'
 ```
 
 ### Uninstalling
 
 ```sh
 # OpenWrt 25.12+ (apk)
-apk del luci-app-trafficctl trafficctl
+apk del luci-app-trafficctl trafficctl-telegram trafficctl
 
-# OpenWrt 22.03 - 24.10 (opkg): the web interface first, then the backend
+# OpenWrt 22.03 - 24.10 (opkg): the web interface first, then the bot, then
+# the backend
 opkg remove luci-app-trafficctl
+opkg remove trafficctl-telegram
 opkg remove trafficctl
 
 # either way, reload the LuCI backend afterwards
@@ -444,13 +455,8 @@ firewall/tc state — they disappear on the next reboot. To clear them
 immediately before removing the package, unblock/unlimit the affected devices
 from the dashboard first, or reboot the router after uninstalling.
 
-If you also enabled the Telegram bot, stop it before removing (the package
-removal stops the notification watcher, `trafficctl-notify`, itself):
-
-```sh
-/etc/init.d/trafficctl-telegram stop
-/etc/init.d/trafficctl-telegram disable
-```
+Removing `trafficctl-telegram` stops and disables the bot, and removing
+`trafficctl` the notification watcher (`trafficctl-notify`).
 
 ### From source (OpenWrt build system)
 
@@ -509,8 +515,8 @@ apk add hostapd-utils
 
 # rpcd-mod-rrdns is included with rpcd (no extra install needed)
 
-# For Telegram bot (optional)
-apk add curl
+# For the Telegram bot (optional; luci-app-trafficctl pulls it in)
+apk add trafficctl-telegram
 ```
 
 </details>
@@ -539,8 +545,8 @@ opkg install hostapd-utils
 
 # rpcd-mod-rrdns is included with rpcd (no extra install needed)
 
-# For Telegram bot (optional)
-opkg install curl
+# For the Telegram bot (optional; luci-app-trafficctl pulls it in)
+opkg install trafficctl-telegram
 ```
 
 </details>
@@ -563,6 +569,8 @@ opkg install curl
 3. In LuCI, expand **Settings > Telegram Bot**, enter token and chat ID, click **Test**, then **Save**.
 4. In Telegram, send `/devices` to see the device list with action buttons.
 5. Which events reach the chat, and the new device message, are set on the **Notifications** tab (Telegram card). The bot does not have to run for notifications.
+
+The bot obeys the chat, not a person: with a group's chat ID, every member of that group can block, limit and unblock devices (as in 1.30.x). Use your private chat with the bot unless that is what you want.
 
 ### Notifications (optional)
 
@@ -666,7 +674,9 @@ The frontend talks to a thin rpcd dispatcher over ubus. The Telegram bot provide
 | `trafficctl/Makefile` | Backend package (`trafficctl`), installs everything under `trafficctl/files/` |
 | `trafficctl/files/usr/libexec/trafficctl/trafficctl-*.sh` | Backend scripts (monitoring + control) |
 | `trafficctl/files/usr/libexec/trafficctl/trafficctl-fw.sh` | Firewall abstraction layer (sourced) |
-| `trafficctl/files/usr/libexec/trafficctl/trafficctl-telegram.sh` | Telegram bot daemon (long polling) |
+| `trafficctl/files/usr/share/ucode/trafficctl/telegram.uc` | Telegram bot (long polling): commands, device menu, actions (package `trafficctl-telegram`) |
+| `trafficctl/files/usr/libexec/trafficctl/trafficctl-telegram.uc` | The bot's entry point, run by its init script and by `trafficctl telegram` |
+| `trafficctl/files/usr/libexec/trafficctl/trafficctl-telegram.sh` | Wrapper: `trafficctl telegram` |
 | `trafficctl/files/etc/init.d/trafficctl-telegram` | procd init script for the bot |
 | `trafficctl/files/usr/share/ucode/trafficctl/notify.uc` | Notification events and senders (ubus, hotplug, Telegram, ntfy, webhook, mail) |
 | `trafficctl/files/etc/init.d/trafficctl-notify` | procd init script for the new/known device scan |

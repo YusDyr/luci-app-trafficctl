@@ -244,9 +244,6 @@ bash tests/test_security.sh           # Input validation and injection resistanc
 bash tests/test_nss.sh                # Qualcomm NSS reporting
 bash tests/test_metrics_cgi.sh        # Metrics CGI gate and token check
 bash tests/test_regressions.sh        # Regressions for previously fixed bugs
-bash tests/test_telegram.sh           # Telegram bot units
-bash tests/test_telegram_mock.sh      # Telegram bot with mocked API responses
-bash tests/test_telegram_e2e.sh       # End-to-end bot tests
 bash tests/test_build_ipk.sh          # IPK package build verification
 ```
 
@@ -275,6 +272,7 @@ bash tests/test_rl_lookup.sh          # Rate limit read-back: units, prefixes, r
 bash tests/test_shape_lookup.sh       # Shape classid lookup, shape-stats
 bash tests/test_subnet_limits.sh      # Subnet limits: stats, persisted mode, the restore hook
 bash tests/test_rpcd_contract.sh      # every rpc.declare in the views against the plugin's list
+bash tests/test_telegram_bot.sh       # Telegram bot: commands, callbacks, cache, validation
 bash tests/test_portfw.sh             # Port-forward control, port ranges, exact comments
 bash tests/test_cut.sh                # Global cut: refusals, rule order, keeper, persistence
 bash tests/test_history.sh            # History store: flush, cursors, interface series, keeper, guard, ISO weeks
@@ -298,12 +296,14 @@ A test must exercise the real script rather than a local copy of the function it
 names — see the "Writing tests" section of `CONTRIBUTING.md` for why, and use
 `tests/test_direction.sh` as the template.
 
-**E2E tests** (`test_telegram_e2e.sh`) run the real bot script with mocked externals (curl, uci, iw, ip, jsonfilter) and verify:
-- Command processing (`/devices`, `/status`, `/help`)
-- Callback handling (block, unblock, limit, shape, WiFi block)
-- Authorization (unauthorized chat rejection)
-- Input validation (invalid IP in callbacks)
-- DHCP trigger processing
+**Bot tests** (`test_telegram_bot.sh`, in the ucode job) run the bot (`trafficctl-telegram.uc`) against a curl mock that serves `getUpdates` from a queue and a CLI stub, and check:
+- Start, the disabled and unconfigured exits, the offset file, the retry after a refused poll
+- Command processing (`/devices`, `/status`, `/help`), HTML-escaped names, the keyboard labels, the 5 s device cache
+- Callback handling (every verb, with the caller variables), the toast cut on a character boundary
+- Input validation (addresses, rates, control characters, unknown verbs) and the token never in curl's argv
+- `trafficctl telegram`, the wrapper and the init script
+
+`tests/equiv.sh` runs the v1.30.0 shell bot and the port side by side on the same updates (the `bot-*` cases) and compares every request, what each one ran, the offset file and the log.
 
 **Notification tests** (`test_notify.sh`, in the ucode job) cover `trafficctl.notify`: the events on ubus and through hotplug-call, every sender against a curl/msmtp mock (the token never in argv), the event filter and the master switch, the device scan and its ledger (sanitised names, seeding), the new device template (17 tags: `{{name}}`, `{{ip}}`, `{{mac}}`, `{{link}}`, `{{date}}`, `{{time}}`, `{{datetime}}`, `{{router}}`, `{{ssid}}`, `{{signal}}`, `{{freq}}`, `{{iface}}`, `{{clients}}`, `{{uptime}}`, `{{wan_ip}}`, `{{load}}`, `{{conns}}`), the migration of the bot's options, the rpcd `notify_*` methods and `telegram-test`.
 
