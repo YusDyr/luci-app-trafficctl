@@ -44,12 +44,8 @@ assert_contains() {
     fi
 }
 
-# The ucode readers find it under TCTL_ROOT, the shell ones at the path below.
+# Under TCTL_ROOT, where every reader and the shaper find it.
 SHAPES="$TMPDIR/root/etc/trafficctl/shapes.json"
-FW="$TMPDIR/fw.sh"
-sed -e "s|TCTL_SHAPES_FILE=\"/etc/trafficctl/shapes.json\"|TCTL_SHAPES_FILE=\"$SHAPES\"|" \
-    "$BIN/trafficctl-fw.sh" > "$FW"
-assert_contains "harness: the shapes path was redirected" "$SHAPES" "$(cat "$FW")"
 
 # .100 symmetric, allocated 1:2 — the minor the old derivation gives 192.168.0.2.
 # .101 with its own upload ceiling, allocated 1:3.
@@ -85,37 +81,28 @@ exit 0
 MOCK
 chmod +x "$MOCKBIN"/*
 
-fw() { PATH="$MOCKBIN:$PATH" sh -c ". $FW >/dev/null 2>&1; $1" 2>&1; }
-
-# ── tctl_shape_classmap ──────────────────────────────────────────────────────
-
-MAP=$(fw 'tctl_shape_classmap')
-assert_contains "classmap: symmetric record" "192.168.1.100 1:2" "$MAP"
-assert_contains "classmap: record with rate_kbit_up" "192.168.1.101 1:3" "$MAP"
-assert_contains "classmap: pre-allocation record maps to its derived class" "192.168.1.5 1:105" "$MAP"
-assert_eq "classmap: one line per record" "3" "$(printf '%s\n' "$MAP" | grep -c .)"
-
+# ── the readers' lookups (trafficctl.ctl) ───────────────────────────────────
 # The summary and the device report look the classid up in this map too
 # (tests/test_report.sh pins both, the borrowed-class case included).
 
-# ── tctl_tc_class_rates: the maps both readers are built from ────────────────
-
-DL=$(fw 'tctl_tc_class_rates br-lan')
-UL=$(fw 'tctl_tc_class_rates tctl-ifb0')
-assert_contains "class rates: LAN download class" "1:3 5000" "$DL"
-assert_contains "class rates: IFB upload class" "1:3 1000" "$UL"
-assert_eq "class rates: root and default classes left out" "" "$(printf '%s\n' "$DL" | grep -E '^1:(1|fffe) ')"
-assert_eq "class rates: default IFB name" "tctl-ifb0" "$(fw 'tctl_shape_ifb_dev')"
-
-# ── ucode: the same lookups ─────────────────────────────────────────────────
-
 uc() { PATH="$MOCKBIN:$PATH" TCTL_ROOT="$TMPDIR/root" "$@" 2>&1; }
-assert_eq "ucode classmap: every record form, as the shell map" \
+assert_eq "ucode classmap: every record form" \
     '{"192.168.1.100":"1:2","192.168.1.101":"1:3","192.168.1.5":"1:105"}' "$(uc tcall trafficctl.ctl shape_classmap | jq -c .)"
 assert_eq "ucode class rates: LAN, root and default left out" \
     '{"1:2":10000,"1:3":5000,"1:105":2000}' "$(uc tcall trafficctl.ctl tc_class_rates '"br-lan"' | jq -c .)"
 assert_eq "ucode class rates: IFB" '{"1:2":10000,"1:3":1000}' "$(uc tcall trafficctl.ctl tc_class_rates '"tctl-ifb0"' | jq -c .)"
 assert_eq "ucode: default IFB name" "tctl-ifb0" "$(uc tcall trafficctl.ctl ifb_dev)"
+
+# ── the shaper's own lookups (trafficctl.shape) agree with the readers ──────
+
+assert_eq "shaper: the classid of a symmetric record" "1:2" "$(uc tcall trafficctl.shape lookup_classid '"192.168.1.100"')"
+assert_eq "shaper: the classid of a record with rate_kbit_up" "1:3" "$(uc tcall trafficctl.shape lookup_classid '"192.168.1.101"')"
+assert_eq "shaper: a pre-allocation record has none recorded" "" "$(uc tcall trafficctl.shape lookup_classid '"192.168.1.5"')"
+assert_eq "shaper: its class is the derived one" "1:105" "$(uc tcall trafficctl.shape legacy_classid '"192.168.1.5"')"
+assert_eq "shaper: never the root class" "" "$(uc tcall trafficctl.shape legacy_classid '"192.168.0.1"')"
+assert_eq "shaper: never the default class" "" "$(uc tcall trafficctl.shape legacy_classid '"10.0.255.254"')"
+assert_eq "shaper: the next minor skips those in the file and on both devices" "1:4" "$(uc tcall trafficctl.shape alloc_classid)"
+assert_eq "shaper: default IFB name" "tctl-ifb0" "$(uc tcall trafficctl.shape ifb_dev)"
 
 # ── shape-stats: every record form is reported ───────────────────────────────
 
@@ -138,6 +125,7 @@ printf '#!/bin/sh\necho "qdisc fq_codel 0: root refcnt 2"\n' > "$TMPDIR/nohtb/tc
 chmod +x "$TMPDIR/nohtb/tc"
 assert_eq "stats: no HTB root, no shapes" "[]" "$(PATH="$TMPDIR/nohtb:$MOCKBIN:$PATH" TCTL_ROOT="$TMPDIR/root" tctl shape-stats 2>&1)"
 assert_eq "shim: the script is the CLI command" 'exec /usr/sbin/trafficctl shape-stats "$@"' "$(tail -n 1 "$BIN/trafficctl-shape-stats.sh")"
+assert_eq "shim: the shaper is the CLI command" 'exec /usr/sbin/trafficctl shape "$@"' "$(tail -n 1 "$BIN/trafficctl-shape.sh")"
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

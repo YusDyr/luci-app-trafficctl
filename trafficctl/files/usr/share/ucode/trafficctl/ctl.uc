@@ -57,6 +57,8 @@
 
 import * as lib from 'trafficctl.lib';
 import * as net from 'trafficctl.net';
+import * as limit from 'trafficctl.limit';
+import * as shape from 'trafficctl.shape';
 
 const RULES = '/etc/trafficctl/rules.json';
 const SHAPES = '/etc/trafficctl/shapes.json';
@@ -1120,12 +1122,14 @@ function newdevice(env) {
 	}
 
 	let shaper = (lib.uci_get('trafficctl', 'newdevice', 'limit_mode') == 'shaper');
-	let argv = shaper
-		? [ lib.path('/usr/libexec/trafficctl/trafficctl-shape.sh'), 'add', ip, kbit, 'shape_' + ip ]
-		: [ lib.path('/usr/libexec/trafficctl/trafficctl-ratelimit.sh'), ip, kbit, 'rl_ratelimit_' + lib.slug(ip) ];
-	if (lib.sh('TCTL_VIA=newdevice TCTL_SRC=hotplug ' + lib.qv(argv)) == 0) {
-		// The limiter logs its own entry with the via/src above; the shaper
-		// logs nothing.
+	// The limiter logs its own entry, with this via/src; the shaper logs
+	// nothing, so its entry is here.
+	lib.set_context({ via: 'newdevice', src: 'hotplug' });
+	let r = shaper
+		? shape.main([ 'add', ip, kbit, 'shape_' + ip ])
+		: limit.ratelimit([ ip, kbit, 'rl_ratelimit_' + lib.slug(ip) ]);
+	lib.set_context({});
+	if (r.rc == 0) {
 		if (shaper)
 			lib.log('shape_set', ip, kbit + 'kbit default for new device ' + mac, 'newdevice', 'hotplug');
 	}

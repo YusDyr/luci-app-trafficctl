@@ -7,7 +7,6 @@
 
 [ "$ACTION" = "ifup" ] && [ "$INTERFACE" = "lan" ] || exit 0
 
-SHAPES_FILE="/etc/trafficctl/shapes.json"
 RULES_FILE="/etc/trafficctl/rules.json"
 
 # Wait for network stack to be ready (up to 10 seconds)
@@ -18,30 +17,15 @@ while ! tc qdisc show dev "$(tctl_get_lan_device)" >/dev/null 2>&1; do
     sleep 0.5 2>/dev/null || sleep 1
 done
 
-# Saved blocks and rate limits (persist_rules): `trafficctl restore` waits up
-# to 10 seconds for fw4, which at boot can load its ruleset after ifup lan,
-# replaces a limit still live from before (an ifup without a reboot), and logs
-# each one it could not put back, or put back only on some devices.
+# Saved blocks and rate limits (persist_rules) and every shape (shapes.json,
+# always saved): `trafficctl restore` waits up to 10 seconds for fw4, which
+# at boot can load its ruleset after ifup lan, replaces a limit or a shape
+# still live from before (an ifup without a reboot), and logs each one it
+# could not put back, or put back only on some devices.
 /usr/sbin/trafficctl restore >/dev/null 2>&1
 
-# Restore shaping rules
-if [ -f "$SHAPES_FILE" ]; then
-    jsonfilter -i "$SHAPES_FILE" -e '@[*].ip' 2>/dev/null | while read -r ip; do
-        rate=$(jsonfilter -i "$SHAPES_FILE" -e "@[@.ip='$ip'].rate_kbit" 2>/dev/null)
-        # Absent on symmetric records, which is all of them before asymmetric
-        # shaping existed; trafficctl-shape.sh reads empty as "same as
-        # download". The label has to be passed explicitly because the upload
-        # rate is the fifth positional.
-        rate_up=$(jsonfilter -i "$SHAPES_FILE" -e "@[@.ip='$ip'].rate_kbit_up" 2>/dev/null)
-        if [ -n "$rate" ] && [ "$rate" != "0" ]; then
-            /usr/libexec/trafficctl/trafficctl-shape.sh add "$ip" "$rate" "shape_$ip" "$rate_up" || \
-                logger -t trafficctl "Failed to restore shape for $ip (${rate}kbit)"
-        fi
-    done
-fi
-
-# Restore port-forward controls (if persist enabled); blocks and rate limits
-# went back above
+# Restore port-forward controls (if persist enabled); blocks, rate limits and
+# shapes went back above
 if [ -f "$RULES_FILE" ] && tctl_persist_enabled; then
     # How many records there are comes from the file, not from a constant.
     # `seq 0 99` stopped at the hundredth, so every rule past it was silently

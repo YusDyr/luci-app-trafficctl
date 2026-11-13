@@ -28,7 +28,7 @@ TCTL_FW="nft"
 
 # Named by absolute path, as it must be on the router; the tests sed this line
 # into their scratch directory rather than have the shipped script carry a
-# test-only override (same approach as the ledger and shapes paths below).
+# test-only override (same approach as the ledger path below).
 TCTL_LEASES_FILE="/tmp/dhcp.leases"
 
 # The MAC behind an IPv4 address: DHCP lease first, neighbour table second.
@@ -79,8 +79,9 @@ tctl_target_mac() {
 
 # ── Rates ──────────────────────────────────────────────────────────────────
 #
-# The rate limiter is the ucode CLI's (trafficctl ratelimit, trafficctl.limit);
-# these are what the port-forward limit and the shaper still use.
+# The limiter, the port-forward limit and the shaper are the ucode CLI's
+# (limit.uc, portfw.uc, shape.uc). These have no shell caller left; they stay,
+# pinned by the tests, until this file goes.
 
 # A kbit/s ceiling as the bytes/second an nft "limit rate" is written in.
 #
@@ -302,7 +303,7 @@ tctl_validate_ip() {
 TCTL_RULES_FILE="/etc/trafficctl/rules.json"
 # Shared with the ucode writer (lib.persist_save): without it the two read
 # the same file and the later rename drops the other's record. Same wait and
-# takeover as the shapes lock in trafficctl-shape.sh.
+# takeover as the shapes lock (trafficctl.shape).
 TCTL_RULES_LOCK="/tmp/trafficctl_rules.lock.d"
 
 tctl_rules_lock() {
@@ -446,68 +447,9 @@ tctl_persist_remove_locked() {
 }
 
 # ── Shapes ────────────────────────────────────────────────────────────────
-
-# TCTL_LEASES_FILE is set once at the top of this file (overridable for tests).
-TCTL_SHAPES_FILE="/etc/trafficctl/shapes.json"
-
-# "<ip> <classid>" for every shape in shapes.json — the only way from an
-# address to its HTB class, because minors are ALLOCATED (see
-# trafficctl-shape.sh), not derived from the address. Readers that derived
-# them anyway showed one device's rate on another.
 #
-# Same record pattern as shapes_entries in trafficctl-shape.sh, optional
-# rate_kbit_up included: a pattern that misses a record form makes that shape
-# vanish from every reader. A record from before allocation carries no
-# classid, and its class is still the one the old derivation gave it
-# (legacy_classid there), so that is what it maps to.
-tctl_shape_classmap() {
-    grep -oE '\{"ip":"[^"]+","rate_kbit":[0-9]+(,"classid":"1:[0-9a-f]+")?(,"rate_kbit_up":[0-9]+)?\}' \
-        "$TCTL_SHAPES_FILE" 2>/dev/null | awk '
-    {
-        if (!match($0, /"ip":"[^"]+"/)) next
-        ip = substr($0, RSTART + 6, RLENGTH - 7)
-        if (match($0, /"classid":"1:[0-9a-f]+"/)) {
-            print ip, substr($0, RSTART + 11, RLENGTH - 12)
-            next
-        }
-        if (split(ip, o, ".") != 4) next
-        dec = o[3] * 256 + o[4]
-        if (dec < 2 || dec > 65533) next
-        printf "%s 1:%x\n", ip, dec
-    }'
-}
-
-# The IFB device upload shaping runs on (see trafficctl-shape.sh).
-tctl_shape_ifb_dev() {
-    local d
-    d=$(uci -q get trafficctl.main.shape_ifb 2>/dev/null)
-    echo "${d:-tctl-ifb0}"
-}
-
-# "classid rate_kbit" for every per-device HTB class on a device, from one tc
-# call. On the LAN device that is the download ceiling, on the IFB the upload
-# one: a shape uses the same classid on both.
-tctl_tc_class_rates() {
-    command -v tc >/dev/null 2>&1 || return 0
-    tc class show dev "$1" 2>/dev/null | awk '
-    /^class htb 1:/ {
-        classid=$3
-        minor=classid; sub(/^1:/,"",minor)
-        if (minor=="1" || minor=="fffe") next
-        rate=0
-        for (i=1;i<=NF;i++) {
-            if ($i=="rate") {
-                v=$(i+1)
-                if (v ~ /Gbit/)       { sub(/Gbit/,"",v);   rate=(v+0)*1000000 }
-                else if (v ~ /Mbit/)  { sub(/Mbit/,"",v);   rate=(v+0)*1000 }
-                else if (v ~ /[Kk]bit/){ sub(/[Kk]bit/,"",v); rate=v+0 }
-                else                  { rate=(v+0)/1000 }
-                break
-            }
-        }
-        print classid, rate
-    }'
-}
+# The shaper, its records and their readers are the ucode CLI's (trafficctl
+# shape, shape-stats, restore; trafficctl.shape and trafficctl.ctl).
 
 # ── Activity Logging ──────────────────────────────────────────────────────
 

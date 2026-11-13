@@ -11,6 +11,7 @@ import * as lib from 'trafficctl.lib';
 import * as net from 'trafficctl.net';
 import * as ctl from 'trafficctl.ctl';
 import * as limit from 'trafficctl.limit';
+import * as shape from 'trafficctl.shape';
 import * as report from 'trafficctl.report';
 // ── PR7: cut, portfw ──
 import * as cut from 'trafficctl.cut';
@@ -142,13 +143,16 @@ const commands = {
 
 	ratelimit: (args) => replied(limit.ratelimit(args)),
 
-	// The iface hotplug hook on ifup lan: the saved blocks, then the saved
-	// limits. Counted together; each failure is in syslog. Each half on its
-	// own: an error in the blocks must not leave every limit off until the
-	// next ifup.
+	shape: (args) => replied(shape.main(args)),
+
+	// The iface hotplug hook on ifup lan: the saved blocks, the saved limits,
+	// then the shapes. Counted together; each failure is in syslog. Each part
+	// on its own: an error in the blocks must not leave every limit and shape
+	// off until the next ifup. Nothing here is announced: it puts back what
+	// was there.
 	restore: () => {
 		let r = { ok: true, restored: 0, failed: 0 };
-		for (let half in [ [ 'blocks', ctl.restore ], [ 'limits', limit.restore ] ]) {
+		for (let half in [ [ 'blocks', ctl.restore ], [ 'limits', limit.restore ], [ 'shapes', shape.restore ] ]) {
 			try {
 				let h = half[1]();
 				r.restored += h.restored;
@@ -194,7 +198,6 @@ const commands = {
 // stdout and exit status, so a port only moves an entry up into commands.
 const LEGACY = {
 	bytes: 'trafficctl-bytes.sh',
-	shape: 'trafficctl-shape.sh',
 	'telegram-test': 'trafficctl-telegram-test.sh',
 	totals: 'trafficctl-totals.sh',
 };
