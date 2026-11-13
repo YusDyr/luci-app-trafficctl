@@ -137,6 +137,26 @@ assert_eq "save: a zero-length file starts over" '[{"type":"block","ip":"192.168
 : > "$RULES"
 ucw persist_remove '"block"' '"192.168.1.7"'
 assert_eq "remove: a zero-length file is left alone" "" "$(cat "$RULES")"
+# Removing the last record leaves an empty array, not an empty file: a
+# v1.30 reader and the restore path both take [] as "nothing to restore".
+rm -f "$RULES"
+ucw persist_save '"block"' '"192.168.1.9"' '""'
+ucw persist_remove '"block"' '"192.168.1.9"'
+assert_eq "remove: the last record leaves []" "[]" "$(cat "$RULES")"
+# A failed write keeps the populated file: the new content goes to a
+# temporary file renamed over it only when complete. A zero file-size limit
+# (SIGXFSZ ignored, so the write just fails) works as root too, where a
+# read-only directory would not.
+rm -f "$RULES"
+ucw persist_save '"block"' '"192.168.1.10"' '""'
+BEFORE=$(cat "$RULES")
+ucnowrite() { ( trap '' XFSZ; ulimit -f 0; TCTL_ROOT="$ROOT" tcall trafficctl.lib "$@" 2>&1 ); }
+assert_eq "save: the write fails" "false" "$(ucnowrite persist_save '"block"' '"192.168.1.11"' '""')"
+assert_eq "save: a failed write keeps the populated file" "$BEFORE" "$(cat "$RULES")"
+assert_eq "remove: the write fails" "false" "$(ucnowrite persist_remove '"block"' '"192.168.1.10"')"
+assert_eq "remove: a failed write keeps the populated file" "$BEFORE" "$(cat "$RULES")"
+assert_eq "a failed write leaves no temporary file" "" \
+    "$(ls -a "$(dirname "$RULES")" | grep 'rules\.json\.tmp\.')"
 # The shell interpolated the label as it came; one with a quote made the file
 # unparseable for every reader. Escaped now (a declared difference).
 rm -f "$RULES"

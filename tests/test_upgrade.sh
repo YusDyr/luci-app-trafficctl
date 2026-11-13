@@ -195,7 +195,6 @@ if [ "${UPGRADE_BACKEND_FIRST:-0}" = 1 ]; then
         echo "FAIL: UPGRADE_BACKEND_FIRST needs an old release with a trafficctl package and a plugin that sources trafficctl-fw.sh"
         exit 1
     fi
-    OLD_BE_VER=$(installed_ver trafficctl)
     echo "=== Installing the NEW trafficctl alone: $NEW_BE ==="
     if [ "$FMT" = ipk ]; then
         opkg install --force-downgrade "$NEW_BE" > /tmp/be-only.out 2>&1 || true
@@ -203,8 +202,10 @@ if [ "${UPGRADE_BACKEND_FIRST:-0}" = 1 ]; then
         apk add --allow-untrusted "$NEW_BE" > /tmp/be-only.out 2>&1 || true
     fi
     cat /tmp/be-only.out
-    if [ "$(installed_ver trafficctl)" = "$OLD_BE_VER" ]; then
-        echo "FAIL: the package manager did not upgrade trafficctl alone (still $OLD_BE_VER)"
+    # By content, not version: the CI .apk carries the Makefile's version,
+    # which can equal the old release's.
+    if [ ! -f /usr/share/ucode/trafficctl/ctl.uc ] || [ -e /usr/libexec/trafficctl/trafficctl-fw.sh ]; then
+        echo "FAIL: the package manager did not upgrade trafficctl alone"
         exit 1
     fi
     grep -q 'trafficctl-fw.sh' /usr/libexec/rpcd/luci.trafficctl ||
@@ -384,8 +385,11 @@ if [ -e /etc/config/trafficctl-opkg.backup ]; then
 fi
 
 # The package manager must actually have swapped the version (real upgrade,
-# not a no-op). OLD is a released version; NEW is 0.0.0-test-1.
-if [ -n "$OLD_VER" ] && [ "$NEW_VER" = "$OLD_VER" ]; then
+# not a no-op). OLD is a released version; the CI .ipk is 0.0.0-test-1. The CI
+# .apk comes from the SDK with the Makefile's version, which can equal the
+# latest release's: there the new files and the removed scripts checked above
+# are the proof.
+if [ "$FMT" = ipk ] && [ -n "$OLD_VER" ] && [ "$NEW_VER" = "$OLD_VER" ]; then
     echo "FAIL: version unchanged after upgrade ($NEW_VER) — install did not take"
     exit 1
 fi
