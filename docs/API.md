@@ -1172,7 +1172,7 @@ caused the event never waits on the network.
 |-------|------------|--------|
 | `new_device` | the device scan, the DHCP hotplug | `mac`, `ip`, `name`, `link` |
 | `known_device` | the device scan (a known MAC back online) | `mac`, `ip`, `name`, `link` |
-| `limit_applied` | `trafficctl ratelimit` (`limit.uc`), `trafficctl-shape.sh add` | `ip`, `rate_kbit`, `rate_kbit_up`, `mode` (`limiter`\|`shaper`) |
+| `limit_applied` | `trafficctl ratelimit` (`limit.uc`), `trafficctl shape add` (`shape.uc`; not its restore) | `ip`, `rate_kbit`, `rate_kbit_up`, `mode` (`limiter`\|`shaper`) |
 | `block_applied` | `trafficctl block`, `trafficctl macfilter-add` (when the deny took) | `ip`, `mac`, `kind` (`internet`\|`wifi`) |
 | `cut_engaged` | `trafficctl cut engage` (not its boot restore) | `duration` (seconds left, `0` = indefinite), `persist` |
 
