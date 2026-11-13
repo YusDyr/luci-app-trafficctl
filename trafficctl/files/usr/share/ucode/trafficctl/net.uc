@@ -35,9 +35,8 @@
 //   flush_v6(mac)        conntrack -D both ways for every IPv6 neighbour
 //                        address of mac
 //
-// Subnet records are "netbase block router" as in tctl_lan_subnets
-// (trafficctl-fw.sh), which still serves the shell scripts: the two copies
-// are kept equal by tests/equiv.sh until the shell one goes.
+// Subnet records are "netbase block router" as in v1.30's tctl_lan_subnets
+// (trafficctl-fw.sh): tests/equiv.sh keeps them equal to that release.
 
 import * as lib from 'trafficctl.lib';
 

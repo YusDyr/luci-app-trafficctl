@@ -53,7 +53,7 @@
 // JSON
 //   to_json(v)                    compact: no spaces, keys in insertion
 //                                 order, integers only, '/' not escaped
-// Validation and addresses (the semantics of trafficctl-fw.sh). match() and
+// Validation and addresses (the semantics of v1.30's trafficctl-fw.sh). match() and
 // replace() stop at a NUL byte, so every check refuses strings holding one.
 //   plain(s)                      a string without a NUL byte
 //   valid_ip(s)                   dotted quad, octets 0..255, no leading zeros
@@ -939,10 +939,11 @@ function seen_seed() {
 }
 
 // ── rules.json (tctl_persist_save / tctl_persist_remove) ────────────────────
-// Rewritten as the shell does it, record by record as text, so the records
-// the shell writers still add (limits, port forwards) keep their bytes. The
-// lock is shared with them: two writers otherwise read the same file and
-// the later rename drops the earlier record.
+// Rewritten as the 1.30.x shell did it, record by record as text, so every
+// record keeps its bytes and a downgrade reads the file. The lock is the one
+// 1.30.x takes: during an upgrade its daemons can still be writing, and two
+// writers otherwise read the same file and the later rename drops the
+// earlier record.
 
 const RULES = '/etc/trafficctl/rules.json';
 const RULES_LOCK = '/tmp/trafficctl_rules.lock.d';

@@ -22,9 +22,7 @@
 import * as lib from 'trafficctl.lib';
 import * as net from 'trafficctl.net';
 import * as ctl from 'trafficctl.ctl';
-// ── PR7: portfw ──
 import * as portfw from 'trafficctl.portfw';
-// ── end PR7 ──
 import { stat, lsdir, writefile, readfile } from 'fs';
 
 const CLI = '/usr/sbin/trafficctl';
@@ -1296,7 +1294,7 @@ function metrics(src) {
 			'# TYPE trafficctl_portfw_limit_kbit gauge\n',
 			'# HELP trafficctl_portfw_bytes Bytes currently accounted per port forward.\n',
 			'# TYPE trafficctl_portfw_bytes gauge\n');
-		// PR7: in process, the port-forward list is ucode now.
+		// In process: the port-forward list is ucode too.
 		let text = source_text(src.portfw ?? (() => portfw.main([ 'list' ]).reply));
 		for (let l in json_lines(text)) {
 			if (jstr(l, 'id') == '')
