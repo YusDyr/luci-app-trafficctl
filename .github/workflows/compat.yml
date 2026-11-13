@@ -372,6 +372,42 @@ jobs:
           sudo chown -R "$(id -u)" "$RUNNER_TEMP/out"
           tools/ci/live-compare.sh "$RUNNER_TEMP/out" "${{ matrix.nft }}"
 
+  # ── PR7: the global cut on a real kernel ──
+  # A cut engaged by v1.30.0's trafficctl-cut.sh is released by
+  # `trafficctl cut` and the other way round, the router-local accept is the
+  # first prerouting rule nft lists back whoever installed it, and with no LAN
+  # device both refuse (tools/ci/live-cut.sh).
+  live-cut:
+    name: Live cut ${{ matrix.version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ["22.03.7", "24.10.6", "25.12.4"]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Engage and release across versions in OpenWrt ${{ matrix.version }}
+        run: |
+          IMAGE="ghcr.io/openwrt/rootfs:x86-64-v${{ matrix.version }}"
+          for attempt in 1 2 3; do
+            docker pull -q "$IMAGE" && break
+            [ "$attempt" = 3 ] && { echo "::error::Could not pull $IMAGE"; exit 1; }
+            sleep $((attempt * 5))
+          done
+          # A container cannot load modules; the cut's prerouting chain needs fib.
+          for m in nf_tables nft_fib nft_fib_inet nft_fib_ipv4 nft_fib_ipv6 nft_ct bridge dummy; do
+            sudo modprobe "$m" || echo "::warning::no module $m"
+          done
+          git fetch -q --depth=1 origin "refs/tags/v1.30.0:refs/tags/v1.30.0" 2>/dev/null || true
+          mkdir -p "$RUNNER_TEMP/legacy"
+          git archive v1.30.0 trafficctl/files | tar -x -C "$RUNNER_TEMP/legacy"
+          docker run --rm --cap-add NET_ADMIN --tmpfs /work:size=300m,exec \
+            -v "$PWD:/src:ro" -v "$RUNNER_TEMP/legacy/trafficctl/files:/legacy:ro" \
+            --entrypoint /bin/sh "$IMAGE" /src/tools/ci/live-cut.sh
+  # ── end PR7 ──
+
   # ──────────────────────────────────────────────────────────────────────────
   # Live limiter: real nft against the runner's kernel, in the OpenWrt rootfs,
   # on a bridge with two dummy ports. An each-mode limit must reach BOTH ports

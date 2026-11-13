@@ -377,6 +377,25 @@ INTERFACE=lan ACTION=ifup run "$TMP/hotplug" >/dev/null 2>&1
 assert_contains "shape restore re-applies the download ceiling" "rate 20000kbit" "$(cat "$TC_LOG")"
 assert_contains "shape restore re-applies the upload ceiling" "rate 2000kbit" "$(cat "$TC_LOG")"
 
+# A restore puts back what was there: no "Limit applied" per device on every
+# boot. The same shaper call made by hand does announce itself.
+NOTIFY_CALLS="$TMP/notify.calls"
+printf '#!/bin/sh\necho "$*" >> "%s"\n' "$NOTIFY_CALLS" > "$TMP/notify-cli"
+chmod +x "$TMP/notify-cli"
+export TCTL_NOTIFY_CLI="$TMP/notify-cli"
+printf '[{"type":"ratelimit","ip":"192.168.1.93","param":"8000","mode":"each"}]' > "$RULES"
+INTERFACE=lan ACTION=ifup run "$TMP/hotplug" >/dev/null 2>&1
+assert_eq "restore: the shape and the limit put back announce nothing" "" "$(cat "$NOTIFY_CALLS" 2>/dev/null)"
+run "$TMP/shape.sh" add 192.168.1.94 20000 shape_192.168.1.94 >/dev/null 2>&1
+assert_contains "restore: a shape added by hand still announces itself" "limit_applied ip=192.168.1.94" "$(cat "$NOTIFY_CALLS" 2>/dev/null)"
+assert_contains "restore: ...with the shaper as its mode" "mode=shaper" "$(cat "$NOTIFY_CALLS" 2>/dev/null)"
+: > "$NOTIFY_CALLS"
+run "$TMP/ratelimit.sh" 192.168.1.95 8000 rl_test each >/dev/null 2>&1
+assert_contains "restore: a limit added by hand announces itself" "limit_applied ip=192.168.1.95" "$(cat "$NOTIFY_CALLS" 2>/dev/null)"
+assert_contains "restore: ...with the limiter as its mode" "mode=limiter" "$(cat "$NOTIFY_CALLS" 2>/dev/null)"
+unset TCTL_NOTIFY_CLI
+printf '[]' > "$RULES"
+
 # ════════════════════════════════════════════════════════════════════════════
 # 5. The rpcd surface
 # ════════════════════════════════════════════════════════════════════════════

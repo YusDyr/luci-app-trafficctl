@@ -109,7 +109,7 @@ method because it returns the contents of the configured log file.
 | `shape_stats` | `trafficctl shape-stats` (ucode) | (none) | read |
 | `shape_status` | `trafficctl-shape.sh status` | `ip` | read |
 | `names_list` | (in plugin) | (none) | read |
-| `portfw_list` | `trafficctl-portfw.sh list` | (none) | read |
+| `portfw_list` | `trafficctl portfw list` (ucode) | (none) | read |
 | `rules_list` | `trafficctl rules list` (ucode) | (none) | read |
 | `netify_status` | `trafficctl netify status` (ucode) | (none) | read |
 | `netify_list` | `trafficctl netify list` (ucode) | (none) | read |
@@ -118,8 +118,8 @@ method because it returns the contents of the configured log file.
 | `logging_config_get` | (in plugin) | (none) | read |
 | `newdevice_config_get` | (in plugin) | (none) — returns `enabled`, `limit_kbit`, `limit_mode`, plus `seeded` and `seen_count` describing the seen-MAC ledger | read |
 | `version` | (in plugin) | (none) — the installed `luci-app-trafficctl` version, read from the opkg status file or the apk database; `dev` when neither lists it | read |
-| `cut_status` | `trafficctl-cut.sh status` | (none) | **write** — see below |
-| `cut_set` | `trafficctl-cut.sh engage`/`release` | `active` (bool), `duration` (seconds, `0` = indefinite), `persist` (bool) | write |
+| `cut_status` | `trafficctl cut status` (ucode) | (none) | **write** — see below |
+| `cut_set` | `trafficctl cut engage`/`release` (ucode) | `active` (bool), `duration` (seconds, `0` = indefinite), `persist` (bool) | write |
 | `block` | `trafficctl block` (ucode) | `ip`, `label` | write |
 | `unblock` | `trafficctl unblock` (ucode) | `ip`, `label` | write |
 | `ratelimit` | `trafficctl-ratelimit.sh` | `ip` (host, CIDR or `all`), `rate_kbit`, `label`, `mode` (`each`\|`shared`) | write |
@@ -129,7 +129,7 @@ method because it returns the contents of the configured log file.
 | `macfilter_remove` | `trafficctl macfilter-remove` (ucode) | `ip` or `mac` (`mac` wins when both are sent) | write |
 | `name_set` | (in plugin) | `ip`, `name` (empty `name` clears the alias) | write |
 | `name_clear` | (in plugin) | `ip` | write |
-| `portfw_ctl` | `trafficctl-portfw.sh` | `action`, `scope`, `proto`, `ip`, `port`, `rate_kbit` | write |
+| `portfw_ctl` | `trafficctl portfw` (ucode) | `action`, `scope`, `proto`, `ip`, `port`, `rate_kbit` | write |
 | `netify_collect` | `trafficctl netify collect` (ucode) | `secs` (1–30, default 3) | write |
 | `config_set` | (in plugin) | `enabled`, `default_mode`, `sw`, `hw`, `poll_interval`, `avg_window` (all optional) | write |
 | `telegram_config_set` | (in plugin) | `enabled`, `bot_token`, `chat_id`, `poll_interval`, `notify_new_device`, `notify_known_device`, `control_enabled`, `notify_template`, `btn_block_inet`, `btn_block_wifi`, `btn_limiter`, `btn_shaper` | write |
@@ -721,9 +721,13 @@ no MAC can be keyed on — see [Address family coverage](#address-family-coverag
 
 ---
 
-### trafficctl-cut.sh
+### trafficctl-cut.sh (`trafficctl cut`)
 
 Cut internet access for **every** device at once while the LAN keeps working.
+`trafficctl/files/usr/share/ucode/trafficctl/cut.uc`; the script is a shim
+that runs `/usr/sbin/trafficctl cut`. Ruleset text, state files and replies are
+those of v1.30.0's shell script, so a cut engaged by either is seen and
+released by the other (`tools/ci/live-cut.sh` checks this on a real kernel).
 
 **Arguments:** `engage <seconds|0> [persist]` · `release` · `status` · `restore` · `tick` · `keeper`
 
@@ -731,7 +735,7 @@ Cut internet access for **every** device at once while the LAN keeps working.
 
 **Output (`status`, and the reply to `engage`/`release`):**
 ```json
-{"ok":true,"active":true,"rule_present":true,"supported":true,
+{"ok":true,"active":true,"rule_present":true,"supported":true,"coverage":"full",
  "expires_at":1700000900,"remaining":845,"started_at":1700000000,
  "persist":false,"keeper_running":true,"lan_devices":"br-lan br-guest",
  "default_duration":900,"default_persist":false,"msg":""}
@@ -784,7 +788,10 @@ table inet tctl_cut {
   anything that depends on the LAN device list being correct: whatever else is
   wrong, LuCI, SSH, DNS, DHCP and a VPN terminating *on* the router are
   accepted. A prerouting drop without that escape hatch would be a total LAN
-  lockout, which is also why the install is atomic (see below).
+  lockout, which is also why the install is atomic (see below). After the
+  load the chain is listed back, and unless its **first** rule is that accept
+  it is taken down again and the forward-only fallback is used (v1.30 only
+  checked that the accept was somewhere in the table).
 - **Interface matching, not addresses.** IPv4 *and* IPv6 are cut by the same
   rules — an address-keyed cut would let a device walk out over a SLAAC
   address. (The per-device block reaches the same end differently: a second
@@ -814,18 +821,72 @@ table inet tctl_cut {
 (tmpfs), so a reboot always clears it. This is the one control that can lock out
 its own operator, and the remedy must never become "be physically present".
 Ticking *Keep after reboot* additionally writes `/etc/trafficctl/cut.state`,
-restored on `ifup lan` by `trafficctl-cut.sh restore` — guarded on that file's
+restored on `ifup lan` by `trafficctl cut restore` — guarded on that file's
 own `persist=1`, **not** on the global `persist_rules` flag, and honouring the
 original absolute deadline rather than restarting the clock. It is deliberately
 absent from `trafficctl/files/lib/upgrade/keep.d/trafficctl`: a cut outliving a *firmware upgrade* is
 strictly worse than one outliving a reboot.
 
-**Auto-revert.** `/etc/init.d/trafficctl-cut` supervises a keeper that ticks
-every 5s: it enforces the deadline and re-asserts the rule if the table went
-missing (a wholesale `nft flush ruleset` still takes it). `status` reconciles
-independently — it releases a cut whose deadline has passed and starts a
-replacement keeper if one died — which is why it is a **write** method despite
-reading like one, the same reasoning that makes `activity_log` a write method.
+**Auto-revert.** `/etc/init.d/trafficctl-cut` has procd run
+`/usr/sbin/trafficctl cut keeper`, one ucode process that ticks every 5s: it
+enforces the deadline and re-asserts the rule if the table went missing (a
+wholesale `nft flush ruleset` still takes it). An exception in a tick is
+logged and the loop goes on, because the auto-revert depends on it. `status`
+reconciles independently — it releases a cut whose deadline has passed and
+starts a replacement keeper if one died — which is why it is a **write** method
+despite reading like one, the same reasoning that makes `activity_log` a write
+method. Whether the keeper runs is asked of procd (`ubus call service list`),
+not of the process list. `engage`, `release`, `status`, `restore` and each tick
+hold `/var/run/trafficctl/cut.lock`, so a tick cannot re-install a rule a
+release has just removed; the lock is waited for, never required.
+
+**Upgrade and removal.** The postinst restarts the keeper when a cut is
+engaged, so a keeper started by an older release stops running its code. The
+prerm runs `trafficctl cut release`, then removes both state files and the
+table itself: a cut left behind by a removed package is a lockout with no UI
+to undo it, and the release needs every ucode module to load.
+
+**By hand.** If `trafficctl cut release` itself fails (a broken ucode
+install, a module that no longer loads), the router stays reachable over SSH,
+because traffic addressed to it is accepted ahead of the drop. Two commands
+end the cut without any of this code:
+
+```sh
+/etc/init.d/trafficctl-cut stop
+nft delete table inet tctl_cut; rm -f /var/run/trafficctl/cut.state /etc/trafficctl/cut.state
+```
+
+Removing the state files matters as much as the table: a keeper or the next
+`ifup lan` would otherwise put the cut back.
+
+---
+
+### trafficctl-portfw.sh (`trafficctl portfw`)
+
+Inbound control of port forwards and open ports (the "Port Forwards" tab).
+`trafficctl/files/usr/share/ucode/trafficctl/portfw.uc`; the script is a shim
+that runs `/usr/sbin/trafficctl portfw`.
+
+**Arguments:** `list` · `pause|resume <forward|input> <tcp|udp|tcpudp> <ip|-> <port>` ·
+`limit <forward|input> <tcp|udp|tcpudp> <ip|-> <port> <rate_kbit>`
+
+`port` is a port or a range `lo-hi`. `rate_kbit` `0` removes the limit; any
+other rate goes through the same check as the per-device limiter (no leading
+zero, at most 100000000).
+
+`list` returns one entry per DNAT redirect and per `ACCEPT` rule from a wan
+zone with a destination port and no destination zone (an open port on the
+router itself, `kind: "open"`, `ip: "-"`), with its connections, distinct
+clients and bytes from conntrack, `paused` and `limit_kbit`.
+
+Rules live in the own table `inet tctl_pfw`, chains at forward/input priority
+−190 (after DNAT, before fw4's flowtable rule). Their comment,
+`tctl_pfw_<pause|limit>_<proto>_<ip|local>_<port>`, is the only record of the
+state, and it is matched whole, quotes included: v1.30 matched a substring,
+so a paused port 8080 also listed port 80 as paused. An open port's rules are
+commented `local`; v1.30 wrote the `-` it was given and then looked for
+`local`, so such a pause never showed and could not be resumed. Rules in that
+form are still read, and removed by a resume or a new limit.
 
 ---
 
@@ -1026,8 +1087,13 @@ caused the event never waits on the network.
 | `new_device` | the device scan, the DHCP hotplug | `mac`, `ip`, `name`, `link` |
 | `known_device` | the device scan (a known MAC back online) | `mac`, `ip`, `name`, `link` |
 | `limit_applied` | `trafficctl-ratelimit.sh`, `trafficctl-shape.sh add` | `ip`, `rate_kbit`, `rate_kbit_up`, `mode` (`limiter`\|`shaper`) |
-| `block_applied` | `trafficctl-block.sh`, `trafficctl-macfilter-add.sh` | `ip`, `mac`, `kind` (`internet`\|`wifi`) |
-| `cut_engaged` | `trafficctl-cut.sh engage` | `duration` (seconds left, `0` = indefinite), `persist` |
+| `block_applied` | `trafficctl block`, `trafficctl macfilter-add` (when the deny took) | `ip`, `mac`, `kind` (`internet`\|`wifi`) |
+| `cut_engaged` | `trafficctl cut engage` (not its boot restore) | `duration` (seconds left, `0` = indefinite), `persist` |
+
+Putting saved rules back is not an event: the `ifup lan` restore hook sets
+`TCTL_NOTIFY=0`, which `tctl_notify` and `notify.emit_action` honour, so a
+reboot sends no "Limit applied" per device. A block already in place, an
+unblock and a refused action send nothing either.
 
 Every event also carries `via` (`luci`, `telegram`, `cli`) and `src` (the
 caller's address or `local`). Unknown fields are dropped, and so is a text
@@ -1075,7 +1141,15 @@ config notify_mail 'notify_mail'
 - **mail**: a plain-text message through `msmtp`.
 
 Tokens and URLs go to curl as a config file on stdin, never in an argument
-list (`ps` shows argv to every local user).
+list (`ps` shows argv to every local user). The LuCI ACL grants no direct uci
+access: the views read the settings through `luci.trafficctl`, which shows
+every token and `auth` as `***`.
+
+Delivery is one attempt per event and sender: there is no retry, rate limit or
+coalescing, so a sender that answers 429 (Telegram's flood limit, ntfy's
+quota) loses that message, and a burst of events is a burst of requests. The
+scan sends synchronously; a config change restarts `trafficctl-notify`, and a
+send in flight at that moment is lost with it.
 
 ### The device scan
 
@@ -1088,7 +1162,11 @@ only when `trafficctl notify wanted` says something listens: `scan '1'`, or
 through `trafficctl notify dhcp`. The scan keeps the bot's state files:
 `/etc/trafficctl/telegram_known.json` (the known-device ledger; a missing or
 empty one is seeded from what is on the network, so switching notifications on
-does not report the whole LAN) and `/tmp/trafficctl_tg_online`.
+does not report the whole LAN) and `/tmp/trafficctl_tg_online`. The scan and
+`notify dhcp` see a new device at the same time; each checks the ledger again
+under `/tmp/.trafficctl_known.lock` before adding it, and only the one that
+added it sends `new_device`. When the lock cannot be had within 10 s nothing
+is written, and the device is reported at its next sighting.
 
 ### CLI
 
@@ -1104,8 +1182,9 @@ trafficctl notify test <sender>                    # a test message through one 
 ```
 
 Shell scripts emit through `tctl_notify <event> key=value...`
-(`trafficctl-fw.sh`), which adds `via` and `src`; ucode callers use
-`notify.emit(ev, fields)`.
+(`trafficctl-fw.sh`), the ucode action code through
+`notify.emit_action(ev, fields)`; both add `via` and `src` (`TCTL_VIA`,
+`TCTL_SRC`) and never fail the action.
 
 ### Migration
 
@@ -1117,6 +1196,12 @@ those options into one: the events that were on, `enabled` as the bot's
 `enabled` (off when no event was on), the template. It removes the old
 options. Until it has run, the old options act as a Telegram sender, so
 notifications keep working mid-upgrade.
+
+A downgrade to 1.30.x does not move them back: 1.30's bot finds no
+`notify_new_device`, `notify_known_device` or `notify_template` and sends no
+device notifications, with the built-in message, until they are set again
+(`uci set trafficctl.telegram.notify_new_device=1`, and the template copied
+from `notify_telegram.template`).
 
 ---
 

@@ -114,6 +114,18 @@ for m in $WRITE_LIST; do
 done
 assert_eq "acl: no mutating method also appears in the read ACL" "" "$OFFENDERS"
 
+# No direct uci grant: no view reads or writes uci (everything goes through
+# luci.trafficctl, which masks the bot token, the ntfy token and the webhook
+# auth as ***). A read grant on trafficctl handed those secrets to any
+# read-only user in clear text, one on wireless the WiFi keys; a write grant
+# set options past the plugin's validation (log_file, max_lines).
+assert_eq "acl: no uci access at all, read or write" "" \
+    "$(jq -r '.[] | [.read.uci, .write.uci] | map(select(. != null)) | .[]' "$ACL_FILE")"
+VIEWS="$(dirname "$ROOT")/htdocs/luci-static/resources/view/trafficctl"
+assert_eq "acl: the views are where this looks" yes "$([ -f "$VIEWS/status.js" ] && echo yes)"
+assert_eq "acl: and no view needs it (no uci module, no form.Map)" "" \
+    "$(grep -lE "'require uci'|form\.Map|uci\.(load|get|set|sections)" "$VIEWS"/*.js 2>/dev/null)"
+
 # ════════════════════════════════════════════════════════════════════════════
 # 3. Shaper classids are allocated, not derived from the address
 # ════════════════════════════════════════════════════════════════════════════

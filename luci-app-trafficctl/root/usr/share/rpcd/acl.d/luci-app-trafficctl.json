@@ -16,7 +16,6 @@
 				],
 				"file": [ "read" ]
 			},
-			"uci": [ "trafficctl", "wireless", "network" ],
 			"file": {
 				"/tmp/dhcp.leases": [ "read" ]
 			}
@@ -36,8 +35,7 @@
 					"history_config_set", "history_flush",
 					"notify_config_set", "notify_test"
 				]
-			},
-			"uci": [ "trafficctl" ]
+			}
 		}
 	}
 }
