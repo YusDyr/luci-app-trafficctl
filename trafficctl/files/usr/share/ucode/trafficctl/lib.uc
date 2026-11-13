@@ -254,9 +254,10 @@ function run(cmd, ms) {
 	return out ?? '';
 }
 
-// run() with a timeout and the exit status: the rpcd plugin has to answer
-// before rpcd kills it, and has to tell a timeout from an empty reply. err:
-// the limiter reports nft's reason for each rule it could not add.
+// run() with a timeout and the exit status, to tell a timeout from an empty
+// reply. err: the limiter reports nft's reason for each rule it could not
+// add. Not inside rpcd: a timed system() blocks SIGCHLD, which rpcd's own
+// children need (the rpcd plugin runs slow commands through file.exec).
 function run_rc(cmd, ms, err) {
 	// Created here and exclusively, as in pipe().
 	let tmp = path('/tmp/.trafficctl_run.' + pid());
