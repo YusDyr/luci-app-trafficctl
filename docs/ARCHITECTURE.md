@@ -25,7 +25,7 @@ graph TD
     subgraph "Router (Server)"
         subgraph "rpcd + uhttpd"
             ACL["luci-app-trafficctl.json<br/>(ACL definitions)"]
-            RPC["/usr/libexec/rpcd/luci.trafficctl<br/>(JSON-RPC dispatch)"]
+            RPC["/usr/share/rpcd/ucode/luci.trafficctl.uc<br/>(JSON-RPC dispatch in rpcd)"]
         end
 
         subgraph "Query Scripts — /usr/libexec/trafficctl/"

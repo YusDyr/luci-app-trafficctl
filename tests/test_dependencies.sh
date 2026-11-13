@@ -4,7 +4,8 @@
 # Usage: sh /tests/test_dependencies.sh /dist/trafficctl.ipk /dist/trafficctl-telegram.ipk /dist/luci-app-trafficctl.ipk
 #    or: sh /tests/test_dependencies.sh /dist/trafficctl.apk /dist/trafficctl-telegram.apk /dist/luci-app-trafficctl.apk
 # Every package file of one run has the same format. trafficctl (the backend)
-# brings conntrack and friends, luci-app-trafficctl brings luci-base and rpcd.
+# brings conntrack and friends, luci-app-trafficctl brings luci-base, rpcd,
+# rpcd-mod-ucode and rpcd-mod-file.
 #
 # Verifies that:
 #   1) Installing WITHOUT resolving deps fails with a sane error
@@ -103,7 +104,7 @@ esac
 
 # Verify deps were actually pulled in
 echo "=== Verifying deps installed ==="
-for dep in trafficctl trafficctl-telegram luci-app-trafficctl conntrack curl kmod-nft-netdev rpcd luci-base; do
+for dep in trafficctl trafficctl-telegram luci-app-trafficctl conntrack curl kmod-nft-netdev rpcd rpcd-mod-ucode rpcd-mod-file luci-base; do
     case "$PKG" in
         *.ipk)
             if opkg list-installed | grep -q "^$dep "; then

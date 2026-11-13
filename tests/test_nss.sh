@@ -185,7 +185,7 @@ assert_contains "and says the toggles beside it do not control NSS" \
     "do not control this" "$(cat "$SJS")"
 
 # The dashboard needs it without applying anything.
-RPCD="$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
+RPCD="$REPO_ROOT/luci-app-trafficctl/root/usr/share/rpcd/ucode/luci.trafficctl.uc"
 # The plugin reads the same ECM knobs through lib.nss_status (the block's
 # reader too); tests/test_rpcd.sh drives it.
 LIBUC="$REPO_ROOT/trafficctl/files/usr/share/ucode/trafficctl/lib.uc"

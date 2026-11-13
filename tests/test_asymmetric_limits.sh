@@ -28,7 +28,7 @@ FAIL=0
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$REPO/trafficctl/files/usr/libexec/trafficctl"
-RPCD="$REPO/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
+RPCD="$REPO/luci-app-trafficctl/root/usr/share/rpcd/ucode/luci.trafficctl.uc"
 
 # The limiter and the shaper are `trafficctl ratelimit` and `trafficctl shape`,
 # their restore `trafficctl restore` (ucode, tests/lib/shape_env.sh, with a
@@ -441,6 +441,7 @@ function fmtRate(kbit) {
     if (mbit >= 1) return (mbit % 1 === 0 ? mbit.toFixed(0) : mbit.toFixed(1)) + ' Mbit/s';
     return kbit + ' kbit/s';
 }
+var RPC_INT_MAX = 2147483647;   // status.js's own, outside the slice
 var _hidden = true, _upUnit = 'mbit';
 var upInput = { value: '' };
 var upRow = { classList: { contains: function () { return _hidden; } } };
@@ -459,6 +460,7 @@ var out = [
     probe(false, 'mbit', '2'),      // 2 Mbit -> 2000 kbit
     probe(false, 'kbit', '800'),    // 800 kbit stays 800
     probe(false, 'mbit', '1.5'),    // fractional Mbit rounds
+    probe(false, 'mbit', '3000000'), // past int32 kbit: capped, so the backend answers
     rateLabel('8000', ''),          // symmetric label
     rateLabel('8000', '8000'),      // explicitly equal is still one figure
     rateLabel('20000', '2000')      // asymmetric label
@@ -467,7 +469,7 @@ console.log(out);
 NODE
     got=$(node "$TMP/ui_run.js" 2>&1)
     assert_eq "the upload reader distinguishes empty from zero, and converts units" \
-        "||||2000|800|1500|8 Mbit/s|8 Mbit/s|20 Mbit/s down / 2 Mbit/s up" \
+        "||||2000|800|1500|2147483647|8 Mbit/s|8 Mbit/s|20 Mbit/s down / 2 Mbit/s up" \
         "$got"
 else
     printf 'skip: no node, not exercising the frontend slices\n'
@@ -534,9 +536,11 @@ assert_contains "the ratelimit rpc call carries an upload rate" \
     "params: ['ip', 'rate_kbit', 'label', 'mode', 'rate_kbit_up']" "$js_src"
 assert_contains "the shape_add rpc call carries an upload rate" \
     "params: ['ip', 'rate_kbit', 'label', 'rate_kbit_up']" "$js_src"
-# null rather than 0 for the symmetric case: 0 would be a ceiling.
-assert_eq "every apply path sends null, not 0, when symmetric" "3" \
-    "$(grep -c "kbitUp ? parseInt(kbitUp) : null" "$JS")"
+# No upload rate for the symmetric case, rather than 0: 0 would be a ceiling.
+# undefined, not null: LuCI drops an undefined param, and rpcd refuses a call
+# with a null for an int.
+assert_eq "every apply path leaves the upload rate out when symmetric" "3" \
+    "$(grep -c "kbitUp ? parseInt(kbitUp) : undefined" "$JS")"
 
 # ══════════════════════════════════════════════════════════════════════════
 # 7. Persisted records must not overwrite one another

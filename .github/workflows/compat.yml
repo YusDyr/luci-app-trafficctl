@@ -472,6 +472,33 @@ jobs:
             -v "$PWD:/src:ro" --entrypoint /bin/sh "$IMAGE" /src/tools/ci/live-shape.sh /src
 
   # ──────────────────────────────────────────────────────────────────────────
+  # Live rpcd: the plugin inside the release's own rpcd and rpcd-mod-ucode
+  # (tools/ci/live-rpcd.sh). Every method through rpcd, a call with a
+  # session, the type policy, a CLI that hangs, and uhttpd's /ubus with a
+  # login. The unit tests model rpcd (tests/lib/rpcd.uc); this is the real
+  # one, on the oldest ucode (22.03) and the newest. Needs no package build.
+  # ──────────────────────────────────────────────────────────────────────────
+  live-rpcd:
+    name: Live rpcd ${{ matrix.version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ["22.03.7", "24.10.6", "25.12.4"]
+    steps:
+      - uses: actions/checkout@v6
+      - name: The rpcd plugin in OpenWrt ${{ matrix.version }}
+        run: |
+          IMAGE="ghcr.io/openwrt/rootfs:x86-64-v${{ matrix.version }}"
+          for attempt in 1 2 3; do
+            docker pull -q "$IMAGE" && break
+            [ "$attempt" = 3 ] && { echo "::error::Could not pull $IMAGE"; exit 1; }
+            sleep $((attempt * 5))
+          done
+          docker run --rm --tmpfs /work:size=300m,exec \
+            -v "$PWD:/src:ro" --entrypoint /bin/sh "$IMAGE" /src/tools/ci/live-rpcd.sh /src
+
+  # ──────────────────────────────────────────────────────────────────────────
   # Upgrade — install previous GitHub release, then install current build.
   # Verifies pre-upgrade/post-upgrade hooks, config file preservation.
   # ──────────────────────────────────────────────────────────────────────────

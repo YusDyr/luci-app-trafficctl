@@ -26,7 +26,7 @@ PASS=0
 FAIL=0
 
 REPO_ROOT="$UC_REPO"
-RPCD="$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
+RPCD="$REPO_ROOT/luci-app-trafficctl/root/usr/share/rpcd/ucode/luci.trafficctl.uc"
 ACL="$REPO_ROOT/luci-app-trafficctl/root/usr/share/rpcd/acl.d/luci-app-trafficctl.json"
 
 assert_eq() {
