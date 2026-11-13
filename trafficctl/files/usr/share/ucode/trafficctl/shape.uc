@@ -16,8 +16,9 @@
 //   apply(ip, rate, up)      both directions, then the record: { reply, rc }
 //   remove(ip)               the classes on both devices, then the record
 //   status(ip)               the download class's rate
-//   main(args)               trafficctl shape <add|remove|status> <ip>
-//                            [rate_kbit] [label] [rate_up]: { reply, rc }
+//   main(args, quiet)        trafficctl shape <add|remove|status> <ip>
+//                            [rate_kbit] [label] [rate_up]: { reply, rc };
+//                            quiet (the restore): nothing announced
 //   restore()                every record of shapes.json (ifup lan), quiet
 //
 // Download is shaped on the LAN device's egress (match ip dst), upload on an
@@ -337,8 +338,9 @@ const USAGE = 'usage: trafficctl-shape.sh <add|remove|status> <ip> [rate_kbit] [
 
 // args: <add|remove|status> <ip> [rate_kbit] [label] [rate_up]. The label is
 // taken and unused; an empty rate_up is the download rate, never zero (a
-// zero ceiling is a total upload block reported as success).
-function main(args) {
+// zero ceiling is a total upload block reported as success). quiet: the
+// restore, which puts back what was already announced.
+function main(args, quiet) {
 	let action = arg(args[0]), ip = arg(args[1]), rate = arg(args[2]), up = arg(args[4]);
 	if (up == '')
 		up = rate;
@@ -359,7 +361,9 @@ function main(args) {
 	if (limit.valid_rate(up) == null)
 		return fail(sprintf('invalid upload rate: expected whole kbit/s, 1 to %d', limit.MAX_KBIT));
 	let r = apply(ip, int(rate), int(up));
-	// Where an announcement of an applied shape belongs; never in restore().
+	// An announcement of an applied shape goes here, behind !quiet: the
+	// restore passes quiet (the shell hook of #156 runs the shaper with
+	// TCTL_NOTIFY=0), so a reboot does not announce every saved shape again.
 	return r;
 }
 
@@ -390,7 +394,7 @@ function restore() {
 		let ip = rec_str(r.ip), rate = rec_str(r.rate_kbit), up = rec_str(r.rate_kbit_up);
 		if (rate == '' || rate == '0')
 			continue;
-		if (main([ 'add', ip, rate, 'shape_' + ip, up ]).rc == 0)
+		if (main([ 'add', ip, rate, 'shape_' + ip, up ], true).rc == 0)
 			res.restored++;
 		else {
 			res.failed++;

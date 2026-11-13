@@ -160,7 +160,7 @@ SHADOW="$STATE/shadow"
 mkdir -p "$SHADOW/trafficctl"
 cp "$UC_LIB"/trafficctl/*.uc "$SHADOW/trafficctl/"
 sed -i 's/^function ratelimit(args) {$/&\n\tlib.log("applied", "ratelimit", join(" ", args));\n\treturn { rc: 0 };/' "$SHADOW/trafficctl/limit.uc"
-sed -i 's/^function main(args) {$/&\n\tlib.log("applied", "shape", join(" ", args));\n\treturn { rc: 0 };/' "$SHADOW/trafficctl/shape.uc"
+sed -i 's/^function main(args, quiet) {$/&\n\tlib.log("applied", "shape", join(" ", args));\n\treturn { rc: 0 };/' "$SHADOW/trafficctl/shape.uc"
 assert_eq "harness: both recorders are in the shadow modules" "2" \
     "$(cat "$SHADOW/trafficctl/limit.uc" "$SHADOW/trafficctl/shape.uc" | grep -c 'lib.log("applied"')"
 
