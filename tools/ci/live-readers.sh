@@ -40,20 +40,23 @@ set -u
 MODE="${1:-}"
 OUT=/out
 W=/work
-mkdir -p "$W/bin" "$OUT/legacy" "$OUT/new" /var/lock /var/log /var/run /tmp/trafficctl /etc/trafficctl
+mkdir -p "$W/ubus" "$OUT/legacy" "$OUT/new" /var/lock /var/log /var/run/ubus /tmp/trafficctl /etc/trafficctl
 
 say() { echo "== $*"; }
 die() { echo "live-readers: $*" >&2; exit 1; }
 
-# ── packages: the rootfs ships no tc ─────────────────────────────────────────
-if ! command -v tc >/dev/null 2>&1; then
+# ── packages: the rootfs ships no tc; the ubus stand-in needs uloop ─────────
+add() {
     if command -v opkg >/dev/null 2>&1; then
-        opkg update >/dev/null 2>&1; opkg install tc-tiny >/dev/null 2>&1
+        opkg update >/dev/null 2>&1; opkg install "$@" >/dev/null 2>&1
     else
-        apk update >/dev/null 2>&1; apk add tc-tiny >/dev/null 2>&1
+        apk update >/dev/null 2>&1; apk add "$@" >/dev/null 2>&1
     fi
-fi
+}
+command -v tc >/dev/null 2>&1 || add tc-tiny
 command -v tc >/dev/null 2>&1 || die "no tc in the image"
+[ -e /usr/lib/ucode/uloop.so ] || add ucode-mod-uloop
+[ -e /usr/lib/ucode/uloop.so ] || die "no ucode-mod-uloop in the image"
 say "nft $(nft --version)"
 say "tc $(tc -V 2>&1)"
 
@@ -111,23 +114,21 @@ EOF
 uci set trafficctl.main.persist_rules=1
 uci commit trafficctl
 
-# No netifd, so no network.interface on ubus: the shell writers' ubus calls
-# get its answer from a stand-in. The ucode readers ask nothing of it.
-cat > "$W/bin/ubus" <<'EOF'
-#!/bin/sh
-case "$*" in
-    "call network.interface dump")
-        echo '{"interface":[{"interface":"lan","up":true,"l3_device":"br-lan","ipv4-address":[{"address":"192.168.0.1","mask":24}]},{"interface":"wan","up":true,"l3_device":"wan","ipv4-address":[{"address":"203.0.113.2","mask":24}]}]}' ;;
-    "call network.interface.lan status")
-        echo '{"up":true,"l3_device":"br-lan","ipv4-address":[{"address":"192.168.0.1","mask":24}]}' ;;
-    "call network.interface.wan status")
-        echo '{"up":true,"l3_device":"wan","ipv4-address":[{"address":"203.0.113.2","mask":24}]}' ;;
-    list) ;;
-    *) exit 1 ;;
-esac
+# No netifd: a private ubusd on the default socket, so the ubus CLI (the
+# shell shaper) and the ucode module (the limiter) meet the same
+# network.interface.
+cat > "$W/ubus/network.interface@dump.json" <<'EOF'
+{"interface":[{"interface":"lan","up":true,"device":"br-lan","l3_device":"br-lan","ipv4-address":[{"address":"192.168.0.1","mask":24}]},{"interface":"wan","up":true,"device":"wan","l3_device":"wan","ipv4-address":[{"address":"203.0.113.2","mask":24}]}]}
 EOF
-chmod +x "$W/bin/ubus"
-export PATH="$W/bin:$PATH"
+echo '{"up":true,"l3_device":"br-lan","ipv4-address":[{"address":"192.168.0.1","mask":24}]}' > "$W/ubus/network.interface.lan@status.json"
+echo '{"up":true,"l3_device":"wan","ipv4-address":[{"address":"203.0.113.2","mask":24}]}' > "$W/ubus/network.interface.wan@status.json"
+SOCK=/var/run/ubus/ubus.sock
+ubusd -s "$SOCK" &
+i=0
+until [ -S "$SOCK" ]; do i=$((i + 1)); [ "$i" -gt 10 ] && die "ubusd did not start"; sleep 1; done
+ucode -S /src/tests/lib/ubus-mock.uc "$SOCK" "$W/ubus" > "$W/mock.out" 2>&1 &
+i=0
+until grep -q '^ready$' "$W/mock.out"; do i=$((i + 1)); [ "$i" -gt 10 ] && die "ubus-mock did not start: $(cat "$W/mock.out")"; sleep 1; done
 
 cat > /tmp/dhcp.leases <<'EOF'
 1794381090 02:00:00:00:00:50 192.168.0.50 kid-tablet *

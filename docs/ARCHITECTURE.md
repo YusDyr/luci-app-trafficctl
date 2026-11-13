@@ -43,7 +43,7 @@ graph TD
         subgraph "Action Scripts — /usr/libexec/trafficctl/"
             BLK["trafficctl-block.sh = trafficctl block<br/>(ucode)"]
             UBK["trafficctl-unblock.sh = trafficctl unblock<br/>(ucode)"]
-            RL["trafficctl-ratelimit.sh"]
+            RL["trafficctl-ratelimit.sh = trafficctl ratelimit<br/>(ucode)"]
             SH["trafficctl-shape.sh"]
             MFA["trafficctl-macfilter-add.sh = trafficctl macfilter-add<br/>(ucode)"]
             MFR["trafficctl-macfilter-remove.sh = trafficctl macfilter-remove<br/>(ucode)"]
@@ -189,12 +189,20 @@ The file `trafficctl-fw.sh` is sourced by all scripts and provides firewall func
 
 | Function | Implementation |
 |----------|----------------|
-| `tctl_ratelimit_add` | `netdev tm_ratelimit`: `ip daddr ... limit rate over ... drop` on every LAN device's egress chain `dl_<dev>` (WAN ingress chain `dl` on kernels without egress), `ip saddr ...` on every bridge port's ingress chain `ul_<port>`; in `each` mode one meter per chain (`tctl_rl_meter_name`). A device that refuses its rule is logged and reported (`partial`); the rules on the other devices stay |
-| `tctl_ratelimit_remove` | `tctl_rl_delete_rules`: rules by exact comment and handle across all chains, then the meter sets those rules named (nftables 1.1 keeps them) |
 | `tctl_get_wan_device` | `uci get network.wan.device` (fallback to `.ifname`) |
 | `tctl_get_lan_device` | `uci get network.lan.device` (fallback to `.ifname`) |
 | `tctl_validate_ip` | regex + octet range check, no leading zeros |
 | `tctl_get_wifi_interfaces` | `uci show wireless` parsing |
+
+The limiter is ucode too, `trafficctl/files/usr/share/ucode/trafficctl/limit.uc`
+behind `trafficctl ratelimit`:
+
+| Function | Implementation |
+|----------|----------------|
+| `limit.add` | `netdev tm_ratelimit`: `ip daddr ... limit rate over ... drop` on every LAN device's egress chain `dl_<dev>` (WAN ingress chain `dl` on kernels without egress), `ip saddr ...` on every bridge port's ingress chain `ul_<port>`; in `each` mode one meter per chain, `tctl_m_<slug>_<chain>`. One `nft` command per rule, so a device that refuses its rule is logged and reported (`partial`) and the rules on the other devices stay |
+| `limit.remove` | rules by exact comment and handle across all chains, then the meter sets those rules named (nftables 1.1 keeps them), then the IPv6 address set |
+| `limit.remove_legacy` | a limit from before v1.13.2, commented after the caller's label (`rl_ratelimit_tg` from the bot): only the rules naming exactly this target, `ip daddr` for download and `ip saddr` for upload, then their meters |
+| `limit.restore` | the `ratelimit` records of `rules.json`, part of `trafficctl restore` on `ifup lan`; a limit still live is replaced, a record that fails is logged and the rest go on |
 
 The block itself is ucode since the CLI took over `block`/`unblock`:
 `ctl.block_add` inserts `ip saddr <ip> counter drop comment "tctl_block_<slug>"`
@@ -205,7 +213,7 @@ deletes by handle after reading the chain with `nft -j`.
 
 ### Reading the rules back (ucode)
 
-The limiter and shaper writers above stay shell. Everything that reads their rules back for a
+The shaper writer stays shell. Everything that reads the limiter's and the shaper's rules back for a
 report (`trafficctl ratelimit-stats`, `shape-stats`, `rules`) is in
 `trafficctl/files/usr/share/ucode/trafficctl/ctl.uc`:
 
@@ -470,7 +478,7 @@ Telegram API  ←──curl long poll──  trafficctl-telegram.sh (procd)
                                         ├── trafficctl-summary.sh (device list)
                                         ├── trafficctl-block.sh / unblock.sh
                                         ├── trafficctl-macfilter-add/remove.sh
-                                        ├── trafficctl-ratelimit.sh
+                                        ├── trafficctl-ratelimit.sh (trafficctl ratelimit)
                                         └── trafficctl-shape.sh
 ```
 

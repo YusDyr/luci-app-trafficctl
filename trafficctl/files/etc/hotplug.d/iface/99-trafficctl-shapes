@@ -18,9 +18,10 @@ while ! tc qdisc show dev "$(tctl_get_lan_device)" >/dev/null 2>&1; do
     sleep 0.5 2>/dev/null || sleep 1
 done
 
-# Saved blocks (persist_rules): `trafficctl restore` waits up to 10 seconds
-# for fw4, which at boot can load its ruleset after ifup lan, and logs each
-# block it could not put back.
+# Saved blocks and rate limits (persist_rules): `trafficctl restore` waits up
+# to 10 seconds for fw4, which at boot can load its ruleset after ifup lan,
+# replaces a limit still live from before (an ifup without a reboot), and logs
+# each one it could not put back, or put back only on some devices.
 /usr/sbin/trafficctl restore >/dev/null 2>&1
 
 # Restore shaping rules
@@ -39,11 +40,9 @@ if [ -f "$SHAPES_FILE" ]; then
     done
 fi
 
-# Restore ratelimits and port-forward controls (if persist enabled); blocks
+# Restore port-forward controls (if persist enabled); blocks and rate limits
 # went back above
 if [ -f "$RULES_FILE" ] && tctl_persist_enabled; then
-    # What the limiter already holds, for the ratelimit records below.
-    RL_LIVE=$(nft list table netdev tm_ratelimit 2>/dev/null)
     # How many records there are comes from the file, not from a constant.
     # `seq 0 99` stopped at the hundredth, so every rule past it was silently
     # not restored: present in rules.json, shown by the UI as persisted, and
@@ -68,55 +67,6 @@ if [ -f "$RULES_FILE" ] && tctl_persist_enabled; then
         [ -z "$ip" ] && continue
 
         case "$type" in
-            ratelimit)
-                # Records written before the mode was stored have none; they
-                # get the same default the CLI would have given the target, so
-                # a subnet does not change meaning across the upgrade.
-                mode=$(jsonfilter -i "$RULES_FILE" -e "@[$idx].mode" 2>/dev/null)
-                [ -z "$mode" ] && mode=$(tctl_ratelimit_default_mode "$ip")
-                # Absent on every record written before the directions could
-                # differ, and on every symmetric one since. tctl_ratelimit_add
-                # reads that as "same as download", which is what those records
-                # have always meant.
-                param_up=$(jsonfilter -i "$RULES_FILE" -e "@[$idx].param_up" 2>/dev/null)
-                # if-blocks, not `a && b || logger`: a record with no rate
-                # restores nothing and is not a failure. The flags are checked
-                # because the nft path returns 0 even when a direction failed.
-                if [ -z "$param" ] || [ "$param" = "0" ]; then
-                    :
-                elif ! tctl_validate_rate "$param" || { [ -n "$param_up" ] && ! tctl_validate_rate "$param_up"; }; then
-                    # Older releases persisted unvalidated rates; one such
-                    # record came back as a 1 byte/s block on every boot.
-                    logger -t trafficctl "Not restoring ratelimit for $ip: invalid rate '${param}'/'${param_up}'"
-                else
-                    TCTL_RL_DOWNLOAD_FAILED=0
-                    TCTL_RL_UPLOAD_FAILED=0
-                    TCTL_RL_DOWNLOAD_ERR=""
-                    TCTL_RL_UPLOAD_ERR=""
-                    # An ifup without a reboot finds the rules still there.
-                    # Adding them again stacked a second copy, and in each
-                    # mode on nftables 1.0 the copy's meter clashed with the
-                    # first ("Resource busy"), which tctl_ratelimit_add now
-                    # reports as a failure. Checked against one listing taken
-                    # before the loop, so a boot (empty table) pays nothing.
-                    _cmt=$(tctl_ratelimit_comment "$ip")
-                    # Each comment in full, closing quote included: a prefix
-                    # would take 192.168.1.10 (and 192.168.1.1/24) for
-                    # 192.168.1.1.
-                    case "$RL_LIVE" in
-                        *"\"$_cmt\""*|*"\"${_cmt}_ul\""*|*"\"${_cmt}_ul6\""*|*"\"${_cmt}_dl6\""*|*"\"${_cmt}_v6\""*)
-                            tctl_ratelimit_remove "$ip" "$_cmt" 2>/dev/null ;;
-                    esac
-                    if ! tctl_ratelimit_add "$ip" "$param" "$_cmt" "$mode" "$param_up" 2>/dev/null \
-                        || [ "$TCTL_RL_DOWNLOAD_FAILED" = "1" ] || [ "$TCTL_RL_UPLOAD_FAILED" = "1" ]; then
-                        logger -t trafficctl "Failed to restore ratelimit for $ip (${param}kbit)${TCTL_RL_DOWNLOAD_ERR:+: $TCTL_RL_DOWNLOAD_ERR}${TCTL_RL_UPLOAD_ERR:+: $TCTL_RL_UPLOAD_ERR}"
-                    elif [ -n "$TCTL_RL_DOWNLOAD_ERR$TCTL_RL_UPLOAD_ERR" ]; then
-                        # Live on the devices that took it; the next ifup or
-                        # a re-apply retries the rest.
-                        logger -t trafficctl "Restored ratelimit for $ip (${param}kbit) PARTIALLY${TCTL_RL_DOWNLOAD_ERR:+: $TCTL_RL_DOWNLOAD_ERR}${TCTL_RL_UPLOAD_ERR:+: $TCTL_RL_UPLOAD_ERR}"
-                    fi
-                fi
-                ;;
             pfw_pause|pfw_limit)
                 # ip field is a composite key: scope/proto/ip|local/port
                 _scope=${ip%%/*}; _rest=${ip#*/}
