@@ -18,8 +18,10 @@
 //                            both directions, rule by rule; what loaded:
 //                            { netdev, dl_failed, ul_failed, dl_err, ul_err,
 //                              ul6, dl6 }
-//   remove(ip, cmt)          the rules with these comments, the meters they
-//                            used, then the IPv6 address set
+//   remove(ip, cmt, legacy)  the rules with these comments, the meters they
+//                            used, then the IPv6 address set; legacy: only
+//                            the rules that police ip (a label comment is
+//                            shared by every device that label limited)
 //   ratelimit(args)          trafficctl ratelimit: { reply, rc }
 //   restore()                the ratelimit records of rules.json (ifup lan)
 //
@@ -312,7 +314,22 @@ function add(ip, kbit, cmt, mode, kbit_up) {
 // 1.30.4 go too: nftables 1.0 lists "meter <name>", 1.1 "add @<name>" and
 // keeps the set, which can only go after the last rule using it. Read as
 // text, the listing every release matched comments against.
-function delete_rules(cmts) {
+// Whether a listed rule polices this target: the address as the whole
+// field after ip saddr/daddr, or the target's own IPv6 address set.
+function owns(f, ip) {
+	let set = '@tctl_v6_' + slug(ip);
+	for (let i = 0; i < length(f); i++) {
+		if (f[i] == set)
+			return true;
+		if (i > 0 && i < length(f) - 1 && f[i - 1] == 'ip' && (f[i] == 'saddr' || f[i] == 'daddr') && f[i + 1] == ip)
+			return true;
+	}
+	return false;
+}
+
+// With a target, only the rules that police it: a caller's label is shared
+// by every device that caller limited.
+function delete_rules(cmts, target) {
 	let want = {};
 	for (let c in cmts)
 		want['"' + c + '"'] = true;
@@ -329,7 +346,7 @@ function delete_rules(cmts) {
 				hit = true;
 				break;
 			}
-		if (!hit)
+		if (!hit || (target != null && !owns(f, target)))
 			continue;
 		let h = null, set = null;
 		for (let i = 0; i < length(f) - 1; i++) {
@@ -358,8 +375,8 @@ const SUFFIXES = [ '', '_ul', '_ul6', '_dl6', '_v6' ];
 // The v6 address set last, once no rule uses it. Most targets never had one,
 // and its absence is not a failure: the shell once returned nft's status
 // here, so removing such a limit failed and left its rules.json record.
-function remove(ip, cmt) {
-	delete_rules(map(SUFFIXES, (x) => cmt + x));
+function remove(ip, cmt, legacy) {
+	delete_rules(map(SUFFIXES, (x) => cmt + x), legacy ? ip : null);
 	nft([ 'delete', 'set', ...TABLE, 'tctl_v6_' + slug(ip) ]);
 	return true;
 }
@@ -404,8 +421,11 @@ function ratelimit(args) {
 
 	if (rate == '0') {
 		// A limit from before comments were derived from the target carries
-		// the caller's label.
-		remove(ip, 'rl_ratelimit_' + label);
+		// the caller's label, and so does every other device that caller
+		// limited: those rules go only where they police this target.
+		// v1.30.x matched the label alone, so removing one device's limit
+		// from Telegram lifted the bot's limits on all the others.
+		remove(ip, 'rl_ratelimit_' + label, true);
 		remove(ip, cmt);
 		if (lib.persist_enabled())
 			lib.persist_remove('ratelimit', ip);

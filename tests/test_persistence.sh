@@ -75,26 +75,11 @@ cutpersist=$(awk '/^config cut/ { inc = 1 } inc && /^[[:space:]]*option persist/
 assert_eq "the global cut does NOT persist by default" "0" "$cutpersist"
 
 # ── the qualifier ─────────────────────────────────────────────────────────
-cat > "$QBIN/uci" <<MOCK
-#!/bin/sh
-while [ "\$1" = "-q" ]; do shift; done
-[ "\$1" = "get" ] || exit 1
-[ "\$2" = "trafficctl.main.persist_rules" ] && { cat "$TMPDIR/persist"; exit 0; }
-exit 1
-MOCK
-cat > "$QBIN/nft" <<'MOCK'
-#!/bin/sh
-exit 1
-MOCK
-chmod +x "$QBIN"/*
+note() { fw_cfg "$1"; TCTL_ROOT="$ROOT" tcall trafficctl.lib persist_note 2>/dev/null; }
 
-note() { PATH="$QBIN:$PATH" sh -c ". '$BIN/trafficctl-fw.sh'; tctl_persist_note" 2>/dev/null; }
+assert_eq "nothing is appended when persistence is on" "" "$(note 1)"
 
-printf '1\n' > "$TMPDIR/persist"
-assert_eq "nothing is appended when persistence is on" "" "$(note)"
-
-printf '0\n' > "$TMPDIR/persist"
-out=$(note)
+out=$(note 0)
 assert_contains "the message says the rule is not persistent" "NOT PERSISTENT" "$out"
 assert_contains "and that it will be lost on reboot" "lost on reboot" "$out"
 # A complaint with no remedy is just a complaint; the exact command is what
@@ -103,22 +88,8 @@ assert_contains "and names the uci command that fixes it" \
     "uci set trafficctl.main.persist_rules=1" "$out"
 
 # ── every losable apply path must carry it ────────────────────────────────
-# Counted rather than grepped for prose: adding a success message without the
-# qualifier should fail here too. The limiter emits 3 apply results.
-# shellcheck disable=SC2043  # one script left; the loop takes the next
-for pair in "trafficctl-ratelimit.sh:3"; do
-    f=${pair%%:*}; want=${pair##*:}
-    got=$(grep -c '\\"persist\\":\$PERSIST' "$BIN/$f")
-    assert_eq "$f reports persist on each of its apply results" "$want" "$got"
-    if grep -q 'tctl_persist_note' "$BIN/$f"; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s does not append the persistence qualifier\n" "$f"
-    fi
-done
-
-# The block (`trafficctl block` since the ucode port), by running it.
+# Run, not grepped: the limiter (`trafficctl ratelimit`) in
+# tests/test_direction.sh, the block here.
 fw_cfg 0
 OUT=$(fw_run block 192.168.1.50)
 assert_contains "block, persistence off: says persist:false" '"persist":false' "$OUT"
@@ -299,28 +270,25 @@ case "$shapes_block" in
     *) PASS=$((PASS + 1)) ;;
 esac
 
-rules_block=$(awk '/^# Restore ratelimits/ { f = 1 } f { print } f && /^fi$/ { exit }' "$HOOK")
+rules_block=$(awk '/^# Restore port-forward controls/ { f = 1 } f { print } f && /^fi$/ { exit }' "$HOOK")
 case "$rules_block" in
     *tctl_persist_enabled*) PASS=$((PASS + 1)) ;;
     *)
         FAIL=$((FAIL + 1))
-        printf "FAIL: the ratelimit restore no longer checks persist_rules\n"
+        printf "FAIL: the port-forward restore no longer checks persist_rules\n"
         ;;
 esac
-case "$rules_block" in
-    *"ratelimit)"*) PASS=$((PASS + 1)) ;;
-    *)
-        FAIL=$((FAIL + 1))
-        printf "FAIL: the restore hook does not handle a persisted 'ratelimit' record\n"
-        ;;
-esac
-assert_contains "the hook restores the blocks through the CLI" "/usr/sbin/trafficctl restore" "$(cat "$HOOK")"
+# Blocks and rate limits come back through the CLI, which checks the flag
+# itself (below, and tests/test_meter_per_chain.sh); a second copy of either
+# in the hook would apply each saved limit twice.
+assert_contains "the hook restores blocks and limits through the CLI" "/usr/sbin/trafficctl restore" "$(cat "$HOOK")"
+assert_not_contains "the hook has no ratelimit restore of its own" "ratelimit)" "$rules_block"
 
 # The blocks, from a file the v1.30 shell writer produced.
 fw_flush
 rm -f "$RULES"
 shw 'tctl_persist_save block 192.168.1.60 ""'
-shw 'tctl_persist_save ratelimit 192.168.1.61 5000'
+shw 'tctl_persist_save pfw_pause forward/tcp/192.168.1.61/8080 ""'
 shw 'tctl_persist_save block 192.168.1.62 tg'
 fw_cfg 0
 assert_eq "restore, persistence off: nothing restored" '{"ok":true,"restored":0,"failed":0}' "$(fw_run restore)"
@@ -355,7 +323,7 @@ assert_eq "restore: waits for inet fw4 before restoring a block" \
 fw_clear
 printf '[{"type":"ratelimit","ip":"192.168.1.61","param":"5000"}]' > "$RULES"
 NFT_NOFW4=always fw_run restore >/dev/null
-assert_eq "restore: no blocks saved, no wait on fw4" "" "$(cat "$NFT_LOG")"
+assert_eq "restore: no blocks saved, no wait on fw4" "" "$(grep "inet fw4" "$NFT_LOG")"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

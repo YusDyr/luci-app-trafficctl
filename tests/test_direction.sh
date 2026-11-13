@@ -118,12 +118,65 @@ assert_contains "limiter: no egress hook: WAN ingress fallback" \
 assert_eq "limiter: no egress hook: download rule on the fallback chain" "dl -" "$(lt_rules_of rl_ratelimit_192_168_1_50)"
 assert_contains "limiter: no egress hook: complete, the LAN errors dropped" '"partial":false' "$OUT"
 
+# ── limiter: what the reply says about the reboot (#105) ─────────────────────
+# Each apply result carries the qualifier, the one-direction ones included.
+for c in both: up:dl_br_lan; do
+    lt_reset
+    OUT=$(NFT_FAIL_HOOKS="${c#*:} dl" lt_run ratelimit 192.168.1.50 5000)
+    assert_contains "limiter ${c%%:*}, persistence off: says persist:false" '"persist":false' "$OUT"
+    assert_contains "limiter ${c%%:*}, persistence off: the message says NOT PERSISTENT" "NOT PERSISTENT" "$OUT"
+done
+assert_contains "limiter: the last case was the upload-only result" "UPLOAD ONLY" "$OUT"
+lt_reset
+OUT=$(NFT_FAIL_CHAINS="ul_lan1 ul_lan2" lt_run ratelimit 192.168.1.50 5000)
+assert_contains "limiter download only, persistence off: NOT PERSISTENT" "NOT PERSISTENT" "$OUT"
+assert_contains "limiter: that was the download-only result" "DOWNLOAD ONLY" "$OUT"
+assert_eq "limiter, persistence off: nothing saved" "[]" "$(cat "$RULES")"
+printf '[{"type":"ratelimit","ip":"192.168.1.50","param":"5000"}]\n' > "$RULES"
+: > "$NFT_LOG"
+assert_contains "restore, persistence off: no limit restored" '"restored":0' "$(lt_run restore)"
+assert_eq "restore, persistence off: nft untouched" "" "$(grep -v '^list' "$NFT_LOG")"
+lt_cfg 1
+lt_reset
+OUT=$(lt_run ratelimit 192.168.1.50 5000)
+assert_contains "limiter, persistence on: says persist:true" '"persist":true' "$OUT"
+if printf '%s' "$OUT" | grep -q 'NOT PERSISTENT'; then
+    FAIL=$((FAIL + 1)); printf "FAIL: limiter, persistence on: still says NOT PERSISTENT\n"
+else
+    PASS=$((PASS + 1))
+fi
+lt_cfg 0
+lt_reset
+lt_run ratelimit 192.168.1.50 5000 rl_test >/dev/null
+
 # ── limiter: removal clears both ─────────────────────────────────────────────
 : > "$NFT_LOG"
 lt_run ratelimit 192.168.1.50 0 rl_test >/dev/null
 NFT=$(cat "$NFT_LOG")
 assert_contains "limiter: removal scans the whole table" "list table netdev tm_ratelimit" "$NFT"
 assert_eq "limiter: removal leaves nothing" "" "$(lt_rules_of rl_ratelimit_192_168_1_50; lt_rules_of rl_ratelimit_192_168_1_50_ul)"
+
+# ── limiter: limits from before target-derived comments ──────────────────────
+# Up to v1.13.x a rule's comment came from the caller's label, so the bot's
+# limits on several devices all read "rl_ratelimit_tg". Removing one of them
+# removes that label's rules only where they police this target: v1.30.x
+# matched the label alone and lifted every other device's limit with it.
+lt_reset
+legacy() {   # legacy <chain> <hook> <dev> <prio> <rule text>
+    PATH="$MOCKBIN:$PATH" nft add chain netdev tm_ratelimit "$1" "{ type filter hook $2 device $3 priority $4; }"
+    PATH="$MOCKBIN:$PATH" nft add rule netdev tm_ratelimit "$1" "$5"
+}
+legacy dl_br_lan egress br-lan 0 'ip daddr 192.168.1.5 limit rate over 625000 bytes/second counter drop comment "rl_ratelimit_tg"'
+legacy dl_br_lan egress br-lan 0 'ip daddr 192.168.1.50 limit rate over 625000 bytes/second counter drop comment "rl_ratelimit_tg"'
+legacy ul_lan1 ingress lan1 -200 'ip saddr 192.168.1.5 limit rate over 625000 bytes/second counter drop comment "rl_ratelimit_tg_ul"'
+legacy ul_lan1 ingress lan1 -200 'ip saddr 192.168.1.50 limit rate over 625000 bytes/second counter drop comment "rl_ratelimit_tg_ul"'
+OUT=$(lt_run ratelimit 192.168.1.5 0 tg)
+assert_contains "legacy label: the removal succeeds" '"ok":true' "$OUT"
+TABLE=$(lt_table)
+assert_eq "legacy label: this device's rules are gone" "" \
+    "$(printf '%s\n' "$TABLE" | grep -E 'ip [sd]addr 192\.168\.1\.5 ')"
+assert_eq "legacy label: the other device's two rules stay" "2" \
+    "$(printf '%s\n' "$TABLE" | grep -cE 'ip [sd]addr 192\.168\.1\.50 .*"rl_ratelimit_tg(_ul)?"')"
 
 # kmod-nft-netdev missing: every chain would fail, so it stops and says why.
 lt_reset
