@@ -199,7 +199,8 @@ n=$(table | grep -c 'ip [sd]addr 192\.168\.0\.81 .*"rl_ratelimit_tg\(_ul\)\{0,1\
 # Saved limits, a reboot (the table gone), the restore; then an ifup without
 # a reboot, whose restore must replace the live limits, not stack a copy
 # (its meter clashed with the first on nftables 1.0). A record 1.30.x saved
-# with a zero-padded mask comes back in its normal form.
+# with a zero-padded mask comes back in its normal form. Before the ifup pass
+# the bot's legacy label limits are live again, and the restore leaves them.
 say "restore: persisted limits after a reboot, then again over them"
 uci set trafficctl.main.persist_rules=1 && uci commit trafficctl
 sh $S/trafficctl-ratelimit.sh 10.0.20.0/24 2000 "" each 500 >/dev/null
@@ -208,6 +209,12 @@ sed -i 's/\]$/,{"type":"ratelimit","ip":"10.0.30.0\/024","param":"1000","mode":"
 cat /etc/trafficctl/rules.json; echo
 nft delete table netdev tm_ratelimit
 for pass in boot ifup; do
+    if [ $pass = ifup ]; then
+        nft add rule netdev tm_ratelimit dl_br_lan "ip daddr 192.168.0.81 limit rate over 62500 bytes/second counter drop comment \"rl_ratelimit_tg\"" \
+            || die "cannot write the legacy download rule"
+        nft add rule netdev tm_ratelimit ul_lan1 "ip saddr 192.168.0.81 limit rate over 62500 bytes/second counter drop comment \"rl_ratelimit_tg_ul\"" \
+            || die "cannot write the legacy upload rule"
+    fi
     out=$(/usr/sbin/trafficctl restore)
     echo "$out"
     case "$out" in
