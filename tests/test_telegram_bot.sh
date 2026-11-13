@@ -271,7 +271,7 @@ reset
 printf '{"ok":true}\n' > "$NLOG/reply.block"
 upd "$(cbq 1 act:block:192.168.1.11)"
 bot > /dev/null
-assert_eq "toast: no msg is done" done "$(req answerCallbackQuery | sed -n 1p | jq -r .text)"
+assert_eq "toast: no msg is done" 'done' "$(req answerCallbackQuery | sed -n 1p | jq -r .text)"
 
 # Validation: the address and the rate land in a command line.
 check_cb() {   # check_cb <name> <data> <toast>

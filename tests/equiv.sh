@@ -154,6 +154,7 @@ CURLERR='echo "{\\"ok\\":false,\\"error_code\\":400,\\"description\\":\\"Bad Req
 # moments), the offset file and the log lines.
 BOTF='tmp/curl.log,tmp/bot.log,tmp/trafficctl_tg_offset,tmp/logger.log'
 TGDEVS='[{"ip":"192.168.0.101","name":"Kitchen tablet","conn_type":"5G","blocked":false,"wifi_blocked":false,"rate_limit_kbit":0,"shape_kbit":0},{"ip":"192.168.0.102","name":"TV (4K)","conn_type":"lan1","blocked":true,"wifi_blocked":false,"rate_limit_kbit":8000,"rate_limit_kbit_up":2000,"shape_kbit":0},{"ip":"192.168.0.103","name":"","conn_type":"2.4G","blocked":false,"wifi_blocked":true,"rate_limit_kbit":3000,"rate_limit_kbit_up":0,"shape_kbit":5000,"shape_kbit_up":5000},{"ip":"192.168.0.104","name":"Пётр'"'"'s phone","conn_type":"wifi","blocked":false,"wifi_blocked":false,"rate_limit_kbit":0,"shape_kbit":4000,"shape_kbit_up":1000},{"ip":"192.168.0.105","name":"averyveryverylongname","conn_type":"routed","blocked":"1","wifi_blocked":"0","rate_limit_kbit":"0","shape_kbit":0}]'
+# shellcheck disable=SC2034 # read by the bot-status-clean case
 TGCLEAN='[{"ip":"192.168.0.101","name":"Kitchen tablet","conn_type":"5G","blocked":false,"wifi_blocked":false,"rate_limit_kbit":0,"shape_kbit":0},{"ip":"192.168.0.103","name":"","conn_type":"lan2","blocked":false,"wifi_blocked":false,"rate_limit_kbit":0,"shape_kbit":0}]'
 botcfg() {   # botcfg [uci option=value...]: the bot on, chat 4242, the devices above
     local o

@@ -202,7 +202,7 @@ for f in /etc/init.d/trafficctl-telegram /usr/libexec/trafficctl/trafficctl-tele
     o=$(owner_of "$f")
     [ "$o" = trafficctl-telegram ] || { echo "FAIL: $f is owned by '$o' after the upgrade, expected trafficctl-telegram"; exit 1; }
 done
-if [ "$FMT" = ipk ] && grep -q 'trafficctl-telegram' /usr/lib/opkg/info/trafficctl.list; then
+if [ "$FMT" = ipk ] && grep -qE '(trafficctl-telegram(\.sh|\.uc)?|/telegram\.uc)$' /usr/lib/opkg/info/trafficctl.list; then
     echo "FAIL: trafficctl still lists the bot's files"
     exit 1
 fi
