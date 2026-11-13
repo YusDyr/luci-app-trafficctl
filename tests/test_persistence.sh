@@ -228,13 +228,36 @@ rmdir "$LOCK" 2>/dev/null
 
 # Writers at once: every record lands. Each kind alone first, so a lost
 # record says whose lock let it through.
+#
+# The shell lock is mkdir(2), which BusyBox's mkdir calls directly. The
+# uutils mkdir of ubuntu-26.04 runners does not: two of them racing for one
+# directory can both succeed, and twelve shell writers lost records there
+# while the ucode writers never did. The shell writers get a mkdir that is
+# the system call, as on the router.
 WLOG="$ROOT/tmp/writers.log"
+LOCKBIN="$FW_T/lockbin"
+mkdir -p "$LOCKBIN"
+cat > "$LOCKBIN/mkdir" <<'EOF'
+#!/usr/bin/env python3
+import os, sys
+args = sys.argv[1:]
+parents = '-p' in args
+rc = 0
+for d in (a for a in args if a != '-p'):
+    try:
+        os.makedirs(d, exist_ok=True) if parents else os.mkdir(d)
+    except OSError as e:
+        print('mkdir: %s: %s' % (d, e.strerror), file=sys.stderr)
+        rc = 1
+sys.exit(rc)
+EOF
+chmod +x "$LOCKBIN/mkdir"
 writers() {   # writers <shell writers> <ucode writers> <name>
     local i pids="" n f
     rm -f "$RULES" "$ROOT"/tmp/sh.*.err "$ROOT"/tmp/uc.*.err
     : > "$WLOG"
     for i in $(seq 1 "$1"); do
-        ( PATH="$MOCKBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; tctl_persist_save ratelimit 10.1.0.$i 100" \
+        ( PATH="$LOCKBIN:$MOCKBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; tctl_persist_save ratelimit 10.1.0.$i 100" \
             >/dev/null 2>"$ROOT/tmp/sh.$i.err"; echo "sh $i rc=$?" >> "$WLOG" ) &
         pids="$pids $!"
     done
