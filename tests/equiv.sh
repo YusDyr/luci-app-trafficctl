@@ -9,8 +9,17 @@
 #   ubus/  served by tests/lib/ubus-mock.uc on a private ubusd
 # The writers (block, unblock, the WiFi deny, restore) meet a stateful
 # `inet fw4 forward` instead (tests/lib/nft-fw4.uc) when the case's setup
-# creates root/tmp/nft.state, and a command with no recording succeeds when
-# cmd/<command>.default exists; every write lands in root/tmp/writes.log.
+# creates root/tmp/nft.state, the limiter a stateful `netdev tm_ratelimit`
+# (tests/lib/nft-netdev.sh, its NFT_FAIL_* knobs included) when it creates
+# the directory root/tmp/nft-netdev, and a command with no recording succeeds
+# when cmd/<command>.default exists; every write lands in root/tmp/writes.log.
+#
+# The limiter is compared with v1.30.5 ($LEGACY5_TAG), not v1.30.0: 1.30.5
+# fixed it (#154: a meter per chain, partial success reported, the sets the
+# rules name removed, the restore replacing a live limit) and the port starts
+# from there. Not compared, because the port differs on purpose: removing a
+# limit whose rules carry a caller's label from before v1.13.2 (v1.30.5
+# deleted that label's rules on every device; tests/test_direction.sh).
 # Both sides see the real uci, ubus and jsonfilter binaries from build-ucode.sh;
 # logger is recorded to root/tmp/logger.log.
 #
@@ -35,9 +44,11 @@
 . "$(dirname "$0")/lib/ucode.sh"
 
 LEGACY_TAG=v1.30.0
+LEGACY5_TAG=v1.30.5
 FIXTURES="$UC_REPO/tests/fixtures"
 W="$UC_TMP/work"
 L="$UC_TMP/legacy"
+L5="$UC_TMP/legacy5"
 C="$UC_TMP/current"
 PASS=0
 FAIL=0
@@ -173,6 +184,18 @@ NDF='tmp/dispatch.log,etc/trafficctl/seen_macs,tmp/trafficctl_tg_newdev,tmp/traf
 LND='sed -e "s#$LEXEC/trafficctl-ratelimit.sh#$W/ndstub/trafficctl-ratelimit.sh#" -e "s#$LEXEC/trafficctl-shape.sh#$W/ndstub/trafficctl-shape.sh#" "$L/trafficctl/files/etc/hotplug.d/dhcp/99-trafficctl-newdevice" > "$W/nd-hook"; sh "$W/nd-hook"; echo done'
 NND='ln -sfn "$W/ndstub" "$W/root/usr/libexec/trafficctl"; tctl newdevice; echo done'
 NEWMAC='ACTION=add MACADDR=02:00:00:00:00:99 IPADDR=192.168.0.99 HOSTNAME=newbie'
+
+# The limiter: an empty netdev table, conntrack flushes answered, both logs in
+# the root. RLW adds the table as each side leaves it.
+RL="$LOGROOT; mkdir -p \"\$W/root/tmp/nft-netdev\"; : > \"\$W/cmd/conntrack.default\"; rm -f \"\$W/root/etc/trafficctl/shapes.json\""
+RLW="$WR"
+RLT='nft -a list table netdev tm_ratelimit'
+# A limit placed by v1.30.5 itself.
+RLOLD="$RL; $PERSIST; sh \"\$L5EXEC/trafficctl-ratelimit.sh\" 192.168.0.109 5000 >/dev/null; sh \"\$L5EXEC/trafficctl-ratelimit.sh\" 192.168.0.0/24 2000 '' each >/dev/null; $FORGET"
+# Its rules.json after a reboot: the netdev table gone.
+RLBOOT="$RLOLD; rm -rf \"\$W/root/tmp/nft-netdev\"; mkdir -p \"\$W/root/tmp/nft-netdev\"; rm -f \"\$W/root/etc/trafficctl/shapes.json\""
+L5RL='sh "$L5EXEC/trafficctl-ratelimit.sh"'
+L5HOOK='ACTION=ifup INTERFACE=lan sh "$L5/trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes"'
 
 CASES="
 subnets | json | router-24.10 | trafficctl-subnets.sh | tctl subnets
@@ -330,6 +353,36 @@ newdevice-seed | text+$NDF | router-24.10 | sh:$NEWMAC; export ACTION MACADDR IP
 newdevice-no-ip | text+$NDF | router-24.10 | sh:ACTION=add MACADDR=02:00:00:00:00:98 IPADDR= HOSTNAME=; export ACTION MACADDR IPADDR HOSTNAME; $LND | ACTION=add MACADDR=02:00:00:00:00:98 IPADDR= HOSTNAME=; export ACTION MACADDR IPADDR HOSTNAME; $NND | $ND
 newdevice-limited | text+$NDF | router-24.10 | sh:ACTION=add MACADDR=02:00:00:00:00:98 IPADDR=192.168.0.109 HOSTNAME=x; export ACTION MACADDR IPADDR HOSTNAME; $LND | ACTION=add MACADDR=02:00:00:00:00:98 IPADDR=192.168.0.109 HOSTNAME=x; export ACTION MACADDR IPADDR HOSTNAME; $NND | $ND
 newdevice-off | text+$NDF | router-24.10 | sh:$NEWMAC; export ACTION MACADDR IPADDR HOSTNAME; $LND | $NEWMAC; export ACTION MACADDR IPADDR HOSTNAME; $NND | $ND; uci set trafficctl.newdevice.enabled=0; uci set trafficctl.telegram.enabled=0; uci commit trafficctl
+rl-host | text+$RLW | router-24.10 | sh:$L5RL 192.168.0.109 5000; echo rc=\$?; $RLT | tctl ratelimit 192.168.0.109 5000; echo rc=\$?; $RLT | $RL
+rl-host-1.1 | text+$RLW | router-24.10 | sh:NFT_EMU=1.1 $L5RL 192.168.0.109 5000 lbl each; echo rc=\$?; $RLT | NFT_EMU=1.1 tctl ratelimit 192.168.0.109 5000 lbl each; echo rc=\$?; $RLT | $RL
+rl-asym | text+$RLW | router-24.10 | sh:$L5RL 192.168.0.109 8000 '' '' 800; echo rc=\$?; $RLT | tctl ratelimit 192.168.0.109 8000 '' '' 800; echo rc=\$?; $RLT | $RL; $PERSIST
+rl-no-mac | text+$RLW | router-24.10 | sh:$L5RL 192.168.0.9 5000; echo rc=\$?; $RLT | tctl ratelimit 192.168.0.9 5000; echo rc=\$?; $RLT | $RL
+rl-nexthop | text+$RLW | router-24.10 | sh:$L5RL 192.168.0.200 5000; echo rc=\$?; $RLT | tctl ratelimit 192.168.0.200 5000; echo rc=\$?; $RLT | $RL; $ROUTED
+rl-subnet | text+$RLW | router-24.10 | sh:$L5RL 192.168.0.0/24 5000; echo rc=\$?; $RLT | tctl ratelimit 192.168.0.0/24 5000; echo rc=\$?; $RLT | $RL; $PERSIST
+rl-subnet-1.1 | text+$RLW | router-24.10 | sh:NFT_EMU=1.1 $L5RL 192.168.0.0/24 5000; echo rc=\$?; $RLT | NFT_EMU=1.1 tctl ratelimit 192.168.0.0/24 5000; echo rc=\$?; $RLT | $RL
+rl-shared | text+$RLW | router-24.10 | sh:$L5RL 10.0.20.0/24 5000 x shared; echo rc=\$?; $RLT | tctl ratelimit 10.0.20.0/24 5000 x shared; echo rc=\$?; $RLT | $RL; $PERSIST
+rl-all | text+$RLW | router-24.10 | sh:$L5RL all 2000; echo rc=\$?; $RLT | tctl ratelimit all 2000; echo rc=\$?; $RLT | $RL
+rl-replace | text+$RLW | router-24.10 | sh:$L5RL 192.168.0.109 3000; echo rc=\$?; $RLT | tctl ratelimit 192.168.0.109 3000; echo rc=\$?; $RLT | $RLOLD
+rl-remove | text+$RLW | router-24.10 | sh:$L5RL 192.168.0.109 0; echo rc=\$?; $RLT | tctl ratelimit 192.168.0.109 0; echo rc=\$?; $RLT | $RLOLD
+rl-remove-1.1 | text+$RLW | router-24.10 | sh:NFT_EMU=1.1 $L5RL 192.168.0.0/24 0; echo rc=\$?; $RLT | NFT_EMU=1.1 tctl ratelimit 192.168.0.0/24 0; echo rc=\$?; $RLT | $RL; $PERSIST; NFT_EMU=1.1 sh \"\$L5EXEC/trafficctl-ratelimit.sh\" 192.168.0.0/24 2000 >/dev/null; $FORGET
+rl-remove-none | text+$RLW | router-24.10 | sh:$L5RL 192.168.0.109 0; echo rc=\$? | tctl ratelimit 192.168.0.109 0; echo rc=\$? | $RL
+rl-partial | text+$RLW | router-24.10 | sh:NFT_FAIL_CHAINS=ul_lan3 $L5RL 192.168.0.109 5000; echo rc=\$?; $RLT | NFT_FAIL_CHAINS=ul_lan3 tctl ratelimit 192.168.0.109 5000; echo rc=\$?; $RLT | $RL
+rl-meter-busy | text+$RLW | router-24.10 | sh:NFT_FAIL_RULE='ul_lan2 saddr' $L5RL 192.168.0.0/24 5000; echo rc=\$?; $RLT | NFT_FAIL_RULE='ul_lan2 saddr' tctl ratelimit 192.168.0.0/24 5000; echo rc=\$?; $RLT | $RL
+rl-upload-only | text+$RLW | router-24.10 | sh:NFT_FAIL_HOOKS='dl_br_lan dl' $L5RL 192.168.0.109 5000; echo rc=\$?; $RLT | NFT_FAIL_HOOKS='dl_br_lan dl' tctl ratelimit 192.168.0.109 5000; echo rc=\$?; $RLT | $RL
+rl-wan-fallback | text+$RLW | router-24.10 | sh:NFT_FAIL_HOOKS=dl_br_lan $L5RL 192.168.0.109 5000; echo rc=\$?; $RLT | NFT_FAIL_HOOKS=dl_br_lan tctl ratelimit 192.168.0.109 5000; echo rc=\$?; $RLT | $RL
+rl-no-set | text+$RLW | router-24.10 | sh:NFT_FAIL_SET=1 $L5RL 192.168.0.109 5000; echo rc=\$?; $RLT | NFT_FAIL_SET=1 tctl ratelimit 192.168.0.109 5000; echo rc=\$?; $RLT | $RL
+rl-no-netdev | text+$RLW | router-24.10 | sh:NFT_FAIL_TABLE=1 $L5RL 192.168.0.109 5000; echo rc=\$? | NFT_FAIL_TABLE=1 tctl ratelimit 192.168.0.109 5000; echo rc=\$? | $RL
+rl-nss | text+$RLW,sys/kernel/debug/ecm/ecm_db/defunct_all | router-24.10 | sh:wmask $L5RL 192.168.0.109 5000 | wmask tctl ratelimit 192.168.0.109 5000 | $RL; $NSSON
+rl-bad-rate | text+$RLW | router-24.10 | sh:$L5RL 192.168.0.109 010; echo rc=\$? | tctl ratelimit 192.168.0.109 010; echo rc=\$? | $RL
+rl-bad-up | text+$RLW | router-24.10 | sh:$L5RL 192.168.0.109 5000 x each 0; echo rc=\$? | tctl ratelimit 192.168.0.109 5000 x each 0; echo rc=\$? | $RL
+rl-bad-target | text+$RLW | router-24.10 | sh:$L5RL '10.0.0.0/99' 5000; echo rc=\$? | tctl ratelimit '10.0.0.0/99' 5000; echo rc=\$? | $RL
+rl-bad-mode | text+$RLW | router-24.10 | sh:$L5RL 192.168.0.109 5000 x bogus; echo rc=\$? | tctl ratelimit 192.168.0.109 5000 x bogus; echo rc=\$? | $RL
+rl-usage | text | router-24.10 | sh:$L5RL 192.168.0.109; echo rc=\$? | tctl ratelimit 192.168.0.109; echo rc=\$? | $RL
+rl-restore | text+$RLW | router-24.10 | sh:$L5HOOK; echo rc=\$?; $RLT | tctl restore >/dev/null; echo rc=\$?; $RLT | $RLBOOT
+rl-restore-live | text+$RLW | router-24.10 | sh:$L5HOOK; echo rc=\$?; $RLT | tctl restore >/dev/null; echo rc=\$?; $RLT | $RLOLD
+rl-restore-off | text+$RLW | router-24.10 | sh:$L5HOOK; echo rc=\$?; $RLT | tctl restore >/dev/null; echo rc=\$?; $RLT | $RLBOOT; uci set trafficctl.main.persist_rules=0; uci commit trafficctl
+rl-restore-bad | text+$RLW | router-24.10 | sh:$L5HOOK; echo rc=\$?; $RLT | tctl restore >/dev/null; echo rc=\$?; $RLT | $RL; $PERSIST; printf '[{\"type\":\"ratelimit\",\"ip\":\"192.168.0.9\",\"param\":\"abc\"},{\"type\":\"ratelimit\",\"ip\":\"192.168.0.10\",\"param\":\"0\"},{\"type\":\"ratelimit\",\"ip\":\"192.168.0.109\",\"param\":\"4000\",\"mode\":\"each\",\"param_up\":\"400\"}]' > \"\$W/root/etc/trafficctl/rules.json\"
+rl-restore-fails | text+$RLW | router-24.10 | sh:NFT_FAIL_CHAINS=ul_lan3 $L5HOOK; echo rc=\$?; $RLT | NFT_FAIL_CHAINS=ul_lan3 tctl restore >/dev/null; echo rc=\$?; $RLT | $RLBOOT
 newdevice-old | text+$NDF | router-24.10 | sh:ACTION=old MACADDR=02:00:00:00:00:99 IPADDR=192.168.0.99 HOSTNAME=x; export ACTION MACADDR IPADDR HOSTNAME; $LND | ACTION=old MACADDR=02:00:00:00:00:99 IPADDR=192.168.0.99 HOSTNAME=x; export ACTION MACADDR IPADDR HOSTNAME; $NND | $ND
 "
 
@@ -342,6 +395,13 @@ if ! git -C "$UC_REPO" rev-parse -q --verify "refs/tags/$LEGACY_TAG" >/dev/null;
 fi
 mkdir -p "$L" "$C/trafficctl" "$W"
 git -C "$UC_REPO" archive "$LEGACY_TAG" trafficctl/files luci-app-trafficctl/root | tar -x -C "$L"
+if ! git -C "$UC_REPO" rev-parse -q --verify "refs/tags/$LEGACY5_TAG" >/dev/null; then
+    git -C "$UC_REPO" fetch -q --depth=1 origin "refs/tags/$LEGACY5_TAG:refs/tags/$LEGACY5_TAG" ||
+        { echo "FAIL: cannot get $LEGACY5_TAG" >&2; exit 1; }
+fi
+mkdir -p "$L5"
+git -C "$UC_REPO" archive "$LEGACY5_TAG" trafficctl/files | tar -x -C "$L5"
+L5EXEC="$L5/trafficctl/files/usr/libexec/trafficctl"
 cp -R "$UC_REPO/trafficctl/files" "$C/trafficctl/"
 LEXEC="$L/trafficctl/files/usr/libexec/trafficctl"
 CEXEC="$C/trafficctl/files/usr/libexec/trafficctl"
@@ -371,6 +431,7 @@ sed -i -e "s|/usr/libexec/trafficctl/trafficctl-rdns-refresh\.sh|$W/bin/spawn rd
 grep -q "$W/bin/spawn netify collect" "$LEXEC/trafficctl-summary.sh" ||
     { echo "FAIL: the legacy summary's spawns were not redirected"; exit 1; }
 rewrite "$L" "$LEXEC"
+rewrite "$L5" "$L5EXEC"
 rewrite "$C" "$CEXEC"
 
 # ── mocks ───────────────────────────────────────────────────────────────────
@@ -380,6 +441,15 @@ cat > "$W/bin/replay" <<EOF
 # Prints the recorded output of this exact command line, or fails like the
 # command would when the fixture has none.
 c=\${0##*/}
+if [ "\$c" = nft ] && [ -d "$W/root/tmp/nft-netdev" ]; then
+    case " \$* " in
+        *" netdev "*)
+            case " \$* " in
+                *" add "*|*" delete "*) echo "nft \$*" >> "$W/root/tmp/writes.log" ;;
+            esac
+            NFT_STATE="$W/root/tmp/nft-netdev" NFT_LOG= exec sh "$UC_TESTLIB/nft-netdev.sh" "\$@" ;;
+    esac
+fi
 if [ "\$c" = nft ] && [ -f "$W/root/tmp/nft.state" ]; then
     case " \$* " in
         *" add "*|*" insert "*|*" delete "*|*" create "*|*" flush "*) echo "nft \$*" >> "$W/root/tmp/writes.log" ;;
@@ -483,6 +553,9 @@ cli_root() {
 }
 # A report as compact JSON in its own key order, then its exit status: the
 # clock (device timestamp, netify cache_age) and the root prefix masked.
+# A command's text output with the root prefix masked: the shell names the
+# rewritten debugfs path in its NSS hint.
+wmask() { "$@" | sed "s#$W/root##g"; }
 rmask() {
     local rc
     "$@" > "$W/masked.json"; rc=$?

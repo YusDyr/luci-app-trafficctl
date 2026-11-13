@@ -109,6 +109,9 @@
 //   nss_status()                  absent, stopped or active (Qualcomm ECM)
 //   nss_note(), persist_note()    the suffix, '' when nothing to say
 //   nss_defunct()                 flush the flows ECM already accelerates
+// Rule names and syslog
+//   slug(target)                  '.' and '/' as '_': nft comments, set names
+//   logger(msg)                   syslog, tag trafficctl
 
 import { popen, readfile as fs_readfile, writefile, open, stat, mkdir, rmdir,
 	unlink, rename, chmod, readlink, dirname, basename, lsdir } from 'fs';
@@ -757,6 +760,16 @@ function env_or(name, dflt) {
 	return (v == null || v == '') ? dflt : v;
 }
 
+// A target as it goes into an nft comment or set name (tctl_target_slug).
+function slug(t) {
+	return replace('' + t, /[.\/]/g, '_');
+}
+
+// syslog, tag trafficctl: what failed, for the operator reading logread.
+function logger(msg) {
+	sh('logger -t trafficctl ' + q(msg));
+}
+
 function log(action, target, detail, via, src) {
 	if (uci_get('trafficctl', 'logging', 'enabled') != '1')
 		return;
@@ -1019,4 +1032,4 @@ export { path, pid, reset, plain, cursor, uci_get, uci_words, uci_foreach, commi
 export { qv, pipe, passthru, set_context, run_rc, ubus_list };
 // The block, WiFi and new-device commands.
 export { append, uci_cli, persist_enabled, persist_save, persist_remove, persist_note,
-	nss_status, nss_note, nss_defunct };
+	nss_status, nss_note, nss_defunct, slug, logger };

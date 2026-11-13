@@ -59,10 +59,6 @@ function rate_bytes(kbit) {
 	return (b < 1) ? 1 : b;
 }
 
-function slug(t) {
-	return replace('' + t, /[.\/]/g, '_');
-}
-
 // A shared cap on a block lets one device starve the rest. The boot restore
 // gives a record saved without a mode the same answer, so a subnet does not
 // change meaning across a reboot.
@@ -75,15 +71,11 @@ function default_mode(t) {
 
 // From the target, never the caller's label (see ctl.block_comment).
 function comment(t) {
-	return 'rl_ratelimit_' + slug(t);
+	return 'rl_ratelimit_' + lib.slug(t);
 }
 
 function fields(l) {
 	return filter(split(l, /[ \t]+/), (w) => w != '');
-}
-
-function logger(msg) {
-	lib.sh('logger -t trafficctl ' + lib.q(msg));
 }
 
 function is_dev(d) {
@@ -193,7 +185,7 @@ function joined(a, b) {
 function add(ip, kbit, cmt, mode, kbit_up) {
 	if (kbit_up == null || kbit_up == '')
 		kbit_up = kbit;
-	let b = rate_bytes(kbit), bu = rate_bytes(kbit_up), s = slug(ip);
+	let b = rate_bytes(kbit), bu = rate_bytes(kbit_up), s = lib.slug(ip);
 	let res = { netdev: true, dl_failed: false, ul_failed: false, dl_err: '', ul_err: '', ul6: false, dl6: false };
 
 	let ul6 = null, feed6 = null, dl6 = null, v6set = 'tctl_v6_' + s;
@@ -208,7 +200,7 @@ function add(ip, kbit, cmt, mode, kbit_up) {
 	// too: stop and say why.
 	let t = lib.run_rc('nft ' + lib.qv([ 'add', 'table', ...TABLE ]), null, true);
 	if (t.rc != 0) {
-		logger('rate limit: cannot create nft table netdev tm_ratelimit (kmod-nft-netdev missing?): ' + rtrim(t.out, '\n'));
+		lib.logger('rate limit: cannot create nft table netdev tm_ratelimit (kmod-nft-netdev missing?): ' + rtrim(t.out, '\n'));
 		res.netdev = false;
 		res.dl_failed = res.ul_failed = true;
 		return res;
@@ -259,7 +251,7 @@ function add(ip, kbit, cmt, mode, kbit_up) {
 	if (dl6_err != '')
 		dl_err = joined(dl_err, 'IPv6 ' + dl6_err);
 	if (dl_err != '') {
-		logger('rate limit: download rule for ' + ip + ' failed on ' + dl_err);
+		lib.logger('rate limit: download rule for ' + ip + ' failed on ' + dl_err);
 		res.dl_err = 'download rule failed on ' + dl_err;
 	}
 	res.dl_failed = !dl_ok;
@@ -290,13 +282,13 @@ function add(ip, kbit, cmt, mode, kbit_up) {
 			ul6_err = joined(ul6_err, dev + ': ' + e);
 	}
 	if (feed6_err != '') {
-		logger('rate limit: IPv6 address feed for ' + ip + ' failed on ' + feed6_err);
+		lib.logger('rate limit: IPv6 address feed for ' + ip + ' failed on ' + feed6_err);
 		res.dl_err = joined(res.dl_err, 'IPv6 address feed failed on ' + feed6_err);
 	}
 	if (ul6_err != '')
 		ul_err = joined(ul_err, 'IPv6 ' + ul6_err);
 	if (ul_err != '') {
-		logger('rate limit: upload rule for ' + ip + ' failed on ' + ul_err);
+		lib.logger('rate limit: upload rule for ' + ip + ' failed on ' + ul_err);
 		res.ul_err = 'upload rule failed on ' + ul_err;
 	}
 	res.ul_failed = !ul_ok;
@@ -317,7 +309,7 @@ function add(ip, kbit, cmt, mode, kbit_up) {
 // Whether a listed rule polices this target: the address as the whole
 // field after ip saddr/daddr, or the target's own IPv6 address set.
 function owns(f, ip) {
-	let set = '@tctl_v6_' + slug(ip);
+	let set = '@tctl_v6_' + lib.slug(ip);
 	for (let i = 0; i < length(f); i++) {
 		if (f[i] == set)
 			return true;
@@ -377,7 +369,7 @@ const SUFFIXES = [ '', '_ul', '_ul6', '_dl6', '_v6' ];
 // here, so removing such a limit failed and left its rules.json record.
 function remove(ip, cmt, legacy) {
 	delete_rules(map(SUFFIXES, (x) => cmt + x), legacy ? ip : null);
-	nft([ 'delete', 'set', ...TABLE, 'tctl_v6_' + slug(ip) ]);
+	nft([ 'delete', 'set', ...TABLE, 'tctl_v6_' + lib.slug(ip) ]);
 	return true;
 }
 
@@ -416,7 +408,7 @@ function ratelimit(args) {
 	if (mode != 'each' && mode != 'shared')
 		return fail('mode must be each or shared');
 	if (label == '')
-		label = 'rl_' + slug(ip);
+		label = 'rl_' + lib.slug(ip);
 	let cmt = comment(ip), via = getenv('TCTL_VIA'), src = getenv('TCTL_SRC');
 
 	if (rate == '0') {
@@ -511,11 +503,11 @@ function restore() {
 		// block on every boot. The file is only as trustworthy as whoever
 		// last wrote /etc, so the target is checked before it is in a rule.
 		if (valid_rate(param) == null || (up != '' && valid_rate(up) == null)) {
-			logger(sprintf("Not restoring ratelimit for %s: invalid rate '%s'/'%s'", ip, param, up));
+			lib.logger(sprintf("Not restoring ratelimit for %s: invalid rate '%s'/'%s'", ip, param, up));
 			continue;
 		}
 		if (lib.valid_target(ip) != ip) {
-			logger('Not restoring ratelimit for ' + ip + ': invalid target');
+			lib.logger('Not restoring ratelimit for ' + ip + ': invalid target');
 			continue;
 		}
 		// A mode other than each is a shared bucket, as it always was here.
@@ -531,14 +523,14 @@ function restore() {
 		let errs = ((a.dl_err != '') ? ': ' + a.dl_err : '') + ((a.ul_err != '') ? ': ' + a.ul_err : '');
 		if (!a.netdev || a.dl_failed || a.ul_failed) {
 			res.failed++;
-			logger(sprintf('Failed to restore ratelimit for %s (%skbit)%s', ip, param, errs));
+			lib.logger(sprintf('Failed to restore ratelimit for %s (%skbit)%s', ip, param, errs));
 		}
 		else {
 			res.restored++;
 			// Live on the devices that took it; the next ifup or a re-apply
 			// retries the rest.
 			if (errs != '')
-				logger(sprintf('Restored ratelimit for %s (%skbit) PARTIALLY%s', ip, param, errs));
+				lib.logger(sprintf('Restored ratelimit for %s (%skbit) PARTIALLY%s', ip, param, errs));
 		}
 	}
 	return res;
