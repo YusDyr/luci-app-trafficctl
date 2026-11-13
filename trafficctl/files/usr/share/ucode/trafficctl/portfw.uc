@@ -13,13 +13,11 @@
 // what is paused or limited; it is matched whole, quotes included.
 // Commands, rule text and replies are those of trafficctl-portfw.sh v1.30.0.
 
-import { dirname } from 'fs';
 import * as lib from 'trafficctl.lib';
 import * as net from 'trafficctl.net';
 import * as ctl from 'trafficctl.ctl';
 
 const CHAINS = [ 'pfw_forward', 'pfw_input' ];
-const RULES = '/etc/trafficctl/rules.json';
 const RATE_MAX_KBIT = 100000000;
 
 const USAGE = 'usage: trafficctl-portfw.sh <list|pause|resume|limit> ...';
@@ -140,51 +138,6 @@ function flush_conntrack(proto, ip, port) {
 	}
 	for (let p = num(lo); p <= num(hi); p++)
 		lib.sh('conntrack -D -p ' + lib.qv([ proto, '--dport', '' + p ]));
-}
-
-// ── persistence (tctl_persist_save / tctl_persist_remove) ───────────────────
-// The shell's record format and its split on "},{", per line as awk reads it.
-
-function persist_enabled() {
-	return lib.uci_get('trafficctl', 'main', 'persist_rules') == '1';
-}
-
-function persist_rewrite(t, ip, add) {
-	let out = '';
-	for (let line in lib.file_lines(RULES)) {
-		line = replace(replace(line, /^\[/, ''), /\]$/, '');
-		let items = (line == '') ? [] : split(line, '},{'), first = true;
-		out += '[';
-		for (let it in items) {
-			it = replace(replace(it, /^\{/, ''), /\}$/, '');
-			if (index(it, '"ip":"' + ip + '"') >= 0 && index(it, '"type":"' + t + '"') >= 0)
-				continue;
-			if (!first)
-				out += ',';
-			out += '{' + it + '}';
-			first = false;
-		}
-		if (add != null) {
-			if (!first)
-				out += ',';
-			out += sprintf('{"type":"%s","ip":"%s","param":"%s"}', t, ip, add);
-		}
-		out += ']';
-	}
-	return (out != '') && lib.write_atomic(RULES, out);
-}
-
-function persist_save(t, ip, param) {
-	lib.mkdir_p(dirname(RULES));
-	if ((lib.readfile(RULES) ?? '') == '')
-		lib.write_atomic(RULES, '[]\n');
-	return persist_rewrite(t, ip, param);
-}
-
-function persist_remove(t, ip) {
-	if ((lib.readfile(RULES) ?? '') == '')
-		return true;
-	return persist_rewrite(t, ip, null);
 }
 
 // ── list ────────────────────────────────────────────────────────────────────
@@ -417,8 +370,8 @@ function pause(scope, proto, ip, port) {
 			return fail('failed to pause ' + p + ' port ' + port);
 		flush_conntrack(p, (scope == 'input') ? '-' : ip, port);
 	}
-	if (persist_enabled())
-		persist_save('pfw_pause', scope + '/' + proto + '/' + cmt_ip + '/' + port, '1');
+	if (lib.persist_enabled())
+		lib.persist_save('pfw_pause', scope + '/' + proto + '/' + cmt_ip + '/' + port, '1');
 	log('block', cmt_ip, port, 'pause ' + proto);
 	return ok('paused ' + proto + ' port ' + port);
 }
@@ -427,8 +380,8 @@ function resume(scope, proto, ip, port) {
 	let cmt_ip = (scope == 'input') ? 'local' : ip;
 	for (let p in proto_tokens(proto))
 		delete_kind('pause', scope, p, cmt_ip, port);
-	if (persist_enabled())
-		persist_remove('pfw_pause', scope + '/' + proto + '/' + cmt_ip + '/' + port);
+	if (lib.persist_enabled())
+		lib.persist_remove('pfw_pause', scope + '/' + proto + '/' + cmt_ip + '/' + port);
 	log('unblock', cmt_ip, port, 'resume ' + proto);
 	return ok('resumed ' + proto + ' port ' + port);
 }
@@ -449,13 +402,13 @@ function limit(scope, proto, ip, port, kbit) {
 	}
 	let key = scope + '/' + proto + '/' + cmt_ip + '/' + port;
 	if (kbit == '0') {
-		if (persist_enabled())
-			persist_remove('pfw_limit', key);
+		if (lib.persist_enabled())
+			lib.persist_remove('pfw_limit', key);
 		log('ratelimit_remove', cmt_ip, port, '');
 		return ok('limit removed for port ' + port);
 	}
-	if (persist_enabled())
-		persist_save('pfw_limit', key, kbit);
+	if (lib.persist_enabled())
+		lib.persist_save('pfw_limit', key, kbit);
 	log('ratelimit_set', cmt_ip, port, kbit + 'kbit');
 	return ok('limit ' + kbit + ' kbit/s set for port ' + port);
 }
