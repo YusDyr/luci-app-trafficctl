@@ -297,9 +297,11 @@ HODD2='uci set trafficctl.history.keep=500; uci set trafficctl.history.interval=
 HERR='printf "1794000000\tcannot write /mnt/x.tsv \"q\" \\\\\n" > "$W/root/tmp/trafficctl_history.err"; printf "1794000001\n" > "$W/root/tmp/trafficctl_history.stamp"'
 HERR2='printf "no tab here\n" > "$W/root/tmp/trafficctl_history.err"; printf "x\n" > "$W/root/tmp/trafficctl_history.stamp"'
 HKEEP1='uci set trafficctl.history.keep=1; uci commit trafficctl'
-# v1.30.0's prune recursed into subdirectories of the store; history.uc
-# deletes period files in the store itself only (an intentional difference).
-HNOSUB='rm -r "$W/root/etc/trafficctl/history/sub"'
+# v1.30.0's prune recursed into subdirectories of the store and took any
+# *.tsv for a period (.hidden.tsv included); history.uc deletes only files
+# named like a period in the store itself (an intentional difference), so
+# the prune cases leave both out.
+HNOSUB='rm -r "$W/root/etc/trafficctl/history/sub"; rm "$W/root/etc/trafficctl/history/.hidden.tsv"'
 # v1.30.0's flush leaks its lock directory (hist_if_flush replaces the EXIT
 # trap that removed it), and the next flush steals it after 5 s; history.uc
 # releases its lock and steals only one older than 20 s. Removed between two
