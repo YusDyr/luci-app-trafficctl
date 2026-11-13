@@ -4,6 +4,21 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.30.8] - 2026-11-13
+
+### Bug Fixes
+- show destination names in the device view behind AdGuard Home ([#170](https://github.com/YusDyr/luci-app-trafficctl/issues/170)) ([6faf4f2](https://github.com/YusDyr/luci-app-trafficctl/commit/6faf4f24d22b7224b778d43ca18b7b369e07d42d))
+  The device view resolves a device's public destinations with
+  network.rrdns, which replies only once every query is answered or its
+  timeout (5 s) has run out. AdGuard Home on :53 (dnsmasq moved to :54)
+  allows each client 20 queries a second by default and drops the rest
+  without an answer, and the router is one client. The view sent every
+  unresolved destination in one batch, and the device poll restarts every
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.30.7...v1.30.8
+
+---
+
 ## [1.30.7] - 2026-11-13
 
 ### Bug Fixes
