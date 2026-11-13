@@ -26,6 +26,8 @@ jobs:
         run: bash tests/test_portfw.sh
       - name: Bidirectional limit/shape tests
         run: bash tests/test_direction.sh
+      - name: Per-chain limiter meters on a multi-port bridge
+        run: bash tests/test_meter_per_chain.sh
       - name: Security tests
         run: bash tests/test_security.sh
       - name: Block/unblock tests

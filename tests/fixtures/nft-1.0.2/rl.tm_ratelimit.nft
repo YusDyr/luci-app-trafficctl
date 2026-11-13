@@ -14,7 +14,7 @@ table netdev tm_ratelimit {
 		ip daddr 192.168.1.6 limit rate over 625 kbytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_6"
 		ip daddr 192.168.1.4 limit rate over 1 mbytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_4"
 		ip daddr 192.168.1.9 limit rate over 512 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_9"
-		ip daddr 192.168.1.8 meter tctl_d_192_168_1_8 size 65535 { ip daddr limit rate over 2000 kbytes/second } counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_8"
+		ip daddr 192.168.1.8 meter tctl_m_192_168_1_8_dl_br_lan size 65535 { ip daddr limit rate over 2000 kbytes/second } counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_8"
 		ip6 daddr @tctl_v6_192_168_1_5 limit rate over 625 kbytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_5_dl6"
 	}
 
@@ -27,7 +27,7 @@ table netdev tm_ratelimit {
 		type filter hook ingress device "lan1" priority -200; policy accept;
 		ip saddr 192.168.1.60 limit rate over 125 kbytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_60_ul"
 		ip saddr 192.168.1.5 limit rate over 125000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_5_ul"
-		ip saddr 192.168.1.8 meter tctl_u_192_168_1_8 size 65535 { ip saddr limit rate over 250000 bytes/second } counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_8_ul"
+		ip saddr 192.168.1.8 meter tctl_m_192_168_1_8_ul_lan1 size 65535 { ip saddr limit rate over 250000 bytes/second } counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_8_ul"
 		ether saddr aa:aa:aa:aa:aa:05 ip6 saddr != fe80::/10 update @tctl_v6_192_168_1_5 { ip6 saddr } comment "rl_ratelimit_192_168_1_5_v6"
 		meta protocol ip6 ether saddr aa:aa:aa:aa:aa:05 limit rate over 125000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_5_ul6"
 	}

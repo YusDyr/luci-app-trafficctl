@@ -373,6 +373,37 @@ jobs:
           tools/ci/live-compare.sh "$RUNNER_TEMP/out" "${{ matrix.nft }}"
 
   # ──────────────────────────────────────────────────────────────────────────
+  # Live limiter: real nft against the runner's kernel, in the OpenWrt rootfs,
+  # on a bridge with two dummy ports. An each-mode limit must reach BOTH ports
+  # (nftables 1.0 refused a meter name already bound in another chain, so the
+  # second port silently got no upload rule), and removing it must leave no
+  # meter set behind (nftables 1.1 keeps them). Needs no package build.
+  # ──────────────────────────────────────────────────────────────────────────
+  live-ratelimit:
+    name: Live limiter ${{ matrix.version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ["22.03.7", "25.12.4"]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Limiter on a two-port bridge in OpenWrt ${{ matrix.version }}
+        run: |
+          IMAGE="ghcr.io/openwrt/rootfs:x86-64-v${{ matrix.version }}"
+          for attempt in 1 2 3; do
+            docker pull -q "$IMAGE" && break
+            [ "$attempt" = 3 ] && { echo "::error::Could not pull $IMAGE"; exit 1; }
+            sleep $((attempt * 5))
+          done
+          # A container cannot load modules.
+          for m in nf_tables nft_limit bridge dummy; do
+            sudo modprobe "$m" || echo "::warning::no module $m"
+          done
+          docker run --rm --cap-add NET_ADMIN --tmpfs /work:size=300m,exec \
+            -v "$PWD:/src:ro" --entrypoint /bin/sh "$IMAGE" /src/tools/ci/live-ratelimit.sh /src
+
+  # ──────────────────────────────────────────────────────────────────────────
   # Upgrade — install previous GitHub release, then install current build.
   # Verifies pre-upgrade/post-upgrade hooks, config file preservation.
   # ──────────────────────────────────────────────────────────────────────────
