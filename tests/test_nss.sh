@@ -140,6 +140,8 @@ printf '' > "$ECM/ecm_db/defunct_all"
 # has its own set of partial-success messages. The block is `trafficctl block`
 # since the ucode port, run against an active ECM in tests/test_block.sh; the
 # limiter is `trafficctl ratelimit`, run against one below.
+# One shell script is left; its port to ucode retires this loop.
+# shellcheck disable=SC2043
 for f in trafficctl-shape.sh; do
     src="$BIN/$f"
     for fn in tctl_nss_status tctl_nss_defunct; do

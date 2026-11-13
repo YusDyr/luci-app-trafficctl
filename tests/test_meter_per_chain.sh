@@ -62,7 +62,6 @@ lt_cfg 1
 LT_LAN_IP=10.0.20.1 lt_net br-lan lan1 lan2 lan3
 
 reset() { lt_reset; }
-RL=ratelimit
 run() { lt_run "$@"; }
 table() { lt_table; }
 rules_of() { lt_rules_of "$1"; }
