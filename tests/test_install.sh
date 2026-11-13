@@ -190,6 +190,27 @@ if /usr/sbin/trafficctl bogus >/dev/null 2>&1; then
     echo "CLI FAILED: an unknown command exited 0"; exit 1
 fi
 
+# PR8 history
+# history.uc, its init script and the old script name, which is a shim now.
+for f in /usr/share/ucode/trafficctl/history.uc /etc/init.d/trafficctl-history \
+         /usr/libexec/trafficctl/trafficctl-history.sh; do
+    [ -f "$f" ] || { echo "MISSING: $f"; exit 1; }
+done
+grep -q '/usr/sbin/trafficctl history keeper' /etc/init.d/trafficctl-history ||
+    { echo "INIT FAILED: trafficctl-history does not run the ucode keeper"; exit 1; }
+for c in "/usr/sbin/trafficctl history status" "/usr/libexec/trafficctl/trafficctl-history.sh status"; do
+    out=$($c 2>&1)
+    case "$out" in '{"enabled":false,'*'}') ;; *) echo "CLI FAILED: $c printed: $out"; exit 1 ;; esac
+done
+out=$(/usr/sbin/trafficctl history periods 2>&1)
+[ "$out" = "[]" ] || { echo "CLI FAILED: trafficctl history periods printed: $out"; exit 1; }
+/usr/sbin/trafficctl history validate-dir /mnt/usb ||
+    { echo "CLI FAILED: validate-dir refused /mnt/usb"; exit 1; }
+if /usr/sbin/trafficctl history validate-dir /etc; then
+    echo "CLI FAILED: validate-dir accepted /etc"; exit 1
+fi
+# end PR8 history
+
 # The rpcd plugin is ucode too: its signature table, a read that needs only
 # uci, and the version, read from this package manager's database (never
 # "dev" once installed, never by running opkg).

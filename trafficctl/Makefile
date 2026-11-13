@@ -80,6 +80,8 @@ define Package/trafficctl/install
 	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/ctl.uc $(1)/usr/share/ucode/trafficctl/
 	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/cut.uc $(1)/usr/share/ucode/trafficctl/
 	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/portfw.uc $(1)/usr/share/ucode/trafficctl/
+	# PR8 history
+	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/history.uc $(1)/usr/share/ucode/trafficctl/
 	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/limit.uc $(1)/usr/share/ucode/trafficctl/
 	$(INSTALL_DIR) $(1)/usr/libexec/trafficctl
 	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-block.sh $(1)/usr/libexec/trafficctl/

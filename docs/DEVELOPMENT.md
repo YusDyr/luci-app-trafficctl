@@ -94,7 +94,7 @@ luci-app-trafficctl/                     # repository
 │       ├── usr/sbin/trafficctl          # The CLI (ucode): subnets, names, rdns, rdns-refresh, ifaces, bytes, totals,
 │       │                                #   ratelimit-stats, shape-stats, rules, summary, device, metrics, netify,
 │       │                                #   block, unblock, macfilter-add, macfilter-remove, newdevice, restore,
-│       │                                #   cut, portfw, ratelimit
+│       │                                #   cut, portfw, history, ratelimit
 │       ├── usr/share/ucode/trafficctl/
 │       │   ├── lib.uc                   # Shared helpers: uci/ubus, commands, JSON, validation, files, log
 │       │   ├── net.uc                   # Subnets, interface roles, reverse DNS, byte samples, totals
@@ -102,6 +102,7 @@ luci-app-trafficctl/                     # repository
 │       │   ├── report.uc                # Summary, device detail, Prometheus exporter, netifyd DPI
 │       │   ├── cut.uc                   # Global internet cut: nft -f ruleset, state, keeper loop
 │       │   ├── portfw.uc                # Port-forward list, pause, limit (inet tctl_pfw)
+│       │   ├── history.uc               # Usage history store: flush, keeper, read, periods, prune
 │       │   └── limit.uc                 # Per-device limiter (netdev tm_ratelimit), its restore
 │       ├── usr/libexec/trafficctl/
 │       │   ├── trafficctl-fw.sh         # Firewall abstraction (sourced)
@@ -119,6 +120,7 @@ luci-app-trafficctl/                     # repository
 │       │   ├── trafficctl-macfilter-add.sh     # Wrapper: `trafficctl macfilter-add`
 │       │   ├── trafficctl-macfilter-remove.sh  # Wrapper: `trafficctl macfilter-remove`
 │       │   ├── trafficctl-rdns.sh       # Wrapper for `trafficctl rdns`
+│       │   ├── trafficctl-history.sh    # Wrapper: `trafficctl history` (the init script runs `trafficctl history keeper`)
 │       │   ├── trafficctl-rules.sh      # Wrapper: `trafficctl rules` (every restriction, online or not; "Rules" tab)
 │       │   ├── trafficctl-cut.sh        # Wrapper: `trafficctl cut` (global cut; the keeper is `trafficctl cut keeper`)
 │       │   ├── trafficctl-portfw.sh     # Wrapper: `trafficctl portfw` ("Port Forwards" tab)
@@ -274,6 +276,7 @@ bash tests/test_subnet_limits.sh      # Subnet limits: stats, persisted mode, th
 bash tests/test_rpcd_contract.sh      # every rpc.declare in the views against the plugin's list
 bash tests/test_portfw.sh             # Port-forward control, port ranges, exact comments
 bash tests/test_cut.sh                # Global cut: refusals, rule order, keeper, persistence
+bash tests/test_history.sh            # History store: flush, cursors, interface series, keeper, guard, ISO weeks
 bash tests/equiv.sh                   # ucode output == the v1.30.0 shell output, rpcd methods included
 ```
 
