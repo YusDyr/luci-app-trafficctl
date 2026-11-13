@@ -94,12 +94,13 @@ assert_eq ".10 removed: .1's record stays" '[{"ip":"192.168.1.1","rate_kbit":500
 # Concurrent adds (the DHCP hook's, the UI's, the bot's) each get their own
 # minor: the pick and the save are under one lock.
 st_reset
-st_run add 192.168.1.41 5000 > "$STATE/c1" &
-st_run add 192.168.1.42 5000 > "$STATE/c2" &
-st_run add 192.168.1.43 5000 > "$STATE/c3" &
-wait
+# (Waits on these three only: the ubus mock runs in the background too.)
+st_run add 192.168.1.41 5000 > "$STATE/c1" & p1=$!
+st_run add 192.168.1.42 5000 > "$STATE/c2" & p2=$!
+st_run add 192.168.1.43 5000 > "$STATE/c3" & p3=$!
+wait "$p1" "$p2" "$p3"
 assert_eq "concurrent adds: three distinct minors" "1:2 1:3 1:4" \
-    "$(for i in 41 42 43; do cid_of 192.168.1.$i; done | sort | tr '\n' ' ' | sed 's/ $//')"
+    "$(echo $(for i in 41 42 43; do cid_of 192.168.1.$i; echo; done | sort))"
 assert_eq "concurrent adds: three download filters" "3" "$(filters_of br-lan | wc -l)"
 assert_eq "concurrent adds: each its own class" "3" "$(filters_of br-lan | awk '{ print $4 }' | sort -u | wc -l)"
 assert_eq "concurrent adds: all replied ok" "3" "$(cat "$STATE/c1" "$STATE/c2" "$STATE/c3" | grep -c '"ok":true')"

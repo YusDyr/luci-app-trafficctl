@@ -434,10 +434,10 @@ shape-add-asym | text+$STW | router-24.10 | sh:$L5SH add 192.168.0.50 8000 lbl 1
 shape-add-first | text+$STW | router-24.10 | sh:$L5SH add 192.168.0.50 8000; echo rc=\$?; stt | tctl shape add 192.168.0.50 8000; echo rc=\$?; stt | $STSET; $NOSHAPES
 shape-readd | text+$STW | router-24.10 | sh:$L5SH add 192.168.0.109 7000 x 700; echo rc=\$?; stt | tctl shape add 192.168.0.109 7000 x 700; echo rc=\$?; stt | $STON
 shape-remove | text+$STW | router-24.10 | sh:$L5SH remove 192.168.0.109; echo rc=\$?; stt | tctl shape remove 192.168.0.109; echo rc=\$?; stt | $STON
-shape-remove-none | text+$STW | router-24.10 | sh:$L5SH remove 192.168.0.77 x; echo rc=\$?; stt | tctl shape remove 192.168.0.77 x; echo rc=\$?; stt | $STSET
+shape-remove-none | text | router-24.10 | sh:$L5SH remove 192.168.0.77 x; echo rc=\$?; stt | tctl shape remove 192.168.0.77 x; echo rc=\$?; stt | $STSET
 shape-remove-legacy | text+$STW | router-24.10 | sh:$L5SH remove 192.168.0.3; echo rc=\$?; stt | tctl shape remove 192.168.0.3; echo rc=\$?; stt | $STSET; $OLDSHAPES
 shape-status | text | router-24.10 | sh:$L5SH status 192.168.0.109; echo rc=\$?; $L5SH status 192.168.0.77; echo rc=\$? | tctl shape status 192.168.0.109; echo rc=\$?; tctl shape status 192.168.0.77; echo rc=\$? | $STON
-shape-sqm | text+$STW | router-24.10 | sh:$L5SH add 192.168.0.50 5000; echo rc=\$?; stt | tctl shape add 192.168.0.50 5000; echo rc=\$?; stt | $LOGROOT; TC_ROOT_br_lan=cake st_init
+shape-sqm | text+$STW | router-24.10 | sh:htbmsg $L5SH add 192.168.0.50 5000; echo rc=\$?; stt | tctl shape add 192.168.0.50 5000; echo rc=\$?; stt | $LOGROOT; TC_ROOT_br_lan=cake st_init
 shape-no-ifb | text+$STW | router-24.10 | sh:TC_NO_IFB=1 $L5SH add 192.168.0.50 5000 lbl 1000; echo rc=\$?; stt | TC_NO_IFB=1 tctl shape add 192.168.0.50 5000 lbl 1000; echo rc=\$?; stt | $STSET
 shape-usage | text+$STW | router-24.10 | sh:$L5SH; echo rc=\$?; $L5SH add; echo rc=\$?; $L5SH add 192.168.0.300 500; echo rc=\$?; $L5SH add 192.168.0.50 010; echo rc=\$?; $L5SH add 192.168.0.50 abc; echo rc=\$?; $L5SH add 192.168.0.50 0; echo rc=\$?; $L5SH remove; echo rc=\$?; $L5SH status; echo rc=\$?; $L5SH bogus 192.168.0.50; echo rc=\$? | tctl shape; echo rc=\$?; tctl shape add; echo rc=\$?; tctl shape add 192.168.0.300 500; echo rc=\$?; tctl shape add 192.168.0.50 010; echo rc=\$?; tctl shape add 192.168.0.50 abc; echo rc=\$?; tctl shape add 192.168.0.50 0; echo rc=\$?; tctl shape remove; echo rc=\$?; tctl shape status; echo rc=\$?; tctl shape bogus 192.168.0.50; echo rc=\$? | $STSET
 shape-restore | text+$STW | router-24.10 | sh:$L5HOOK >/dev/null; echo rc=\$?; sttnf | tctl restore >/dev/null; echo rc=\$?; sttnf | $STSET; $STNOPERSIST
@@ -830,6 +830,18 @@ st_init() {
 }
 stt() { echo "--- tc"; TC_STATE="$W/root/tmp/tc-htb" sh "$UC_TESTLIB/tc-htb.sh" dump; }
 sttnf() { stt | grep -v '^  filter '; }
+# v1.30.0 named "a custom HTB tree" among the root qdiscs it declines; an HTB
+# root is in fact reused or replaced, so shape.uc no longer says so (an
+# intentional difference). For the legacy side only, the new wording.
+htbmsg() {
+    local r
+    "$@" > "$W/htbmsg.out"; r=$?
+    sed 's#SQM/cake or a custom HTB tree#SQM/cake or another non-HTB qdisc#' "$W/htbmsg.out"
+    return $r
+}
+# shape-remove-none compares the reply and the tc state, not the write log:
+# v1.30.0 ran its deletes on the class derived from an address with no
+# record, which can be another device's; shape.uc runs none (intentional).
 
 # For sh: cases. total_since is "now" for a device first seen in this run,
 # and the two sides do not run in the same second.
