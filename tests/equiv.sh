@@ -377,6 +377,12 @@ CUTPSTATE='mkdir -p "$W/root/etc/trafficctl"; printf "expires_at=1700000600\nper
 TPROXY='printf "table inet PodkopTable {\n\tchain proxy {\n\t\tmeta l4proto tcp tproxy ip to 127.0.0.1:1602\n\t}\n}\n" > "$W/root/netfake/ruleset"'
 PFWENV='mkdir -p "$W/root/netfake"; : > "$W/root/netfake/calls"; uci add firewall redirect >/dev/null; uci set firewall.@redirect[-1].name="Web Server"; uci set firewall.@redirect[-1].src=wan; uci set firewall.@redirect[-1].src_dport=8080; uci set firewall.@redirect[-1].dest_ip=192.168.0.140; uci set firewall.@redirect[-1].dest_port=80; uci set firewall.@redirect[-1].proto=tcp; uci add firewall redirect >/dev/null; uci set firewall.@redirect[-1].name="Game"; uci set firewall.@redirect[-1].src=wan; uci set firewall.@redirect[-1].src_dport=27015-27030; uci set firewall.@redirect[-1].dest_ip=192.168.0.109; uci add firewall rule >/dev/null; uci set firewall.@rule[-1].name=WireGuard; uci set firewall.@rule[-1].src=wan; uci set firewall.@rule[-1].dest_port=51820; uci set firewall.@rule[-1].proto=udp; uci set firewall.@rule[-1].target=ACCEPT; uci commit firewall'
 PFWF='etc/trafficctl/rules.json,tmp/trafficctl/activity.log,netfake/calls'
+# rules.json as the other writers leave it, so a port-forward save or removal
+# has to keep their records byte for byte.
+cat > "$W/pfw-rules.json" <<'JSON'
+[{"type":"block","ip":"192.168.0.5","param":""},{"type":"ratelimit","ip":"10.0.20.0/24","param":"5000","mode":"each","param_up":"1000"},{"type":"pfw_pause","ip":"forward/tcp/192.168.0.140/80","param":"1"},{"type":"pfw_limit","ip":"forward/udp/192.168.0.109/27015-27030","param":"8000"}]
+JSON
+PFWRULES='mkdir -p "$W/root/etc/trafficctl"; cp "$W/pfw-rules.json" "$W/root/etc/trafficctl/rules.json"'
 PFWSEED='nft add table inet tctl_pfw; nft add chain inet tctl_pfw pfw_forward x; nft add rule inet tctl_pfw pfw_forward ip daddr 192.168.0.140 tcp dport 80 counter drop comment \"tctl_pfw_pause_tcp_192.168.0.140_80\"; nft add rule inet tctl_pfw pfw_forward ip daddr 192.168.0.109 udp dport 27015-27030 limit rate over 1000 kbytes/second counter drop comment \"tctl_pfw_limit_udp_192.168.0.109_27015-27030\"; : > "$W/root/netfake/calls"'
 CASES+="
 cut-status-off | json | router-24.10 | sh:lcut status | ncut status | $CUTENV
@@ -421,6 +427,7 @@ portfw-limit | text+$PFWF | router-24.10 | sh:lpfw limit forward tcp 192.168.0.1
 portfw-limit-remove | text+$PFWF | router-24.10 | sh:lpfw limit forward udp 192.168.0.109 27015-27030 0; lpfw list | npfw limit forward udp 192.168.0.109 27015-27030 0; npfw list | $PFWENV; $PFWSEED
 portfw-limit-input | text | router-24.10 | sh:lpfw limit input udp - 51820 800 | npfw limit input udp - 51820 800 | $PFWENV
 portfw-persist | text+$PFWF | router-24.10 | sh:lpfw pause forward tcp 192.168.0.140 80; lpfw limit forward tcp 192.168.0.140 80 900; lpfw resume forward tcp 192.168.0.140 80 | npfw pause forward tcp 192.168.0.140 80; npfw limit forward tcp 192.168.0.140 80 900; npfw resume forward tcp 192.168.0.140 80 | $PFWENV; $PERSIST
+portfw-persist-mixed | text+$PFWF | router-24.10 | sh:lpfw limit forward tcp 192.168.0.140 80 900; lpfw limit forward udp 192.168.0.109 27015-27030 0; lpfw resume forward tcp 192.168.0.140 80; lpfw pause forward tcpudp 192.168.0.109 27015-27030 | npfw limit forward tcp 192.168.0.140 80 900; npfw limit forward udp 192.168.0.109 27015-27030 0; npfw resume forward tcp 192.168.0.140 80; npfw pause forward tcpudp 192.168.0.109 27015-27030 | $PFWENV; $PERSIST; $PFWSEED; $PFWRULES
 portfw-bad | text+$PFWF | router-24.10 | sh:lpfw; lpfw pause; lpfw pause forward icmp 192.168.0.140 80; lpfw pause forward tcp 1.2.3 80; lpfw pause forward tcp 192.168.0.140 0; lpfw pause forward tcp 192.168.0.140 9-8; lpfw pause x tcp - 80; lpfw limit forward tcp 192.168.0.140 80 | npfw; npfw pause; npfw pause forward icmp 192.168.0.140 80; npfw pause forward tcp 1.2.3 80; npfw pause forward tcp 192.168.0.140 0; npfw pause forward tcp 192.168.0.140 9-8; npfw pause x tcp - 80; npfw limit forward tcp 192.168.0.140 80 | $PFWENV
 "
 # ── end PR7 ─────────────────────────────────────────────────────────────────
