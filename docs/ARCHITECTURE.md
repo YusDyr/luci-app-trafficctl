@@ -47,10 +47,12 @@ graph TD
             SH["trafficctl-shape.sh"]
             MFA["trafficctl-macfilter-add.sh = trafficctl macfilter-add<br/>(ucode)"]
             MFR["trafficctl-macfilter-remove.sh = trafficctl macfilter-remove<br/>(ucode)"]
+            CUT["trafficctl-cut.sh = trafficctl cut<br/>(global cut, procd keeper, ucode)"]
+            PFW["trafficctl-portfw.sh = trafficctl portfw<br/>(port-forward pause/limit, ucode)"]
         end
 
         subgraph "Kernel Subsystems"
-            NFT["nftables<br/>(inet fw4 forward,<br/>netdev tm_ratelimit)"]
+            NFT["nftables<br/>(inet fw4 forward,<br/>netdev tm_ratelimit,<br/>inet tctl_cut, inet tctl_pfw)"]
             TC["tc<br/>(HTB qdisc on br-lan)"]
             CTMOD["/proc/net/nf_conntrack"]
             IW["iw + brctl<br/>(WiFi/bridge detection)"]
@@ -67,6 +69,7 @@ graph TD
     RPC -->|"ACL check"| ACL
     RPC --> SUM & DEV & TOT & RLS & SHS & RDNS
     RPC --> BLK & UBK & RL & SH & MFA & MFR
+    RPC --> CUT & PFW
 
     SUM --> CTMOD
     SUM --> IW
@@ -77,6 +80,7 @@ graph TD
 
     BLK & UBK --> NFT
     RL --> NFT
+    CUT & PFW --> NFT
 
     SH --> TC
     SHS --> TC

@@ -102,6 +102,11 @@ for f in \
   /usr/share/ucode/trafficctl/lib.uc \
   /usr/share/ucode/trafficctl/net.uc \
   /usr/share/ucode/trafficctl/report.uc \
+  /usr/share/ucode/trafficctl/cut.uc \
+  /usr/share/ucode/trafficctl/portfw.uc \
+  /usr/libexec/trafficctl/trafficctl-cut.sh \
+  /usr/libexec/trafficctl/trafficctl-portfw.sh \
+  /etc/init.d/trafficctl-cut \
   /usr/libexec/trafficctl/trafficctl-summary.sh \
   /usr/libexec/trafficctl/trafficctl-fw.sh \
   /usr/libexec/trafficctl/trafficctl-device.sh \
@@ -170,6 +175,17 @@ for c in "/usr/sbin/trafficctl metrics" /usr/libexec/trafficctl/trafficctl-metri
     out=$($c 2>&1)
     case "$out" in "# trafficctl metrics are disabled"*) ;; *) echo "CLI FAILED: $c printed: $out"; exit 1 ;; esac
 done
+# ── PR7: cut and portfw. Status only reads (no rule, no keeper), and a
+#    container without nf_tables still answers with JSON.
+for c in "/usr/sbin/trafficctl cut status" "/usr/libexec/trafficctl/trafficctl-cut.sh status"; do
+    out=$($c 2>&1)
+    case "$out" in '{"ok":true,"active":false,'*) ;; *) echo "CLI FAILED: $c printed: $out"; exit 1 ;; esac
+done
+for c in "/usr/sbin/trafficctl portfw list" "/usr/libexec/trafficctl/trafficctl-portfw.sh list"; do
+    out=$($c 2>&1)
+    case "$out" in "["*"]") ;; *) echo "CLI FAILED: $c printed: $out"; exit 1 ;; esac
+done
+# ── end PR7
 if /usr/sbin/trafficctl bogus >/dev/null 2>&1; then
     echo "CLI FAILED: an unknown command exited 0"; exit 1
 fi

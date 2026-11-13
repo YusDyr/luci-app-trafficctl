@@ -22,8 +22,6 @@ jobs:
         run: sudo apt-get install -y --no-install-recommends busybox-static mawk
       - name: Shell unit tests
         run: bash tests/test_fw.sh
-      - name: Port-forward control tests
-        run: bash tests/test_portfw.sh
       - name: Bidirectional limit/shape tests
         run: bash tests/test_direction.sh
       - name: Per-chain limiter meters on a multi-port bridge
@@ -72,8 +70,6 @@ jobs:
       # compares against a golden .lmo built by the real po2lmo.
       - name: Translation packaging tests
         run: bash tests/test_i18n_packaging.sh
-      - name: Global internet cut tests
-        run: bash tests/test_cut.sh
       - name: Regression tests
         run: bash tests/test_regressions.sh
       - name: Release version-bump tests
@@ -156,6 +152,12 @@ jobs:
       # Every rpc.declare in the views against the plugin's list.
       - name: rpcd contract tests
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_rpcd_contract.sh
+      # ── PR7: cut, portfw ──
+      - name: Port-forward control tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_portfw.sh
+      - name: Global internet cut tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_cut.sh
+      # ── end PR7 ──
       # PR8 history
       # The history store (history.uc): flush, cursors, the interface series,
       # the keeper, the flush guard and the ISO week against date(1).
