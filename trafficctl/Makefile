@@ -186,6 +186,10 @@ endef
 # The config itself is kept, so the copy is clutter. It is removed only while
 # the real file is there, and nothing else is touched.
 #
+# rpcd: luci-app-trafficctl's plugin runs inside rpcd (rpcd-mod-ucode), which
+# loads it and the trafficctl modules it imports once, when rpcd starts. An
+# upgrade of this package alone reaches the plugin only with an rpcd restart.
+#
 # Guarded on IPKG_INSTROOT: when it is set the package is being unpacked into
 # an image being built, where there are no running services to talk to.
 define Package/trafficctl/postinst
@@ -232,6 +236,9 @@ if [ -z "$${IPKG_INSTROOT}" ]; then
 		if /etc/init.d/trafficctl-history enabled; then
 			/etc/init.d/trafficctl-history restart 2>/dev/null || true
 		fi
+	fi
+	if [ -f /usr/share/rpcd/ucode/luci.trafficctl.uc ]; then
+		/etc/init.d/rpcd restart 2>/dev/null || true
 	fi
 fi
 exit 0

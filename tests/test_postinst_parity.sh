@@ -144,6 +144,29 @@ assert_contains "luci-app build-ipk.sh guards the restart on IPKG_INSTROOT" \
 assert_contains "luci-app build-apk.sh guards the restart on IPKG_INSTROOT" \
     'if [ -z "${IPKG_INSTROOT}" ]; then' "$FE_APK_POSTINST"
 
+# 3. The exec plugin of releases up to 1.30.x goes, and before the restart:
+#    a copy left there registers the same ubus object as the ucode plugin.
+OLDPLUGIN='/usr/libexec/rpcd/luci.trafficctl"'
+assert_contains "luci-app Makefile postinst removes the exec plugin" "rm -f \"\$\${IPKG_INSTROOT}$OLDPLUGIN" "$FE_MK_POSTINST"
+assert_contains "luci-app build-ipk.sh postinst removes the exec plugin" "rm -f \"\${IPKG_INSTROOT}$OLDPLUGIN" "$FE_IPK_POSTINST"
+assert_contains "luci-app build-apk.sh post-install removes the exec plugin" "rm -f \"\${IPKG_INSTROOT}$OLDPLUGIN" "$FE_APK_POSTINST"
+for s in "$FE_MK_POSTINST" "$FE_IPK_POSTINST" "$FE_APK_POSTINST"; do
+    assert_eq "the exec plugin goes before the rpcd restart" "yes" \
+        "$(printf '%s' "$s" | awk -v a="$OLDPLUGIN" -v b="$RPCD" \
+            'index($0, a) && !ra { ra = NR } index($0, b) && !rb { rb = NR } END { print (ra && rb && ra < rb) ? "yes" : "no" }')"
+done
+
+# 4. trafficctl restarts rpcd when the ucode plugin is there: rpcd loads the
+#    plugin and the trafficctl modules it imports once, so a backend upgrade
+#    alone would leave the old modules running.
+RPCD_IF='if [ -f /usr/share/rpcd/ucode/luci.trafficctl.uc ]; then'
+assert_contains "trafficctl Makefile postinst restarts rpcd for the plugin" "$RPCD_IF" "$BE_MK_POSTINST"
+assert_contains "trafficctl build-ipk.sh postinst restarts rpcd for the plugin" "$RPCD_IF" "$BE_IPK_POSTINST"
+assert_contains "trafficctl build-apk.sh post-install restarts rpcd for the plugin" "$RPCD_IF" "$BE_APK_POSTINST"
+for s in "$BE_MK_POSTINST" "$BE_IPK_POSTINST" "$BE_APK_POSTINST"; do
+    assert_contains "trafficctl postinst: the rpcd restart" "$RPCD" "$s"
+done
+
 # The web interface no longer owns the config or the services.
 for s in 'chmod 0600' 'trafficctl-telegram' 'trafficctl-history' 'trafficctl-cut'; do
     assert_not_contains "luci-app Makefile postinst leaves '$s' to trafficctl" "$s" "$FE_MK_POSTINST"

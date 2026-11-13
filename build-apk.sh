@@ -164,6 +164,10 @@ if [ -z "${IPKG_INSTROOT}" ]; then
             /etc/init.d/trafficctl-history restart 2>/dev/null || true
         fi
     fi
+    # The LuCI plugin runs inside rpcd, which loads the modules once.
+    if [ -f /usr/share/rpcd/ucode/luci.trafficctl.uc ]; then
+        /etc/init.d/rpcd restart 2>/dev/null || true
+    fi
 fi
 exit 0
 SCRIPT
@@ -262,7 +266,6 @@ mkdir -p "$DATA/www/luci-static/resources/view/trafficctl"
 # Copy every view/asset so new files (portfw.js, ...) can't be missed
 cp "$SRC/htdocs/luci-static/resources/view/trafficctl/"* "$DATA/www/luci-static/resources/view/trafficctl/"
 
-chmod +x "$DATA/usr/libexec/rpcd/luci.trafficctl"
 
 SCRIPTS="$WORKDIR/scripts"
 mkdir -p "$SCRIPTS"
@@ -271,6 +274,7 @@ mkdir -p "$SCRIPTS"
 # luci-app-trafficctl/Makefile, after an install and after an upgrade.
 cat > "$SCRIPTS/post-install" <<'SCRIPT'
 #!/bin/sh
+rm -f "${IPKG_INSTROOT}/usr/libexec/rpcd/luci.trafficctl"
 if [ -z "${IPKG_INSTROOT}" ]; then
     rm -f /tmp/luci-indexcache.*
     rm -rf /tmp/luci-modulecache
@@ -284,7 +288,7 @@ chmod +x "$SCRIPTS"/*
 # The backend is pinned to the same version, as in build-ipk.sh.
 APK_FILE=$(build_apk "$PKG_NAME" luci \
     "Per-device traffic monitoring, rate limiting (nftables), traffic shaping (tc/HTB), internet blocking, WiFi MAC filtering, and Telegram bot control." \
-    "${BE_NAME}=${PKG_VERSION}-r${PKG_RELEASE} ${TG_NAME}=${PKG_VERSION}-r${PKG_RELEASE} $BE_DEPENDS $FE_EXTRA_DEPENDS luci-base rpcd" "$DATA" "$SCRIPTS")
+    "${BE_NAME}=${PKG_VERSION}-r${PKG_RELEASE} ${TG_NAME}=${PKG_VERSION}-r${PKG_RELEASE} $BE_DEPENDS $FE_EXTRA_DEPENDS luci-base rpcd rpcd-mod-ucode" "$DATA" "$SCRIPTS")
 
 # --- Translations, one package per language ---
 #

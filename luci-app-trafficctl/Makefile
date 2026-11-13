@@ -32,7 +32,10 @@ LUCI_DESCRIPTION:=Per-device traffic monitoring, rate limiting (nftables), \
 # trafficctl-telegram is the Telegram bot, a package of its own since releases
 # after 1.30.x (it was part of trafficctl). The Settings panel configures it,
 # and with it here an upgrade from 1.30.x keeps a bot that was running.
-LUCI_DEPENDS:=+trafficctl +trafficctl-telegram +conntrack +curl +tc +iw +kmod-nft-netdev +firewall4 +ucode +ucode-mod-fs +ucode-mod-uci +ucode-mod-ubus +hostapd-utils +luci-base +rpcd
+#
+# rpcd-mod-ucode runs the rpcd plugin (/usr/share/rpcd/ucode/luci.trafficctl.uc)
+# inside rpcd. Releases up to 1.30.x shipped it as an exec plugin.
+LUCI_DEPENDS:=+trafficctl +trafficctl-telegram +conntrack +curl +tc +iw +kmod-nft-netdev +firewall4 +ucode +ucode-mod-fs +ucode-mod-uci +ucode-mod-ubus +hostapd-utils +luci-base +rpcd +rpcd-mod-ucode
 LUCI_PKGARCH:=all
 
 include $(TOPDIR)/feeds/luci/luci.mk
@@ -57,10 +60,16 @@ include $(TOPDIR)/feeds/luci/luci.mk
 # with this upgrade. The config itself is kept by trafficctl, so the copy is
 # removed only while the real file is there.
 #
+# /usr/libexec/rpcd/luci.trafficctl is the exec plugin of releases up to
+# 1.30.x. The package manager drops it with the upgrade; a copy put there by
+# hand would register the same ubus object, and rpcd would then refuse the
+# ucode one. It goes before the restart.
+#
 # The config mode, the services and the cut release on removal belong to the
 # backend and live in ../trafficctl/Makefile.
 define Package/$(PKG_NAME)/postinst
 #!/bin/sh
+rm -f "$${IPKG_INSTROOT}/usr/libexec/rpcd/luci.trafficctl"
 if [ -z "$${IPKG_INSTROOT}" ]; then
 	if [ -f /etc/config/trafficctl ]; then
 		rm -f /etc/config/trafficctl-opkg.backup
