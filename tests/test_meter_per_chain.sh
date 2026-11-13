@@ -434,6 +434,40 @@ assert_eq "restore .1 twice: still one rule per port" "3" \
 assert_eq "restore .1 twice: .10 untouched" "3" \
     "$(rules_of rl_ratelimit_10_0_20_10_ul | wc -l | tr -d ' ')"
 
+# ── a shared legacy label: removing one target's limit keeps the other's ────
+# Limits set before v1.13.2 carry the caller's label in the comment, so every
+# target limited from Telegram shares rl_ratelimit_tg (upload _ul). v1.30.5
+# removed that comment through tctl_ratelimit_remove, which matches on the
+# comment alone: turning off 10.0.20.40's limit from Telegram lifted
+# 10.0.20.4's as well, and deleted its meters.
+export NFT_EMU=1.1
+reset
+printf 'dl_br_lan\nul_lan1\nul_lan2\nul_lan3\n' > "$STATE/chains"
+printf 'tctl_d_10_0_20_40\ntctl_u_10_0_20_40\ntctl_d_10_0_20_4\ntctl_u_10_0_20_4\n' > "$STATE/sets"
+{
+    h=4
+    for t in 10.0.20.40 10.0.20.4; do
+        s=$(printf '%s' "$t" | tr '.' '_')
+        echo "$h dl_br_lan ip daddr $t add @tctl_d_$s { ip daddr limit rate over 625000 bytes/second } counter packets 0 bytes 0 drop comment \"rl_ratelimit_tg\""
+        h=$((h + 1))
+        for i in 1 2 3; do
+            echo "$h ul_lan$i ip saddr $t add @tctl_u_$s { ip saddr limit rate over 625000 bytes/second } counter packets 0 bytes 0 drop comment \"rl_ratelimit_tg_ul\""
+            h=$((h + 1))
+        done
+    done
+    echo "$h" > "$STATE/handle"
+} > "$STATE/rules"
+OUT=$(run "$RL" 10.0.20.40 0 tg)
+assert_contains "shared legacy label: the limit is removed" '"ok":true' "$OUT"
+assert_eq "shared legacy label: the target's own rules are gone" "" \
+    "$(table | grep -E 'ip [ds]addr 10\.0\.20\.40 ')"
+assert_eq "shared legacy label: the other target keeps its download rule" "1" \
+    "$(rules_of rl_ratelimit_tg | wc -l | tr -d ' ')"
+assert_eq "shared legacy label: and every upload rule" "3" \
+    "$(table | grep -c 'ip saddr 10\.0\.20\.4 .*"rl_ratelimit_tg_ul"')"
+assert_not_contains "shared legacy label: the target's meters are gone" "set tctl_u_10_0_20_40 " "$(table)"
+assert_contains "shared legacy label: the other target's meters stay" "set tctl_u_10_0_20_4 " "$(table)"
+
 # ── the meter name ──────────────────────────────────────────────────────────
 NAME=$(PATH="$MOCKBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; tctl_rl_meter_name \"\$(tctl_target_slug 255.255.255.255/32)\" \"\$(tctl_ingress_chain wlan-guest-5gx)\"")
 assert_eq "name: deterministic" "tctl_m_255_255_255_255_32_ul_wlan_guest_5gx" "$NAME"
