@@ -178,6 +178,30 @@ assert_eq "legacy label: this device's rules are gone" "" \
 assert_eq "legacy label: the other device's two rules stay" "2" \
     "$(printf '%s\n' "$TABLE" | grep -cE 'ip [sd]addr 192\.168\.1\.50 .*"rl_ratelimit_tg(_ul)?"')"
 
+# A label rule in the other direction does not name this target: download
+# goes by ip daddr, upload by ip saddr.
+lt_reset
+legacy dl_br_lan egress br-lan 0 'ip saddr 192.168.1.5 limit rate over 625000 bytes/second counter drop comment "rl_ratelimit_tg"'
+legacy ul_lan1 ingress lan1 -200 'ip daddr 192.168.1.5 limit rate over 625000 bytes/second counter drop comment "rl_ratelimit_tg_ul"'
+lt_run ratelimit 192.168.1.5 0 tg >/dev/null
+assert_eq "legacy label: a rule naming the target in the other direction stays" "2" \
+    "$(lt_table | grep -c '"rl_ratelimit_tg')"
+
+# "each" mode then: the meters, named after the target, go after their rules,
+# and the other target's meter stays.
+lt_reset
+legacy dl_br_lan egress br-lan 0 'ip daddr 10.0.20.0/24 meter tctl_d_10_0_20_0_24 { ip daddr limit rate over 625000 bytes/second } counter drop comment "rl_ratelimit_tg"'
+legacy dl_br_lan egress br-lan 0 'ip daddr 10.0.30.0/24 meter tctl_d_10_0_30_0_24 { ip daddr limit rate over 625000 bytes/second } counter drop comment "rl_ratelimit_tg"'
+: > "$NFT_LOG"
+lt_run ratelimit 10.0.20.0/24 0 tg >/dev/null
+assert_eq "legacy label each: this target's rule is gone" "" "$(lt_table | grep '10\.0\.20\.0/24')"
+assert_eq "legacy label each: the other target's rule stays" "1" "$(lt_table | grep -c '10\.0\.30\.0/24')"
+NFT=$(grep '^delete' "$NFT_LOG")
+assert_contains "legacy label each: its meter is deleted" "delete set netdev tm_ratelimit tctl_d_10_0_20_0_24" "$NFT"
+assert_eq "legacy label each: after its rule" "delete rule" \
+    "$(printf '%s\n' "$NFT" | grep -E 'delete (rule|set netdev tm_ratelimit tctl_d_10_0_20)' | head -n 1 | cut -d' ' -f1-2)"
+assert_eq "legacy label each: the other meter is kept" "" "$(printf '%s\n' "$NFT" | grep tctl_d_10_0_30)"
+
 # kmod-nft-netdev missing: every chain would fail, so it stops and says why.
 lt_reset
 OUT=$(NFT_FAIL_TABLE=1 lt_run ratelimit 192.168.1.50 5000)

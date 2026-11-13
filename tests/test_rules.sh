@@ -9,13 +9,12 @@
 # are SAVED (rules.json, shapes.json, the uci maclist), never from the set of
 # devices currently online, and it must say which of the two each was found in.
 #
-# Runs the ucode CLI and the real removal scripts with fake nft/tc/ip/
-# hostapd_cli on PATH (test_direction.sh's pattern), a private ubusd, and one
-# scratch root both read: the CLI through TCTL_ROOT, the scripts through
-# rewritten paths. The list is read from the `nft -j` output of OpenWrt 22.03
+# Runs the ucode CLI with fake nft/tc/ip/hostapd_cli on PATH
+# (test_direction.sh's pattern), a private ubusd, and one scratch root it
+# reads through TCTL_ROOT. The list is read from the `nft -j` output of OpenWrt 22.03
 # (nft 1.0.2) and 25.12 (1.1.6) in turn. The second half runs
-# the removals the tab calls (`trafficctl unblock`/`macfilter-remove`, the
-# limiter script) against an OFFLINE device, since "listed but cannot be
+# the removals the tab calls (`trafficctl unblock`/`macfilter-remove`,
+# `ratelimit`) against an OFFLINE device, since "listed but cannot be
 # removed" would be the same bug one step later.
 
 PASS=0
@@ -31,6 +30,8 @@ MOCKBIN="$TMPDIR/bin"
 STATE="$TMPDIR/state"
 FIXTURES="$UC_REPO/tests/fixtures"
 mkdir -p "$MOCKBIN" "$STATE" "$ROOT/tmp/.uci" "$ROOT/etc/trafficctl" "$ROOT/etc/config" "$ROOT/proc/net" "$TMPDIR/ubus"
+# The limiter checks its devices in sysfs.
+mkdir -p "$ROOT/sys/class/net/br-lan" "$ROOT/sys/class/net/eth1"
 CTX=""
 
 assert_eq() {
@@ -57,22 +58,6 @@ NAMES="$ROOT/etc/trafficctl/names"
 RDNS="$ROOT/tmp/trafficctl_rdns_cache"
 CT="$ROOT/proc/net/nf_conntrack"
 
-FW="$TMPDIR/fw.sh"
-sed -e "s|TCTL_LEASES_FILE=\"/tmp/dhcp.leases\"|TCTL_LEASES_FILE=\"$LEASES\"|" \
-    -e "s|TCTL_RULES_FILE=\"/etc/trafficctl/rules.json\"|TCTL_RULES_FILE=\"$RULES\"|" \
-    -e "s|TCTL_SHAPES_FILE=\"/etc/trafficctl/shapes.json\"|TCTL_SHAPES_FILE=\"$SHAPES\"|" \
-    "$BIN/trafficctl-fw.sh" > "$FW"
-patch_script() {
-    sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FW|" \
-        -e "s|^SCRIPTS=\"/usr/libexec/trafficctl\"|SCRIPTS=\"$TMPDIR\"|" \
-        -e "s|^NAMES_FILE=\"/etc/trafficctl/names\"|NAMES_FILE=\"$NAMES\"|" \
-        -e "s|^RDNS_CACHE_FILE=\"/tmp/trafficctl_rdns_cache\"|RDNS_CACHE_FILE=\"$RDNS\"|" \
-        -e "s|^CONNTRACK_FILE=\"/proc/net/nf_conntrack\"|CONNTRACK_FILE=\"$CT\"|" \
-        -e "s|/tmp/dhcp.leases|$LEASES|g" \
-        "$1" > "$2"
-}
-patch_script "$BIN/trafficctl-ratelimit.sh"        "$TMPDIR/ratelimit.sh"
-chmod +x "$TMPDIR"/*.sh
 
 # ── fakes ──────────────────────────────────────────────────────────────────
 # Each listing is a fixture file, so a scenario is "write the kernel state,
@@ -136,6 +121,8 @@ esac
 exit 0
 MOCK
 echo '{"clients":[]}' > "$TMPDIR/ubus/hostapd.phy0-ap0@list_bans.json"
+printf '{"interface":[{"interface":"lan","up":true,"l3_device":"br-lan","ipv4-address":[{"address":"192.168.1.1","mask":24}]},{"interface":"wan","up":true,"l3_device":"eth1"}]}\n' > "$TMPDIR/ubus/network.interface@dump.json"
+printf '{"up":true,"l3_device":"eth1"}\n' > "$TMPDIR/ubus/network.interface.wan@status.json"
 ubus_start "$TMPDIR/ubus"
 cat > "$MOCKBIN/hostapd_cli" <<MOCK
 #!/bin/sh
@@ -152,7 +139,6 @@ export TCTL_SYSFS_NET="$TMPDIR/sys/class/net"
 for t in conntrack logger; do printf '#!/bin/sh\nexit 0\n' > "$MOCKBIN/$t"; done
 chmod +x "$MOCKBIN"/*
 
-run() { PATH="$MOCKBIN:$PATH" sh "$@" 2>/dev/null; }
 list() { PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" tctl rules list 2>/dev/null; }
 # The removals the tab calls that are CLI commands themselves.
 uc_run() { PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" tctl "$@" 2>/dev/null; }
@@ -352,15 +338,15 @@ assert_eq "unblock: the saved-only block is gone from the list" "<none>" "$(rec 
 # known MAC). nft exits 1 deleting the missing set; that used to be reported as
 # a failed removal and kept the rules.json record, so the limit came back at
 # the next boot.
-OUT=$(run "$TMPDIR/ratelimit.sh" 192.168.1.66 0)
+OUT=$(uc_run ratelimit 192.168.1.66 0)
 assert_contains "removing a limit with no v6 set reports ok" '"ok":true' "$OUT"
 assert_eq "rules.json no longer holds the removed limit" "0" "$(grep -c '"ip":"192.168.1.66"' "$RULES")"
-OUT=$(run "$TMPDIR/ratelimit.sh" 10.0.20.0/24 0)
+OUT=$(uc_run ratelimit 10.0.20.0/24 0)
 assert_contains "removing a subnet limit reports ok" '"ok":true' "$OUT"
 
-# Editing a saved-only limit goes through the same script with a new rate.
+# Editing a saved-only limit goes through the same command with a new rate.
 : > "$STATE/nft.log"
-OUT=$(run "$TMPDIR/ratelimit.sh" 192.168.1.66 3000 "" shared 1500)
+OUT=$(uc_run ratelimit 192.168.1.66 3000 "" shared 1500)
 assert_contains "editing a limit on an offline host is accepted" '"ok":true' "$OUT"
 assert_contains "edit: the new upload ceiling is saved" '"param_up":"1500"' "$(cat "$RULES")"
 assert_contains "edit: the new download ceiling is saved" '"ip":"192.168.1.66","param":"3000"' "$(cat "$RULES")"
