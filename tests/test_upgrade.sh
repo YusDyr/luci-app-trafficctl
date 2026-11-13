@@ -93,6 +93,41 @@ done
 [ -n "$OLD_FW" ] || { echo "OLD install: trafficctl-fw.sh missing"; exit 1; }
 echo "Old helper scripts at: $(dirname "$OLD_FW")"
 
+# ── Step 1a: rules written by the old release ─────────────────────────────────
+# 2.0.0 drops the shell scripts that wrote them; the ucode commands must still
+# remove them, and the ifup hook must still restore what rules.json records.
+# Needs nf_tables in the container (docker run --cap-add NET_ADMIN); fw4
+# itself needs netifd, and its forward chain is all a block writes to. Run
+# before the bot is switched on below: a 1.30.x block notifies through it.
+OLD_RULES=0
+if ip link add br-lan type bridge 2>/dev/null && nft -f - 2>/dev/null <<'NFT'
+table inet fw4 {
+	chain forward {
+		type filter hook forward priority filter; policy accept;
+	}
+}
+NFT
+then
+    ip link set br-lan up
+    ip addr add 192.168.1.1/24 dev br-lan
+    uci set trafficctl.main.persist_rules=1
+    uci commit trafficctl
+    D=$(dirname "$OLD_FW")
+    sh "$D/trafficctl-block.sh" 192.168.1.50 >/dev/null 2>&1 || true
+    sh "$D/trafficctl-portfw.sh" pause forward tcp 192.168.1.60 80 >/dev/null 2>&1 || true
+    if nft list chain inet fw4 forward | grep -q '"tctl_block_192_168_1_50"' &&
+       nft list table inet tctl_pfw 2>/dev/null | grep -q '"tctl_pfw_pause_tcp_192.168.1.60_80"'; then
+        OLD_RULES=1
+        echo "Old release wrote a block and a port pause"
+    else
+        echo "FAIL: the old release did not write its block and port pause"
+        nft list ruleset
+        exit 1
+    fi
+else
+    echo "No nf_tables in this container (run it with --cap-add NET_ADMIN): old-rule checks skipped"
+fi
+
 # ── Step 1b: services switched on in uci but not enabled in rc.d ──────────────
 # The state a router reached with every earlier release: the Settings toggle
 # set trafficctl.telegram.enabled and only reloaded the bot, and no postinst
@@ -147,7 +182,9 @@ done
 echo "OK: services switched on in uci are enabled in rc.d"
 
 # New files present?
-for f in /usr/libexec/trafficctl/trafficctl-fw.sh \
+for f in /usr/sbin/trafficctl \
+         /usr/share/ucode/trafficctl/ctl.uc \
+         /usr/libexec/trafficctl/trafficctl-telegram.uc \
          /usr/libexec/rpcd/luci.trafficctl \
          /www/cgi-bin/trafficctl-metrics \
          /www/luci-static/resources/view/trafficctl/status.js; do
@@ -156,13 +193,37 @@ done
 
 # Files the old package owned and the new one does not must be gone: the
 # package manager removes them on upgrade, which is why postinst does no
-# cleanup of /usr/local/bin. A leftover copy there would be a stale second
-# set of helpers that nothing updates.
-if [ "$OLD_FW" != /usr/libexec/trafficctl/trafficctl-fw.sh ]; then
-    for f in "$(dirname "$OLD_FW")"/trafficctl-*.sh; do
-        if [ -e "$f" ]; then echo "FAIL: $f left behind by the upgrade"; exit 1; fi
-    done
-    echo "OK: helper scripts at the old path removed by the upgrade"
+# cleanup of /usr/local/bin or /usr/libexec/trafficctl. A leftover copy
+# would be a stale second set of helpers that nothing updates. 2.0.0 ships
+# no shell scripts at all.
+for f in "$(dirname "$OLD_FW")"/trafficctl-*.sh /usr/libexec/trafficctl/*.sh; do
+    if [ -e "$f" ]; then echo "FAIL: $f left behind by the upgrade"; exit 1; fi
+done
+echo "OK: the old shell scripts were removed by the upgrade"
+
+# The old release's rules, through the ucode commands: the ifup hook puts back
+# what rules.json records, and unblock and resume take them away.
+if [ "$OLD_RULES" = 1 ]; then
+    nft flush chain inet fw4 forward
+    nft delete table inet tctl_pfw
+    ACTION=ifup INTERFACE=lan sh /etc/hotplug.d/iface/99-trafficctl-shapes
+    nft list chain inet fw4 forward | grep -q '"tctl_block_192_168_1_50"' ||
+        { echo "FAIL: the ifup hook did not restore the old release's block"; nft list ruleset; exit 1; }
+    nft list table inet tctl_pfw 2>/dev/null | grep -q '"tctl_pfw_pause_tcp_192.168.1.60_80"' ||
+        { echo "FAIL: the ifup hook did not restore the old release's port pause"; nft list ruleset; exit 1; }
+    echo "OK: the ifup hook restored the old release's block and port pause"
+    /usr/sbin/trafficctl unblock 192.168.1.50 >/dev/null
+    /usr/sbin/trafficctl portfw resume forward tcp 192.168.1.60 80 >/dev/null
+    if nft list chain inet fw4 forward | grep -q '"tctl_block_192_168_1_50'; then
+        echo "FAIL: trafficctl unblock left the old release's block"; nft list ruleset; exit 1
+    fi
+    if nft list table inet tctl_pfw 2>/dev/null | grep -q '"tctl_pfw_pause_tcp_192.168.1.60_80"'; then
+        echo "FAIL: trafficctl portfw resume left the old release's pause"; nft list ruleset; exit 1
+    fi
+    if grep -qE '"ip":"(192\.168\.1\.50|forward/tcp/192\.168\.1\.60/80)"' /etc/trafficctl/rules.json; then
+        echo "FAIL: rules.json still records a removed rule: $(cat /etc/trafficctl/rules.json)"; exit 1
+    fi
+    echo "OK: the ucode commands removed the old release's block and port pause"
 fi
 if [ -e /lib/upgrade/keep.d/luci-app-trafficctl ]; then
     echo "FAIL: the old keep.d entry /lib/upgrade/keep.d/luci-app-trafficctl is left behind"
@@ -193,12 +254,12 @@ owner_of() {
             | sed -n 's/^.* is owned by \(.*\)-[0-9][^-]*-r[0-9]*$/\1/p' | head -1
     fi
 }
-for f in /usr/libexec/trafficctl/trafficctl-fw.sh /etc/config/trafficctl \
+for f in /usr/sbin/trafficctl /usr/share/ucode/trafficctl/lib.uc /etc/config/trafficctl \
          /www/cgi-bin/trafficctl-metrics /lib/upgrade/keep.d/trafficctl; do
     o=$(owner_of "$f")
     [ "$o" = trafficctl ] || { echo "FAIL: $f is owned by '$o' after the upgrade, expected trafficctl"; exit 1; }
 done
-for f in /etc/init.d/trafficctl-telegram /usr/libexec/trafficctl/trafficctl-telegram.sh; do
+for f in /etc/init.d/trafficctl-telegram /usr/libexec/trafficctl/trafficctl-telegram.uc; do
     o=$(owner_of "$f")
     [ "$o" = trafficctl-telegram ] || { echo "FAIL: $f is owned by '$o' after the upgrade, expected trafficctl-telegram"; exit 1; }
 done

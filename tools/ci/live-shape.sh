@@ -10,10 +10,9 @@
 # Up to v1.30.x a shape's filters were deleted by prio with no handle, which
 # removes every u32 filter of that prio on the device: each shape added or
 # removed took the filters of all the others with it, and only the last one
-# applied was in force. The shaper is the ucode CLI (`trafficctl shape`,
-# behind the trafficctl-shape.sh wrapper); it reads the LAN device from ubus,
-# so a private ubusd carries a recorded network.interface
-# (tests/lib/ubus-mock.uc).
+# applied was in force. The shaper is the ucode CLI (`trafficctl shape`); it
+# reads the LAN device from ubus, so a private ubusd carries a recorded
+# network.interface (tests/lib/ubus-mock.uc).
 #
 # Usage: live-shape.sh [repository root, default /src]
 
@@ -89,7 +88,6 @@ else
     say "no IFB in this kernel: download only"
 fi
 IFBDEV=tctl-ifb0
-S=/usr/libexec/trafficctl
 shape() { /usr/sbin/trafficctl shape "$@"; }
 
 # The u32 filters of prio 10 that send an address to its class: <dev> <ip>
@@ -161,7 +159,7 @@ check_shape 192.168.0.70 1:2 5Mbit 1Mbit
 check_shape 192.168.0.71 1:3 3Mbit 3Mbit
 [ "$IFB" = 1 ] && check_mirred
 
-out=$(sh $S/trafficctl-shape.sh status 192.168.0.70)
+out=$(/usr/sbin/trafficctl shape status 192.168.0.70)
 echo "$out"
 case "$out" in *'"classid":"1:2"'*'"info":"5Mbit"'*) ok "status through the wrapper: 1:2 at 5Mbit" ;; *) bad "status: $out" ;; esac
 

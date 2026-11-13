@@ -555,7 +555,9 @@ jobs:
           done
           [ "$pulled" = "1" ] || { echo "::error::Could not pull $IMAGE after 3 attempts"; exit 1; }
           # shellcheck disable=SC2086 # OLD_PKGS is a list of package files
-          docker run --rm \
+          # NET_ADMIN: the old release writes a block and a port pause, which
+          # the new one must restore on ifup lan and remove.
+          docker run --rm --cap-add NET_ADMIN \
             --entrypoint /bin/sh \
             -v "$PWD/dist:/dist" \
             -v "$PWD/dist-old:/dist-old" \
