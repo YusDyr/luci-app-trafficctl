@@ -206,8 +206,7 @@ shape_attach() {
 # listed every device as shaped.
 shape_filter_handles() {
     local dev="$1" match="$2" ip="$3" classid="$4" key at
-    # shellcheck disable=SC2046
-    key=$(printf '%02x%02x%02x%02x' $(echo "$ip" | tr '.' ' '))
+    key=$(echo "$ip" | awk -F. '{ printf "%02x%02x%02x%02x", $1, $2, $3, $4 }')
     [ "$match" = "dst" ] && at=16 || at=12
     tc filter show dev "$dev" parent 1: 2>/dev/null | awk -v cid="$classid" -v key="$key/ffffffff" -v at="$at" '
         $1 == "filter" {
