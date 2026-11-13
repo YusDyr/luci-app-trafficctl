@@ -188,8 +188,34 @@ function filter_argv(op, dev, dir, ip) {
 		'match', 'ip', dir, ip + '/32' ];
 }
 
+// The handles of the prio-10 filters on dev that send to class cid or match
+// ip in direction dir. A u32 delete without a handle removes the whole prio,
+// which up to v1.30.x took every other device's filter with it on each add
+// and remove: only the last shape applied stayed in force. Verified on
+// kernel 6.x; tools/ci/live-shape.sh checks it on every release's tc.
+function filter_handles(dev, dir, ip, cid) {
+	let o = map(split(ip, '.'), (x) => int(x));
+	let key = sprintf('match %02x%02x%02x%02x/ffffffff at %d', o[0], o[1], o[2], o[3],
+		(dir == 'dst') ? 16 : 12);
+	let out = [], fh = null;
+	for (let l in tc_lines([ 'filter', 'show', 'dev', dev, 'parent', '1:' ])) {
+		let m = match(l, /^filter .*pref 10 u32 .*fh ([0-9a-f]+:[0-9a-f]*:[0-9a-f]+) .*flowid (1:[0-9a-f]+)/);
+		if (m) {
+			fh = m[1];
+			if (m[2] == cid)
+				push(out, fh);
+		}
+		else if (substr(l, 0, 7) == 'filter ')
+			fh = null;
+		else if (fh != null && trim(l) == key && index(out, fh) < 0)
+			push(out, fh);
+	}
+	return out;
+}
+
 function detach(dev, dir, ip, cid) {
-	tc(filter_argv('del', dev, dir, ip));
+	for (let fh in filter_handles(dev, dir, ip, cid))
+		tc([ 'filter', 'del', 'dev', dev, 'parent', '1:0', 'prio', '10', 'handle', fh, 'protocol', 'ip', 'u32' ]);
 	tc([ 'qdisc', 'del', 'dev', dev, 'parent', cid ]);
 	tc([ 'class', 'del', 'dev', dev, 'classid', cid ]);
 }

@@ -151,30 +151,32 @@ unset NFT_FIXTURES
 # trafficctl newdevice
 # ════════════════════════════════════════════════════════════════════════════
 
-APPLIED="$STATE/applied.log"
-LIBEXEC="$ROOT/usr/libexec/trafficctl"
-mkdir -p "$LIBEXEC"
-cat > "$LIBEXEC/trafficctl-ratelimit.sh" <<MOCK
-#!/bin/sh
-printf 'ratelimit via=%s src=%s args=%s\n' "\$TCTL_VIA" "\$TCTL_SRC" "\$*" >> "$APPLIED"
-MOCK
-cat > "$LIBEXEC/trafficctl-shape.sh" <<MOCK
-#!/bin/sh
-printf 'shape via=%s src=%s args=%s\n' "\$TCTL_VIA" "\$TCTL_SRC" "\$*" >> "$APPLIED"
-MOCK
-chmod +x "$LIBEXEC"/*
+# newdevice calls limit.ratelimit and shape.main in process. Shadow copies of
+# the modules replace both with a recorder: an activity-log line with no
+# via/src of its own, so it carries the context newdevice set, as the real
+# limiter's entry does.
+APPLIED="$ROOT/tmp/trafficctl/activity.log"
+SHADOW="$STATE/shadow"
+mkdir -p "$SHADOW/trafficctl"
+cp "$UC_LIB"/trafficctl/*.uc "$SHADOW/trafficctl/"
+sed -i 's/^function ratelimit(args) {$/&\n\tlib.log("applied", "ratelimit", join(" ", args));\n\treturn { rc: 0 };/' "$SHADOW/trafficctl/limit.uc"
+sed -i 's/^function main(args) {$/&\n\tlib.log("applied", "shape", join(" ", args));\n\treturn { rc: 0 };/' "$SHADOW/trafficctl/shape.uc"
+assert_eq "harness: both recorders are in the shadow modules" "2" \
+    "$(cat "$SHADOW/trafficctl/limit.uc" "$SHADOW/trafficctl/shape.uc" | grep -c 'lib.log("applied"')"
 
 setnd() {   # setnd <enabled> <limit_kbit> <limit_mode>
     fw_cfg 0
+    sed -i "s/option enabled '0'/option enabled '1'/" "$ROOT/etc/config/trafficctl"
     printf "\nconfig newdevice 'newdevice'\n\toption enabled '%s'\n\toption limit_kbit '%s'\n\toption limit_mode '%s'\n" \
         "$1" "$2" "$3" >> "$ROOT/etc/config/trafficctl"
 }
 
 run_newdevice() {   # run_newdevice <action> <mac> <ip>
-    : > "$APPLIED"
+    rm -f "$APPLIED"
     PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" ACTION="$1" MACADDR="$2" IPADDR="$3" \
-        tctl newdevice >/dev/null 2>&1
-    cat "$APPLIED" 2>/dev/null
+        "$UCODE" -S -L "$SHADOW" -- "$UC_REPO/trafficctl/files/usr/sbin/trafficctl" newdevice >/dev/null 2>&1
+    sed -n 's/.* src=\([^ ]*\) user=[^ ]* via=\([^ ]*\) action=applied target=\([^ ]*\) detail=\(.*\)$/\3 via=\2 src=\1 args=\4/p' \
+        "$APPLIED" 2>/dev/null
 }
 
 setnd 1 4000 limiter

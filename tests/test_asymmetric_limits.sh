@@ -28,25 +28,22 @@ FAIL=0
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$REPO/trafficctl/files/usr/libexec/trafficctl"
-HOTPLUG="$REPO/trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes"
 RPCD="$REPO/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
 
-# The limiter is `trafficctl ratelimit` and the limit half of `trafficctl
-# restore` (ucode, tests/lib/limit_env.sh); the shaper, the shapes restore of
-# the hook and fw.sh's persistence helpers are still shell, run with the fakes
-# in $SHBIN. Both write the one rules.json, $RULES.
+# The limiter and the shaper are `trafficctl ratelimit` and `trafficctl shape`,
+# their restore `trafficctl restore` (ucode, tests/lib/shape_env.sh, with a
+# stateful tc); fw.sh's persistence and rate helpers are still shell, run with
+# the fakes in $SHBIN. Both write the one rules.json, $RULES.
 # shellcheck source=tests/lib/ucode.sh
 . "$(dirname "$0")/lib/ucode.sh"
-# shellcheck source=tests/lib/limit_env.sh
-. "$UC_TESTLIB/limit_env.sh"
+# shellcheck source=tests/lib/shape_env.sh
+. "$UC_TESTLIB/shape_env.sh"
 lt_cfg 1
-lt_net br-lan lan1
+st_net br-lan lan1
 printf '[]' > "$RULES"
 TMP="$UC_TMP/asym"
 SHBIN="$TMP/bin"
 mkdir -p "$SHBIN"
-SHAPES="$TMP/shapes.json"
-TC_LOG="$TMP/tc.log"
 
 assert_eq() {
     local desc="$1" expected="$2" actual="$3"
@@ -179,21 +176,6 @@ esac
 exit 0
 MOCK
 
-cat > "$SHBIN/tc" <<MOCK
-#!/bin/sh
-printf '%s\n' "\$*" >> "$TC_LOG"
-case "\$*" in
-    # ensure_ifb's last act is to confirm the IFB root class exists, and it
-    # returns failure if it does not — without this the upload half is skipped
-    # and the test would be measuring a missing kmod-ifb rather than the rates.
-    # Only the root class is reported: minor 1 is below CLASSID_MIN, so this
-    # does not feed the allocator and the record format stays the only thing
-    # deciding which minors are taken.
-    "class show dev "*) echo "class htb 1:1 root rate 1000Mbit ceil 1000Mbit burst 125000b cburst 125000b" ;;
-esac
-exit 0
-MOCK
-
 for m in logger conntrack ip; do
     printf '#!/bin/sh\nexit 0\n' > "$SHBIN/$m"
 done
@@ -216,38 +198,14 @@ patch_script() {
         -e "s|SHAPES_FILE=\"/etc/trafficctl/shapes.json\"|SHAPES_FILE=\"$SHAPES\"|" \
         -e "s|SHAPES_FILE=\"/etc/trafficctl/shapes.json\"|SHAPES_FILE=\"$SHAPES\"|" \
         -e "s|RULES_FILE=\"/etc/trafficctl/rules.json\"|RULES_FILE=\"$RULES\"|" \
-        -e "s|/usr/libexec/trafficctl/trafficctl-shape.sh|$TMP/shape.sh|" \
         "$1" > "$2"
     chmod +x "$2"
 }
-patch_script "$BIN/trafficctl-shape.sh"     "$TMP/shape.sh"
-patch_script "$HOTPLUG"                     "$TMP/hotplug"
-
-assert_not_contains "harness: no production shapes path survived the rewrite" \
-    "/etc/trafficctl/shapes.json" "$(cat "$TMP/shape.sh")"
-
-run() { PATH="$SHBIN:$PATH" sh "$@" 2>/dev/null; }
 rl() { lt_run ratelimit "$@"; }
 
-# Source only the record helpers out of the patched shaper, so they can be
-# called directly without going through its action dispatch.
-slice_helpers() {
-    awk '/^SHAPES_FILE=/ { print }
-         /^re_quote\(\)/, /^}/ { print }
-         /^shapes_entries\(\)/, /^}/ { print }
-         /^lookup_classid\(\)/, /^}/ { print }
-         /^lookup_rate_up\(\)/, /^}/ { print }
-         /^used_minors\(\)/, /^}/ { print }
-         /^alloc_classid\(\)/, /^}/ { print }
-         /^CLASSID_MIN=/ { print }
-         /^CLASSID_MAX=/ { print }' "$TMP/shape.sh" > "$TMP/helpers.sh"
-    printf 'LAN_DEV=br-lan\nIFB_DEV=tctl-ifb0\n' >> "$TMP/helpers.sh"
-}
-slice_helpers
-
-helper() {
-    PATH="$SHBIN:$PATH" sh -c ". '$TMP/helpers.sh'; $1" 2>/dev/null
-}
+# The shaper's record readers, called directly (trafficctl.shape).
+shp() { PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" tcall trafficctl.shape "$@"; }
+entries_n() { shp entries | grep -o '\\"ip\\"' | wc -l | tr -d ' '; }
 
 # ════════════════════════════════════════════════════════════════════════════
 # 1. The record format — an asymmetric record must still be VISIBLE
@@ -258,32 +216,26 @@ helper() {
 
 printf '[{"ip":"192.168.1.50","rate_kbit":20000,"classid":"1:2","rate_kbit_up":2000}]' > "$SHAPES"
 
-assert_eq "an asymmetric record is seen by shapes_entries" "1" \
-    "$(helper 'shapes_entries | wc -l' | tr -d ' ')"
-assert_eq "its classid is found" "1:2" "$(helper 'lookup_classid 192.168.1.50')"
-assert_eq "its upload ceiling is read back" "2000" "$(helper 'lookup_rate_up 192.168.1.50')"
+assert_eq "an asymmetric record is seen by entries()" "1" "$(entries_n)"
+assert_eq "its classid is found" "1:2" "$(shp lookup_classid '"192.168.1.50"')"
 # The collision test: minor 2 is taken, so the next allocation must not be 1:2.
 assert_eq "the allocator does NOT reuse a minor held by an asymmetric record" "1:3" \
-    "$(helper 'alloc_classid')"
+    "$(shp alloc_classid)"
 
 # ── and an old symmetric record must keep working unchanged ─────────────────
 
 printf '[{"ip":"10.0.0.7","rate_kbit":5000,"classid":"1:4"}]' > "$SHAPES"
-assert_eq "a pre-existing symmetric record is still seen" "1" \
-    "$(helper 'shapes_entries | wc -l' | tr -d ' ')"
-assert_eq "its classid is still found" "1:4" "$(helper 'lookup_classid 10.0.0.7')"
-assert_eq "it reports no upload ceiling, meaning symmetric" "" \
-    "$(helper 'lookup_rate_up 10.0.0.7')"
-assert_eq "the allocator skips its minor too" "1:2" "$(helper 'alloc_classid')"
+assert_eq "a pre-existing symmetric record is still seen" "1" "$(entries_n)"
+assert_eq "its classid is still found" "1:4" "$(shp lookup_classid '"10.0.0.7"')"
+assert_eq "the allocator skips its minor too" "1:2" "$(shp alloc_classid)"
 
 # ── a file holding both forms at once, which is what an upgrade produces ────
 
 printf '[{"ip":"10.0.0.7","rate_kbit":5000,"classid":"1:2"},{"ip":"10.0.0.8","rate_kbit":9000,"classid":"1:3","rate_kbit_up":1000}]' > "$SHAPES"
-assert_eq "both forms are seen side by side" "2" \
-    "$(helper 'shapes_entries | wc -l' | tr -d ' ')"
-assert_eq "old-form classid in a mixed file" "1:2" "$(helper 'lookup_classid 10.0.0.7')"
-assert_eq "new-form classid in a mixed file" "1:3" "$(helper 'lookup_classid 10.0.0.8')"
-assert_eq "allocation skips both minors" "1:4" "$(helper 'alloc_classid')"
+assert_eq "both forms are seen side by side" "2" "$(entries_n)"
+assert_eq "old-form classid in a mixed file" "1:2" "$(shp lookup_classid '"10.0.0.7"')"
+assert_eq "new-form classid in a mixed file" "1:3" "$(shp lookup_classid '"10.0.0.8"')"
+assert_eq "allocation skips both minors" "1:4" "$(shp alloc_classid)"
 
 # ════════════════════════════════════════════════════════════════════════════
 # 2. The shaper applies two different ceilings
@@ -291,7 +243,7 @@ assert_eq "allocation skips both minors" "1:4" "$(helper 'alloc_classid')"
 
 : > "$SHAPES"; printf '[]' > "$SHAPES"
 : > "$TC_LOG"
-out=$(run "$TMP/shape.sh" add 192.168.1.60 20000 shape_test 2000)
+out=$(st_run add 192.168.1.60 20000 shape_test 2000)
 
 assert_contains "shaper reports both ceilings when they differ" \
     "20000 kbit/s down, 2000 kbit/s up" "$out"
@@ -305,9 +257,9 @@ assert_contains "upload burst is sized from the upload rate" "burst 2500b" "$(ca
 
 # ── symmetric still writes exactly the record it always wrote ──────────────
 
+st_reset
 printf '[]' > "$SHAPES"
-: > "$TC_LOG"
-out=$(run "$TMP/shape.sh" add 192.168.1.61 5000 shape_test)
+out=$(st_run add 192.168.1.61 5000 shape_test)
 assert_eq "a symmetric shape writes the pre-feature record verbatim" \
     '[{"ip":"192.168.1.61","rate_kbit":5000,"classid":"1:2"}]' "$(cat "$SHAPES")"
 assert_not_contains "no upload field appears for a symmetric shape" \
@@ -315,8 +267,9 @@ assert_not_contains "no upload field appears for a symmetric shape" \
 assert_contains "and it reports a single figure" "shape 5000 kbit/s applied" "$out"
 
 # Explicitly equal rates are symmetric, not a special asymmetric case.
+st_reset
 printf '[]' > "$SHAPES"
-run "$TMP/shape.sh" add 192.168.1.62 5000 shape_test 5000 >/dev/null
+st_run add 192.168.1.62 5000 shape_test 5000 >/dev/null
 assert_not_contains "an explicitly equal upload rate still writes no field" \
     "rate_kbit_up" "$(cat "$SHAPES")"
 
@@ -378,12 +331,24 @@ assert_not_contains "a pre-feature record does not restore as a total upload blo
 
 # ── and the shaper's restore path ──────────────────────────────────────────
 
-: > "$TC_LOG"
+st_reset
 printf '[]' > "$RULES"
 printf '[{"ip":"192.168.1.92","rate_kbit":20000,"classid":"1:2","rate_kbit_up":2000}]' > "$SHAPES"
-INTERFACE=lan ACTION=ifup run "$TMP/hotplug" >/dev/null 2>&1
-assert_contains "shape restore re-applies the download ceiling" "rate 20000kbit" "$(cat "$TC_LOG")"
-assert_contains "shape restore re-applies the upload ceiling" "rate 2000kbit" "$(cat "$TC_LOG")"
+lt_run restore >/dev/null
+assert_contains "shape restore re-applies the download ceiling" \
+    "class add dev br-lan parent 1:1 classid 1:2 htb rate 20000kbit" "$(cat "$TC_LOG")"
+assert_contains "shape restore re-applies the upload ceiling" \
+    "class add dev tctl-ifb0 parent 1:1 classid 1:2 htb rate 2000kbit" "$(cat "$TC_LOG")"
+assert_eq "and the record is written back as it was" \
+    '[{"ip":"192.168.1.92","rate_kbit":20000,"classid":"1:2","rate_kbit_up":2000}]' "$(cat "$SHAPES")"
+
+# A record with no upload field comes back symmetric, never as a zero ceiling.
+st_reset
+printf '[{"ip":"192.168.1.93","rate_kbit":5000,"classid":"1:4"}]' > "$SHAPES"
+lt_run restore >/dev/null
+assert_contains "a pre-feature shape restores its upload at the download rate" \
+    "class add dev tctl-ifb0 parent 1:1 classid 1:4 htb rate 5000kbit" "$(cat "$TC_LOG")"
+assert_not_contains "and gains no upload field" "rate_kbit_up" "$(cat "$SHAPES")"
 
 # ════════════════════════════════════════════════════════════════════════════
 # 5. The rpcd surface
@@ -623,11 +588,11 @@ assert_contains "ratelimit: 0 still removes" '"ok":true' "$out"
 : > "$SHAPES"
 for r in abc 1.5 010 0; do
     : > "$TC_LOG"
-    out=$(run "$TMP/shape.sh" add 192.168.1.91 "$r")
+    out=$(st_run add 192.168.1.91 "$r")
     assert_contains "shape: rate '$r' is refused" '"ok":false' "$out"
     assert_not_contains "shape: rate '$r' builds no class" '192.168.1.91' "$(cat "$TC_LOG")"
 done
-out=$(run "$TMP/shape.sh" add 192.168.1.91 5000 shape_test abc)
+out=$(st_run add 192.168.1.91 5000 shape_test abc)
 assert_contains "shape: an invalid upload rate is refused" '"ok":false' "$out"
 assert_not_contains "shape: nothing invalid was persisted" '192.168.1.91' "$(cat "$SHAPES")"
 
