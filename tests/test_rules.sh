@@ -20,7 +20,6 @@
 PASS=0
 FAIL=0
 
-BIN="$(cd "$(dirname "$0")/.." && pwd)/trafficctl/files/usr/libexec/trafficctl"
 
 # shellcheck source=tests/lib/ucode.sh
 . "$(dirname "$0")/lib/ucode.sh"
@@ -368,7 +367,6 @@ OUT=$(PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" tctl rules bogus 2>/dev/null; echo
 assert_eq "an unknown subcommand is refused, as by the shell script" \
     "$(printf '%s\n%s' '{"ok":false,"msg":"usage: trafficctl-rules.sh [list]"}' 'rc=1')" "$OUT"
 assert_eq "no subcommand is list" "$(list)" "$(PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" tctl rules 2>/dev/null)"
-assert_eq "shim: the script is the CLI command" 'exec /usr/sbin/trafficctl rules "$@"' "$(tail -n 1 "$BIN/trafficctl-rules.sh")"
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

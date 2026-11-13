@@ -58,7 +58,9 @@ for ip in 192.168.1.1 10.0.0.1 255.255.255.255 0.0.0.0; do
 done
 for ip in '' abc.def.ghi.jkl 256.1.1.1 1.1.1.999 192.168.1 '192.168.1.1 ; rm -rf /' \
           192.168.1.0/24 192.168.1.1. 1.2.3.4.5 1111.1.1.1 ' 1.2.3.4' '1.2.3.4
-'; do
+' '192.168.1.1|cat /etc/passwd' '$(whoami).168.1.1' '`id`.1.1.1' '192.168.1.1&& cat /etc/shadow' \
+          '192.168.1.1>/tmp/hacked' '192.168.1.1
+rm -rf /'; do
     assert_eq "invalid IP '$ip'" "false" "$(lib valid_ip "$(js "$ip")")"
 done
 assert_eq "valid_ip: a number is not an address" "false" "$(lib valid_ip 1)"

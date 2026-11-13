@@ -20,7 +20,6 @@
 PASS=0
 FAIL=0
 
-BIN="$(cd "$(dirname "$0")/.." && pwd)/trafficctl/files/usr/libexec/trafficctl"
 HOTPLUG="$(cd "$(dirname "$0")/.." && pwd)/trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes"
 
 # shellcheck source=tests/lib/ucode.sh
@@ -30,9 +29,8 @@ mkdir -p "$TMP/root"
 MOCKBIN="$TMP/bin"
 mkdir -p "$MOCKBIN"
 NFT_LOG="$TMP/nft.log"
-# The ucode limiter and fw.sh's persistence helpers share one rules.json,
-# under the TCTL_ROOT the CLI runs with (a symlink would not do: the writers
-# rename a new file over it).
+# rules.json under the TCTL_ROOT the CLI runs with (a symlink would not do:
+# the writer renames a new file over it).
 RULES="$TMP/root/etc/trafficctl/rules.json"
 mkdir -p "$TMP/root/etc/trafficctl" "$TMP/root/etc/config" "$TMP/root/tmp"
 
@@ -188,14 +186,6 @@ export TCTL_TEST_PERSIST="$TMP/persist_on"
 mkdir -p "$TMP/sys/class/net/br-lan/brif/lan1" "$TMP/sys/class/net/br-guest/brif/lan4"
 export TCTL_SYSFS_NET="$TMP/sys/class/net"
 
-# fw.sh names its state files by absolute path, as it must on the router; the
-# tests rewrite those into the scratch directory rather than adding test-only
-# seams to the shipped script.
-FW="$TMP/trafficctl-fw.sh"
-sed -e "s|TCTL_RULES_FILE=\"/etc/trafficctl/rules.json\"|TCTL_RULES_FILE=\"$RULES\"|" \
-    "$BIN/trafficctl-fw.sh" > "$FW"
-assert_not_contains "harness: no production rules path survived the rewrite" \
-    "TCTL_RULES_FILE=\"/etc/trafficctl/rules.json" "$(cat "$FW")"
 # The same router for the ucode CLI: lan (br-lan, 10.10.4.128/25), a guest
 # VLAN (br-guest, 192.168.20.0/24) and wan, as the uci and ubus fakes above.
 printf "config trafficctl 'main'\n\toption persist_rules '1'\n" > "$TMP/root/etc/config/trafficctl"
@@ -285,24 +275,19 @@ assert_contains "persist: a shared cap is stored as shared" \
 # A block record has no bucket layout and must keep its exact previous shape,
 # or an older restore hook would choke on the extra field.
 printf '[]\n' > "$RULES"
-PATH="$MOCKBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; tctl_persist_save block 192.168.1.9 ''" 2>/dev/null
+PATH="$MOCKBIN:$PATH" TCTL_ROOT="$TMP/root" tcall trafficctl.lib persist_save '"block"' '"192.168.1.9"' '""' >/dev/null 2>&1
 assert_eq "persist: a block record is unchanged" \
     '[{"type":"block","ip":"192.168.1.9","param":""}]' "$(cat "$RULES")"
 
 # ── the restore path ────────────────────────────────────────────────────────
 HOOK="$TMP/99-trafficctl-shapes"
-sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FW|" \
-    -e "s|RULES_FILE=\"/etc/trafficctl/rules.json\"|RULES_FILE=\"$RULES\"|" \
-    -e "s|/etc/trafficctl/cut.state|$TMP/cut.state|" \
-    -e "s|/usr/sbin/trafficctl|$TMP/tctl-cli|" \
-    "$HOTPLUG" > "$HOOK"
-# Blocks and rate limits go back through `trafficctl restore`, on the same
-# fake nft and the same rules.json.
+sed -e "s|/usr/sbin/trafficctl|$TMP/tctl-cli|" "$HOTPLUG" > "$HOOK"
+# The hook runs `trafficctl restore`, here on the same fake nft and the same
+# rules.json.
 printf '#!/bin/sh\nTCTL_ROOT="%s" exec "%s" -S -L "%s" -- "%s" "$@"\n' "$TMP/root" "$UCODE" "$UC_LIB" \
     "$UC_REPO/trafficctl/files/usr/sbin/trafficctl" > "$TMP/tctl-cli"
 chmod +x "$TMP/tctl-cli"
-assert_not_contains "harness: the hook's rules path was redirected" \
-    "RULES_FILE=\"/etc/trafficctl/rules.json" "$(cat "$HOOK")"
+assert_contains "harness: the hook runs the CLI under test" "$TMP/tctl-cli restore" "$(cat "$HOOK")"
 
 # What ends the restore loop is a sentinel, not a counted range (#108), so a
 # broken sentinel is an infinite loop and a skipped increment is an infinite
@@ -417,27 +402,12 @@ assert_contains "restore: the hundred-and-first rule comes back" \
     "10.9.1.101" "$RESTORED"
 assert_terminated "restore: a hundred-and-one records end the loop on their own"
 
-# A fixture cannot prove the absence of a bound: raising the cap to 500 passes
-# every assertion above. So the absence is asserted structurally — the loop
-# header carries no condition, and the only way out is the absent-record
-# sentinel. Comments are stripped first because the hook's own comment quotes
-# `seq 0 99` while explaining why it is gone.
-RULES_LOOP=$(awk '/^# Restore port-forward controls/ { f = 1 } f { print } f && /^fi$/ { exit }' \
-             "$HOTPLUG" | grep -v '^[[:space:]]*#')
-assert_not_contains "restore: the loop bound is not a counted range" "seq " "$RULES_LOOP"
-assert_contains "restore: the loop header carries no bound at all" "while :; do" "$RULES_LOOP"
-assert_contains "restore: and ends only when a record is absent" \
-    '[ -z "$type" ] && break' "$RULES_LOOP"
-# The increment must be the first thing in the body, ahead of the `continue`
-# further down; at the bottom it would be skipped and the loop would spin.
-FIRST_STMT=$(printf '%s' "$RULES_LOOP" | awk '/while :; do/ { getline; print; exit }')
-assert_contains "restore: the index is advanced before anything can skip it" \
-    'idx=$((idx + 1))' "$FIRST_STMT"
-
-# The index is advanced at the TOP of the loop. With the increment at the
-# bottom, the `[ -z "$ip" ] && continue` below it would skip the increment and
-# spin forever on the same record — inside a boot hook, which is worse than
-# the bug above.
+# A fixture cannot prove the absence of a bound. Up to 1.30.x the port-forward
+# records were read by a shell loop in the hook (`while :; do`, ended by the
+# absent-record sentinel); `trafficctl restore` walks the parsed array, so
+# there is no index or bound left to pin.
+# A record with no address is skipped, and the next one still restored: the
+# shell loop spun forever on it when its increment came after the `continue`.
 RESTORED=$(restore '[{"type":"block"},{"type":"block","ip":"192.168.1.77","param":""}]')
 assert_terminated "restore: a record with no ip must not spin the loop"
 assert_contains "restore: a record after a malformed one is still restored" \

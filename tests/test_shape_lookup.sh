@@ -15,7 +15,6 @@
 PASS=0
 FAIL=0
 
-BIN="$(cd "$(dirname "$0")/.." && pwd)/trafficctl/files/usr/libexec/trafficctl"
 
 # shellcheck source=tests/lib/ucode.sh
 . "$(dirname "$0")/lib/ucode.sh"
@@ -124,8 +123,6 @@ mkdir -p "$TMPDIR/nohtb"
 printf '#!/bin/sh\necho "qdisc fq_codel 0: root refcnt 2"\n' > "$TMPDIR/nohtb/tc"
 chmod +x "$TMPDIR/nohtb/tc"
 assert_eq "stats: no HTB root, no shapes" "[]" "$(PATH="$TMPDIR/nohtb:$MOCKBIN:$PATH" TCTL_ROOT="$TMPDIR/root" tctl shape-stats 2>&1)"
-assert_eq "shim: the script is the CLI command" 'exec /usr/sbin/trafficctl shape-stats "$@"' "$(tail -n 1 "$BIN/trafficctl-shape-stats.sh")"
-assert_eq "shim: the shaper is the CLI command" 'exec /usr/sbin/trafficctl shape "$@"' "$(tail -n 1 "$BIN/trafficctl-shape.sh")"
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

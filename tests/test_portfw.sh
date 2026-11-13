@@ -356,10 +356,6 @@ assert_eq "unknown subcommand exits 1" 1 "$?"
 OUT=$(run_portfw pause forward tcp 192.168.0.10 1000-2000)
 assert_contains "port range accepted" '"ok":true' "$OUT"
 
-assert_eq "shim: trafficctl-portfw.sh hands over to the CLI" \
-    "$(printf '#!/bin/sh\nexec /usr/sbin/trafficctl portfw "$@"')" \
-    "$(cat "$UC_REPO/trafficctl/files/usr/libexec/trafficctl/trafficctl-portfw.sh")"
-
 # ── Results ──────────────────────────────────────────────────────────────────
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"

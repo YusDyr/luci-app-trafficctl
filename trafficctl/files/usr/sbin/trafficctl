@@ -149,8 +149,8 @@ const commands = {
 	// what was there.
 	restore: () => {
 		// The LAN device can still be coming up (up to 10 seconds).
-		let dev = lib.q(net.lan_device());
-		for (let i = 0; i < 20 && lib.sh('tc qdisc show dev ' + dev) != 0; i++)
+		let dev = net.lan_device();
+		for (let i = 0; i < 20 && lib.sh('tc qdisc show dev ' + lib.q(dev)) != 0; i++)
 			sleep(500);
 		let r = { ok: true, restored: 0, failed: 0 };
 		for (let half in [ [ 'blocks', ctl.restore ], [ 'limits', limit.restore ], [ 'shapes', shape.restore ],

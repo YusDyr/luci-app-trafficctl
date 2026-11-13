@@ -227,13 +227,11 @@ OUT=$(run_netify status)
 assert_contains "endpoint: the uci override wins" '"endpoint":"unix:///tmp/other.sock"' "$OUT"
 main_config
 
-# ── usage and the shim ──────────────────────────────────────────────────────
+# ── usage ───────────────────────────────────────────────────────────────────
 TCTL_ROOT="$ROOT" tctl netify bogus > "$TMPDIR/out" 2>/dev/null
 rc=$?
 assert_contains "usage: unknown subcommand" '"msg":"usage: trafficctl-netify.sh status|collect [secs]|list|raw [secs]"' "$(cat "$TMPDIR/out")"
 [ "$rc" = 1 ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); echo "FAIL: usage exits 1 (got $rc)"; }
-assert_contains "the old script is a shim" 'exec /usr/sbin/trafficctl netify "$@"' \
-    "$(cat "$UC_REPO/trafficctl/files/usr/libexec/trafficctl/trafficctl-netify.sh")"
 
 # ── Results ──────────────────────────────────────────────────────────────────
 
