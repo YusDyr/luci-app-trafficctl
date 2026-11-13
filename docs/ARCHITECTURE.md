@@ -37,6 +37,7 @@ graph TD
             RLS["trafficctl-ratelimit-stats.sh = trafficctl ratelimit-stats<br/>(nft drop counters, ucode)"]
             SHS["trafficctl-shape-stats.sh = trafficctl shape-stats<br/>(tc class stats, ucode)"]
             RDNS["trafficctl-rdns.sh<br/>(reverse DNS — Telegram/CLI)"]
+            HIST["trafficctl-history.sh = trafficctl history<br/>(usage history store + keeper, ucode)"]
         end
 
         subgraph "Action Scripts — /usr/libexec/trafficctl/"
@@ -414,6 +415,7 @@ The WiFi deny is `trafficctl macfilter-add` / `macfilter-remove` (`ctl.macfilter
 | Rate limiting (nft policer) | Optional (`persist_rules`) | `/etc/trafficctl/rules.json` | Configurable -- may be temporary or permanent |
 | Internet blocking | Optional (`persist_rules`) | `/etc/trafficctl/rules.json` | Configurable -- may be temporary or permanent |
 | WiFi MAC filtering | Always | `uci commit wireless` | Committed to `/etc/config/wireless` |
+| Usage history | When `history.enabled` | `<history.dir>/<period>.tsv`, `<period>.if.tsv` | Durable per-period device and interface totals |
 
 The hotplug script triggers on `ACTION=ifup` and `INTERFACE=lan`, with a readiness loop (waits up to 10s for tc to be available on the bridge device). When `persist_rules` is enabled, blocks and ratelimits are saved/removed from `/etc/trafficctl/rules.json` alongside shape operations.
 
@@ -422,6 +424,39 @@ The saved blocks come back through `trafficctl restore` (`ctl.restore`). At boot
 `rules.json` has a shell writer (the limiter, `tctl_persist_*`) and a ucode one (the block, `lib.persist_save`/`persist_remove`). Both take the mkdir lock `/tmp/trafficctl_rules.lock.d`, wait 5 s for it and then take it over from a holder that was killed, and write byte-identical records, so either may run while the other is mid-write.
 
 The DHCP hook (`dhcp/99-trafficctl-newdevice`) runs `trafficctl newdevice` with dnsmasq's `ACTION`, `MACADDR`, `IPADDR` and `HOSTNAME`: the Telegram new-device queue, then the default limit through the seen-MAC ledger `/etc/trafficctl/seen_macs` (seeded on the first run, which applies nothing; a MAC is marked before the limit is applied). A device that already has a limit, live or saved, is left alone.
+
+<!-- PR8 history -->
+### Usage history (ucode)
+
+`trafficctl history` (`trafficctl/files/usr/share/ucode/trafficctl/history.uc`)
+keeps per-period totals (a month, an ISO week or a day) for every device and
+interface. The procd service `trafficctl-history` runs
+`/usr/sbin/trafficctl history keeper`, one process that samples the
+lifetime totals and the interfaces every `sample_interval` seconds (the
+interface series into a tmpfs accumulator) and flushes every `interval`
+seconds:
+
+- The device series folds the growth of the lifetime totals (`net.totals`)
+  since the tmpfs cursor; a value below the cursor rebaselines and adds
+  nothing. The interface series adds a restarted `/proc/net/dev` counter as
+  it stands (#111).
+- The store is the v1.30.0 TSV layout with its `# trafficctl-history 1` and
+  `# trafficctl-history-if 1` headers, period file names, cursors and stamp
+  file, so either version reads what the other wrote. Each write goes to a
+  temp file in the same directory and is renamed into place.
+- `dir` may be a network share. The keeper runs each flush as a child,
+  `timeout 15 trafficctl history flush-now`, under a 20 s kill of its own
+  (22.03 has no `timeout(1)`), so a stalled NFS mount costs one interval and
+  sets the error that `status` reports, and the keeper goes on. The bound
+  holds unless the kernel cannot kill the writer: `system()` waits for the
+  child after SIGKILL, and a writer in uninterruptible sleep (a hard NFS
+  mount) dies only when its I/O returns.
+- A period file that exists and cannot be read (EIO, mode 000) is never
+  rewritten: the flush fails with `read failed` and the cursor stays put.
+- Period ids are computed in the local zone with a hand-written ISO week
+  (2026 has 53 weeks); `tests/test_history.sh` checks them against
+  `date +%G-W%V`.
+<!-- end PR8 history -->
 
 ---
 
