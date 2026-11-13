@@ -437,6 +437,38 @@ jobs:
             -v "$PWD:/src:ro" --entrypoint /bin/sh "$IMAGE" /src/tools/ci/live-ratelimit.sh /src
 
   # ──────────────────────────────────────────────────────────────────────────
+  # Live shaper: real tc/HTB/u32/mirred and an IFB device against the runner's
+  # kernel, in the OpenWrt rootfs, on a bridge with two dummy ports. Two
+  # shapes must both keep their filters (up to v1.30.x a u32 delete by prio
+  # took every other shape's filters with it), removing one must leave the
+  # other, and `trafficctl restore` must bring them back after a reboot and
+  # replace them over live ones. Needs no package build.
+  # ──────────────────────────────────────────────────────────────────────────
+  live-shape:
+    name: Live shaper ${{ matrix.version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ["22.03.7", "25.12.4"]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Shaper on a two-port bridge in OpenWrt ${{ matrix.version }}
+        run: |
+          IMAGE="ghcr.io/openwrt/rootfs:x86-64-v${{ matrix.version }}"
+          for attempt in 1 2 3; do
+            docker pull -q "$IMAGE" && break
+            [ "$attempt" = 3 ] && { echo "::error::Could not pull $IMAGE"; exit 1; }
+            sleep $((attempt * 5))
+          done
+          # A container cannot load modules.
+          for m in sch_htb sch_fq_codel sch_ingress cls_u32 act_mirred ifb bridge dummy; do
+            sudo modprobe "$m" || echo "::warning::no module $m"
+          done
+          docker run --rm --cap-add NET_ADMIN --tmpfs /work:size=300m,exec \
+            -v "$PWD:/src:ro" --entrypoint /bin/sh "$IMAGE" /src/tools/ci/live-shape.sh /src
+
+  # ──────────────────────────────────────────────────────────────────────────
   # Upgrade — install previous GitHub release, then install current build.
   # Verifies pre-upgrade/post-upgrade hooks, config file preservation.
   # ──────────────────────────────────────────────────────────────────────────
