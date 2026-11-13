@@ -12,7 +12,7 @@
 // Replies keep the shell plugin's JSON; rpcd needs an object, so arrays come
 // wrapped as {"result": ...}.
 
-import { stdin, stat } from 'fs';
+import { stdin } from 'fs';
 import * as lib from 'trafficctl.lib';
 import * as notify from 'trafficctl.notify';
 
@@ -273,16 +273,6 @@ function offload_mode() {
 	return 'none';
 }
 
-// tctl_nss_status: Qualcomm ECM accelerating (our rules not enforced),
-// stopped, or absent. A missing knob is read as accelerating.
-function nss_status() {
-	const ECM = '/sys/kernel/debug/ecm';
-	if (stat(lib.path(ECM))?.type != 'directory')
-		return 'absent';
-	let knob = (f) => rtrim(lib.readfile(ECM + '/' + f) ?? '', '\n');
-	return (knob('front_end_ipv4_stop') == '1' && knob('front_end_ipv6_stop') == '1') ? 'stopped' : 'active';
-}
-
 function bot_running() {
 	let svc = lib.ubus_call('service', 'list', { name: 'trafficctl-telegram' })?.['trafficctl-telegram'];
 	for (let k, inst in svc?.instances ?? {})
@@ -532,7 +522,7 @@ const methods = {
 		enabled: uget('main', 'enabled') == '1',
 		default_mode: uget('main', 'default_mode') || 'limiter',
 		offload_mode: offload_mode(),
-		nss: nss_status(),
+		nss: lib.nss_status(),
 		sw: fw_get('flow_offloading') == '1',
 		hw: fw_get('flow_offloading_hw') == '1',
 		poll_interval: num(uget('main', 'poll_interval'), 2),

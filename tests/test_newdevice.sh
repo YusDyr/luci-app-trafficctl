@@ -1,5 +1,7 @@
 #!/bin/bash
-# Default limits for devices seen for the first time (#28, part 2).
+# Default limits for devices seen for the first time (#28, part 2), done by
+# `trafficctl newdevice` since the ucode port: the DHCP hotplug hook passes
+# its environment on to it.
 #
 # The feature has one dangerous direction and one harmless one. Calling a
 # device NEW when it is not applies a limit nobody asked for — and because the
@@ -13,12 +15,11 @@
 PASS=0
 FAIL=0
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="$REPO_ROOT/trafficctl/files/usr/libexec/trafficctl"
-HOTPLUG="$REPO_ROOT/trafficctl/files/etc/hotplug.d/dhcp/99-trafficctl-newdevice"
-
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
+# shellcheck source=tests/lib/ucode.sh
+. "$(dirname "$0")/lib/ucode.sh"
+# shellcheck source=tests/lib/fw4_env.sh
+. "$UC_TESTLIB/fw4_env.sh"
+HOTPLUG="$UC_REPO/trafficctl/files/etc/hotplug.d/dhcp/99-trafficctl-newdevice"
 
 assert_eq() {
     local desc="$1" expected="$2" actual="$3"
@@ -54,73 +55,27 @@ assert_empty() {
 # The seen-MAC ledger
 # ════════════════════════════════════════════════════════════════════════════
 
-LEDGER="$TMP/seen_macs"
-LEASES="$TMP/dhcp.leases"
-MOCKBIN="$TMP/bin"
-mkdir -p "$MOCKBIN"
-
-cat > "$MOCKBIN/ip" <<'MOCK'
-#!/bin/sh
-[ "$1" = "neigh" ] || exit 1
-echo "192.168.1.9 dev br-lan lladdr AA:BB:CC:DD:EE:03 REACHABLE"
-echo "192.168.1.8 dev br-lan  FAILED"
-MOCK
-cat > "$MOCKBIN/uci" <<'MOCK'
-#!/bin/sh
-exit 1
-MOCK
-cat > "$MOCKBIN/nft" <<'MOCK'
-#!/bin/sh
-exit 1
-MOCK
-chmod +x "$MOCKBIN"/*
-
+LEDGER="$ROOT/etc/trafficctl/seen_macs"
+SHAPES="$ROOT/etc/trafficctl/shapes.json"
+printf '192.168.1.9 dev br-lan lladdr AA:BB:CC:DD:EE:03 REACHABLE\n192.168.1.8 dev br-lan  FAILED\n' > "$STATE/neigh"
 printf '1700000000 aa:bb:cc:dd:ee:01 192.168.1.5 host-a *\n' > "$LEASES"
 printf '1700000001 AA:BB:CC:DD:EE:02 192.168.1.6 host-b *\n' >> "$LEASES"
-
-RULES="$TMP/rules.json"
-SHAPES="$TMP/shapes.json"
 : > "$SHAPES"
 printf '[]\n' > "$RULES"
+printf '#!/bin/sh\nexit 0\n' > "$MOCKBIN/tc"
+chmod +x "$MOCKBIN/tc"
+fw_cfg 0
 
-# fw.sh names its state files by absolute path, as it must on the router. The
-# tests rewrite those paths into the scratch directory rather than adding
-# override variables to the production script — the same approach the metrics
-# tests take, and it keeps test-only seams out of the shipped code.
-FW="$TMP/fw.sh"
-sed -e "s|TCTL_SEEN_FILE=\"/etc/trafficctl/seen_macs\"|TCTL_SEEN_FILE=\"$LEDGER\"|" \
-    -e "s|TCTL_LEASES_FILE=\"/tmp/dhcp.leases\"|TCTL_LEASES_FILE=\"$LEASES\"|" \
-    -e "s|TCTL_SHAPES_FILE=\"/etc/trafficctl/shapes.json\"|TCTL_SHAPES_FILE=\"$SHAPES\"|" \
-    -e "s|TCTL_RULES_FILE=\"/etc/trafficctl/rules.json\"|TCTL_RULES_FILE=\"$RULES\"|" \
-    -e "s|/usr/libexec/trafficctl/trafficctl-ratelimit-stats.sh|$MOCKBIN/ratelimit-stats|" \
-    -e "s|/usr/libexec/trafficctl/trafficctl-shape-stats.sh|$MOCKBIN/shape-stats|" \
-    "$BIN/trafficctl-fw.sh" > "$FW"
-
-# Confirm the rewrite actually landed: a silently unpatched copy would write to
-# the real /etc and every assertion below would be meaningless.
-assert_contains "test harness: the ledger path was redirected" "$LEDGER" "$(cat "$FW")"
-assert_empty "test harness: no production state path survived the rewrite" \
-    "$(grep -n '/etc/trafficctl/seen_macs\|/etc/trafficctl/rules.json\|/tmp/dhcp.leases' "$FW")"
-
-# Default stats mocks: nothing is limited unless a case says otherwise.
-printf '#!/bin/sh\nprintf "[]\\n"\n' > "$MOCKBIN/ratelimit-stats"
-printf '#!/bin/sh\nprintf "[]\\n"\n' > "$MOCKBIN/shape-stats"
-chmod +x "$MOCKBIN/ratelimit-stats" "$MOCKBIN/shape-stats"
-
-# Sourcing fw.sh runs its firewall probe, which is noise here.
-ledger_env() {
-    PATH="$MOCKBIN:$PATH" bash -c ". '$FW' >/dev/null 2>&1; $1"
-}
+lib() { PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" tcall trafficctl.lib "$@" 2>&1; }
+known() { [ "$(lib seen_known "\"$1\"")" = "true" ] && echo yes || echo no; }
 
 rm -f "$LEDGER"
-assert_eq "no ledger: seen_ready is false" "no" \
-    "$(ledger_env 'tctl_seen_ready && echo yes || echo no')"
+assert_eq "no ledger: seen_ready is false" "false" "$(lib seen_ready)"
 
 # The safe answer, so a caller that ignores seen_ready still cannot mass-limit.
-assert_eq "no ledger: an unknown MAC still answers 'known'" "yes" \
-    "$(ledger_env 'tctl_seen_known aa:bb:cc:dd:ee:99 && echo yes || echo no')"
+assert_eq "no ledger: an unknown MAC still answers 'known'" "yes" "$(known aa:bb:cc:dd:ee:99)"
 
-ledger_env 'tctl_seen_seed'
+lib seen_seed >/dev/null
 assert_eq "seed: picks up both leases and the neighbour table" "3" \
     "$(wc -l < "$LEDGER" | tr -d ' ')"
 assert_contains "seed: lowercases a MAC from the leases" "aa:bb:cc:dd:ee:02" "$(cat "$LEDGER")"
@@ -128,21 +83,20 @@ assert_contains "seed: lowercases a MAC from ip neigh" "aa:bb:cc:dd:ee:03" "$(ca
 assert_empty "seed: drops the neighbour entry with no lladdr" \
     "$(grep -i 'FAILED\|192.168' "$LEDGER")"
 
-assert_eq "seeded ledger: a listed MAC is known" "yes" \
-    "$(ledger_env 'tctl_seen_known AA:BB:CC:DD:EE:01 && echo yes || echo no')"
-assert_eq "seeded ledger: an unlisted MAC is not known" "no" \
-    "$(ledger_env 'tctl_seen_known aa:bb:cc:dd:ee:99 && echo yes || echo no')"
+assert_eq "seeded ledger: a listed MAC is known" "yes" "$(known AA:BB:CC:DD:EE:01)"
+assert_eq "seeded ledger: an unlisted MAC is not known" "no" "$(known aa:bb:cc:dd:ee:99)"
+# Nothing to compare an invalid MAC with, so it answers the safe way.
+assert_eq "seeded ledger: an invalid MAC answers 'known'" "yes" "$(known 'aa:bb;x')"
 
 # Re-seeding must not wipe a ledger that already carries history.
 printf 'aa:bb:cc:dd:ee:77\n' >> "$LEDGER"
-ledger_env 'tctl_seen_seed'
+lib seen_seed >/dev/null
 assert_contains "seed: leaves an existing ledger alone" "aa:bb:cc:dd:ee:77" "$(cat "$LEDGER")"
 
-ledger_env 'tctl_seen_mark aa:bb:cc:dd:ee:99'
-assert_eq "mark: appends an unseen MAC" "yes" \
-    "$(ledger_env 'tctl_seen_known aa:bb:cc:dd:ee:99 && echo yes || echo no')"
+lib seen_mark '"aa:bb:cc:dd:ee:99"' >/dev/null
+assert_eq "mark: appends an unseen MAC" "yes" "$(known aa:bb:cc:dd:ee:99)"
 before=$(wc -l < "$LEDGER" | tr -d ' ')
-ledger_env 'tctl_seen_mark AA:BB:CC:DD:EE:99'
+lib seen_mark '"AA:BB:CC:DD:EE:99"' >/dev/null
 assert_eq "mark: is idempotent, and case-insensitively so" "$before" \
     "$(wc -l < "$LEDGER" | tr -d ' ')"
 
@@ -153,14 +107,13 @@ while [ "$i" -lt 1005 ]; do
     printf 'aa:bb:cc:%02x:%02x:%02x\n' $((i / 65536)) $(((i / 256) % 256)) $((i % 256)) >> "$LEDGER"
     i=$((i + 1))
 done
-ledger_env 'tctl_seen_mark ff:ff:ff:ff:ff:ff'
+lib seen_mark '"ff:ff:ff:ff:ff:ff"' >/dev/null
 count=$(wc -l < "$LEDGER" | tr -d ' ')
-assert_eq "cap: the ledger is trimmed once it passes TCTL_SEEN_MAX" "800" "$count"
-assert_eq "cap: the most recent MAC survives the trim" "yes" \
-    "$(ledger_env 'tctl_seen_known ff:ff:ff:ff:ff:ff && echo yes || echo no')"
+assert_eq "cap: the ledger is trimmed once it passes 1000 entries" "800" "$count"
+assert_eq "cap: the most recent MAC survives the trim" "yes" "$(known ff:ff:ff:ff:ff:ff)"
 
 # ════════════════════════════════════════════════════════════════════════════
-# tctl_has_limit — "is this address already under somebody's control?"
+# has_limit — "is this address already under somebody's control?"
 #
 # Live nft/tc state is not enough. After a reboot the restore hook runs on
 # `ifup lan` and only when persist_rules is on, so a device carrying a manual
@@ -168,83 +121,63 @@ assert_eq "cap: the most recent MAC survives the trim" "yes" \
 # would overwrite a deliberate choice. The persisted files are checked too.
 # ════════════════════════════════════════════════════════════════════════════
 
-has_limit_env() {
-    PATH="$MOCKBIN:$PATH" bash -c ". '$FW' >/dev/null 2>&1; tctl_has_limit '$1' && echo yes || echo no"
+has_limit() {
+    [ "$(PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" tcall trafficctl.ctl has_limit "\"$1\"" 2>&1)" = "true" ] \
+        && echo yes || echo no
 }
 
 printf '[{"type":"ratelimit","ip":"192.168.1.50","param":"2000"}]\n' > "$RULES"
-assert_eq "has_limit: sees a persisted rate limit while nft is empty" "yes" \
-    "$(has_limit_env 192.168.1.50)"
-assert_eq "has_limit: says no for an address nothing mentions" "no" \
-    "$(has_limit_env 192.168.1.51)"
+assert_eq "has_limit: sees a persisted rate limit while nft is empty" "yes" "$(has_limit 192.168.1.50)"
+assert_eq "has_limit: says no for an address nothing mentions" "no" "$(has_limit 192.168.1.51)"
+# Matched on the whole quoted address: .5 is a prefix of .50.
+assert_eq "has_limit: a prefix of a limited address is not limited" "no" "$(has_limit 192.168.1.5)"
 
 printf '[]\n' > "$RULES"
 printf '[{"ip":"192.168.1.60","rate_kbit":5000}]\n' > "$SHAPES"
-assert_eq "has_limit: sees a persisted shape" "yes" "$(has_limit_env 192.168.1.60)"
+assert_eq "has_limit: sees a persisted shape" "yes" "$(has_limit 192.168.1.60)"
 
-# Live state is consulted first; a stats script that reports the address wins
-# even with both files empty.
+# Live state is consulted first; a limiter rule for the address wins even with
+# both files empty.
 printf '[]\n' > "$RULES"
 : > "$SHAPES"
-cat > "$MOCKBIN/ratelimit-stats" <<'MOCK'
-#!/bin/sh
-printf '[{"ip":"192.168.1.70","rate_kbit":1000,"packets":0,"bytes":0}]\n'
-MOCK
-chmod +x "$MOCKBIN/ratelimit-stats"
-assert_eq "has_limit: sees a live rate limit" "yes" "$(has_limit_env 192.168.1.70)"
-assert_eq "has_limit: still says no for an unrelated address" "no" "$(has_limit_env 192.168.1.71)"
-# Back to "nothing is limited" for the hotplug cases below.
-printf '#!/bin/sh\nprintf "[]\\n"\n' > "$MOCKBIN/ratelimit-stats"
-chmod +x "$MOCKBIN/ratelimit-stats"
+mkdir -p "$STATE/nftfix"
+cp "$UC_REPO/tests/fixtures/nft-1.0.2/rl.tm_ratelimit.json" "$STATE/nftfix/-j_list_table_netdev_tm_ratelimit"
+export NFT_FIXTURES="$STATE/nftfix"
+assert_eq "has_limit: sees a live rate limit" "yes" "$(has_limit 192.168.1.50)"
+assert_eq "has_limit: still says no for an unrelated address" "no" "$(has_limit 192.168.1.71)"
+unset NFT_FIXTURES
 
 # ════════════════════════════════════════════════════════════════════════════
-# The hotplug script
+# trafficctl newdevice
 # ════════════════════════════════════════════════════════════════════════════
 
-APPLIED="$TMP/applied.log"
-HP="$TMP/hotplug"
-
-sed -e "s|\\. /usr/libexec/trafficctl/trafficctl-fw.sh|. $FW|" \
-    -e "s|/usr/libexec/trafficctl/trafficctl-ratelimit.sh|$MOCKBIN/ratelimit|" \
-    -e "s|/usr/libexec/trafficctl/trafficctl-shape.sh|$MOCKBIN/shape|" \
-    "$HOTPLUG" > "$HP"
-
-cat > "$MOCKBIN/ratelimit" <<MOCK
+APPLIED="$STATE/applied.log"
+LIBEXEC="$ROOT/usr/libexec/trafficctl"
+mkdir -p "$LIBEXEC"
+cat > "$LIBEXEC/trafficctl-ratelimit.sh" <<MOCK
 #!/bin/sh
 printf 'ratelimit via=%s src=%s args=%s\n' "\$TCTL_VIA" "\$TCTL_SRC" "\$*" >> "$APPLIED"
 MOCK
-cat > "$MOCKBIN/shape" <<MOCK
+cat > "$LIBEXEC/trafficctl-shape.sh" <<MOCK
 #!/bin/sh
 printf 'shape via=%s src=%s args=%s\n' "\$TCTL_VIA" "\$TCTL_SRC" "\$*" >> "$APPLIED"
 MOCK
-printf '#!/bin/sh\nexit 0\n' > "$MOCKBIN/logger"
-chmod +x "$MOCKBIN/ratelimit" "$MOCKBIN/shape" "$MOCKBIN/logger"
+chmod +x "$LIBEXEC"/*
 
-# uci mock driven by a file, so each case can restate the configuration.
-UCIVALS="$TMP/uci.vals"
-cat > "$MOCKBIN/uci" <<MOCK
-#!/bin/sh
-key=""
-for a in "\$@"; do case "\$a" in trafficctl.*) key="\$a" ;; esac; done
-v=\$(grep "^\$key=" "$UCIVALS" 2>/dev/null | head -1 | cut -d= -f2-)
-[ -n "\$v" ] || exit 1
-printf '%s\n' "\$v"
-MOCK
-chmod +x "$MOCKBIN/uci"
+setnd() {   # setnd <enabled> <limit_kbit> <limit_mode>
+    fw_cfg 0
+    printf "\nconfig newdevice 'newdevice'\n\toption enabled '%s'\n\toption limit_kbit '%s'\n\toption limit_mode '%s'\n" \
+        "$1" "$2" "$3" >> "$ROOT/etc/config/trafficctl"
+}
 
-run_hotplug() {   # run_hotplug <action> <mac> <ip>
+run_newdevice() {   # run_newdevice <action> <mac> <ip>
     : > "$APPLIED"
-    PATH="$MOCKBIN:$PATH" ACTION="$1" MACADDR="$2" IPADDR="$3" \
-        sh "$HP" >/dev/null 2>&1
+    PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" ACTION="$1" MACADDR="$2" IPADDR="$3" \
+        tctl newdevice >/dev/null 2>&1
     cat "$APPLIED" 2>/dev/null
 }
 
-cat > "$UCIVALS" <<'VALS'
-trafficctl.newdevice.enabled=1
-trafficctl.newdevice.limit_kbit=4000
-trafficctl.newdevice.limit_mode=limiter
-trafficctl.logging.enabled=0
-VALS
+setnd 1 4000 limiter
 
 # A ledger that does not exist cannot answer "is this device new?", and the
 # wrong answer limits the entire LAN. The first pass only takes the baseline.
@@ -252,60 +185,103 @@ VALS
 # with the guard removed, seeding alone would still call it new and limit it.
 # Using a MAC that the leases already carry would let a broken version pass.
 rm -f "$LEDGER"
-out=$(run_hotplug add aa:bb:cc:dd:ee:5a 192.168.1.50)
+: > "$LOGGER_LOG"
+out=$(run_newdevice add aa:bb:cc:dd:ee:5a 192.168.1.50)
 assert_empty "no ledger: applies nothing on the first pass, even to a MAC the seed never saw" "$out"
 assert_eq "no ledger: the baseline is taken instead" "yes" \
     "$([ -f "$LEDGER" ] && echo yes || echo no)"
-assert_eq "no ledger: the baseline carries the devices the seed did find" "yes" \
-    "$(ledger_env 'tctl_seen_known aa:bb:cc:dd:ee:01 && echo yes || echo no')"
-assert_eq "no ledger: the triggering MAC is recorded too, so it is not limited later" "yes" \
-    "$(ledger_env 'tctl_seen_known aa:bb:cc:dd:ee:5a && echo yes || echo no')"
+assert_eq "no ledger: the baseline carries the devices the seed did find" "yes" "$(known aa:bb:cc:dd:ee:01)"
+assert_eq "no ledger: the triggering MAC is recorded too, so it is not limited later" "yes" "$(known aa:bb:cc:dd:ee:5a)"
+assert_contains "no ledger: syslog says why nothing was applied" "seeded the seen-MAC ledger" "$(cat "$LOGGER_LOG")"
 
 assert_empty "a MAC already in the ledger is left alone" \
-    "$(run_hotplug add aa:bb:cc:dd:ee:01 192.168.1.5)"
+    "$(run_newdevice add aa:bb:cc:dd:ee:01 192.168.1.5)"
 
 assert_empty "a non-add DHCP event does nothing" \
-    "$(run_hotplug old aa:bb:cc:dd:ee:aa 192.168.1.90)"
+    "$(run_newdevice old aa:bb:cc:dd:ee:aa 192.168.1.90)"
 
-out=$(run_hotplug add aa:bb:cc:dd:ee:bb 192.168.1.91)
-assert_contains "a genuinely new device gets the configured limit" \
-    "args=192.168.1.91 4000" "$out"
-assert_contains "the limit is attributed to the feature, not to the CLI" \
-    "via=newdevice src=hotplug" "$out"
-assert_eq "the new device is recorded, so it is limited only once" "yes" \
-    "$(ledger_env 'tctl_seen_known aa:bb:cc:dd:ee:bb && echo yes || echo no')"
+out=$(run_newdevice add aa:bb:cc:dd:ee:bb 192.168.1.91)
+assert_eq "a genuinely new device gets the configured limit" \
+    "ratelimit via=newdevice src=hotplug args=192.168.1.91 4000 rl_ratelimit_192_168_1_91" "$out"
+assert_eq "the new device is recorded, so it is limited only once" "yes" "$(known aa:bb:cc:dd:ee:bb)"
 assert_empty "the same device on a later lease renewal is left alone" \
-    "$(run_hotplug add aa:bb:cc:dd:ee:bb 192.168.1.91)"
+    "$(run_newdevice add aa:bb:cc:dd:ee:bb 192.168.1.91)"
 
 # A limit somebody set by hand outranks the default.
 printf '[{"type":"ratelimit","ip":"192.168.1.92","param":"1000"}]\n' > "$RULES"
 assert_empty "a device that already has a limit is not touched" \
-    "$(run_hotplug add aa:bb:cc:dd:ee:cc 192.168.1.92)"
-assert_eq "...but it is still recorded, so it is not reconsidered" "yes" \
-    "$(ledger_env 'tctl_seen_known aa:bb:cc:dd:ee:cc && echo yes || echo no')"
+    "$(run_newdevice add aa:bb:cc:dd:ee:cc 192.168.1.92)"
+assert_eq "...but it is still recorded, so it is not reconsidered" "yes" "$(known aa:bb:cc:dd:ee:cc)"
 printf '[]\n' > "$RULES"
 
 # A new device with no address yet: nothing to apply a limit to.
 assert_empty "a new MAC with no address applies nothing" \
-    "$(run_hotplug add aa:bb:cc:dd:ee:dd "")"
+    "$(run_newdevice add aa:bb:cc:dd:ee:dd "")"
 
 # Shaper mode routes to the other backend.
-sed -i.bak 's/^trafficctl.newdevice.limit_mode=.*/trafficctl.newdevice.limit_mode=shaper/' "$UCIVALS"
-out=$(run_hotplug add aa:bb:cc:dd:ee:ee 192.168.1.93)
-assert_contains "shaper mode calls the shaper" "shape via=newdevice" "$out"
-assert_contains "shaper mode passes add, address and rate" "args=add 192.168.1.93 4000" "$out"
+setnd 1 4000 shaper
+out=$(run_newdevice add aa:bb:cc:dd:ee:ee 192.168.1.93)
+assert_eq "shaper mode calls the shaper with add, address, rate and label" \
+    "shape via=newdevice src=hotplug args=add 192.168.1.93 4000 shape_192.168.1.93" "$out"
 
 # Switched off, or with no rate set, the feature must be inert.
-sed -i.bak 's/^trafficctl.newdevice.enabled=.*/trafficctl.newdevice.enabled=0/' "$UCIVALS"
+setnd 0 4000 limiter
 assert_empty "disabled: applies nothing to a new device" \
-    "$(run_hotplug add aa:bb:cc:dd:ee:f1 192.168.1.94)"
+    "$(run_newdevice add aa:bb:cc:dd:ee:f1 192.168.1.94)"
 
-sed -i.bak 's/^trafficctl.newdevice.enabled=.*/trafficctl.newdevice.enabled=1/' "$UCIVALS"
-sed -i.bak 's/^trafficctl.newdevice.limit_kbit=.*/trafficctl.newdevice.limit_kbit=0/' "$UCIVALS"
+setnd 1 0 limiter
 assert_empty "rate 0: enabled but with no rate is a no-op" \
-    "$(run_hotplug add aa:bb:cc:dd:ee:f2 192.168.1.95)"
-assert_eq "rate 0: and the device is NOT recorded, so it still counts as new later" "no" \
-    "$(ledger_env 'tctl_seen_known aa:bb:cc:dd:ee:f2 && echo yes || echo no')"
+    "$(run_newdevice add aa:bb:cc:dd:ee:f2 192.168.1.95)"
+assert_eq "rate 0: and the device is NOT recorded, so it still counts as new later" "no" "$(known aa:bb:cc:dd:ee:f2)"
+setnd 1 '4000;reboot' limiter
+assert_empty "a rate that is not a number is a no-op" \
+    "$(run_newdevice add aa:bb:cc:dd:ee:f3 192.168.1.96)"
+
+# ── the new-device notification ─────────────────────────────────────────────
+# Independent of the default limit: an unknown MAC (not in telegram_known.json)
+# goes to `trafficctl notify dhcp`, detached, which decides whether anybody
+# listens (tests/test_notify.sh); a known one costs nothing.
+NLOG="$STATE/notify.log"
+mkdir -p "$ROOT/usr/sbin"
+printf '#!/bin/sh\necho "$*" >> "%s"\n' "$NLOG" > "$ROOT/usr/sbin/trafficctl"
+chmod +x "$ROOT/usr/sbin/trafficctl"
+fw_cfg 0
+printf '{"aa:bb:cc:dd:ee:01":1}\n' > "$ROOT/etc/trafficctl/telegram_known.json"
+rm -f "$NLOG"
+PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" ACTION=add MACADDR=aa:bb:cc:dd:ee:a1 IPADDR=192.168.1.97 HOSTNAME=laptop \
+    tctl newdevice >/dev/null 2>&1
+PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" ACTION=add MACADDR=aa:bb:cc:dd:ee:01 IPADDR=192.168.1.5 \
+    tctl newdevice >/dev/null 2>&1
+# bash exports its own HOSTNAME; the hook hands dnsmasq's on, empty here.
+PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" ACTION=add MACADDR=aa:bb:cc:dd:ee:a2 HOSTNAME='' \
+    tctl newdevice >/dev/null 2>&1
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    [ "$(wc -l < "$NLOG" 2>/dev/null)" -ge 2 ] 2>/dev/null && break
+    sleep 0.2
+done
+assert_eq "notify: an unknown MAC goes to notify dhcp with its lease, a known one does not" \
+    "$(printf 'notify dhcp aa:bb:cc:dd:ee:a1 192.168.1.97 laptop\nnotify dhcp aa:bb:cc:dd:ee:a2  ')" \
+    "$(sort "$NLOG" 2>/dev/null)"
+assert_eq "notify: the bot's old queue file is not written" "no" \
+    "$([ -e "$ROOT/tmp/trafficctl_tg_newdev" ] && echo yes || echo no)"
+rm -f "$ROOT/usr/sbin/trafficctl"
+
+# ── the hotplug hook ────────────────────────────────────────────────────────
+# A wrapper now: what matters is that it filters as before and hands the
+# DHCP environment on unchanged.
+HP="$STATE/hotplug"
+sed "s|/usr/sbin/trafficctl|$MOCKBIN/tctl-stub|" "$HOTPLUG" > "$HP"
+cat > "$MOCKBIN/tctl-stub" <<MOCK
+#!/bin/sh
+printf '%s|%s|%s|%s|%s\n' "\$*" "\$ACTION" "\$MACADDR" "\$IPADDR" "\$HOSTNAME" >> "$STATE/stub.log"
+MOCK
+chmod +x "$MOCKBIN/tctl-stub"
+: > "$STATE/stub.log"
+ACTION=add MACADDR=aa:bb:cc:dd:ee:a3 IPADDR=192.168.1.98 HOSTNAME=tv sh "$HP"
+ACTION=old MACADDR=aa:bb:cc:dd:ee:a4 IPADDR=192.168.1.99 sh "$HP"
+ACTION=add MACADDR='' IPADDR=192.168.1.99 sh "$HP"
+assert_eq "hotplug: passes an add event on with its environment, and nothing else" \
+    "newdevice|add|aa:bb:cc:dd:ee:a3|192.168.1.98|tv" "$(cat "$STATE/stub.log")"
 
 # ════════════════════════════════════════════════════════════════════════════
 

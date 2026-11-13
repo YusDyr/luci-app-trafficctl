@@ -1,36 +1,36 @@
 #!/bin/bash
-# Tests for trafficctl-macfilter-add.sh / trafficctl-macfilter-remove.sh —
-# previously had NO test coverage at all. Fakes uci/hostapd_cli/ubus/ip on
-# PATH and runs the real scripts, asserting on the uci list mutations and the
-# runtime hostapd ACL calls made.
+# `trafficctl macfilter-add` / `macfilter-remove` (the WiFi deny;
+# trafficctl-macfilter-add.sh and -remove.sh are wrappers since the ucode
+# port). Runs the CLI with the real uci on a scratch wireless config, a fake
+# hostapd_cli on PATH and hostapd's ubus objects on a private ubusd
+# (tests/lib/fw4_env.sh), asserting on the maclist edits and the runtime
+# hostapd ACL calls made.
 #
 # Two behaviours are under test.
 #
-# 1. The scripts must respect whichever ACL policy ("allow"/whitelist vs
+# 1. The CLI must respect whichever ACL policy ("allow"/whitelist vs
 #    "deny"/blacklist) the admin already configured on a wifi interface,
 #    rather than forcing "deny" — forcing deny would invert a curated
 #    whitelist (letting in everything it meant to keep out).
 #
-# 2. The scripts must never claim success for a runtime block that did not
-#    happen. A router without hostapd-utils wrote the uci maclist, got
-#    "command not found" from every hostapd_cli call, discarded the status and
-#    answered ok:true while the device kept browsing. So the hostapd_cli fake
-#    below is STATEFUL — ADD_MAC/DEL_MAC mutate ACL files that SHOW reads back
-#    — and its knobs let each failure mode be mocked apart from the others:
-#    the tool missing entirely, the tool present but not landing the entry, the
-#    control socket dead, ubus unavailable. A fake that merely logs the call
-#    would pass whether or not the ACL was ever touched, which is the very
-#    assumption that let this ship.
+# 2. It must never claim success for a runtime block that did not happen. A
+#    router without hostapd-utils wrote the uci maclist, got "command not
+#    found" from every hostapd_cli call, discarded the status and answered
+#    ok:true while the device kept browsing. So the hostapd_cli fake is
+#    STATEFUL — ADD_MAC/DEL_MAC mutate ACL files that SHOW reads back — and so
+#    is the ubus ban list, and fw_hostapd mocks each failure mode apart from
+#    the others: the tool missing entirely, the tool present but not landing
+#    the entry, the control socket dead, ubus unavailable. A fake that merely
+#    logs the call would pass whether or not the ACL was ever touched, which is
+#    the very assumption that let this ship.
 
 PASS=0
 FAIL=0
 
-BIN="$(cd "$(dirname "$0")/.." && pwd)/trafficctl/files/usr/libexec/trafficctl"
-
-TMPDIR=$(mktemp -d)
-trap 'rm -rf "$TMPDIR"' EXIT
-MOCKBIN="$TMPDIR/bin"
-mkdir -p "$MOCKBIN"
+# shellcheck source=tests/lib/ucode.sh
+. "$(dirname "$0")/lib/ucode.sh"
+# shellcheck source=tests/lib/fw4_env.sh
+. "$UC_TESTLIB/fw4_env.sh"
 
 assert_contains() {
     local desc="$1" needle="$2" haystack="$3"
@@ -62,173 +62,24 @@ assert_not_contains() {
     fi
 }
 
-ADD_SH="$TMPDIR/macfilter-add.sh"
-REMOVE_SH="$TMPDIR/macfilter-remove.sh"
-sed "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" "$BIN/trafficctl-macfilter-add.sh" > "$ADD_SH"
-sed "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" "$BIN/trafficctl-macfilter-remove.sh" > "$REMOVE_SH"
-
-UCI_LOG="$TMPDIR/uci.log"
-HOSTAPD_LOG="$TMPDIR/hostapd.log"
-UBUS_LOG="$TMPDIR/ubus.log"
-LEASES_FILE="$TMPDIR/dhcp.leases"
-
-# Runtime state the fakes read and write. deny_acl/accept_acl are hostapd's
-# running ACLs, bans is what `ubus call hostapd.X list_bans` would report.
-STATE="$TMPDIR/state"
-mkdir -p "$STATE"
-
-# Stateful hostapd_cli. ADD_MAC/DEL_MAC really mutate the ACL file that SHOW
-# prints, so "did the entry land" is a question the tests can ask instead of
-# assume. $STATE/cli_mode selects the failure being mocked:
-#   ok      - works
-#   silent  - every command still exits 0, but the ACL never changes. That is
-#             the shape of a hostapd_cli talking to the wrong socket, or a
-#             hostapd that drops the entry: nothing in the exit status says so,
-#             which is exactly why the code reads the ACL back.
-#   dead    - the binary exists but the control socket does not answer ping.
-cat > "$MOCKBIN/hostapd_cli" <<MOCK
-#!/bin/sh
-echo "\$*" >> "$HOSTAPD_LOG"
-STATE="$STATE"
-MOCK
-cat >> "$MOCKBIN/hostapd_cli" <<'MOCK'
-mode=$(cat "$STATE/cli_mode" 2>/dev/null)
-# argv is always: -i <iface> <cmd> [sub] [mac]
-shift 2
-cmd="$1"; sub="$2"; mac="$3"
-case "$cmd" in
-    ping)
-        [ "$mode" = "dead" ] && exit 1
-        echo "PONG"
-        ;;
-    deny_acl|accept_acl)
-        f="$STATE/$cmd"
-        [ -f "$f" ] || : > "$f"
-        case "$sub" in
-            SHOW) cat "$f" ;;
-            ADD_MAC)
-                [ "$mode" = "silent" ] || grep -qixF "$mac" "$f" || echo "$mac" >> "$f"
-                ;;
-            DEL_MAC)
-                if [ "$mode" != "silent" ]; then
-                    grep -vixF "$mac" "$f" > "$f.new"
-                    mv "$f.new" "$f"
-                fi
-                ;;
-        esac
-        ;;
-esac
-exit 0
-MOCK
-chmod +x "$MOCKBIN/hostapd_cli"
-
-# tctl_get_hostapd_ifaces enumerates RUNNING APs via `ubus list`, and the
-# fallback path calls del_client / list_bans on them. $STATE/ubus_mode:
-#   ok          - everything works
-#   ban_nonzero - del_client exits non-zero but the ban still lands, which is
-#                 what hostapd does for a client that is not associated. The
-#                 code must believe list_bans, not the exit status.
-#   noban       - del_client fails and no ban lands
-#   noradio     - ubus answers and no hostapd object exists (radios down)
-#   broken      - ubus itself fails, which is NOT the same as "no AP running"
-cat > "$MOCKBIN/ubus" <<MOCK
-#!/bin/sh
-STATE="$STATE"
-UBUS_LOG="$UBUS_LOG"
-MOCK
-cat >> "$MOCKBIN/ubus" <<'MOCK'
-mode=$(cat "$STATE/ubus_mode" 2>/dev/null)
-[ "$mode" = "broken" ] && exit 1
-[ -f "$STATE/bans" ] || : > "$STATE/bans"
-case "$1" in
-    list)
-        echo "network.interface"
-        [ "$mode" = "noradio" ] || echo "hostapd.wifi0"
-        exit 0
-        ;;
-    call)
-        case "$3" in
-            del_client)
-                echo "del_client $2 $4" >> "$UBUS_LOG"
-                [ "$mode" = "noban" ] && exit 1
-                echo "$4" | grep -oE '([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}' >> "$STATE/bans"
-                [ "$mode" = "ban_nonzero" ] && exit 1
-                exit 0
-                ;;
-            list_bans)
-                printf '{"clients":['
-                sep=""
-                while read -r m; do
-                    [ -z "$m" ] && continue
-                    printf '%s"%s"' "$sep" "$m"
-                    sep=","
-                done < "$STATE/bans"
-                printf ']}\n'
-                exit 0
-                ;;
-        esac
-        exit 1
-        ;;
-esac
-exit 1
-MOCK
-chmod +x "$MOCKBIN/ubus"
-cp "$MOCKBIN/hostapd_cli" "$TMPDIR/hostapd_cli.real"
-
-cat > "$MOCKBIN/ip" <<'MOCK'
-#!/bin/sh
-exit 1
-MOCK
-chmod +x "$MOCKBIN/ip"
-
+fw_cfg 0
 # dnsmasq lease format: <expiry> <mac> <ip> <hostname> <clientid>
-echo "1787600000 aa:bb:cc:dd:ee:ff 192.168.1.50 device-name *" > "$LEASES_FILE"
-sed -i.bak "s|/tmp/dhcp.leases|$LEASES_FILE|g" "$ADD_SH" "$REMOVE_SH"
+echo "1787600000 aa:bb:cc:dd:ee:ff 192.168.1.50 device-name *" > "$LEASES"
 
-# $1 = cli_mode, or "missing" to delete the binary entirely — the router this
-# bug was found on had no hostapd-utils at all, and "not installed" has to be
-# mocked apart from "installed but not working".
-# $2 = ubus_mode. $3.. = MACs already in the running deny ACL.
-set_runtime() {
-    local cli="$1" ubus_mode="$2" m
-    shift 2
-    : > "$STATE/deny_acl"
-    : > "$STATE/accept_acl"
-    : > "$STATE/bans"
-    for m in "$@"; do echo "$m" >> "$STATE/deny_acl"; done
-    echo "$ubus_mode" > "$STATE/ubus_mode"
-    if [ "$cli" = "missing" ]; then
-        rm -f "$MOCKBIN/hostapd_cli"
-        echo ok > "$STATE/cli_mode"
-    else
-        cp "$TMPDIR/hostapd_cli.real" "$MOCKBIN/hostapd_cli"
-        chmod +x "$MOCKBIN/hostapd_cli"
-        echo "$cli" > "$STATE/cli_mode"
-    fi
-}
+# set_runtime <cli> <ubus> [mac...]: cli ok|silent|dead|missing ("missing"
+# deletes the binary: the router this bug was found on had no hostapd-utils
+# at all, and "not installed" has to be mocked apart from "installed but not
+# working"); ubus ok|ban_nonzero|noban|noradio|broken; the MACs already in
+# the running deny ACL. See fw_hostapd.
+set_runtime() { fw_hostapd "$@"; }
 set_runtime ok ok
 
-acl_state() { cat "$STATE/deny_acl" "$STATE/accept_acl" 2>/dev/null; }
+run_add() { fw_clear; fw_run macfilter-add "$@"; }
+run_remove() { fw_clear; fw_run macfilter-remove "$@"; }
 
-run_add() { : > "$UCI_LOG"; : > "$HOSTAPD_LOG"; : > "$UBUS_LOG"; PATH="$MOCKBIN:$PATH" sh "$ADD_SH" "$@" 2>&1; }
-run_remove() { : > "$UCI_LOG"; : > "$HOSTAPD_LOG"; : > "$UBUS_LOG"; PATH="$MOCKBIN:$PATH" sh "$REMOVE_SH" "$@" 2>&1; }
-
-set_uci_single_iface() {
-    # $1 = macfilter mode ("deny"/"allow"/""), $2 = existing maclist content
-    local mode="$1" maclist="$2"
-    cat > "$MOCKBIN/uci" <<MOCK
-#!/bin/sh
-echo "\$*" >> "$UCI_LOG"
-case "\$*" in
-    "show wireless") echo "wireless.wifi0=wifi-iface" ;;
-    -q\ get\ wireless.wifi0.macfilter) echo "$mode" ;;
-    -q\ get\ wireless.wifi0.maclist) echo "$maclist" ;;
-    *) exit 1 ;;
-esac
-exit 0
-MOCK
-    chmod +x "$MOCKBIN/uci"
-}
+# $1 = macfilter mode ("deny"/"allow"/""), $2 = existing maclist content
+# shellcheck disable=SC2086
+set_uci_single_iface() { fw_wifi "$1" $2; }
 
 # ── validation ───────────────────────────────────────────────────────────────
 
@@ -337,7 +188,7 @@ assert_contains "enforce (cli missing): uci maclist still written (intent is kep
 assert_contains "enforce (cli missing): ubus del_client carries a ban_time" \
     "ban_time" "$(cat "$UBUS_LOG")"
 assert_contains "enforce (cli missing): ubus del_client deauths the client" \
-    '"deauth":true' "$(cat "$UBUS_LOG")"
+    '"deauth": true' "$(cat "$UBUS_LOG")"
 
 # hostapd_cli present and exiting 0, but the ACL never gains the entry. Only
 # reading the ACL back catches this; the exit status says everything is fine.
@@ -461,14 +312,7 @@ assert_contains "unblock (allow radio, cli ok): MAC back in the accept ACL" \
 # hostapd_cli. The second is covered above ("cli missing": a temporary ubus ban
 # that says so). The first must refuse cleanly without touching hostapd.
 
-set_uci_wired() {
-    cat > "$MOCKBIN/uci" <<MOCK
-#!/bin/sh
-echo "\$*" >> "$UCI_LOG"
-exit 1
-MOCK
-    chmod +x "$MOCKBIN/uci"
-}
+set_uci_wired() { : > "$ROOT/etc/config/wireless"; }
 
 set_uci_wired
 set_runtime missing noradio
@@ -483,19 +327,11 @@ assert_contains "wired-only remove: NOT ok" '"ok":false' "$OUT"
 assert_contains "wired-only remove: says there is no wifi" "no wifi interfaces found" "$OUT"
 assert_eq "wired-only remove: hostapd untouched" "" "$(cat "$HOSTAPD_LOG" "$UBUS_LOG")"
 
-# tctl_wifi_filter_support is what the view keys the WiFi button on.
-filter_support() {
-    PATH="$MOCKBIN:$PATH" sh -c ". '$BIN/trafficctl-fw.sh'; tctl_wifi_filter_support" 2>&1
-}
-assert_eq "filter support: no wifi-iface = none" "none" "$(filter_support)"
-set_uci_single_iface deny ""
-assert_eq "filter support: wifi, no hostapd_cli = temporary" "temporary" "$(filter_support)"
-set_runtime ok ok
-assert_eq "filter support: wifi + hostapd_cli = full" "full" "$(filter_support)"
+# What the view keys the WiFi button on (none/temporary/full) is reported by
+# `trafficctl device` as wifi_filter: tests/test_report.sh.
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-STATUS_JS="$ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js"
-# `trafficctl device` reports it as wifi_filter: tests/test_report.sh.
+REPO="$UC_REPO"
+STATUS_JS="$REPO/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js"
 assert_contains "view passes wifi_filter to the WiFi button" \
     "updateWifiBtn(data.wifi_blocked, !!data.mac, data.wifi_filter)" "$(cat "$STATUS_JS")"
 assert_contains "view hides the WiFi button where there is no wifi" \
@@ -504,13 +340,13 @@ assert_contains "view explains a temporary block with a translatable note" \
     "_('hostapd-utils is not installed:" "$(cat "$STATUS_JS")"
 # Makefile and builders: optional for the backend, kept on the web interface.
 assert_not_contains "trafficctl does not depend on hostapd-utils" "hostapd-utils" \
-    "$(grep -E '^[[:space:]]*DEPENDS:=' "$ROOT/trafficctl/Makefile")"
+    "$(grep -E '^[[:space:]]*DEPENDS:=' "$REPO/trafficctl/Makefile")"
 assert_not_contains "build-ipk backend deps lack hostapd-utils" "hostapd-utils" \
-    "$(grep '^BE_DEPENDS=' "$ROOT/build-ipk.sh")"
+    "$(grep '^BE_DEPENDS=' "$REPO/build-ipk.sh")"
 assert_not_contains "build-apk backend deps lack hostapd-utils" "hostapd-utils" \
-    "$(grep '^BE_DEPENDS=' "$ROOT/build-apk.sh")"
+    "$(grep '^BE_DEPENDS=' "$REPO/build-apk.sh")"
 assert_contains "the backend description names hostapd-utils for WiFi filtering" \
-    "WiFi MAC filtering needs hostapd-utils" "$(cat "$ROOT/trafficctl/Makefile")"
+    "WiFi MAC filtering needs hostapd-utils" "$(cat "$REPO/trafficctl/Makefile")"
 
 
 # ── the row indicator (defect 2) ─────────────────────────────────────────────
@@ -522,7 +358,7 @@ assert_contains "the backend description names hostapd-utils for WiFi filtering"
 # the cell falls through to "?" or eth) and whenever a blocked device was on
 # cable. Source-level guards, in the same spirit as tests/test_byte_overflow.sh:
 # there is no JS test harness in this repo, and the failure mode is structural.
-# (ROOT and STATUS_JS are set in the hostapd-utils section above.)
+# (REPO and STATUS_JS are set in the hostapd-utils section above.)
 
 # The marking must hang off the finished cell, not off one branch inside it.
 CONN_CELL=$(grep -A 10 "cellMap.conn_type = E(" "$STATUS_JS")
@@ -537,6 +373,72 @@ assert_contains "row: frontend consumes wifi_block_pending" \
 # A device on the deny list that is still associated is not blocked, and the
 # backend has to say so for the row to be able to: wifi_block_pending, from
 # the summary and the device report (tests/test_report.sh).
+
+# ── a hung control socket ───────────────────────────────────────────────────
+# hostapd_cli blocks for as long as hostapd does not answer, and the caller
+# (rpcd, the bot) has its own deadline: every call is timed, and a socket that
+# never answers is a dead one.
+set_uci_single_iface "deny" ""
+set_runtime hang ok
+t0=$(date +%s)
+OUT=$(run_add 192.168.1.50)
+t1=$(date +%s)
+assert_eq "hung hostapd_cli: the call returns within its timeout" "yes" "$([ $((t1 - t0)) -lt 15 ] && echo yes || echo no)"
+assert_contains "hung hostapd_cli: falls back to the ubus ban" '"enforcement":"ban"' "$OUT"
+
+# ── the MAC is validated ────────────────────────────────────────────────────
+# A lease line with junk in the MAC field was used as it stood; refused now
+# rather than written into the wireless config.
+set_runtime ok ok
+echo "1787600000 not-a-mac 192.168.1.51 junk *" >> "$LEASES"
+OUT=$(run_add 192.168.1.51)
+assert_contains "junk lease MAC: refused" "cannot find MAC for 192.168.1.51" "$OUT"
+assert_eq "junk lease MAC: nothing written" "" "$(cat "$UCI_LOG")"
+# The neighbour table is the second source, case-folded.
+echo "192.168.1.52 dev br-lan lladdr AA:BB:CC:00:00:52 REACHABLE" > "$STATE/neigh"
+OUT=$(run_add 192.168.1.52)
+assert_contains "no lease: the MAC comes from ip neigh, lowercased" "MAC aa:bb:cc:00:00:52 blocked" "$OUT"
+: > "$STATE/neigh"
+
+# ── the weakest AP decides ──────────────────────────────────────────────────
+# A block applied on one radio and missed on another must report the miss:
+# the device simply joins the other radio.
+FW_RADIOS="wifi0 wifi1" set_runtime ok ok
+echo silent > "$STATE/cli_mode.wifi1"
+OUT=$(run_add 192.168.1.50)
+assert_contains "two APs, one ACL lands, the other bans: reports ban" '"enforcement":"ban"' "$OUT"
+assert_contains "two APs: the good one did get the ACL" "aa:bb:cc:dd:ee:ff" "$(cat "$STATE/deny_acl")"
+FW_RADIOS="wifi0 wifi1" set_runtime ok noban
+echo silent > "$STATE/cli_mode.wifi1"
+OUT=$(run_add 192.168.1.50)
+assert_contains "two APs, one enforced, one not at all: reports none" '"enforcement":"none"' "$OUT"
+assert_contains "two APs, one not at all: NOT ok" '"ok":false' "$OUT"
+FW_RADIOS="wifi0 wifi1" set_runtime ok ok
+OUT=$(run_add 192.168.1.50)
+assert_contains "two APs, both ACLs: acl" '"enforcement":"acl"' "$OUT"
+set_runtime ok ok
+
+# ── the block_applied notification ──────────────────────────────────────────
+# As v1.30.0's macfilter-add.sh: kind wifi, only when the deny took (ok:true),
+# never for a removal.
+unset FW_RADIOS
+set_runtime ok ok
+set_uci_single_iface "deny" ""
+fw_events_on
+OUT=$(TCTL_VIA=telegram TCTL_SRC=tg run_add 192.168.1.50)
+assert_contains "event: the WiFi deny went in" '"ok":true' "$OUT"
+assert_eq "event: a WiFi deny fires block_applied, kind wifi, with via/src" \
+    "ACTION=block_applied IP=192.168.1.50 KIND=wifi MAC=aa:bb:cc:dd:ee:ff SRC=tg VIA=telegram" \
+    "$(cat "$EVENTS_LOG")"
+OUT=$(run_remove 192.168.1.50)
+assert_eq "event: a WiFi allow fires nothing" "" "$(cat "$EVENTS_LOG")"
+set_runtime silent noban
+set_uci_single_iface "deny" ""
+OUT=$(run_add 192.168.1.50)
+assert_contains "event: the radio refused the deny" '"ok":false' "$OUT"
+assert_eq "event: a deny that did not take fires nothing" "" "$(cat "$EVENTS_LOG")"
+fw_events_off
+set_runtime ok ok
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

@@ -638,7 +638,7 @@ call_site "a WiFi deny raises block_applied" "block_applied.*wifi"
 call_site "a limiter raises limit_applied" "limit_applied.*limiter"
 call_site "a shaper raises limit_applied" "limit_applied.*shaper"
 call_site "an engaged cut raises cut_engaged" "cut_engaged"
-call_site "a DHCP event reaches the device scan" "notify dhcp|notify\.dhcp\("
+call_site "a DHCP event reaches the device scan" "notify dhcp|notify\.dhcp\(|'notify', 'dhcp'"
 # The shell call sites through tctl_notify reach the CLI (TCTL_NOTIFY_CLI).
 CALLS="$UC_TMP/notify_cli.log"
 printf '#!/bin/sh\necho "$*" >> "%s"\n' "$CALLS" > "$MOCKBIN/notify-cli"
