@@ -200,12 +200,15 @@ them. Leave an argument out to leave it unchanged (the views pass
 `undefined`, which LuCI drops, never `null`).
 
 **Delegated commands** run through rpcd's `file.exec`, as a deferred reply:
-rpcd keeps serving other calls meanwhile. A command still running after 60 s
-(`TCTL_CLI_TIMEOUT_MS`, at most 110 s) is killed by rpcd and the reply is
-`{"ok":false,"msg":"trafficctl <command> did not finish within 60 s"}`. rpcd
-gives every call its exec timeout (`rpcd -t`, 120 s by default) in total: with
-a shorter one the caller gets `Request timed out` (status 7) instead. Only the
-CLI process is killed: on 22.03 nothing can give it a process group of its own
+rpcd keeps serving other calls meanwhile. When a command is still running
+after 60 s (`TCTL_CLI_TIMEOUT_MS`, at most 110 s) the plugin stops waiting and
+replies `{"ok":false,"msg":"trafficctl <command> did not finish within 60 s"}`.
+That does not stop the command: it runs on until rpcd's exec timeout
+(`rpcd -t`, 120 s by default), where rpcd kills it. A write can therefore still
+complete after the timeout reply: read the state back before repeating it.
+rpcd also gives the plugin's own call that exec timeout: with a `-t` shorter
+than the plugin's limit the caller gets `Request timed out` (status 7) instead.
+Only the CLI process is killed: on 22.03 nothing can give it a process group of its own
 (busybox has no `setsid`, ash no job control without a terminal), so what it
 started runs to its end. `file.exec` takes at most 256 KiB of output: a longer
 reply is `{"ok":false,"msg":"trafficctl <command> printed more than rpcd takes

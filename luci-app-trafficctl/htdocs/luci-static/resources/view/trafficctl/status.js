@@ -112,6 +112,11 @@ var callMacfilterRemove = rpc.declare({
 	params: ['ip']
 });
 
+// rpcd takes an int argument as a signed 32-bit number and refuses the whole
+// call (Invalid argument) for anything larger. A rate typed beyond that is
+// sent as this, so the backend answers with its own range message.
+var RPC_INT_MAX = 2147483647;
+
 var callRatelimit = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'ratelimit',
@@ -2695,8 +2700,7 @@ return view.extend({
 			if (_rateSelected !== 'custom') return _rateSelected;
 			var n = parseFloat(customInput.value);
 			if (!n || n <= 0) return '0';
-			if (_customUnit === 'mbit') return String(Math.round(n * 1000));
-			return String(Math.round(n));
+			return String(Math.min(Math.round(_customUnit === 'mbit' ? n * 1000 : n), RPC_INT_MAX));
 		}
 
 		// Empty string means symmetric — never 0, which the backend would have
@@ -2705,7 +2709,7 @@ return view.extend({
 			if (upRow.classList.contains('tc-hidden')) return '';
 			var n = parseFloat(upInput.value);
 			if (!n || n <= 0) return '';
-			return String(_upUnit === 'mbit' ? Math.round(n * 1000) : Math.round(n));
+			return String(Math.min(Math.round(_upUnit === 'mbit' ? n * 1000 : n), RPC_INT_MAX));
 		}
 
 		// How the pending action is described. Naming one figure when the

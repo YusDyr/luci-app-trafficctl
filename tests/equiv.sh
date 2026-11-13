@@ -1352,6 +1352,8 @@ rpcd_side() {   # rpcd_side <legacy|new> <stub|real> <method> <json>
     else
         mkdir -p "$W/root/usr/sbin" "$W/root/usr/libexec"
         ln -sfn "$dir" "$W/root/usr/libexec/trafficctl"
+        # The plugin runs nft by its absolute path (lib.path, so under the root).
+        ln -sf "$W/bin/nft" "$W/root/usr/sbin/nft"
         # glibc's getopt would take the CLI's own --proto for a ucode option;
         # musl's, on the router, stops at the script name.
         {

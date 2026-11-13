@@ -345,14 +345,15 @@ function wrapped(x, argv) {
 	});
 }
 
-function init_script(name, action, background) {
+// Runs the init script's actions one after the other, in the background:
+// every one of them, enable and stop included, may wait on procd or on the
+// service, and a wait here would stop all of rpcd. The reply does not wait.
+function init_script(name, actions) {
 	let p = '/etc/init.d/' + name;
 	if (!lib.is_file(p))
 		return;
-	if (background)
-		lib.sh(lib.q(lib.path(p)) + ' ' + lib.q(action) + ' &');
-	else
-		lib.sh(lib.q(lib.path(p)) + ' ' + lib.q(action));
+	let q = lib.q(lib.path(p));
+	lib.sh('(' + join('; ', map(actions, (a) => q + ' ' + lib.q(a))) + ') &');
 }
 
 // ── uci ─────────────────────────────────────────────────────────────────────
@@ -656,7 +657,7 @@ const methods = {
 		if (!hw && !sw)
 			return r;
 		let mode = hw ? 'hardware' : 'software';
-		return chain(x, 'file', 'exec', { command: 'nft', params: [ 'list', 'flowtables' ] }, (rc, out) => {
+		return chain(x, 'file', 'exec', { command: lib.path('/usr/sbin/nft'), params: [ 'list', 'flowtables' ] }, (rc, out) => {
 			r.offload_mode = (rc == 0 && index(out?.stdout ?? '', 'counter') >= 0) ? mode + '-counter' : mode;
 			return r;
 		});
@@ -701,7 +702,7 @@ const methods = {
 				c.set('firewall', fw, 'flow_offloading_hw', bool01(hw));
 			if ((err = save('firewall')))
 				return err;
-			init_script('firewall', 'reload', true);
+			init_script('firewall', [ 'reload' ]);
 		}
 		return OK;
 	},
@@ -772,8 +773,8 @@ const methods = {
 		lib.log('telegram_config_change', '', '', 'luci', x.who.src);
 		// Boot starts only what rc.d enables, so rc.d follows the flag: a
 		// reload alone left a bot switched on here gone after the next reboot.
-		init_script('trafficctl-telegram', (uget('telegram', 'enabled') == '1') ? 'enable' : 'disable');
-		init_script('trafficctl-telegram', 'reload', true);
+		init_script('trafficctl-telegram',
+			[ (uget('telegram', 'enabled') == '1') ? 'enable' : 'disable', 'reload' ]);
 		return OK;
 	},
 
@@ -809,8 +810,7 @@ const methods = {
 		if (err)
 			return err;
 		lib.log('notify_config_change', r.sender ?? 'notify', '', 'luci', x.who.src);
-		init_script('trafficctl-notify', 'enable');
-		init_script('trafficctl-notify', 'restart', true);
+		init_script('trafficctl-notify', [ 'enable', 'restart' ]);
 		return OK;
 	},
 
@@ -943,8 +943,7 @@ const methods = {
 			file = '/tmp/trafficctl/activity.log';
 		if (!lib.is_file(file))
 			return { ok: true, lines: [] };
-		let l = lib.file_lines(file);
-		return { ok: true, lines: n ? slice(l, -n) : [] };
+		return { ok: true, lines: lib.tail_lines(file, n) };
 	},
 
 	history_status: (x) => wrapped(x, [ 'history', 'status' ]),
@@ -990,13 +989,8 @@ const methods = {
 			return err;
 		// The keeper re-reads its settings every tick, but it has to be
 		// running: switching history on must not wait for a reboot.
-		if (uget('history', 'enabled') == '1') {
-			init_script('trafficctl-history', 'enable');
-			init_script('trafficctl-history', 'start');
-		}
-		else {
-			init_script('trafficctl-history', 'stop');
-		}
+		init_script('trafficctl-history',
+			(uget('history', 'enabled') == '1') ? [ 'enable', 'start' ] : [ 'stop' ]);
 		lib.log('config_change', 'history', '', 'luci', x.who.src);
 		return OK;
 	},

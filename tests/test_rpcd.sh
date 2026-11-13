@@ -470,10 +470,13 @@ for bad in '{"poll_interval":"abc"}' '{"poll_interval":5.5}' '{"poll_interval":n
 done
 
 # ── the offload mode: nft asked through file.exec only when offload is on ──
+# By its absolute path, /usr/sbin/nft: never whatever PATH finds first.
 fresh
 mkdir -p "$R/bin"
-printf '#!/bin/sh\necho "nft $*" >> "%s"\necho "flowtable ft { counter }"\n' "$DISPATCH_LOG" > "$R/bin/nft"
-chmod +x "$R/bin/nft"
+printf '#!/bin/sh\necho "nft $*" >> "%s"\necho "flowtable ft { counter }"\n' "$DISPATCH_LOG" > "$R/usr/sbin/nft"
+chmod +x "$R/usr/sbin/nft"
+cp "$R/usr/sbin/nft" "$R/bin/nft"
+sed -i 's/{ counter }/{ }/' "$R/bin/nft"
 OUT=$(PATH="$R/bin:$PATH" run_call config_get)
 assert_contains "config_get: a counter flowtable" '"offload_mode":"software-counter"' "$OUT"
 assert_contains "config_get: asks nft list flowtables" "nft list flowtables" "$(cat "$DISPATCH_LOG")"
@@ -716,6 +719,22 @@ OUT=$(run_call activity_log '{"lines":2}')
 assert_eq "activity_log: the tail of the log" '["line 4","line 5"]' "$(printf '%s' "$OUT" | jq -c .lines)"
 OUT=$(run_call activity_log '{"lines":99999}')
 assert_eq "activity_log: an absurd lines value is clamped" "5" "$(printf '%s' "$OUT" | jq '.lines | length')"
+printf 'line 6' >> "$R/tmp/trafficctl/activity.log"
+OUT=$(run_call activity_log '{"lines":2}')
+assert_eq "activity_log: a last line without its newline counts" '["line 5","line 6"]' "$(printf '%s' "$OUT" | jq -c .lines)"
+printf '\n\nline 8\n' >> "$R/tmp/trafficctl/activity.log"
+OUT=$(run_call activity_log '{"lines":3}')
+assert_eq "activity_log: an empty line is a line" '["line 6","","line 8"]' "$(printf '%s' "$OUT" | jq -c .lines)"
+# Only the tail is read, in 64 KiB chunks from the end: a log of several
+# chunks gives the same lines as tail(1), at a chunk border too.
+awk 'BEGIN { for (i = 1; i <= 9000; i++) printf "%06d %s\n", i, "an activity log line of some length" }' > "$R/tmp/trafficctl/activity.log"
+for n in 1 2 999 1000; do
+    assert_eq "activity_log: a 9000-line log, lines $n" "$(tail -n "$n" "$R/tmp/trafficctl/activity.log" | jq -Rsc 'split("\n") | if .[-1] == "" then .[:-1] else . end')" \
+        "$(run_call activity_log "{\"lines\":$n}" | jq -c .lines)"
+done
+head -c 65536 "$R/tmp/trafficctl/activity.log" > "$R/tmp/a.log"; mv "$R/tmp/a.log" "$R/tmp/trafficctl/activity.log"
+assert_eq "activity_log: a log of exactly one chunk" "$(tail -n 1000 "$R/tmp/trafficctl/activity.log" | jq -Rsc 'split("\n") | if .[-1] == "" then .[:-1] else . end')" \
+    "$(run_call activity_log '{"lines":1000}' | jq -c .lines)"
 # A configured path outside the allowed roots is never read.
 mkdir -p "$R/etc"; echo "root:secret" > "$R/etc/shadow"
 uci -c "$R/etc/config" -t "$R/tmp/.uci" set trafficctl.logging.log_file=/etc/shadow

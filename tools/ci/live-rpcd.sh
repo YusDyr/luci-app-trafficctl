@@ -11,8 +11,9 @@
 #   - rpcd registers the object with every method and its typed arguments
 #   - every method answers with an object, through rpcd, and rpcd survives
 #     every one of them (a script error must not take rpcd down)
-#   - a call with a session (ubus_rpc_session) works: the plugin looks the
-#     session up with a deferred call to rpcd's own session object
+#   - a call with a session (ubus_rpc_session) works, a write through the CLI
+#     included: the plugin looks the session up with a deferred call to rpcd's
+#     own session object, and the CLI logs the session's user
 #   - rpcd's policy refuses a value of the wrong type, a null and an unknown
 #     method before the plugin runs
 #   - a CLI call that outlives the plugin's limit is answered, not dropped
@@ -124,6 +125,16 @@ if [ -n "$SID" ]; then
         ok "the activity log names the session's user"
     else
         bad "the activity log does not name the session's user: $(tail -n 3 /tmp/trafficctl/activity.log 2>&1)"
+    fi
+    # A write as LuCI sends it, delegated to the CLI: the session lookup
+    # first, then file.exec, which must reach the CLI with the session's user
+    # in its environment (the session itself is never passed on).
+    out=$(ubus -t 60 call luci.trafficctl cut_set "{\"active\":false,\"ubus_rpc_session\":\"$SID\"}" 2>&1)
+    case "$out" in *'internet restored for all devices'*) ok "cut_set with a session, through file.exec" ;; *) bad "cut_set with a session: $out" ;; esac
+    if grep 'action=uncut' /tmp/trafficctl/activity.log 2>/dev/null | grep 'via=luci' | grep -q 'user=ci-user'; then
+        ok "the CLI's activity log line names the session's user"
+    else
+        bad "the CLI's activity log line does not name the session's user: $(tail -n 3 /tmp/trafficctl/activity.log 2>&1)"
     fi
     out=$(ubus -t 30 call luci.trafficctl config_get "{\"ubus_rpc_session\":\"$SID\"}" 2>&1)
     case "$out" in *'"enabled":'*) ok "a read with a session" ;; *) bad "config_get with a session: $out" ;; esac

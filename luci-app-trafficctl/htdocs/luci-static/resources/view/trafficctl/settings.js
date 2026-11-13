@@ -28,6 +28,11 @@
 	}
 })();
 
+// rpcd takes an int argument as a signed 32-bit number and refuses the whole
+// call (Invalid argument) for anything larger. A rate typed beyond that is
+// sent as this, so the backend answers with its own range message.
+var RPC_INT_MAX = 2147483647;
+
 var callTelegramGet = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'telegram_config_get'
@@ -499,6 +504,9 @@ return view.extend({
 						saveStatus.style.color = 'var(--tc-muted)';
 						var kbit = parseInt(rateInput.value, 10);
 						if (isNaN(kbit) || kbit < 0) kbit = 0;
+						// No ceiling of its own: the limiter refuses a rate over
+						// 100 Gbit/s when it applies this to a new device.
+						kbit = Math.min(kbit, RPC_INT_MAX);
 						callNewDeviceSet(
 							enabledToggle.querySelector('input').checked,
 							kbit,

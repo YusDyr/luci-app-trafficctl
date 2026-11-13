@@ -22,6 +22,11 @@
 	}
 })();
 
+// rpcd takes an int argument as a signed 32-bit number and refuses the whole
+// call (Invalid argument) for anything larger. A rate typed beyond that is
+// sent as this, so the backend answers with its own range message.
+var RPC_INT_MAX = 2147483647;
+
 var callRulesList = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'rules_list',
@@ -149,8 +154,8 @@ function mbitInput(kbit) {
 
 function toKbit(v) {
 	var n = parseFloat(v);
-	if (!isFinite(n) || n <= 0) return 0;
-	return Math.round(n * 1000);
+	if (isNaN(n) || n <= 0) return 0;
+	return Math.min(Math.round(n * 1000), RPC_INT_MAX);
 }
 
 return view.extend({
