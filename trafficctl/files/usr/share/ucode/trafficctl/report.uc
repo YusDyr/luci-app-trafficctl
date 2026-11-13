@@ -7,7 +7,7 @@
 //   summary()          the `summary` command: one row per active device, the
 //                      LuCI table's 2-second poll. Spawns the reverse-DNS and
 //                      netify refreshes detached; never waits for them
-//   device(args)       `device <ip> [--rdns] [--proto P]`: { reply, rc }
+//   device(args)       `device <ip> [--rdns] [--proto P] [--max-bytes N]`: { reply, rc }
 //   metrics(src)       `metrics`: the OpenMetrics text. src replaces the
 //                      sources in tests: { totals, summary } return the
 //                      values, { portfw, netify } the text of those commands
@@ -625,6 +625,34 @@ function summary() {
 // ── device ──────────────────────────────────────────────────────────────────
 
 const DEVICE_USAGE = 'usage: trafficctl-device.sh <ip> [--rdns] [--proto tcp|udp|all]';
+
+// --max-bytes: rpcd's file.exec answers NOT_SUPPORTED, with nothing, once a
+// command prints 256 KiB, and a device behind a torrent client tracks enough
+// connections for that. Over the budget the largest connections by bytes are
+// kept, in their order, and connections_omitted says how many were not.
+function cap_connections(reply, budget) {
+	let conns = reply.connections;
+	if (length(lib.to_json(reply)) <= budget)
+		return reply;
+	reply.connections = [];
+	let room = budget - length(lib.to_json(reply)) - length(',"connections_omitted":') - 12;
+	let sizes = map(conns, (c) => length(lib.to_json(c)) + 1);
+	let order = sort(map(conns, (c, i) => i), (x, y) => {
+		let d = conns[y].bytes - conns[x].bytes;
+		return (d > 0) ? 1 : (d < 0) ? -1 : x - y;
+	});
+	let keep = {}, n = 0;
+	for (let i in order) {
+		if (sizes[i] > room)
+			break;
+		room -= sizes[i];
+		keep[i] = true;
+		n++;
+	}
+	reply.connections = filter(conns, (c, i) => keep[i]);
+	reply.connections_omitted = length(conns) - n;
+	return reply;
+}
 const SERVICES = { '80': 'http', '443': 'https', '53': 'dns', '22': 'ssh', '123': 'ntp',
 	'5353': 'mdns', '21': 'ftp', '25': 'smtp', '993': 'imaps', '8080': 'http-alt' };
 const META_STATES = { ESTABLISHED: true, TIME_WAIT: true, SYN_SENT: true, CLOSE_WAIT: true };
@@ -787,12 +815,17 @@ function dst_hosts(ls, ip) {
 }
 
 function device(args) {
-	let ip = '', do_rdns = false, pf = 'all';
+	let ip = '', do_rdns = false, pf = 'all', budget = null;
 	for (let i = 0; i < length(args); i++) {
 		if (args[i] == '--rdns')
 			do_rdns = true;
 		else if (args[i] == '--proto')
 			pf = args[++i] ?? '';
+		else if (args[i] == '--max-bytes') {
+			budget = lib.valid_int('' + (args[++i] ?? ''), 1024, 1073741824);
+			if (budget == null)
+				return { reply: { ok: false, msg: DEVICE_USAGE }, rc: 1 };
+		}
 		else if (ip == '')
 			ip = '' + args[i];
 	}
@@ -883,7 +916,7 @@ function device(args) {
 	}
 
 	let tools = length(wifs) ? have_tools() : {};
-	return { rc: 0, reply: {
+	let reply = {
 		ip,
 		name,
 		mac,
@@ -905,7 +938,8 @@ function device(args) {
 		// printf %d here, %.0f in the summary: 0.8 kbit/s reads 0 and 1.
 		shape_kbit: int(anum(shape_rate(lim, ip, false) ?? '0')),
 		shape_kbit_up: int(anum(shape_rate(lim, ip, true) ?? '0'))
-	} };
+	};
+	return { rc: 0, reply: (budget == null) ? reply : cap_connections(reply, budget) };
 }
 
 // ── netify ──────────────────────────────────────────────────────────────────
