@@ -42,6 +42,8 @@ fi
 # Restore ratelimits and port-forward controls (if persist enabled); blocks
 # went back above
 if [ -f "$RULES_FILE" ] && tctl_persist_enabled; then
+    # What the limiter already holds, for the ratelimit records below.
+    RL_LIVE=$(nft list table netdev tm_ratelimit 2>/dev/null)
     # How many records there are comes from the file, not from a constant.
     # `seq 0 99` stopped at the hundredth, so every rule past it was silently
     # not restored: present in rules.json, shown by the UI as persisted, and
@@ -89,9 +91,29 @@ if [ -f "$RULES_FILE" ] && tctl_persist_enabled; then
                 else
                     TCTL_RL_DOWNLOAD_FAILED=0
                     TCTL_RL_UPLOAD_FAILED=0
-                    if ! tctl_ratelimit_add "$ip" "$param" "$(tctl_ratelimit_comment "$ip")" "$mode" "$param_up" 2>/dev/null \
+                    TCTL_RL_DOWNLOAD_ERR=""
+                    TCTL_RL_UPLOAD_ERR=""
+                    # An ifup without a reboot finds the rules still there.
+                    # Adding them again stacked a second copy, and in each
+                    # mode on nftables 1.0 the copy's meter clashed with the
+                    # first ("Resource busy"), which tctl_ratelimit_add now
+                    # reports as a failure. Checked against one listing taken
+                    # before the loop, so a boot (empty table) pays nothing.
+                    _cmt=$(tctl_ratelimit_comment "$ip")
+                    # Each comment in full, closing quote included: a prefix
+                    # would take 192.168.1.10 (and 192.168.1.1/24) for
+                    # 192.168.1.1.
+                    case "$RL_LIVE" in
+                        *"\"$_cmt\""*|*"\"${_cmt}_ul\""*|*"\"${_cmt}_ul6\""*|*"\"${_cmt}_dl6\""*|*"\"${_cmt}_v6\""*)
+                            tctl_ratelimit_remove "$ip" "$_cmt" 2>/dev/null ;;
+                    esac
+                    if ! tctl_ratelimit_add "$ip" "$param" "$_cmt" "$mode" "$param_up" 2>/dev/null \
                         || [ "$TCTL_RL_DOWNLOAD_FAILED" = "1" ] || [ "$TCTL_RL_UPLOAD_FAILED" = "1" ]; then
-                        logger -t trafficctl "Failed to restore ratelimit for $ip (${param}kbit)"
+                        logger -t trafficctl "Failed to restore ratelimit for $ip (${param}kbit)${TCTL_RL_DOWNLOAD_ERR:+: $TCTL_RL_DOWNLOAD_ERR}${TCTL_RL_UPLOAD_ERR:+: $TCTL_RL_UPLOAD_ERR}"
+                    elif [ -n "$TCTL_RL_DOWNLOAD_ERR$TCTL_RL_UPLOAD_ERR" ]; then
+                        # Live on the devices that took it; the next ifup or
+                        # a re-apply retries the rest.
+                        logger -t trafficctl "Restored ratelimit for $ip (${param}kbit) PARTIALLY${TCTL_RL_DOWNLOAD_ERR:+: $TCTL_RL_DOWNLOAD_ERR}${TCTL_RL_UPLOAD_ERR:+: $TCTL_RL_UPLOAD_ERR}"
                     fi
                 fi
                 ;;

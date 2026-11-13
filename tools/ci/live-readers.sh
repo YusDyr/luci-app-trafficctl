@@ -143,14 +143,19 @@ run sh $S/trafficctl-block.sh 192.168.0.5
 run sh $S/trafficctl-ratelimit.sh 192.168.0.60 5000 "" shared 1000
 run sh $S/trafficctl-ratelimit.sh 192.168.0.6 5000
 run sh $S/trafficctl-ratelimit.sh 192.168.0.7 8192
-# Each mode on 22.03: the writer gives a target's upload meter the same name
-# in every ul_<port> chain, and nftables 1.0.2 refuses a second meter of that
-# name ("Resource busy"), so ul_lan2 gets no IPv4 upload rule for these two
-# targets while the writer still reports ok. That writer bug is fixed
-# separately (docs/ARCHITECTURE.md, "Reading the rules back"). Both readers
-# see the same partial state, so the comparison keeps these targets.
+# Each mode, on both ports. Up to 1.30.4 the writer gave a target's upload
+# meter the same name in every ul_<port> chain, and nftables 1.0.2 refused
+# the second one ("Resource busy"): ul_lan2 had no IPv4 upload rule for these
+# two targets while the writer reported ok. Every chain has its own meter
+# now (tctl_m_<slug>_<chain>), so both ports must hold the rule.
 run sh $S/trafficctl-ratelimit.sh 192.168.0.70 2000 "" each
 run sh $S/trafficctl-ratelimit.sh 10.0.20.0/24 2000 "" each 500
+for p in lan1 lan2; do
+    for c in rl_ratelimit_192_168_0_70_ul rl_ratelimit_10_0_20_0_24_ul; do
+        nft list chain netdev tm_ratelimit "ul_$p" | grep -qF "comment \"$c\"" \
+            || die "each mode: no $c rule on ul_$p"
+    done
+done
 run sh $S/trafficctl-shape.sh add 192.168.0.81 3000
 run sh $S/trafficctl-shape.sh add 192.168.0.80 8000 x 2000
 # A saved-only block and limit: in rules.json, not in the kernel.

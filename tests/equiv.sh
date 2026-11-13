@@ -124,7 +124,7 @@ nftfix() {   # nftfix <nft version> <name>
 # readers took for a shared limit (an intentional fix in the port). For the
 # legacy side only, put the listing back into the 1.0 form it recognises.
 meterize() {
-    sed -i -E 's/ add @(tctl_[du]_[0-9a-z_]+) \{/ meter \1 size 65535 {/' "$W/cmd/nft list table netdev tm_ratelimit"
+    sed -i -E 's/ add @(tctl_(m|[du])_[0-9a-z_]+) \{/ meter \1 size 65535 {/' "$W/cmd/nft list table netdev tm_ratelimit"
 }
 PERSIST='uci set trafficctl.main.persist_rules=1; uci commit trafficctl'
 NORDNS='uci set trafficctl.main.resolve_names=0; uci commit trafficctl'

@@ -352,7 +352,7 @@ assert_terminated() {
 RESTORED=$(restore '[{"type":"ratelimit","ip":"192.168.20.0/24","param":"20000","mode":"each"}]')
 assert_terminated "restore: the loop ended on its own"
 assert_contains "restore: an each-mode subnet limit comes back per-device" \
-    "meter tctl_d_192_168_20_0_24" "$RESTORED"
+    "meter tctl_m_192_168_20_0_24_dl_" "$RESTORED"
 
 RESTORED=$(restore '[{"type":"ratelimit","ip":"10.0.0.0/24","param":"20000","mode":"shared"}]')
 assert_terminated "restore: the loop ended on its own"
@@ -367,7 +367,7 @@ assert_not_contains "restore: a shared cap does NOT come back per-device" \
 RESTORED=$(restore '[{"type":"ratelimit","ip":"192.168.20.0/24","param":"20000"}]')
 assert_terminated "restore: the loop ended on its own"
 assert_contains "restore: a legacy subnet record defaults to per-device" \
-    "meter tctl_d_192_168_20_0_24" "$RESTORED"
+    "meter tctl_m_192_168_20_0_24_dl_" "$RESTORED"
 
 RESTORED=$(restore '[{"type":"ratelimit","ip":"192.168.1.50","param":"5000"}]')
 assert_terminated "restore: the loop ended on its own"
