@@ -12,7 +12,7 @@ All backend functionality is exposed through shell scripts in `/usr/libexec/traf
 - **Rate units**: All rate values are in **kbit/s** (kilobits per second).
 - **Exit codes**: 0 on success, 1 on input validation failure.
 - **Label sanitization**: `block`, `unblock`, `ratelimit` and `shape_add` strip their label to `[a-zA-Z0-9_.-]`.
-- **Labels do not identify rules.** A label is recorded in the activity log only. Firewall rule comments are derived from the target (`tctl_block_<slug>`, `rl_ratelimit_<slug>`), so a control created from one surface can be removed from another — a label-derived comment made a block placed in LuCI un-removable from the Telegram bot.
+- **Labels do not identify rules.** A label is recorded in the activity log only. Firewall rule comments are derived from the target (`tctl_block_<slug>`, `rl_ratelimit_<slug>`), so a control created from one surface can be removed from another — a label-derived comment made a block placed in LuCI un-removable from the Telegram bot. Rules written before v1.13.2 still carry such a comment (`tctl_block_tg`, `rl_ratelimit_tg`), shared by every target given that label; on nft, `unblock` and `ratelimit` with rate 0 remove one only when it names the exact target (`ip saddr`, and `ip daddr` for a download limit), so other targets keep theirs.
 - **`log_file` is constrained** to `/tmp/trafficctl/*` or `/var/log/*`, and `max_lines` to 20–100000. The path is both an append target and a `tail`/rewrite target, so an unconstrained value was an arbitrary root read and truncate.
 
 ---
@@ -582,7 +582,10 @@ and the two are merged:
   `tctl_block_block_<ip>` or a typed label from LuCI) works with any label,
   the empty one the Rules tab sends included: `trafficctl-unblock.sh` also
   removes every drop rule on that exact `ip saddr` whose comment starts with
-  `tctl_block_`.
+  `tctl_block_`. On nft the label never selects a rule: such a comment was
+  shared by every device blocked with that label, so unblocking one device
+  leaves the others blocked. On iptables the label comment is still tried,
+  always together with `-s <ip>`.
 - `applied`: in the kernel or on the radio now. `persisted`: survives a reboot.
   A saved record that is not applied is restored at the next `ifup lan`; a live
   rule that is not saved is lost at the next reboot. Live rates win over saved ones.
