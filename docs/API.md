@@ -557,8 +557,10 @@ rate-limiter.
 `mode` is the bucket layout (`each`/`shared`) read back from the live rule — an
 nft meter keyed on the address is what makes a bucket per-device. The rules are
 read from `nft -j list table netdev tm_ratelimit`; of the expressions only
-matches, limits, meters, counters and the verdict are read. nftables 1.1 (OpenWrt 25.12) lists a meter as a named set
-the rule adds to; the shell reader looked for the word `meter` and reported
+matches, limits, meters, counters and the verdict are read, so the meter's
+name does not matter (`tctl_m_<slug>_<chain>` since 1.30.5, one per target
+before). nftables 1.1 (OpenWrt 25.12) lists a meter as a named set the rule
+adds to; the v1.30.0 shell reader looked for the word `meter` and reported
 those limits as `shared`, the CLI reports `each`. `pass_packets`/`pass_bytes`
 are always 0, as before.
 
@@ -859,10 +861,44 @@ trafficctl-ratelimit.sh 192.168.20.0/24 0 "iot-cap"
   never matches a packet. `trafficctl-subnets.sh` lists what is covered, and
   the dashboard warns when a target falls outside it.
 
+**Partial results are kept and reported.** The download rule goes on the
+egress chain of every LAN device (`dl_<dev>`) and the upload rule on the
+ingress chain of every bridge port (`ul_<port>`). A device that refuses its
+rule (a port hostapd is re-creating during the boot restore, say) does not
+take the others down with it: the rules that went in stay, the failure is
+logged with the device and nft's reason, and the result says which devices
+the limit misses. `partial` is `true` whenever some device is missing a rule;
+the `ipv6_*` flags and the IPv6 note describe the v6 rules that are actually
+loaded:
+
+```json
+{"ok": true, "partial": true, "ipv6_upload": false, "ipv6_download": false, "nss": "none", "persist": true, "msg": "rate limit 5000 kbit/s for 10.0.20.0/24 (both directions, each) — PARTIAL: upload rule failed on lan2: Operation not supported [IPv4 only]"}
+```
+
+When a direction went in on no device at all, the message says `UPLOAD ONLY`
+or `DOWNLOAD ONLY` with the reason. `ok` is `false` only if nothing went in, in
+either direction. Applying the limit again (or the next `ifup lan`) replaces
+the rules and fills the missing device in. The restore hook logs
+`Restored ratelimit for <target> (<rate>kbit) PARTIALLY: ...` for a partial
+restore and `Failed to restore ratelimit ...` when nothing went in.
+
+**Meters are per chain.** In `each` mode every chain gets its own meter,
+`tctl_m_<target slug>_<chain>` (`tctl_m_10_0_20_0_24_ul_lan1`). Releases up to
+1.30.4 used one name per target in every chain: nftables 1.0 (OpenWrt 22.03)
+binds a meter to the one rule that declares it and refused the second port's
+rule with `Could not process rule: Resource busy`, so clients on `lan2` and
+later uploaded unlimited while the limit was reported as applied. nftables 1.1
+turns a meter into a named set that outlives its rules; removing a limit now
+deletes the meters its rules used, including those old per-target names, so a
+new rate does not meet the buckets of the old one.
+
 **Persistence:** with `persist_rules` on, the target, rate **and mode** are
 written to `/etc/trafficctl/rules.json` and restored on `ifup lan`. Records
 written before the mode was stored fall back to the same default the CLI would
-have picked for that target.
+have picked for that target. A restore that finds the limit already in the
+kernel (an `ifup` without a reboot) replaces it rather than adding a copy; it
+looks for the target's exact comments, so restoring `192.168.1.1` leaves the
+limit on `192.168.1.10` alone.
 
 ---
 
