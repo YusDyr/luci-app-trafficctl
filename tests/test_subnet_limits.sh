@@ -30,7 +30,11 @@ mkdir -p "$TMP/root"
 MOCKBIN="$TMP/bin"
 mkdir -p "$MOCKBIN"
 NFT_LOG="$TMP/nft.log"
-RULES="$TMP/rules.json"
+# The ucode limiter and fw.sh's persistence helpers share one rules.json,
+# under the TCTL_ROOT the CLI runs with (a symlink would not do: the writers
+# rename a new file over it).
+RULES="$TMP/root/etc/trafficctl/rules.json"
+mkdir -p "$TMP/root/etc/trafficctl" "$TMP/root/etc/config" "$TMP/root/tmp"
 SHAPES="$TMP/shapes.json"
 
 assert_eq() {
@@ -193,7 +197,7 @@ sed -e "s|TCTL_RULES_FILE=\"/etc/trafficctl/rules.json\"|TCTL_RULES_FILE=\"$RULE
     -e "s|TCTL_SHAPES_FILE=\"/etc/trafficctl/shapes.json\"|TCTL_SHAPES_FILE=\"$SHAPES\"|" \
     "$BIN/trafficctl-fw.sh" > "$FW"
 assert_not_contains "harness: no production rules path survived the rewrite" \
-    "/etc/trafficctl/rules.json" "$(cat "$FW")"
+    "TCTL_RULES_FILE=\"/etc/trafficctl/rules.json" "$(cat "$FW")"
 
 # Every script under test sources fw.sh by absolute path too.
 patch_script() {
@@ -202,9 +206,21 @@ patch_script() {
         "$1" > "$2"
     chmod +x "$2"
 }
-patch_script "$BIN/trafficctl-ratelimit.sh"       "$TMP/ratelimit.sh"
+# The same router for the ucode CLI: lan (br-lan, 10.10.4.128/25), a guest
+# VLAN (br-guest, 192.168.20.0/24) and wan, as the uci and ubus fakes above.
+printf "config trafficctl 'main'\n\toption persist_rules '1'\n" > "$TMP/root/etc/config/trafficctl"
+printf "config interface 'lan'\n\toption device 'br-lan'\n\nconfig interface 'guest'\n\toption device 'br-guest'\n\nconfig interface 'wan'\n\toption device 'eth1'\n" \
+    > "$TMP/root/etc/config/network"
+printf "config zone\n\toption name 'lan'\n\tlist network 'lan'\n\nconfig zone\n\toption name 'guest'\n\tlist network 'guest'\n\nconfig zone\n\toption name 'wan'\n\tlist network 'wan'\n\toption masq '1'\n" \
+    > "$TMP/root/etc/config/firewall"
+mkdir -p "$TMP/ubus" "$TMP/sys/class/net/eth1" "$TMP/sys/class/net/lan1" "$TMP/sys/class/net/lan4"
+ln -s "$TMP/sys" "$TMP/root/sys"
+printf '{"interface":[{"interface":"lan","up":true,"l3_device":"br-lan","ipv4-address":[{"address":"10.10.4.130","mask":25}]},{"interface":"guest","up":true,"l3_device":"br-guest","ipv4-address":[{"address":"192.168.20.1","mask":24}]},{"interface":"wan","up":true,"l3_device":"eth1"}]}\n' \
+    > "$TMP/ubus/network.interface@dump.json"
+printf '{"up":true,"l3_device":"eth1"}\n' > "$TMP/ubus/network.interface.wan@status.json"
+ubus_start "$TMP/ubus"
 
-run() { PATH="$MOCKBIN:$PATH" sh "$@" 2>/dev/null; }
+rl() { PATH="$MOCKBIN:$PATH" TCTL_ROOT="$TMP/root" tctl ratelimit "$@" 2>/dev/null; }
 
 # ════════════════════════════════════════════════════════════════════════════
 # 1. Rate-limit statistics: the target of an "each"-mode rule
@@ -266,13 +282,13 @@ assert_eq "stats: no table is an empty array" "[]" "$(stats)"
 printf '[]\n' > "$RULES"
 
 : > "$NFT_LOG"
-OUT=$(run "$TMP/ratelimit.sh" 192.168.20.0/24 20000 "iot-cap" each)
+OUT=$(rl 192.168.20.0/24 20000 "iot-cap" each)
 assert_contains "ratelimit: an each-mode subnet limit is accepted" '"ok":true' "$OUT"
 assert_contains "persist: the mode is stored beside the rate" \
     '"type":"ratelimit","ip":"192.168.20.0/24","param":"20000","mode":"each"' "$(cat "$RULES")"
 
 printf '[]\n' > "$RULES"
-run "$TMP/ratelimit.sh" 10.0.0.0/24 20000 "guest-cap" shared >/dev/null
+rl 10.0.0.0/24 20000 "guest-cap" shared >/dev/null
 assert_contains "persist: a shared cap is stored as shared" \
     '"ip":"10.0.0.0/24","param":"20000","mode":"shared"' "$(cat "$RULES")"
 
@@ -291,16 +307,13 @@ sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FW|" \
     -e "s|/etc/trafficctl/cut.state|$TMP/cut.state|" \
     -e "s|/usr/sbin/trafficctl|$TMP/tctl-cli|" \
     "$HOTPLUG" > "$HOOK"
-# The blocks go back through `trafficctl restore`, on the same fake nft and
-# the same rules.json.
-mkdir -p "$TMP/root/etc/trafficctl" "$TMP/root/etc/config"
-ln -sf "$RULES" "$TMP/root/etc/trafficctl/rules.json"
-printf "config trafficctl 'main'\n\toption persist_rules '1'\n" > "$TMP/root/etc/config/trafficctl"
+# Blocks and rate limits go back through `trafficctl restore`, on the same
+# fake nft and the same rules.json.
 printf '#!/bin/sh\nTCTL_ROOT="%s" exec "%s" -S -L "%s" -- "%s" "$@"\n' "$TMP/root" "$UCODE" "$UC_LIB" \
     "$UC_REPO/trafficctl/files/usr/sbin/trafficctl" > "$TMP/tctl-cli"
 chmod +x "$TMP/tctl-cli"
 assert_not_contains "harness: the hook's rules path was redirected" \
-    "/etc/trafficctl/rules.json" "$(cat "$HOOK")"
+    "RULES_FILE=\"/etc/trafficctl/rules.json" "$(cat "$HOOK")"
 
 # What ends the restore loop is a sentinel, not a counted range (#108), so a
 # broken sentinel is an infinite loop and a skipped increment is an infinite
@@ -362,7 +375,7 @@ assert_not_contains "restore: a shared cap does NOT come back per-device" \
     "meter" "$RESTORED"
 
 # Records written before the mode was stored must land on the same default the
-# CLI would have chosen, not on tctl_ratelimit_add's own "shared" fallback —
+# CLI would have chosen, not on the limiter's own "shared" fallback —
 # that turned "5 Mbit each" into "5 Mbit for the whole subnet" on reboot.
 RESTORED=$(restore '[{"type":"ratelimit","ip":"192.168.20.0/24","param":"20000"}]')
 assert_terminated "restore: the loop ended on its own"
@@ -420,7 +433,7 @@ assert_terminated "restore: a hundred-and-one records end the loop on their own"
 # header carries no condition, and the only way out is the absent-record
 # sentinel. Comments are stripped first because the hook's own comment quotes
 # `seq 0 99` while explaining why it is gone.
-RULES_LOOP=$(awk '/^# Restore ratelimits/ { f = 1 } f { print } f && /^fi$/ { exit }' \
+RULES_LOOP=$(awk '/^# Restore port-forward controls/ { f = 1 } f { print } f && /^fi$/ { exit }' \
              "$HOTPLUG" | grep -v '^[[:space:]]*#')
 assert_not_contains "restore: the loop bound is not a counted range" "seq " "$RULES_LOOP"
 assert_contains "restore: the loop header carries no bound at all" "while :; do" "$RULES_LOOP"
@@ -484,7 +497,7 @@ assert_not_contains "shaper: a default root qdisc is not reported as somebody's 
     "will not be torn down" "$PLAIN_OUT"
 
 # ── the default itself ──────────────────────────────────────────────────────
-mode_of() { PATH="$MOCKBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; tctl_ratelimit_default_mode '$1'" 2>/dev/null; }
+mode_of() { tcall trafficctl.limit default_mode "\"$1\"" 2>/dev/null; }
 assert_eq "default mode: a subnet is per-device"      "each"   "$(mode_of 192.168.20.0/24)"
 assert_eq "default mode: a /32 is a single host"      "shared" "$(mode_of 192.168.1.50/32)"
 assert_eq "default mode: a bare address is one host"  "shared" "$(mode_of 192.168.1.50)"
