@@ -326,7 +326,34 @@ run_portfw resume input udp - 51820 >/dev/null
 run_portfw limit forward tcp 192.168.0.10 80 0 >/dev/null
 assert_eq "persist: resume and limit 0 drop their records only" \
     '[{"type":"block","ip":"192.168.0.5","param":""}]' "$(cat "$RULES")"
+
+# ── restore after a reboot (`trafficctl restore` runs portfw.restore) ────────
+# Every record comes back once. v1.30.0's hook walked rules.json by index
+# while each restored record moved itself to the end of the file, so with
+# three records it applied one twice and skipped another.
+LOGGER_LOG="$UC_TMP/logger.log"
+printf '#!/bin/sh\necho "$*" >> "%s"\n' "$LOGGER_LOG" > "$MOCKBIN/logger"
+chmod +x "$MOCKBIN/logger"
+restore() { TCTL_ROOT="$ROOT" PATH="$MOCKBIN:$PATH" tcall trafficctl.portfw restore 2>/dev/null; }
+pfw_table() { PATH="$MOCKBIN:$PATH" nft list table inet tctl_pfw 2>/dev/null; }
+reset_net
+printf '%s' '[{"type":"pfw_pause","ip":"forward/tcp/192.168.0.10/80","param":"1"},{"type":"pfw_limit","ip":"forward/udp/192.168.0.11/27015-27030","param":"8000"},{"type":"pfw_pause","ip":"input/udp/local/51820","param":"1"}]' > "$RULES"
+assert_eq "restore: all three records" '{ "ok": true, "restored": 3, "failed": 0 }' "$(restore)"
+T=$(pfw_table)
+for c in tctl_pfw_pause_tcp_192.168.0.10_80 tctl_pfw_limit_udp_192.168.0.11_27015-27030 tctl_pfw_pause_udp_local_51820; do
+    assert_eq "restore: $c once" 1 "$(printf '%s\n' "$T" | grep -c "\"$c\"")"
+done
+reset_net
+printf '%s' '[{"type":"pfw_limit","ip":"forward/tcp/192.168.0.10/80","param":"0"},{"type":"pfw_pause","ip":"forward/tcp/1.2.3/81","param":"1"}]' > "$RULES"
+: > "$LOGGER_LOG"
+assert_eq "restore: a rate 0 and a bad address fail" '{ "ok": false, "restored": 0, "failed": 2 }' "$(restore)"
+assert_contains "restore: the rate 0 is logged, as v1.30's hook did" "Failed to restore port limit for 80" "$(cat "$LOGGER_LOG")"
+assert_contains "restore: so is the bad address" "Failed to restore port pause for 81" "$(cat "$LOGGER_LOG")"
 write_trafficctl 0
+reset_net
+printf '%s' '[{"type":"pfw_pause","ip":"forward/tcp/192.168.0.10/80","param":"1"}]' > "$RULES"
+assert_eq "restore, persistence off: nothing" '{ "ok": true, "restored": 0, "failed": 0 }' "$(restore)"
+printf '[]' > "$RULES"
 
 # ── validation ───────────────────────────────────────────────────────────────
 

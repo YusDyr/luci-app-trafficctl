@@ -467,7 +467,9 @@ function restore() {
 	catch (e) {
 		return res;
 	}
-	// The hook read @[0], @[1], ... until a record had no type.
+	// The hook read @[0], @[1], ... until a record had no type. The records
+	// are read once: each restore rewrites rules.json, which made the hook's
+	// index skip one record and apply another twice.
 	for (let r in (type(d) == 'array') ? d : []) {
 		let t = (type(r) == 'object') ? field(r.type) : '';
 		if (t == '')
@@ -478,16 +480,17 @@ function restore() {
 		let k = key_parts(ip);
 		if (k[2] == 'local')
 			k[2] = '-';
-		if (t == 'pfw_limit' && (param == '' || param == '0'))
-			continue;
 		let what = (t == 'pfw_pause') ? 'pause' : 'limit';
 		let argv = (t == 'pfw_pause') ? [ 'pause', ...k ] : [ 'limit', ...k, param ];
-		let rc;
-		try {
-			rc = main(argv).rc;
-		}
-		catch (e) {
-			rc = 1;
+		let rc = 1;
+		// A limit with no rate is not restorable; v1.30's hook logged it.
+		if (t == 'pfw_pause' || (param != '' && param != '0')) {
+			try {
+				rc = main(argv).rc;
+			}
+			catch (e) {
+				rc = 1;
+			}
 		}
 		if (rc == 0)
 			res.restored++;

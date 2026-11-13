@@ -909,10 +909,14 @@ cat > "$W/pfw-rules.json" <<'JSON'
 [{"type":"block","ip":"192.168.0.5","param":""},{"type":"ratelimit","ip":"10.0.20.0/24","param":"5000","mode":"each","param_up":"1000"},{"type":"pfw_pause","ip":"forward/tcp/192.168.0.140/80","param":"1"},{"type":"pfw_limit","ip":"forward/udp/192.168.0.109/27015-27030","param":"8000"}]
 JSON
 PFWRULES='mkdir -p "$W/root/etc/trafficctl"; cp "$W/pfw-rules.json" "$W/root/etc/trafficctl/rules.json"'
-# Port controls as v1.30.0 saved them, for the restore after a reboot: an open
-# port under its "local" key, and in the bad file records the hook skipped
-# (no rate, rate 0) or failed on (an address that is none).
-PFWONLY='mkdir -p "$W/root/etc/trafficctl"; printf "%s" "[{\"type\":\"pfw_pause\",\"ip\":\"forward/tcp/192.168.0.140/80\",\"param\":\"1\"},{\"type\":\"pfw_limit\",\"ip\":\"forward/udp/192.168.0.109/27015-27030\",\"param\":\"8000\"},{\"type\":\"pfw_pause\",\"ip\":\"input/udp/local/51820\",\"param\":\"1\"}]" > "$W/root/etc/trafficctl/rules.json"'
+# Port controls as v1.30.0 saved them, for the restore after a reboot. One
+# record only: with more, v1.30.0's hook skipped one and applied another twice
+# (each restore rewrote rules.json under its index), and an open port comes
+# back commented "local" where v1.30 wrote "-"; tests/test_portfw.sh covers
+# both. The bad file holds records the hook logged (no rate, rate 0, an
+# address that is none) and one it restored.
+PFWONLY='mkdir -p "$W/root/etc/trafficctl"; printf "%s" "[{\"type\":\"pfw_limit\",\"ip\":\"forward/udp/192.168.0.109/27015-27030\",\"param\":\"8000\"}]" > "$W/root/etc/trafficctl/rules.json"'
+NOFT='sed -i "/^nft list flowtables/d" "$W/root/netfake/calls"'
 PFWBAD='mkdir -p "$W/root/etc/trafficctl"; printf "%s" "[{\"type\":\"pfw_limit\",\"ip\":\"forward/tcp/192.168.0.140/80\",\"param\":\"0\"},{\"type\":\"pfw_limit\",\"ip\":\"forward/tcp/192.168.0.140/81\",\"param\":\"\"},{\"type\":\"pfw_pause\",\"ip\":\"forward/tcp/1.2.3/80\",\"param\":\"1\"},{\"type\":\"pfw_pause\",\"ip\":\"forward/udp/192.168.0.109/27015\",\"param\":\"1\"}]" > "$W/root/etc/trafficctl/rules.json"'
 PFWSEED='nft add table inet tctl_pfw; nft add chain inet tctl_pfw pfw_forward x; nft add rule inet tctl_pfw pfw_forward ip daddr 192.168.0.140 tcp dport 80 counter drop comment \"tctl_pfw_pause_tcp_192.168.0.140_80\"; nft add rule inet tctl_pfw pfw_forward ip daddr 192.168.0.109 udp dport 27015-27030 limit rate over 1000 kbytes/second counter drop comment \"tctl_pfw_limit_udp_192.168.0.109_27015-27030\"; : > "$W/root/netfake/calls"'
 CASES+="
@@ -960,12 +964,12 @@ portfw-limit-input | text | router-24.10 | sh:lpfw limit input udp - 51820 800 |
 portfw-persist | text+$PFWF | router-24.10 | sh:lpfw pause forward tcp 192.168.0.140 80; lpfw limit forward tcp 192.168.0.140 80 900; lpfw resume forward tcp 192.168.0.140 80 | npfw pause forward tcp 192.168.0.140 80; npfw limit forward tcp 192.168.0.140 80 900; npfw resume forward tcp 192.168.0.140 80 | $PFWENV; $PERSIST
 portfw-persist-mixed | text+$PFWF | router-24.10 | sh:lpfw limit forward tcp 192.168.0.140 80 900; lpfw limit forward udp 192.168.0.109 27015-27030 0; lpfw resume forward tcp 192.168.0.140 80; lpfw pause forward tcpudp 192.168.0.109 27015-27030 | npfw limit forward tcp 192.168.0.140 80 900; npfw limit forward udp 192.168.0.109 27015-27030 0; npfw resume forward tcp 192.168.0.140 80; npfw pause forward tcpudp 192.168.0.109 27015-27030 | $PFWENV; $PERSIST; $PFWSEED; $PFWRULES
 portfw-bad | text+$PFWF | router-24.10 | sh:lpfw; lpfw pause; lpfw pause forward icmp 192.168.0.140 80; lpfw pause forward tcp 1.2.3 80; lpfw pause forward tcp 192.168.0.140 0; lpfw pause forward tcp 192.168.0.140 9-8; lpfw pause x tcp - 80; lpfw limit forward tcp 192.168.0.140 80 | npfw; npfw pause; npfw pause forward icmp 192.168.0.140 80; npfw pause forward tcp 1.2.3 80; npfw pause forward tcp 192.168.0.140 0; npfw pause forward tcp 192.168.0.140 9-8; npfw pause x tcp - 80; npfw limit forward tcp 192.168.0.140 80 | $PFWENV
-restore-ports | text+$PFWF | router-24.10 | sh:$LHOOK; echo rc=\$?; nft list table inet tctl_pfw | tctl restore >/dev/null; echo rc=\$?; nft list table inet tctl_pfw | $PFWENV; $PERSIST; $PFWONLY
-restore-ports-off | text+$PFWF | router-24.10 | sh:$LHOOK; echo rc=\$?; nft list table inet tctl_pfw | tctl restore >/dev/null; echo rc=\$?; nft list table inet tctl_pfw | $PFWENV; $PFWONLY; uci set trafficctl.main.persist_rules=0; uci commit trafficctl
-restore-ports-bad | text+$PFWF,tmp/logger.log | router-24.10 | sh:$LHOOK; echo rc=\$?; nft list table inet tctl_pfw | tctl restore >/dev/null; echo rc=\$?; nft list table inet tctl_pfw | $PFWENV; $PERSIST; $PFWBAD
-restore-cut | text+$CUTF | router-24.10 | sh:TCTL_NOW=$CUT_T0 $LHOOK; echo rc=\$?; lcut status | TCTL_NOW=$CUT_T0 tctl restore >/dev/null; echo rc=\$?; ncut status | $CUTENV; $CUTPSTATE
-restore-cut-persist-off | text+$CUTF | router-24.10 | sh:TCTL_NOW=$CUT_T0 $LHOOK; echo rc=\$?; lcut status | TCTL_NOW=$CUT_T0 tctl restore >/dev/null; echo rc=\$?; ncut status | $CUTENV; $CUTPSTATE; uci set trafficctl.main.persist_rules=0; uci commit trafficctl
-restore-cut-none | text+$CUTF | router-24.10 | sh:TCTL_NOW=$CUT_T0 $LHOOK; echo rc=\$?; lcut status | TCTL_NOW=$CUT_T0 tctl restore >/dev/null; echo rc=\$?; ncut status | $CUTENV
+restore-ports | text+$PFWF | router-24.10 | sh:$LHOOK >/dev/null 2>&1; $NOFT; nft list table inet tctl_pfw 2>&1 | tctl restore >/dev/null 2>&1; nft list table inet tctl_pfw 2>&1 | $PFWENV; $NOSHAPES; $PERSIST; $PFWONLY
+restore-ports-off | text+$PFWF | router-24.10 | sh:$LHOOK >/dev/null 2>&1; $NOFT; nft list table inet tctl_pfw 2>&1 | tctl restore >/dev/null 2>&1; nft list table inet tctl_pfw 2>&1 | $PFWENV; $NOSHAPES; $PFWONLY; uci set trafficctl.main.persist_rules=0; uci commit trafficctl
+restore-ports-bad | text+$PFWF,tmp/logger.log | router-24.10 | sh:$LHOOK >/dev/null 2>&1; $NOFT; nft list table inet tctl_pfw 2>&1 | tctl restore >/dev/null 2>&1; nft list table inet tctl_pfw 2>&1 | $PFWENV; $NOSHAPES; $PERSIST; $PFWBAD
+restore-cut | text+$CUTF | router-24.10 | sh:TCTL_NOW=$CUT_T0 $LHOOK >/dev/null 2>&1; $NOFT; lcut status | TCTL_NOW=$CUT_T0 tctl restore >/dev/null 2>&1; ncut status | $CUTENV; $NOSHAPES; $CUTPSTATE
+restore-cut-persist-off | text+$CUTF | router-24.10 | sh:TCTL_NOW=$CUT_T0 $LHOOK >/dev/null 2>&1; $NOFT; lcut status | TCTL_NOW=$CUT_T0 tctl restore >/dev/null 2>&1; ncut status | $CUTENV; $NOSHAPES; $CUTPSTATE; uci set trafficctl.main.persist_rules=0; uci commit trafficctl
+restore-cut-none | text+$CUTF | router-24.10 | sh:TCTL_NOW=$CUT_T0 $LHOOK >/dev/null 2>&1; $NOFT; lcut status | TCTL_NOW=$CUT_T0 tctl restore >/dev/null 2>&1; ncut status | $CUTENV; $NOSHAPES
 "
 # A recorded agent feed, read by both netify sides when a case writes it.
 export TCTL_NETIFY_FEED="$W/root/tmp/feed"
@@ -1091,6 +1095,7 @@ while IFS='|' read -r name mode fixture legacy new setup; do
     [ -z "$files" ] || with_files "$W/new.out" "$files"
     ubus_stop
     # EQUIV_KEEP=<dir> keeps both sides' output for a look by hand.
+    # EQUIV_ONLY=<regex> runs only the cases whose name matches (not rpcd).
     if [ -n "${EQUIV_KEEP:-}" ]; then
         mkdir -p "$EQUIV_KEEP"
         cp "$W/legacy.out" "$EQUIV_KEEP/$name.legacy"; cp "$W/new.out" "$EQUIV_KEEP/$name.new"
@@ -1103,7 +1108,7 @@ while IFS='|' read -r name mode fixture legacy new setup; do
     else
         FAIL=$((FAIL + 1)); echo "FAIL: $name ($mode)"; cat "$W/diff" "$W/new.err"
     fi
-done <<< "$CASES"
+done <<< "$(printf '%s\n' "$CASES" | grep -E "^(${EQUIV_ONLY:-.*}) *\|" || true)"
 
 # ── the rpcd plugin ─────────────────────────────────────────────────────────
 # The v1.30.0 shell plugin and the ucode one, method by method, with the same
