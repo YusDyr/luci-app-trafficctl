@@ -14,7 +14,7 @@
 # the directory root/tmp/nft-netdev, and a command with no recording succeeds
 # when cmd/<command>.default exists; every write lands in root/tmp/writes.log.
 #
-# The limiter is compared with main at #161 ($LEGACY5_REF), not v1.30.0:
+# The limiter is compared with v1.30.6 ($LEGACY5_TAG), not v1.30.0:
 # v1.30.5 fixed it (#154: a meter per chain, partial success reported, the
 # sets the rules name removed, the restore replacing a live limit), and #161
 # stopped a removal from lifting other targets' limits that carry a caller's
@@ -43,8 +43,7 @@
 . "$(dirname "$0")/lib/ucode.sh"
 
 LEGACY_TAG=v1.30.0
-# v1.30.5 plus #161, not released yet: the tag that carries it replaces this.
-LEGACY5_REF=f15f363e2ef8e07e0668f91a91c83a95e9a59002
+LEGACY5_TAG=v1.30.6
 FIXTURES="$UC_REPO/tests/fixtures"
 W="$UC_TMP/work"
 L="$UC_TMP/legacy"
@@ -535,12 +534,12 @@ if ! git -C "$UC_REPO" rev-parse -q --verify "refs/tags/$LEGACY_TAG" >/dev/null;
 fi
 mkdir -p "$L" "$C/trafficctl" "$W"
 git -C "$UC_REPO" archive "$LEGACY_TAG" trafficctl/files luci-app-trafficctl/root | tar -x -C "$L"
-if ! git -C "$UC_REPO" rev-parse -q --verify "$LEGACY5_REF^{commit}" >/dev/null; then
-    git -C "$UC_REPO" fetch -q --depth=1 origin "$LEGACY5_REF" ||
-        { echo "FAIL: cannot get $LEGACY5_REF" >&2; exit 1; }
+if ! git -C "$UC_REPO" rev-parse -q --verify "refs/tags/$LEGACY5_TAG" >/dev/null; then
+    git -C "$UC_REPO" fetch -q --depth=1 origin "refs/tags/$LEGACY5_TAG:refs/tags/$LEGACY5_TAG" ||
+        { echo "FAIL: cannot get $LEGACY5_TAG" >&2; exit 1; }
 fi
 mkdir -p "$L5"
-git -C "$UC_REPO" archive "$LEGACY5_REF" trafficctl/files | tar -x -C "$L5"
+git -C "$UC_REPO" archive "$LEGACY5_TAG" trafficctl/files | tar -x -C "$L5"
 L5EXEC="$L5/trafficctl/files/usr/libexec/trafficctl"
 cp -R "$UC_REPO/trafficctl/files" "$C/trafficctl/"
 LEXEC="$L/trafficctl/files/usr/libexec/trafficctl"
