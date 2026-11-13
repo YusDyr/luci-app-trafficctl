@@ -4,6 +4,21 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.30.7] - 2026-11-13
+
+### Bug Fixes
+- remove only this shape's tc filters, not every shape's ([#166](https://github.com/YusDyr/luci-app-trafficctl/issues/166)) ([59c5d82](https://github.com/YusDyr/luci-app-trafficctl/commit/59c5d82b0f7d55b858da4bb74ccfd0780589ca4b))
+  Every shape is an HTB class plus a prio-10 u32 filter on the LAN device
+  (match ip dst) and on the IFB (match ip src). The shaper removed a filter
+  with "tc filter del ... prio 10 protocol ip u32 match ip dst <ip>/32" and
+  no handle, and the kernel's u32 then deletes every filter of that prio on
+  the device, whatever match follows. Adding a shape (attach detaches first)
+  or removing one took all other shapes' filters with it: only the last
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.30.6...v1.30.7
+
+---
+
 ## [1.30.6] - 2026-11-13
 
 ### Bug Fixes
