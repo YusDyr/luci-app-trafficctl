@@ -4,6 +4,21 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.30.6] - 2026-11-13
+
+### Bug Fixes
+- removing one device's block or limit no longer lifts other devices' legacy rules ([#161](https://github.com/YusDyr/luci-app-trafficctl/issues/161)) ([f15f363](https://github.com/YusDyr/luci-app-trafficctl/commit/f15f363e2ef8e07e0668f91a91c83a95e9a59002))
+  Blocks written before v1.13.2 carry the caller's label in their comment,
+  and every device blocked from Telegram shares tctl_block_tg.
+  trafficctl-unblock.sh removed tctl_block_<label> through tctl_block_remove,
+  which matches on the comment alone, so unblocking one device from Telegram
+  (label tg) also unblocked every other device with a tg-labelled rule. The
+  same held for any label typed in the UI more than once.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.30.5...v1.30.6
+
+---
+
 ## [1.30.5] - 2026-11-13
 
 ### Bug Fixes

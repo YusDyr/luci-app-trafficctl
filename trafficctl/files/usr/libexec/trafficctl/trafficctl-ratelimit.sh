@@ -58,7 +58,13 @@ COMMENT=$(tctl_ratelimit_comment "$IP")
 if [ "$RATE" = "0" ]; then
     # Limits written before comments were derived from the target carry the
     # caller's label, so one set from LuCI could not be removed from Telegram.
-    tctl_ratelimit_remove "$IP" "rl_ratelimit_${LABEL}" 2>/dev/null
+    # On nft only the rules naming this target go: the label comment is shared
+    # (every limit set from Telegram is rl_ratelimit_tg).
+    if [ "$TCTL_FW" = "nft" ]; then
+        tctl_ratelimit_remove_legacy "$IP" "rl_ratelimit_${LABEL}" 2>/dev/null
+    else
+        tctl_ratelimit_remove "$IP" "rl_ratelimit_${LABEL}" 2>/dev/null
+    fi
     if tctl_ratelimit_remove "$IP" "$COMMENT"; then
         tctl_persist_enabled && tctl_persist_remove "ratelimit" "$IP"
         tctl_log "ratelimit_remove" "$IP" "" "${TCTL_VIA:-cli}" "${TCTL_SRC:-local}"
