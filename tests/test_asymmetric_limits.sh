@@ -534,9 +534,11 @@ assert_contains "the ratelimit rpc call carries an upload rate" \
     "params: ['ip', 'rate_kbit', 'label', 'mode', 'rate_kbit_up']" "$js_src"
 assert_contains "the shape_add rpc call carries an upload rate" \
     "params: ['ip', 'rate_kbit', 'label', 'rate_kbit_up']" "$js_src"
-# null rather than 0 for the symmetric case: 0 would be a ceiling.
-assert_eq "every apply path sends null, not 0, when symmetric" "3" \
-    "$(grep -c "kbitUp ? parseInt(kbitUp) : null" "$JS")"
+# No upload rate for the symmetric case, rather than 0: 0 would be a ceiling.
+# undefined, not null: LuCI drops an undefined param, and rpcd refuses a call
+# with a null for an int.
+assert_eq "every apply path leaves the upload rate out when symmetric" "3" \
+    "$(grep -c "kbitUp ? parseInt(kbitUp) : undefined" "$JS")"
 
 # ══════════════════════════════════════════════════════════════════════════
 # 7. Persisted records must not overwrite one another
