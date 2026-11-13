@@ -25,6 +25,15 @@
 //                        accumulated from bytes() (from sample in tests)
 //   reset()              drop the cached interface dump and LAN subnets, and
 //                        lib.reset(); long-running callers call it per request
+// MACs, for the IPv6 halves of the block and the limiter (#67)
+//   lookup_mac(ip)       lease first, neighbour table second, lower case;
+//                        null when neither knows a valid one
+//   ip_is_nexthop(ip)    ip is the `via` of a route: a router, whose MAC is
+//                        the source of everything it forwards
+//   target_mac(t)        the MAC to key t's IPv6 rules on: null for a CIDR,
+//                        a next hop, or a device without a known MAC
+//   flush_v6(mac)        conntrack -D both ways for every IPv6 neighbour
+//                        address of mac
 //
 // Subnet records are "netbase block router" as in tctl_lan_subnets
 // (trafficctl-fw.sh), which still serves the shell scripts: the two copies
@@ -883,7 +892,86 @@ function totals(all, sample) {
 	return out;
 }
 
+// ── MACs (tctl_lookup_mac, tctl_ip_is_nexthop, tctl_target_mac) ─────────────
+
+const LEASES = '/tmp/dhcp.leases';
+
+// The value is interpolated into an nft rule, so only six hex pairs pass. A
+// lease that names a broken MAC is not overridden by the neighbour table:
+// the shell did not look further either.
+function lookup_mac(ip) {
+	if (!lib.valid_ip(ip))
+		return null;
+	let mac = null;
+	for (let l in lib.file_lines(LEASES))
+		if (lib.field(l, 2) == ip) {
+			mac = lib.field(l, 1);
+			break;
+		}
+	if (mac == null || mac == '') {
+		mac = null;
+		for (let l in lib.lines('ip neigh show')) {
+			let f = split(ltrim(l, ' \t'), /[ \t]+/);
+			if (f[0] != ip)
+				continue;
+			for (let i = 1; i < length(f) - 1; i++)
+				if (f[i] == 'lladdr') {
+					mac = f[i + 1];
+					break;
+				}
+			if (mac != null)
+				break;
+		}
+	}
+	return lib.norm_mac(mac);
+}
+
+function ip_is_nexthop(ip) {
+	if (ip == null || ip == '')
+		return false;
+	for (let l in lib.lines('ip route show')) {
+		let f = split(ltrim(l, ' \t'), /[ \t]+/);
+		for (let i = 0; i < length(f) - 1; i++)
+			if (f[i] == 'via' && f[i + 1] == ip)
+				return true;
+	}
+	return false;
+}
+
+function target_mac(t) {
+	t = '' + (t ?? '');
+	if (substr(t, -3) == '/32')
+		t = substr(t, 0, -3);
+	else if (index(t, '/') >= 0)
+		return null;
+	return ip_is_nexthop(t) ? null : lookup_mac(t);
+}
+
+// `conntrack -D -s <v4>` leaves the device's IPv6 flows alone, and under flow
+// offload an established one is never checked against a new rule again. The
+// addresses come from a one-shot snapshot, which is sound for a flush and
+// would not be for a rule: privacy addresses rotate.
+const CT_MS = 5000;
+
+function flush_v6(mac) {
+	mac = lib.norm_mac(mac);
+	if (mac == null || lib.sh('command -v conntrack') != 0)
+		return;
+	for (let l in lib.lines('ip -6 neigh show')) {
+		let f = split(ltrim(l, ' \t'), /[ \t]+/);
+		for (let i = 1; i < length(f) - 1; i++) {
+			if (f[i] != 'lladdr' || lc(f[i + 1]) != mac)
+				continue;
+			if (match(f[0], /^[0-9a-fA-F:]+$/)) {
+				lib.sh('conntrack -D -f ipv6 -s ' + lib.q(f[0]), CT_MS);
+				lib.sh('conntrack -D -f ipv6 -d ' + lib.q(f[0]), CT_MS);
+			}
+			break;
+		}
+	}
+}
+
 // 2022-12 needs a ';' after `export function f() {}`; one list avoids it.
 export { lan_subnets, lan_devices, lan_device, routed_subnets,
 	monitored_subnets, subnets, ifaces, rdns, rdns_refresh, offload_mode, ct_each,
-	bytes, totals, reset, local_ips };
+	bytes, totals, reset, local_ips, lookup_mac, ip_is_nexthop, target_mac, flush_v6 };

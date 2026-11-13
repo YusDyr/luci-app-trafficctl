@@ -36,14 +36,10 @@ jobs:
         run: bash tests/test_telegram_e2e.sh
       - name: Security tests
         run: bash tests/test_security.sh
-      - name: Block/unblock tests
-        run: bash tests/test_block.sh
-      - name: IPv6 enforcement tests
+      - name: IPv6 enforcement tests (limiter)
         run: bash tests/test_ipv6.sh
-      - name: WiFi MAC filter tests
-        run: bash tests/test_macfilter.sh
-      - name: New device default-limit tests
-        run: bash tests/test_newdevice.sh
+      - name: Qualcomm NSS reporting tests
+        run: bash tests/test_nss.sh
       # Independent up/down ceilings. Most of the risk is the shapes.json
       # record format: a record the extraction pattern misses disappears from
       # the classid allocator and two devices end up sharing an HTB class.
@@ -135,6 +131,16 @@ jobs:
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_netify.sh
       # The limiter, block and shaper readers (trafficctl.ctl), read from the
       # nft -j output of both nft versions; the shell helpers beside them too.
+      - name: Block/unblock tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_block.sh
+      - name: IPv6 block tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_ipv6_block.sh
+      - name: WiFi MAC filter tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_macfilter.sh
+      - name: New device default-limit tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_newdevice.sh
+      - name: Persistence tests (rules.json, restore, the shared lock)
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_persistence.sh
       - name: Rules tab backend tests
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_rules.sh
       - name: Subnet / aggregate limit tests

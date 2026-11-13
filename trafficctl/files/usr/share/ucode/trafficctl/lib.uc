@@ -22,6 +22,9 @@
 //   uci_words(conf, sect, opt)    value split on whitespace, [] when unset
 //   uci_foreach(conf, stype, fn)  cursor().foreach; fn returning false stops
 //   commit(conf)                  commit; trafficctl's file goes back to 0600
+//   uci_cli(argv)                 the uci CLI on argv (ROOT-aware): its exit
+//                                 status. For list edits, which 2022-12's
+//                                 cursor cannot make in place
 //   ubus_call(obj, method, args)  reply, or null on any failure; a failed
 //                                 connect is retried on the next call
 //                                 (socket: getenv('TCTL_UBUS_SOCKET'))
@@ -62,6 +65,8 @@
 //                                 false when p cannot be opened
 //   is_file(p)
 //   mkdir_p(dir)
+//   append(p, data)               append (created if missing): false when p
+//                                 cannot be opened
 //   write_atomic(p, data, mode)   temp file in the same directory + rename;
 //                                 mode defaults to the current file's
 //   create_once(p, data)          exclusive create + write: true for exactly one
@@ -93,6 +98,16 @@
 //   sanitize_name(s)              /etc/trafficctl/names, "IP NAME" lines
 //   seen_known(mac), seen_ready(), seen_count(), seen_mark(mac), seen_seed()
 //                                 /etc/trafficctl/seen_macs, one MAC a line
+//   persist_enabled()             trafficctl.main.persist_rules is 1
+//   persist_save(type, ip, param, mode, param_up)
+//   persist_remove(type, ip)      /etc/trafficctl/rules.json, compact, keys in
+//                                 the shell's order, under the mkdir lock
+//                                 the shell writers take too; false when the
+//                                 file could not be rewritten
+// Qualifiers every enforcing command appends to its message
+//   nss_status()                  absent, stopped or active (Qualcomm ECM)
+//   nss_note(), persist_note()    the suffix, '' when nothing to say
+//   nss_defunct()                 flush the flows ECM already accelerates
 
 import { popen, readfile as fs_readfile, writefile, open, stat, mkdir, rmdir,
 	unlink, rename, chmod, readlink, dirname, basename, lsdir } from 'fs';
@@ -246,6 +261,11 @@ function sh(cmd, ms) {
 	return system('{ ' + cmd + '\n} >/dev/null 2>&1 </dev/null');
 }
 
+function uci_cli(argv) {
+	return sh('uci ' + ((ROOT != '') ? '-c ' + q(ROOT + '/etc/config') + ' -t ' + q(ROOT + '/tmp/.uci') + ' ' : '') +
+		qv(argv));
+}
+
 function commit(conf) {
 	// After the command helpers: it needs sh() and q().
 	let c = cursor();
@@ -259,8 +279,7 @@ function commit(conf) {
 			ucimod.error();
 			return false;
 		}
-		if (sh('uci ' + ((ROOT != '') ? '-c ' + q(ROOT + '/etc/config') + ' -t ' + q(ROOT + '/tmp/.uci') + ' ' : '') +
-				'commit ' + q(conf)) != 0) {
+		if (uci_cli([ 'commit', conf ]) != 0) {
 			// Not left staged, or the next reader would take it for saved:
 			// what `uci revert <conf>` does, without having to rewrite a
 			// delta file that inherited a read-only config's mode.
@@ -870,6 +889,123 @@ function seen_seed() {
 	write_atomic(SEEN, length(macs) ? join('\n', macs) + '\n' : '');
 }
 
+// ── rules.json (tctl_persist_save / tctl_persist_remove) ────────────────────
+// Rewritten as the shell does it, record by record as text, so the records
+// the shell writers still add (limits, port forwards) keep their bytes. The
+// lock is shared with them: two writers otherwise read the same file and
+// the later rename drops the earlier record.
+
+const RULES = '/etc/trafficctl/rules.json';
+const RULES_LOCK = '/tmp/trafficctl_rules.lock.d';
+// The shell's wait (50 x 100 ms), then its takeover of a lock that old.
+const RULES_LOCK_TRIES = 50;
+const RULES_LOCK_STALE = 5;
+
+function persist_enabled() {
+	return uci_get('trafficctl', 'main', 'persist_rules') == '1';
+}
+
+// The records other than type+ip, split on "},{" as the shell's awk does.
+function rules_others(text, t, ip) {
+	let s = replace(replace(text, /\n+$/, ''), /^\[/, '');
+	s = replace(s, /\]$/, '');
+	let out = [];
+	if (s == '')
+		return out;
+	for (let it in split(s, '},{')) {
+		it = replace(replace(it, /^\{/, ''), /\}$/, '');
+		// Fixed strings, not patterns, as in the shell.
+		if (index(it, '"ip":"' + ip + '"') >= 0 && index(it, '"type":"' + t + '"') >= 0)
+			continue;
+		push(out, '{' + it + '}');
+	}
+	return out;
+}
+
+function rules_rewrite(fn) {
+	// Not getting the lock in the shell's wait means a killed holder: carry
+	// on, as the shell does.
+	let locked = lock(RULES_LOCK, RULES_LOCK_TRIES, RULES_LOCK_STALE, true), ok;
+	try {
+		ok = fn();
+	}
+	catch (e) {
+		if (locked)
+			unlock(RULES_LOCK);
+		die(e.message);
+	}
+	if (locked)
+		unlock(RULES_LOCK);
+	return ok;
+}
+
+function persist_save(t, ip, param, mode, param_up) {
+	return rules_rewrite(() => {
+		mkdir_p(dirname(RULES));
+		// A zero-length file is what a failed save used to leave: start over.
+		let text = readfile(RULES);
+		if (text == null || text == '')
+			text = '[]';
+		let rec = { type: '' + t, ip: '' + ip, param: '' + (param ?? '') };
+		if (mode != null && mode != '')
+			rec.mode = '' + mode;
+		if (param_up != null && param_up != '')
+			rec.param_up = '' + param_up;
+		let recs = rules_others(text, t, ip);
+		push(recs, to_json(rec));
+		return write_atomic(RULES, '[' + join(',', recs) + ']');
+	});
+}
+
+function persist_remove(t, ip) {
+	return rules_rewrite(() => {
+		let text = readfile(RULES);
+		if (text == null || text == '')
+			return true;
+		return write_atomic(RULES, '[' + join(',', rules_others(text, t, ip)) + ']');
+	});
+}
+
+function persist_note() {
+	if (persist_enabled())
+		return '';
+	return ' [NOT PERSISTENT: this will be lost on reboot — persistence is off. Enable it with `uci set trafficctl.main.persist_rules=1 && uci commit trafficctl`, or in Settings → Logging & Persistence, then re-apply]';
+}
+
+// ── Qualcomm NSS / ECM (tctl_nss_*) ─────────────────────────────────────────
+// An accelerated flow never meets the Linux stack, so on such a router our
+// rules are installed and do nothing. The callers say so instead of
+// reporting success. A missing knob reads as accelerating: guessing
+// "stopped" for an ECM build we do not know would bring that success back.
+
+const ECM = '/sys/kernel/debug/ecm';
+
+function nss_status() {
+	if (stat(path(ECM))?.type != 'directory')
+		return 'absent';
+	let knob = (f) => rtrim(readfile(ECM + '/' + f) ?? '', '\n');
+	return (knob('front_end_ipv4_stop') == '1' && knob('front_end_ipv6_stop') == '1') ? 'stopped' : 'active';
+}
+
+function nss_note() {
+	if (nss_status() != 'active')
+		return '';
+	return ' [NOT ENFORCED: Qualcomm NSS acceleration is active — accelerated flows bypass the Linux network stack entirely, so this rule is installed but has no effect. Stop acceleration (echo 1 > ' + ECM + '/front_end_ipv4_stop, same for ipv6) or set acceleration_engine in /etc/config/ecm, then re-apply]';
+}
+
+// Best effort, as the shell's: a flow ECM already offloads is not checked
+// against a rule that came after it. Unverified on hardware.
+function nss_defunct() {
+	let p = path(ECM + '/ecm_db/defunct_all');
+	if (stat(p)?.type != 'file')
+		return;
+	let f = open(p, 'r+');
+	if (f) {
+		f.write('1\n');
+		f.close();
+	}
+}
+
 // 2022-12 needs a ';' after `export function f() {}`; one list avoids it.
 export { path, pid, reset, plain, cursor, uci_get, uci_words, uci_foreach, commit,
 	ubus_call, q, run, lines, sh, to_json, valid_ip, valid_int, norm_mac, ip2int,
@@ -879,3 +1015,6 @@ export { path, pid, reset, plain, cursor, uci_get, uci_words, uci_foreach, commi
 	seen_known, seen_mark, seen_seed };
 // What the rpcd plugin and the CLI's legacy commands need.
 export { qv, pipe, passthru, set_context, run_rc, ubus_list };
+// The block, WiFi and new-device commands.
+export { append, uci_cli, persist_enabled, persist_save, persist_remove, persist_note,
+	nss_status, nss_note, nss_defunct };

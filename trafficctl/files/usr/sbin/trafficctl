@@ -24,6 +24,12 @@ function result(r) {
 	return r.ok ? 0 : 1;
 }
 
+// A command that keeps its script's exit status: { reply, rc }.
+function replied(r) {
+	out(r.reply);
+	return r.rc;
+}
+
 const NAMES_USAGE = 'usage: trafficctl names list|set <ip> <name>|remove <ip>';
 // The script's own wording: the rpcd plugin and the view show it as it is.
 const RULES_USAGE = 'usage: trafficctl-rules.sh [list]';
@@ -107,6 +113,22 @@ const commands = {
 		return 0;
 	},
 
+	block: (args) => replied(ctl.block(args[0], args[1])),
+
+	unblock: (args) => replied(ctl.unblock(args[0], args[1])),
+
+	'macfilter-add': (args) => replied(ctl.macfilter('add', args[0])),
+
+	'macfilter-remove': (args) => replied(ctl.macfilter('remove', args[0])),
+
+	// The DHCP hotplug hook: dnsmasq's event in the environment. Prints
+	// nothing; what it did goes to syslog and the activity log.
+	newdevice: () => ctl.newdevice({ ACTION: getenv('ACTION'), MACADDR: getenv('MACADDR'),
+		IPADDR: getenv('IPADDR'), HOSTNAME: getenv('HOSTNAME') }),
+
+	// The iface hotplug hook on ifup lan: the saved blocks.
+	restore: () => result(ctl.restore()),
+
 	netify: (args) => {
 		let r = report.netify(args);
 		if (type(r.out) == 'string')
@@ -131,17 +153,13 @@ const commands = {
 // Commands the shell scripts still serve: run with our arguments, stdin,
 // stdout and exit status, so a port only moves an entry up into commands.
 const LEGACY = {
-	block: 'trafficctl-block.sh',
 	bytes: 'trafficctl-bytes.sh',
 	cut: 'trafficctl-cut.sh',
-	'macfilter-add': 'trafficctl-macfilter-add.sh',
-	'macfilter-remove': 'trafficctl-macfilter-remove.sh',
 	portfw: 'trafficctl-portfw.sh',
 	ratelimit: 'trafficctl-ratelimit.sh',
 	shape: 'trafficctl-shape.sh',
 	'telegram-test': 'trafficctl-telegram-test.sh',
 	totals: 'trafficctl-totals.sh',
-	unblock: 'trafficctl-unblock.sh',
 };
 
 // What a caller expecting this command's shape can still parse.

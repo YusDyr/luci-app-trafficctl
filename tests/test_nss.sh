@@ -135,8 +135,19 @@ printf '' > "$ECM/ecm_db/defunct_all"
 # ── every apply path must carry the verdict ────────────────────────────────
 # Structural, so a success message added later without the note fails here
 # rather than shipping an unqualified claim. Checked per script because each
-# has its own set of partial-success messages.
-for f in trafficctl-ratelimit.sh trafficctl-shape.sh trafficctl-block.sh; do
+# has its own set of partial-success messages. The block is `trafficctl block`
+# since the ucode port, run against an active ECM in tests/test_block.sh.
+# The limiter builds its result fields once (FIELDS="...") and every apply
+# result starts with them: count those results with FIELDS spelled out.
+expand_fields() {   # expand_fields <script>
+    local l v
+    v=$(sed -n 's/^ *FIELDS="\(.*\)"$/\1/p' "$1" | head -1)
+    while IFS= read -r l; do
+        case "$l" in *'FIELDS="'*) continue ;; esac
+        printf '%s\n' "${l//\$FIELDS/$v}"
+    done < "$1"
+}
+for f in trafficctl-ratelimit.sh trafficctl-shape.sh; do
     src="$BIN/$f"
     for fn in tctl_nss_status tctl_nss_defunct; do
         if grep -q "$fn" "$src"; then
@@ -154,14 +165,13 @@ for f in trafficctl-ratelimit.sh trafficctl-shape.sh trafficctl-block.sh; do
     case "$f" in
         trafficctl-ratelimit.sh) want=3 ;;
         trafficctl-shape.sh)     want=3 ;;
-        trafficctl-block.sh)     want=2 ;;
     esac
-    got=$(grep -c '\\"nss\\":\\"$NSS\\"' "$src")
+    got=$(expand_fields "$src" | grep -c '\\"nss\\":\\"$NSS\\"')
     assert_eq "$f reports nss on each of its apply results" "$want" "$got"
 
     # And every one of them carries the human-readable verdict too, so the
     # operator sees it in the notification and not only in the JSON.
-    bare=$(grep -n '\\"nss\\":\\"$NSS\\"' "$src" | grep -v 'NSSNOTE' | grep -v '\$NOTE')
+    bare=$(expand_fields "$src" | grep -n '\\"nss\\":\\"$NSS\\"' | grep -v 'NSSNOTE' | grep -v '\$NOTE')
     if [ -n "$bare" ]; then
         FAIL=$((FAIL + 1))
         printf "FAIL: %s reports nss as a field but omits the verdict from the message:\n%s\n" "$f" "$bare"
@@ -184,9 +194,11 @@ assert_contains "and says the toggles beside it do not control NSS" \
 
 # The dashboard needs it without applying anything.
 RPCD="$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
-# The plugin reads the same ECM knobs itself; tests/test_rpcd.sh drives it.
-assert_contains "config_get reports the NSS status" 'nss: nss_status(),' "$(cat "$RPCD")"
-assert_contains "the plugin reads the ECM debugfs directory" "'/sys/kernel/debug/ecm'" "$(cat "$RPCD")"
+# The plugin reads the same ECM knobs through lib.nss_status (the block's
+# reader too); tests/test_rpcd.sh drives it.
+LIBUC="$REPO_ROOT/trafficctl/files/usr/share/ucode/trafficctl/lib.uc"
+assert_contains "config_get reports the NSS status" 'nss: lib.nss_status(),' "$(cat "$RPCD")"
+assert_contains "lib.uc reads the ECM debugfs directory" "'/sys/kernel/debug/ecm'" "$(cat "$LIBUC")"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
