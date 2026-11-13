@@ -1109,8 +1109,32 @@ done <<< "$CASES"
 #            real: the legacy scripts themselves
 #   mode     json[+files]: the reply semantically (jq -S, or as text when it
 #            is not JSON), then the files; the root prefix is masked
+# The new side is the rpcd-mod-ucode plugin as rpcd runs it (tests/lib/rpcd.uc):
+# rpcd's strict policy, the deferred replies and its file.exec.
+#
+# Intentional differences (RPCD_REFUSED): rpcd checks each argument's type
+# before a method runs, so an argument of another type than its declaration
+# (a string for an int, a string for a bool, a double), and a method that does
+# not exist, never reach the plugin: INVALID_ARGUMENT and METHOD_NOT_FOUND,
+# where the exec plugin got the raw JSON and answered with ok:false (or
+# coerced it). Those cases check the status; each keeps a correctly typed twin
+# below that is compared.
 LPLUGIN="$L/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
-NPLUGIN="$UC_REPO/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
+NPLUGIN="$UC_REPO/luci-app-trafficctl/root/usr/share/rpcd/ucode/luci.trafficctl.uc"
+declare -A RPCD_REFUSED=(
+    [unknown]="Method not found"
+    [config-set-poll-nan]="Invalid argument"
+    [config-set-poll-double]="Invalid argument"
+    [config-set-window-nan]="Invalid argument"
+    [logging-set-max-low]="Invalid argument"
+    [logging-set-max-nan]="Invalid argument"
+    [logging-set-max-str]="Invalid argument"
+    [newdevice-set-kbit-nan]="Invalid argument"
+    [cut-engage-forever]="Invalid argument"
+    [cut-bad]="Invalid argument"
+    [activity-log-nan]="Invalid argument"
+    [history-config-set-keep-nan]="Invalid argument"
+)
 STUBS="$UC_TMP/stubs"
 mkdir -p "$STUBS"
 cat > "$STUBS/stub" <<EOF
@@ -1238,6 +1262,7 @@ config-set-poll-double | json+$LOGF | stub | config_set | {\"poll_interval\":5.5
 config-set-window-low | json+$LOGF | stub | config_set | {\"avg_window\":1}
 config-set-window-high | json+$LOGF | stub | config_set | {\"avg_window\":3601}
 config-set-window-nan | json+$LOGF | stub | config_set | {\"avg_window\":\"1e3\"}
+config-set-window-ok | json+$LOGF | stub | config_set | {\"avg_window\":1000}
 config-set-offload | json+$LOGF,etc/config/firewall | stub | config_set | {\"sw\":false,\"hw\":false}
 config-set-offload-sw | json+$LOGF,etc/config/firewall | stub | config_set | {\"sw\":true} | $NOFLOW
 telegram-get | json | stub | telegram_config_get | {}
@@ -1262,6 +1287,8 @@ logging-set-max-low | json+$LOGF | stub | logging_config_set | {\"max_lines\":\"
 logging-set-max-high | json+$LOGF | stub | logging_config_set | {\"max_lines\":100001}
 logging-set-max-nan | json+$LOGF | stub | logging_config_set | {\"max_lines\":\"5k\"}
 logging-set-max-str | json+$LOGF | stub | logging_config_set | {\"max_lines\":\"500\"}
+logging-set-max-low-int | json+$LOGF | stub | logging_config_set | {\"max_lines\":1}
+logging-set-max-int | json+$LOGF | stub | logging_config_set | {\"max_lines\":500}
 newdevice-get | json | stub | newdevice_config_get | {}
 newdevice-get-seen | json | stub | newdevice_config_get | {} | $SEEN
 newdevice-set | json+$LOGF,etc/trafficctl/seen_macs | stub | newdevice_config_set | {\"enabled\":true,\"limit_kbit\":2000,\"limit_mode\":\"shaper\"}
@@ -1272,6 +1299,8 @@ newdevice-set-mode-bad | json+$LOGF | stub | newdevice_config_set | {\"limit_mod
 cut-status | json+$LOGF | stub | cut_status | {}
 cut-engage | json+$LOGF | stub | cut_set | {\"active\":true,\"duration\":600,\"persist\":true}
 cut-engage-forever | json+$LOGF | stub | cut_set | {\"active\":\"true\",\"duration\":0}
+cut-engage-forever-bool | json+$LOGF | stub | cut_set | {\"active\":true,\"duration\":0}
+cut-no-active | json+$LOGF | stub | cut_set | {\"duration\":60}
 cut-engage-no-duration | json+$LOGF | stub | cut_set | {\"active\":true}
 cut-release | json+$LOGF | stub | cut_set | {\"active\":false}
 cut-bad | json+$LOGF | stub | cut_set | {\"active\":\"maybe\"}
@@ -1301,6 +1330,7 @@ history-config-set-dir-dotdot | json+$LOGF | real | history_config_set | {\"dir\
 history-config-set-dir-meta | json+$LOGF | real | history_config_set | {\"dir\":\"/tmp/a;b\"} | $INITS
 history-config-set-period-bad | json+$LOGF | real | history_config_set | {\"period\":\"year\"} | $INITS
 history-config-set-keep-nan | json+$LOGF | real | history_config_set | {\"keep\":\"-1\"} | $INITS
+history-config-set-keep-neg | json+$LOGF | real | history_config_set | {\"keep\":-1} | $INITS
 history-flush | json+$LOGF | stub | history_flush | {}
 version | json | stub | version | {} | $OPKG
 version-none | json | stub | version | {}
@@ -1328,6 +1358,12 @@ rpcd_side() {   # rpcd_side <legacy|new> <stub|real> <method> <json>
             echo '#!/bin/sh'
             if [ "$2" = stub ]; then
                 printf 'case "$1" in\n'
+                # The plugin caps the device detail (--max-bytes, new in the
+                # ucode plugin): the v1.30.0 script never saw it. test_rpcd.sh
+                # checks that it is sent, test_report.sh what it does.
+                printf 'device) shift; first=1; skip=0; for a in "$@"; do [ $first = 1 ] && { set --; first=0; }; '
+                printf 'if [ $skip = 1 ]; then skip=0; continue; fi; [ "$a" = --max-bytes ] && { skip=1; continue; }; '
+                printf 'set -- "$@" "$a"; done; exec "%s/trafficctl-device.sh" "$@" ;;\n' "$STUBS"
                 for c in $PORTED; do
                     printf '%s) c=$1; shift; exec "%s/trafficctl-$c.sh" "$@" ;;\n' "$c" "$STUBS"
                 done
@@ -1338,7 +1374,7 @@ rpcd_side() {   # rpcd_side <legacy|new> <stub|real> <method> <json>
         } > "$W/root/usr/sbin/trafficctl"
         chmod +x "$W/root/usr/sbin/trafficctl"
         printf '%s\n' "$4" |
-            (export TCTL_ROOT="$W/root" PATH="$W/bin:$PATH"; "$UCODE" -S -L "$UC_LIB" "$NPLUGIN" call "$3")
+            (export TCTL_ROOT="$W/root" PATH="$W/bin:$PATH"; rpcd_uc "$NPLUGIN" call "$3")
     fi
     sleep 0.3
 }
@@ -1351,6 +1387,7 @@ BUSYBOX_SH=""
 busybox sh -c 'printf %d 12x' 2>/dev/null | grep -qx 0 && BUSYBOX_SH="busybox sh"
 RSKIP=0
 RPASS=0
+RREFUSED=0
 while IFS='|' read -r name mode scripts method input setup; do
     name=$(trim "$name")
     [ -n "$name" ] || continue
@@ -1377,6 +1414,16 @@ while IFS='|' read -r name mode scripts method input setup; do
     rpcd_side new "$scripts" "$method" "$input" > "$W/new.out" 2> "$W/new.err"
     normalise "$W/new.out" "$files"
     ubus_stop
+    if [ -n "${RPCD_REFUSED[$name]:-}" ]; then
+        want="Command failed: ${RPCD_REFUSED[$name]}"
+        if [ ! -s "$W/new.out" ] && grep -qxF "$want" "$W/new.err"; then
+            PASS=$((PASS + 1)); RREFUSED=$((RREFUSED + 1))
+        else
+            FAIL=$((FAIL + 1)); echo "FAIL: rpcd $name: rpcd should refuse it ($want)"
+            cat "$W/new.out" "$W/new.err"
+        fi
+        continue
+    fi
     if [ -n "${EQUIV_KEEP:-}" ]; then
         mkdir -p "$EQUIV_KEEP"
         cp "$W/legacy.out" "$EQUIV_KEEP/rpcd-$name.legacy"; cp "$W/new.out" "$EQUIV_KEEP/rpcd-$name.new"
@@ -1393,7 +1440,7 @@ while IFS='|' read -r name mode scripts method input setup; do
 done <<< "$RPCD_CASES"
 # Every method the plugin lists has a case.
 covered=$(printf '%s\n' "$RPCD_CASES" | awk -F'|' 'NF > 3 { gsub(/[[:space:]]/, "", $4); print $4 }')
-for m in $("$UCODE" -S -L "$UC_LIB" "$NPLUGIN" list | jq -r 'keys[]'); do
+for m in $(rpcd_uc "$NPLUGIN" list | jq -r 'keys[]'); do
     # ── notifications ── new in 1.31, no v1.30.0 method to compare with
     # (tests/test_notify.sh covers them)
     case "$m" in notify_*) continue ;; esac
@@ -1401,7 +1448,7 @@ for m in $("$UCODE" -S -L "$UC_LIB" "$NPLUGIN" list | jq -r 'keys[]'); do
     printf '%s\n' "$covered" | grep -qx "$m" ||
         { FAIL=$((FAIL + 1)); echo "FAIL: rpcd method $m has no equivalence case"; }
 done
-echo "rpcd plugin: $RPASS cases equal, $RSKIP skipped (no busybox)"
+echo "rpcd plugin: $RPASS cases equal, $RREFUSED refused by rpcd's policy as intended, $RSKIP skipped (no busybox)"
 
 echo ""
 echo "$PASS passed, $FAIL failed"
