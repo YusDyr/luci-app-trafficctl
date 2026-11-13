@@ -60,6 +60,9 @@ define Package/trafficctl-telegram
   TITLE:=Telegram bot for trafficctl
   URL:=https://github.com/YusDyr/luci-app-trafficctl
   DEPENDS:=+trafficctl +curl
+  # Versioned, so the opkg/apk solver never pairs this bot with a trafficctl
+  # older than its own release (1.30.x has no trafficctl.uc for it to call).
+  EXTRA_DEPENDS:=trafficctl (>=$(PKG_VERSION))
   PKGARCH:=all
 endef
 
@@ -178,6 +181,14 @@ if [ -z "$${IPKG_INSTROOT}" ]; then
 	rm -f /etc/rc.d/S95trafficctl-cut /etc/rc.d/K10trafficctl-cut
 	if [ -f /var/run/trafficctl/cut.state ] && [ -x /etc/init.d/trafficctl-cut ]; then
 		/etc/init.d/trafficctl-cut restart 2>/dev/null || true
+	fi
+	# A luci-app-trafficctl up to 1.30.x depends on any trafficctl, so this
+	# package can be upgraded on its own; that web interface's rpcd plugin
+	# sources trafficctl-fw.sh, which 2.0.0 removed, and every page fails.
+	if grep -q 'trafficctl-fw.sh' /usr/libexec/rpcd/luci.trafficctl 2>/dev/null; then
+		_m="The installed luci-app-trafficctl predates trafficctl 2.0.0 and does not work with it: upgrade luci-app-trafficctl too (opkg upgrade luci-app-trafficctl, or apk upgrade luci-app-trafficctl) unless this run already does"
+		echo "$$_m"
+		logger -t trafficctl "$$_m" 2>/dev/null || true
 	fi
 	# The Telegram options of releases up to 1.30.x move to the notification
 	# senders (once: only while the 'notify' section is missing).

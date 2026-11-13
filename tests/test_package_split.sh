@@ -124,6 +124,14 @@ assert_eq "LUCI_DEPENDS starts with +trafficctl +trafficctl-telegram" "1" \
     "$(grep -cE '^LUCI_DEPENDS:=\+trafficctl \+trafficctl-telegram( |$)' "$FE_MK")"
 assert_eq "trafficctl-telegram depends on trafficctl and curl" "+trafficctl +curl" \
     "$(mk_define Package/trafficctl-telegram | sed -n 's/^[[:space:]]*DEPENDS:=//p')"
+# Versioned on the new side: luci-app-trafficctl and trafficctl-telegram of
+# this release need the ucode backend, which a trafficctl up to 1.30.x lacks.
+# PKG_VERSION, not a literal, as the three packages move in lockstep.
+assert_eq "trafficctl-telegram needs trafficctl of its own version or newer" \
+    'trafficctl (>=$(PKG_VERSION))' \
+    "$(mk_define Package/trafficctl-telegram | sed -n 's/^[[:space:]]*EXTRA_DEPENDS:=//p')"
+assert_eq "luci-app-trafficctl needs trafficctl of its own version or newer" \
+    'trafficctl (>=$(PKG_VERSION))' "$(sed -n 's/^LUCI_EXTRA_DEPENDS:=//p' "$FE_MK")"
 # The backend's own dependencies are repeated on luci-app-trafficctl: without
 # them opkg removes conntrack, curl, iw and hostapd-utils as orphans of the old
 # single package in the same run that installs trafficctl.

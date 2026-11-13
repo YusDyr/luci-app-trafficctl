@@ -3,6 +3,13 @@
 # Usage: sh /tests/test_upgrade.sh <old packages...> -- <new packages...>
 #   e.g. sh /tests/test_upgrade.sh /dist-old/luci-app-trafficctl.ipk \
 #            -- /dist/trafficctl.ipk /dist/trafficctl-telegram.ipk /dist/luci-app-trafficctl.ipk
+# UPGRADE_BACKEND_FIRST=1: before the full upgrade, upgrade trafficctl alone
+# (a luci-app-trafficctl up to 1.30.x depends on any trafficctl, so the package
+# manager allows it) and check that its postinst says to upgrade the web
+# interface too.
+#
+# opkg runs with --force-depends (feeds of old images are flaky): that masks a
+# broken dependency in the full upgrade. The backend-only step does without it.
 # Verifies upgrade scenario: install previous release, then install current build.
 # Asserts config files are preserved and upgrade hooks don't crash.
 #
@@ -63,8 +70,15 @@ pkg_install() {
         opkg install --force-depends --force-downgrade $1 2>&1 | tee /tmp/opkg.out || true
         opkg list-installed | grep -q '^luci-app-trafficctl ' || { cat /tmp/opkg.out; return 1; }
     else
+        # A local .apk still resolves its dependencies from the feeds, which
+        # minimal rootfs images have no index of until this runs.
+        apk update 2>&1 | tee /tmp/apk-update.out || true
+        # Post-install noise from upstream packages (rpcd-mod-luci and the
+        # like) is tolerated as in test_install.sh: what counts is that the
+        # web interface is installed, checked next.
         # shellcheck disable=SC2086 # a list of package files, split on purpose
-        apk add --allow-untrusted $1
+        apk add --allow-untrusted $1 2>&1 | tee /tmp/apk.out || true
+        apk info -e luci-app-trafficctl >/dev/null 2>&1 || { cat /tmp/apk.out; return 1; }
     fi
 }
 
@@ -115,6 +129,22 @@ then
     D=$(dirname "$OLD_FW")
     sh "$D/trafficctl-block.sh" 192.168.1.50 >/dev/null 2>&1 || true
     sh "$D/trafficctl-portfw.sh" pause forward tcp 192.168.1.60 80 >/dev/null 2>&1 || true
+    # A rate limit and a shape too, best effort: they need a WAN device, tc
+    # and ifb, which not every runner has. Whatever the old release managed to
+    # write, the ucode commands must remove completely below.
+    OLD_RL=0 OLD_SHAPE=0
+    sh "$D/trafficctl-ratelimit.sh" 192.168.1.70 2000 >/tmp/old-rl.out 2>&1 || true
+    if grep -q '"ok":true' /tmp/old-rl.out && nft list ruleset 2>/dev/null | grep -q '192\.168\.1\.70'; then
+        OLD_RL=1; echo "Old release wrote a rate limit"
+    else
+        echo "NOTE: the old release wrote no rate limit here: $(cat /tmp/old-rl.out)"
+    fi
+    sh "$D/trafficctl-shape.sh" add 192.168.1.80 2000 >/tmp/old-shape.out 2>&1 || true
+    if grep -q '"ok":true' /tmp/old-shape.out && tc filter show dev br-lan 2>/dev/null | grep -q 'c0a80150'; then
+        OLD_SHAPE=1; echo "Old release wrote a shape"
+    else
+        echo "NOTE: the old release wrote no shape here: $(cat /tmp/old-shape.out)"
+    fi
     if nft list chain inet fw4 forward | grep -q '"tctl_block_192_168_1_50"' &&
        nft list table inet tctl_pfw 2>/dev/null | grep -q '"tctl_pfw_pause_tcp_192.168.1.60_80"'; then
         OLD_RULES=1
@@ -150,6 +180,39 @@ done
 MARKER="m$(date +%s)"
 printf "\nconfig marker 'upgrade_marker'\n\toption id '%s'\n" "$MARKER" >> /etc/config/trafficctl
 echo "Marker section added to /etc/config/trafficctl: $MARKER"
+
+# ── Step 2b: the backend alone (UPGRADE_BACKEND_FIRST=1) ─────────────────────
+# Only from a release that ships trafficctl as a package of its own, and whose
+# rpcd plugin sources trafficctl-fw.sh, as 1.30.x does.
+if [ "${UPGRADE_BACKEND_FIRST:-0}" = 1 ]; then
+    NEW_BE=
+    for p in $NEW_PKGS; do
+        case "${p##*/}" in "trafficctl.$FMT"|"trafficctl_"*".$FMT") NEW_BE=$p ;; esac
+    done
+    [ -n "$NEW_BE" ] || { echo "FAIL: no new trafficctl package among:$NEW_PKGS"; exit 1; }
+    if [ -z "$(installed_ver trafficctl)" ] ||
+       ! grep -q 'trafficctl-fw.sh' /usr/libexec/rpcd/luci.trafficctl; then
+        echo "FAIL: UPGRADE_BACKEND_FIRST needs an old release with a trafficctl package and a plugin that sources trafficctl-fw.sh"
+        exit 1
+    fi
+    OLD_BE_VER=$(installed_ver trafficctl)
+    echo "=== Installing the NEW trafficctl alone: $NEW_BE ==="
+    if [ "$FMT" = ipk ]; then
+        opkg install --force-downgrade "$NEW_BE" > /tmp/be-only.out 2>&1 || true
+    else
+        apk add --allow-untrusted "$NEW_BE" > /tmp/be-only.out 2>&1 || true
+    fi
+    cat /tmp/be-only.out
+    if [ "$(installed_ver trafficctl)" = "$OLD_BE_VER" ]; then
+        echo "FAIL: the package manager did not upgrade trafficctl alone (still $OLD_BE_VER)"
+        exit 1
+    fi
+    grep -q 'trafficctl-fw.sh' /usr/libexec/rpcd/luci.trafficctl ||
+        { echo "FAIL: the backend-only upgrade replaced the web interface's rpcd plugin"; exit 1; }
+    grep -qF 'upgrade luci-app-trafficctl too' /tmp/be-only.out ||
+        { echo "FAIL: the backend-only upgrade did not say to upgrade luci-app-trafficctl"; exit 1; }
+    echo "OK: trafficctl upgraded alone says to upgrade luci-app-trafficctl too"
+fi
 
 # ── Step 3: install NEW on top ────────────────────────────────────────────────
 # Real package-manager upgrade, so the config-preservation assertion below
@@ -224,6 +287,31 @@ if [ "$OLD_RULES" = 1 ]; then
         echo "FAIL: rules.json still records a removed rule: $(cat /etc/trafficctl/rules.json)"; exit 1
     fi
     echo "OK: the ucode commands removed the old release's block and port pause"
+    if [ "$OLD_RL" = 1 ]; then
+        /usr/sbin/trafficctl ratelimit 192.168.1.70 0 >/dev/null
+        if nft list ruleset | grep -q '192\.168\.1\.70'; then
+            echo "FAIL: trafficctl ratelimit 0 left the old release's rate limit in nft"; nft list ruleset; exit 1
+        fi
+        if grep -q '"ip":"192\.168\.1\.70"' /etc/trafficctl/rules.json; then
+            echo "FAIL: rules.json still records the removed rate limit: $(cat /etc/trafficctl/rules.json)"; exit 1
+        fi
+        echo "OK: trafficctl ratelimit removed the old release's rate limit"
+    fi
+    if [ "$OLD_SHAPE" = 1 ]; then
+        /usr/sbin/trafficctl shape remove 192.168.1.80 >/dev/null
+        for dev in /sys/class/net/*; do
+            dev=${dev##*/}
+            if tc filter show dev "$dev" 2>/dev/null | grep -q 'c0a80150' ||
+               tc class show dev "$dev" 2>/dev/null | grep -q 'rate 2Mbit'; then
+                echo "FAIL: trafficctl shape remove left the old release's shape on $dev"
+                tc class show dev "$dev"; tc filter show dev "$dev"; exit 1
+            fi
+        done
+        if grep -q '192\.168\.1\.80' /etc/trafficctl/shapes.json 2>/dev/null; then
+            echo "FAIL: shapes.json still records the removed shape: $(cat /etc/trafficctl/shapes.json)"; exit 1
+        fi
+        echo "OK: trafficctl shape remove removed the old release's shape"
+    fi
 fi
 if [ -e /lib/upgrade/keep.d/luci-app-trafficctl ]; then
     echo "FAIL: the old keep.d entry /lib/upgrade/keep.d/luci-app-trafficctl is left behind"
