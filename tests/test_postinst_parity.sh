@@ -184,10 +184,18 @@ done
 
 # 7. Removal fails open: a global internet cut left engaged by a package that is
 #    going away is a lockout with no UI left to undo it.
-CUT="/usr/libexec/trafficctl/trafficctl-cut.sh release"
+CUT="/usr/sbin/trafficctl cut release"
 assert_contains "trafficctl Makefile prerm releases the cut" "$CUT" "$BE_MK_PRERM"
 assert_contains "trafficctl build-ipk.sh prerm releases the cut" "$CUT" "$BE_IPK_PRERM"
 assert_contains "trafficctl build-apk.sh pre-deinstall releases the cut" "$CUT" "$BE_APK_PREDEL"
+# ── PR7: the release needs ucode and every module to load, so its effect is
+#    made sure of without them too: no state left, no table.
+for s in "$BE_MK_PRERM" "$BE_IPK_PRERM" "$BE_APK_PREDEL"; do
+    assert_contains "prerm: the cut state goes even if the release failed" \
+        "rm -f /var/run/trafficctl/cut.state /etc/trafficctl/cut.state" "$s"
+    assert_contains "prerm: and so does the table" "nft delete table inet tctl_cut 2>/dev/null || true" "$s"
+done
+# ── end PR7
 
 # 8. The cut keeper is never started at boot. default_postinst runs `enable` on
 #    every init script, and rc.common's enable links S<START>/K<STOP>, so the
@@ -261,7 +269,7 @@ fi
 # enabled in rc.d and (re)started, flag 0 means nothing is started and rc.d is
 # not touched.
 FAKE="$TMP/fake"
-run_postinst() { # <script> <telegram flag> <history flag> <history in rc.d: 0|1> [IPKG_INSTROOT] [old nft table: 0|1]
+run_postinst() { # <script> <telegram flag> <history flag> <history in rc.d: 0|1> [IPKG_INSTROOT] [old nft table: 0|1] [cut engaged: 0|1]
     rm -rf "$FAKE"
     mkdir -p "$FAKE/etc/init.d" "$FAKE/etc/config" "$FAKE/rc.d" "$FAKE/bin"
     : > "$FAKE/calls"
@@ -269,7 +277,7 @@ run_postinst() { # <script> <telegram flag> <history flag> <history in rc.d: 0|1
     printf '%s\n' "$2" > "$FAKE/telegram.flag"
     printf '%s\n' "$3" > "$FAKE/history.flag"
     [ "$4" = 1 ] && : > "$FAKE/rc.d/trafficctl-history"
-    for svc in trafficctl-telegram trafficctl-history; do
+    for svc in trafficctl-telegram trafficctl-history trafficctl-cut; do
         cat > "$FAKE/etc/init.d/$svc" <<FAKEINIT
 #!/bin/sh
 echo "$svc \$1" >> "$FAKE/calls"
@@ -300,8 +308,11 @@ FAKENFT
     [ "${6:-0}" = 1 ] && : > "$FAKE/nft.table"
     # A boot link for the cut keeper, as releases up to 1.30.1 left behind.
     : > "$FAKE/rc.d/S95trafficctl-cut"
+    # An engaged cut, as its state file says.
+    mkdir -p "$FAKE/run"
+    [ "${7:-0}" = 1 ] && : > "$FAKE/run/cut.state"
     sed -e "s|/etc/init.d/|$FAKE/etc/init.d/|g" -e "s|/etc/config/|$FAKE/etc/config/|g" \
-        -e "s|/etc/rc.d/|$FAKE/rc.d/|g" "$1" > "$FAKE/postinst"
+        -e "s|/etc/rc.d/|$FAKE/rc.d/|g" -e "s|/var/run/trafficctl/|$FAKE/run/|g" "$1" > "$FAKE/postinst"
     # shellcheck disable=SC2086 # SHELL_CMD may be "busybox ash"
     IPKG_INSTROOT="${5:-}" PATH="$FAKE/bin:$PATH" ${SHELL_CMD:-sh} "$FAKE/postinst" >/dev/null 2>&1
     echo "$?" > "$FAKE/rc"
@@ -344,6 +355,16 @@ for f in "$TMP/trafficctl.postinst" "$TMP/ipk.postinst" "$TMP/apk.postinst"; do
     assert_eq "$n, no old nft table: the postinst succeeds" 0 "$(cat "$FAKE/rc")"
     assert_eq "$n, no old nft table: the steps after it still run" 1 "$(calls 'trafficctl-history restart')"
     assert_eq "$n, nft is asked for nothing else" 1 "$(grep -c '^nft ' "$FAKE/calls")"
+
+    # ── PR7: a keeper started by the old release runs the old code until it
+    #    ends; a restart puts procd's `trafficctl cut keeper` in its place.
+    #    No cut, no keeper: it is started on demand only.
+    run_postinst "$f" 0 0 0 "" 0 1
+    assert_eq "$n, cut engaged: the keeper is restarted onto the new code" 1 "$(calls 'trafficctl-cut restart')"
+    assert_eq "$n, cut engaged: the postinst succeeds" 0 "$(cat "$FAKE/rc")"
+    run_postinst "$f" 0 0 0 "" 0 0
+    assert_eq "$n, no cut: the keeper is not started" 0 "$(grep -c '^trafficctl-cut ' "$FAKE/calls")"
+    # ── end PR7
 
     # Unpacking into an image: no services and no rc.d of ours to manage.
     mkdir -p "$TMP/img/etc/config"

@@ -497,6 +497,101 @@ cat > "$W/bin/spawn" <<EOF
 echo "\$*" >> "$W/root/tmp/spawn.log"
 EOF
 chmod +x "$W/bin/"*
+
+# ── PR7: cut, portfw ────────────────────────────────────────────────────────
+# Both commands change nft state, which a replayed fixture cannot follow: a
+# case that makes root/netfake gets tests/lib/netfake.sh for nft and
+# conntrack instead, and its calls log is the record of what each side did to
+# the kernel. Every other case still replays.
+mkdir -p "$W/bin/replay.d"
+for c in nft conntrack; do
+    ln -sf ../replay "$W/bin/replay.d/$c"
+    rm -f "$W/bin/$c"
+    cat > "$W/bin/$c" <<EOF
+#!/bin/sh
+[ -d "$W/root/netfake" ] || exec "$W/bin/replay.d/$c" "\$@"
+NETFAKE="$W/root/netfake" exec sh "$UC_TESTLIB/netfake.sh" $c "\$@"
+EOF
+    chmod +x "$W/bin/$c"
+done
+# The legacy cut reads its clock from date(1); the port from TCTL_NOW.
+REAL_DATE=$(command -v date)
+cat > "$W/bin/date" <<EOF
+#!/bin/sh
+[ "\$*" = +%s ] && [ -n "\$TCTL_NOW" ] && { echo "\$TCTL_NOW"; exit 0; }
+exec "$REAL_DATE" "\$@"
+EOF
+chmod +x "$W/bin/date"
+CUT_T0=1700000000
+lcut() { TCTL_NOW="${CUT_NOW:-$CUT_T0}" sh "$LEXEC/trafficctl-cut.sh" "$@"; echo "rc=$?"; }
+ncut() { TCTL_NOW="${CUT_NOW:-$CUT_T0}" tctl cut "$@"; echo "rc=$?"; }
+# Not compared, because main changed them after v1.30.0 and the port keeps
+# main's: nft is the only backend (v1.30 answered "running iptables" when nft
+# listed nothing), and a rate goes through tctl_validate_rate (v1.30 took 08
+# and 100000001). tests/test_cut.sh and tests/test_portfw.sh cover both.
+lpfw() { sh "$LEXEC/trafficctl-portfw.sh" "$@"; echo "rc=$?"; }
+npfw() { tctl portfw "$@"; echo "rc=$?"; }
+# An init script that records what it was asked, and a kernel with our tables.
+CUTENV='mkdir -p "$W/root/netfake" "$W/root/etc/init.d"; : > "$W/root/netfake/calls"; printf "#!/bin/sh\necho \"\$*\" >> \"$W/root/tmp/init.log\"\n" > "$W/root/etc/init.d/trafficctl-cut"; chmod +x "$W/root/etc/init.d/trafficctl-cut"'
+CUTF='var/run/trafficctl/cut.state,etc/trafficctl/cut.state,tmp/init.log,tmp/logger.log,tmp/trafficctl/activity.log,netfake/calls'
+CUTPSTATE='mkdir -p "$W/root/etc/trafficctl"; printf "expires_at=1700000600\npersist=1\nstarted_at=1699999000\n" > "$W/root/etc/trafficctl/cut.state"'
+TPROXY='printf "table inet PodkopTable {\n\tchain proxy {\n\t\tmeta l4proto tcp tproxy ip to 127.0.0.1:1602\n\t}\n}\n" > "$W/root/netfake/ruleset"'
+PFWENV='mkdir -p "$W/root/netfake"; : > "$W/root/netfake/calls"; uci add firewall redirect >/dev/null; uci set firewall.@redirect[-1].name="Web Server"; uci set firewall.@redirect[-1].src=wan; uci set firewall.@redirect[-1].src_dport=8080; uci set firewall.@redirect[-1].dest_ip=192.168.0.140; uci set firewall.@redirect[-1].dest_port=80; uci set firewall.@redirect[-1].proto=tcp; uci add firewall redirect >/dev/null; uci set firewall.@redirect[-1].name="Game"; uci set firewall.@redirect[-1].src=wan; uci set firewall.@redirect[-1].src_dport=27015-27030; uci set firewall.@redirect[-1].dest_ip=192.168.0.109; uci add firewall rule >/dev/null; uci set firewall.@rule[-1].name=WireGuard; uci set firewall.@rule[-1].src=wan; uci set firewall.@rule[-1].dest_port=51820; uci set firewall.@rule[-1].proto=udp; uci set firewall.@rule[-1].target=ACCEPT; uci commit firewall'
+PFWF='etc/trafficctl/rules.json,tmp/trafficctl/activity.log,netfake/calls'
+# rules.json as the other writers leave it, so a port-forward save or removal
+# has to keep their records byte for byte.
+cat > "$W/pfw-rules.json" <<'JSON'
+[{"type":"block","ip":"192.168.0.5","param":""},{"type":"ratelimit","ip":"10.0.20.0/24","param":"5000","mode":"each","param_up":"1000"},{"type":"pfw_pause","ip":"forward/tcp/192.168.0.140/80","param":"1"},{"type":"pfw_limit","ip":"forward/udp/192.168.0.109/27015-27030","param":"8000"}]
+JSON
+PFWRULES='mkdir -p "$W/root/etc/trafficctl"; cp "$W/pfw-rules.json" "$W/root/etc/trafficctl/rules.json"'
+PFWSEED='nft add table inet tctl_pfw; nft add chain inet tctl_pfw pfw_forward x; nft add rule inet tctl_pfw pfw_forward ip daddr 192.168.0.140 tcp dport 80 counter drop comment \"tctl_pfw_pause_tcp_192.168.0.140_80\"; nft add rule inet tctl_pfw pfw_forward ip daddr 192.168.0.109 udp dport 27015-27030 limit rate over 1000 kbytes/second counter drop comment \"tctl_pfw_limit_udp_192.168.0.109_27015-27030\"; : > "$W/root/netfake/calls"'
+CASES+="
+cut-status-off | json | router-24.10 | sh:lcut status | ncut status | $CUTENV
+cut-usage | text | router-24.10 | sh:lcut; lcut bogus | ncut; ncut bogus | $CUTENV
+cut-engage | text+$CUTF | router-24.10 | sh:lcut engage 900 0 | ncut engage 900 0 | $CUTENV
+cut-engage-default | text+$CUTF | router-24.10 | sh:lcut engage | ncut engage | $CUTENV
+cut-engage-indefinite | text+$CUTF | router-24.10 | sh:lcut engage 0 0 | ncut engage 0 0 | $CUTENV
+cut-engage-persist | text+$CUTF | router-24.10 | sh:lcut engage 900 1 | ncut engage 900 1 | $CUTENV
+cut-engage-bounds | text+$CUTF | router-24.10 | sh:lcut engage 59; lcut engage 604801; lcut engage 9x; lcut engage 900 2; lcut engage 60 0 | ncut engage 59; ncut engage 604801; ncut engage 9x; ncut engage 900 2; ncut engage 60 0 | $CUTENV
+cut-engage-no-lan | text+$CUTF | router-24.10 | sh:lcut engage 900 0 | ncut engage 900 0 | $CUTENV; : > \"\$W/root/etc/config/firewall\"
+cut-engage-no-fib | text+$CUTF | router-24.10 | sh:lcut engage 900 0 | ncut engage 900 0 | $CUTENV; : > \"\$W/root/netfake/no_fib\"
+cut-engage-tproxy | text+$CUTF | router-24.10 | sh:lcut engage 900 0 | ncut engage 900 0 | $CUTENV; $TPROXY
+cut-engage-tproxy-no-fib | text+$CUTF | router-24.10 | sh:lcut engage 900 0 | ncut engage 900 0 | $CUTENV; $TPROXY; : > \"\$W/root/netfake/no_fib\"
+cut-engage-strip-local | text+$CUTF | router-24.10 | sh:lcut engage 900 0 | ncut engage 900 0 | $CUTENV; : > \"\$W/root/netfake/strip_local\"
+cut-engage-no-conntrack | text+$CUTF | router-24.10 | sh:lcut engage 900 0 | ncut engage 900 0 | $CUTENV; : > \"\$W/root/netfake/no_conntrack\"
+cut-status-on | text+$CUTF | router-24.10 | sh:lcut engage 900 0 >/dev/null; CUT_NOW=1700000300 lcut status | ncut engage 900 0 >/dev/null; CUT_NOW=1700000300 ncut status | $CUTENV
+cut-status-expired | text+$CUTF | router-24.10 | sh:lcut engage 900 1 >/dev/null; CUT_NOW=1700000900 lcut status | ncut engage 900 1 >/dev/null; CUT_NOW=1700000900 ncut status | $CUTENV
+cut-status-lapsed | text+$CUTF | router-24.10 | sh:lcut engage 0 0 >/dev/null; rm \"\$W/root/netfake/tctl_cut\"; lcut status | ncut engage 0 0 >/dev/null; rm \"\$W/root/netfake/tctl_cut\"; ncut status | $CUTENV
+cut-release | text+$CUTF | router-24.10 | sh:lcut engage 900 1 >/dev/null; lcut release | ncut engage 900 1 >/dev/null; ncut release | $CUTENV
+cut-release-idle | text+$CUTF | router-24.10 | sh:lcut release | ncut release | $CUTENV
+cut-tick | text+$CUTF | router-24.10 | sh:lcut engage 900 0 >/dev/null; CUT_NOW=1700000005 lcut tick | ncut engage 900 0 >/dev/null; CUT_NOW=1700000005 ncut tick | $CUTENV
+cut-tick-expired | text+$CUTF | router-24.10 | sh:lcut engage 900 0 >/dev/null; CUT_NOW=1700000901 lcut tick | ncut engage 900 0 >/dev/null; CUT_NOW=1700000901 ncut tick | $CUTENV
+cut-tick-lapsed | text+$CUTF | router-24.10 | sh:lcut engage 0 0 >/dev/null; rm \"\$W/root/netfake/tctl_cut\"; lcut tick | ncut engage 0 0 >/dev/null; rm \"\$W/root/netfake/tctl_cut\"; ncut tick | $CUTENV
+cut-tick-orphan | text+$CUTF | router-24.10 | sh:lcut tick | ncut tick | $CUTENV; echo 'counter drop comment \"tctl_cut\"' > \"\$W/root/netfake/tctl_cut\"
+cut-tick-idle | text+$CUTF | router-24.10 | sh:lcut tick | ncut tick | $CUTENV
+cut-restore | text+$CUTF | router-24.10 | sh:lcut restore; lcut status | ncut restore; ncut status | $CUTENV; $CUTPSTATE
+cut-restore-expired | text+$CUTF | router-24.10 | sh:CUT_NOW=1700000600 lcut restore | CUT_NOW=1700000600 ncut restore | $CUTENV; $CUTPSTATE
+cut-restore-no-consent | text+$CUTF | router-24.10 | sh:lcut restore | ncut restore | $CUTENV; $CUTPSTATE; sed -i s/persist=1/persist=0/ \"\$W/root/etc/trafficctl/cut.state\"
+cut-restore-none | text+$CUTF | router-24.10 | sh:lcut restore | ncut restore | $CUTENV
+cut-restore-no-lan | text+$CUTF | router-24.10 | sh:lcut restore | ncut restore | $CUTENV; $CUTPSTATE; : > \"\$W/root/etc/config/firewall\"
+cut-v130-engage-new-release | text+$CUTF | router-24.10 | sh:lcut engage 900 1 >/dev/null; lcut release | lcut engage 900 1 >/dev/null; ncut release | $CUTENV
+cut-new-engage-v130-release | text+$CUTF | router-24.10 | sh:lcut engage 900 1 >/dev/null; lcut release | ncut engage 900 1 >/dev/null; lcut release | $CUTENV
+cut-v130-engage-new-status | text+$CUTF | router-24.10 | sh:lcut engage 900 1 >/dev/null; CUT_NOW=1700000100 lcut status | lcut engage 900 1 >/dev/null; CUT_NOW=1700000100 ncut status | $CUTENV
+portfw-list | json | router-24.10 | trafficctl-portfw.sh list | tctl portfw list | $PFWENV
+portfw-list-state | json | router-24.10 | trafficctl-portfw.sh list | tctl portfw list | $PFWENV; $PFWSEED
+portfw-list-none | json | router-24.10 | trafficctl-portfw.sh list | tctl portfw list | mkdir -p \"\$W/root/netfake\"
+portfw-pause | text+$PFWF | router-24.10 | sh:lpfw pause forward tcp 192.168.0.140 80; lpfw list | npfw pause forward tcp 192.168.0.140 80; npfw list | $PFWENV
+portfw-pause-range | text+$PFWF | router-24.10 | sh:lpfw pause forward tcpudp 192.168.0.109 27015-27030 | npfw pause forward tcpudp 192.168.0.109 27015-27030 | $PFWENV
+portfw-pause-input | text | router-24.10 | sh:lpfw pause input udp - 51820 | npfw pause input udp - 51820 | $PFWENV
+portfw-resume | text+$PFWF | router-24.10 | sh:lpfw resume forward tcp 192.168.0.140 80; lpfw list | npfw resume forward tcp 192.168.0.140 80; npfw list | $PFWENV; $PFWSEED
+portfw-limit | text+$PFWF | router-24.10 | sh:lpfw limit forward tcp 192.168.0.140 80 8000; lpfw list | npfw limit forward tcp 192.168.0.140 80 8000; npfw list | $PFWENV
+portfw-limit-remove | text+$PFWF | router-24.10 | sh:lpfw limit forward udp 192.168.0.109 27015-27030 0; lpfw list | npfw limit forward udp 192.168.0.109 27015-27030 0; npfw list | $PFWENV; $PFWSEED
+portfw-limit-input | text | router-24.10 | sh:lpfw limit input udp - 51820 800 | npfw limit input udp - 51820 800 | $PFWENV
+portfw-persist | text+$PFWF | router-24.10 | sh:lpfw pause forward tcp 192.168.0.140 80; lpfw limit forward tcp 192.168.0.140 80 900; lpfw resume forward tcp 192.168.0.140 80 | npfw pause forward tcp 192.168.0.140 80; npfw limit forward tcp 192.168.0.140 80 900; npfw resume forward tcp 192.168.0.140 80 | $PFWENV; $PERSIST
+portfw-persist-mixed | text+$PFWF | router-24.10 | sh:lpfw limit forward tcp 192.168.0.140 80 900; lpfw limit forward udp 192.168.0.109 27015-27030 0; lpfw resume forward tcp 192.168.0.140 80; lpfw pause forward tcpudp 192.168.0.109 27015-27030 | npfw limit forward tcp 192.168.0.140 80 900; npfw limit forward udp 192.168.0.109 27015-27030 0; npfw resume forward tcp 192.168.0.140 80; npfw pause forward tcpudp 192.168.0.109 27015-27030 | $PFWENV; $PERSIST; $PFWSEED; $PFWRULES
+portfw-bad | text+$PFWF | router-24.10 | sh:lpfw; lpfw pause; lpfw pause forward icmp 192.168.0.140 80; lpfw pause forward tcp 1.2.3 80; lpfw pause forward tcp 192.168.0.140 0; lpfw pause forward tcp 192.168.0.140 9-8; lpfw pause x tcp - 80; lpfw limit forward tcp 192.168.0.140 80 | npfw; npfw pause; npfw pause forward icmp 192.168.0.140 80; npfw pause forward tcp 1.2.3 80; npfw pause forward tcp 192.168.0.140 0; npfw pause forward tcp 192.168.0.140 9-8; npfw pause x tcp - 80; npfw limit forward tcp 192.168.0.140 80 | $PFWENV
+"
+# ── end PR7 ─────────────────────────────────────────────────────────────────
 # The default limit's two appliers, for the newdevice cases.
 mkdir -p "$W/ndstub"
 for s in trafficctl-ratelimit.sh trafficctl-shape.sh; do
