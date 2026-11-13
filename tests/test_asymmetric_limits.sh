@@ -321,7 +321,7 @@ out=$(run "$TMP/ratelimit.sh" 192.168.1.70 8000 rl_test each 800)
 
 # 8000 kbit is 1000000 bytes/s (SI: kbit * 125); 800 kbit is 100000.
 assert_contains "download rule takes the download rate" \
-    "ip daddr 192.168.1.70 meter tctl_d_" "$(cat "$NFT_LOG")"
+    "ip daddr 192.168.1.70 meter tctl_m_192_168_1_70_dl_" "$(cat "$NFT_LOG")"
 assert_contains "download rate reaches nft as bytes" "1000000 bytes/second" "$(cat "$NFT_LOG")"
 assert_contains "upload rate reaches nft as bytes" "100000 bytes/second" "$(cat "$NFT_LOG")"
 assert_contains "limiter reports both figures" "8000 kbit/s down, 800 kbit/s up" "$out"

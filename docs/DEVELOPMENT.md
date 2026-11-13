@@ -227,6 +227,7 @@ Run all tests locally. These run on the host with fake `nft`/`tc`/`ip`/`uci`/
 ```sh
 bash tests/test_fw.sh                 # Firewall helper library
 bash tests/test_direction.sh          # Bidirectional limit/shape, classid allocation
+bash tests/test_meter_per_chain.sh    # Each-mode meters per chain, per-port success, nft 1.0/1.1
 bash tests/test_portfw.sh             # Port-forward control, port ranges
 bash tests/test_netify.sh             # Netify (DPI) integration
 bash tests/test_openwrt_compat.sh     # BusyBox ash compatibility / no bashisms
@@ -303,7 +304,7 @@ their own — everything else is reached through `workflow_call`:
 | `tests.yml` | called by `ci.yml` | Unit, mock, E2E, security, and build tests |
 | `shellcheck.yml` | called by `ci.yml` | ShellCheck (`-S warning`) on every script with a shell shebang |
 | `eslint.yml` | called by `ci.yml` | ESLint on the frontend — `ecmaVersion: 5` plus `no-restricted-syntax`, so ES6 syntax fails the build |
-| `compat.yml` | PR, called by `auto-release.yml` | OpenWrt rootfs compatibility (52 version/arch combos); installs the built package and tests upgrades |
+| `compat.yml` | PR, called by `auto-release.yml` | OpenWrt rootfs compatibility (52 version/arch combos); installs the built package and tests upgrades; job `live-ratelimit` runs `tools/ci/live-ratelimit.sh` (real nft, a bridge with two dummy ports) on 22.03.7 and 25.12.4 |
 | `auto-release.yml` | push to main | Waits for `ci.yml` **and** `compat.yml`, then bumps the version, tags, builds and publishes; job `pages` then rebuilds the signed opkg/apk feed on GitHub Pages with `tools/build-feed.sh` |
 
 The nesting is why the leaf workflows carry no `push`/`pull_request` triggers.

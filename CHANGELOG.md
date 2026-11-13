@@ -4,6 +4,36 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.30.5] - 2026-11-13
+
+### Bug Fixes
+- give each limiter chain its own meter and check every port ([#154](https://github.com/YusDyr/luci-app-trafficctl/issues/154)) ([e93ef32](https://github.com/YusDyr/luci-app-trafficctl/commit/e93ef32689136537cbe55c7e8af04ca28d1707ee))
+  In each mode the upload rule goes on every bridge port's ingress chain
+  and the download rule on every LAN device's egress chain, and every copy
+  carried the same meter name, tctl_u_<slug> / tctl_d_<slug>. nftables 1.0
+  (OpenWrt 22.03 ships 1.0.2) binds a meter to the one rule declaring it,
+  so the second port's rule failed with "Could not process rule: Resource
+  busy". The error went to /dev/null and ul_ok was set by the first port,
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.30.4...v1.30.5
+
+---
+
+## [1.30.4] - 2026-11-12
+
+### Bug Fixes
+- unblock removes blocks written before v1.13.2 ([#153](https://github.com/YusDyr/luci-app-trafficctl/issues/153)) ([c2d7091](https://github.com/YusDyr/luci-app-trafficctl/commit/c2d7091f534db96bbb0f05d33daed99104caed38))
+  Their nft comment carries the caller's label, not the address:
+  tctl_block_tg from Telegram, tctl_block_block_<ip> from LuCI, or a label
+  typed in the UI. The Rules tab lists them (any drop on an ip saddr whose
+  comment starts with tctl_block_) and unblocks with an empty label, so
+  trafficctl-unblock.sh only tried tctl_block_block_<ip> and the derived
+  comment, left a Telegram-placed or typed-label rule in place, and still
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.30.3...v1.30.4
+
+---
+
 ## [1.30.3] - 2026-11-12
 
 ### Bug Fixes
