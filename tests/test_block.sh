@@ -199,5 +199,27 @@ assert_not_contains "nss stopped: no warning" "NOT ENFORCED" "$OUT"
 rm -r "$ROOT/sys"
 fw_flush
 
+# ── unblock with a shared legacy label lifts only that device's block ───────
+# Every device blocked from Telegram before v1.13.2 got the comment
+# tctl_block_tg, and a delete by comment alone matches them all. v1.30.5 also
+# removed tctl_block_<label>, so unblocking 192.168.1.40 from Telegram (label
+# tg) lifted 192.168.1.4's block too. The other device's IPv6 half carries its
+# own comment and stays as well.
+fw_flush
+fw_put 'ip saddr 192.168.1.40 counter packets 1 bytes 1 drop comment "tctl_block_tg"'
+fw_put 'ip saddr 192.168.1.4 counter packets 1 bytes 1 drop comment "tctl_block_tg"'
+fw_put 'meta nfproto ipv6 ether saddr aa:bb:cc:dd:ee:04 counter packets 1 bytes 1 drop comment "tctl_block_192_168_1_4_mac"'
+fw_put 'ip saddr 192.168.1.41 counter packets 1 bytes 1 drop comment "tctl_block_kids"'
+fw_put 'ip saddr 192.168.1.42 counter packets 1 bytes 1 drop comment "tctl_block_kids"'
+OUT=$(run_unblock 192.168.1.40 tg)
+assert_contains "unblock, shared legacy label: reports ok" '"ok":true' "$OUT"
+assert_eq "unblock, shared legacy label: the other tg device stays blocked" "1" "$(handles_deleted)"
+assert_contains "unblock, shared legacy label: 192.168.1.4's IPv6 half stays" \
+    '"tctl_block_192_168_1_4_mac"' "$(fw_rules)"
+run_unblock 192.168.1.41 kids >/dev/null
+assert_eq "unblock, shared legacy label: a label typed in the UI" "4" "$(handles_deleted)"
+assert_contains "unblock, shared legacy label: 192.168.1.42 still blocked" 'ip saddr 192.168.1.42 ' "$(fw_rules)"
+fw_flush
+
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
