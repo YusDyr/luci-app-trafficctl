@@ -17,7 +17,7 @@ FAIL=0
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 JS="$REPO_ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/history.js"
-SH="$REPO_ROOT/trafficctl/files/usr/libexec/trafficctl/trafficctl-history.sh"
+UC="$REPO_ROOT/trafficctl/files/usr/share/ucode/trafficctl/history.uc"
 RPCD="$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
 ACL="$REPO_ROOT/luci-app-trafficctl/root/usr/share/rpcd/acl.d/luci-app-trafficctl.json"
 MENU="$REPO_ROOT/luci-app-trafficctl/root/usr/share/luci/menu.d/luci-app-trafficctl.json"
@@ -25,7 +25,7 @@ MENU="$REPO_ROOT/luci-app-trafficctl/root/usr/share/luci/menu.d/luci-app-traffic
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-for f in "$JS" "$SH" "$RPCD" "$ACL" "$MENU"; do
+for f in "$JS" "$UC" "$RPCD" "$ACL" "$MENU"; do
     if [ ! -f "$f" ]; then
         echo "FAIL: missing $f"
         exit 1
@@ -53,10 +53,15 @@ assert_contains() {
 }
 
 # ── every verdict the backend can emit must be a verdict the view knows ─────
-awk '/^hist_accuracy\(\)/ { inf = 1 }
-     inf && /^}/ { exit }
-     inf { print }' "$SH" \
-    | grep -oE "printf '[a-z]+" | sed "s/printf '//" | sort -u > "$TMP/verdicts"
+# A verdict is a string the function returns: "return 'x'" or either arm of
+# "cond ? 'x' : 'y'".
+verdicts_of() {   # verdicts_of <function name>
+    awk -v f="$1" '$0 ~ "^function " f "\\(" { inf = 1 }
+         inf && /^}/ { exit }
+         inf { print }' "$UC" \
+        | grep -oE "(return|[?:]) '[a-z]+'" | sed -E "s/^(return|[?:]) '//; s/'\$//" | sort -u
+}
+verdicts_of accuracy > "$TMP/verdicts"
 
 awk "/^var ACCURACY = \{/ { inl = 1; next }
      inl && /^\};/ { exit }
@@ -121,10 +126,7 @@ done
 # offload this table is the more trustworthy of the two, so inheriting would be
 # wrong in the direction that matters — it would mark exact numbers as a floor,
 # and a reader who learned to distrust the mark would distrust the right ones.
-awk '/^hist_if_accuracy\(\)/ { inf = 1 }
-     inf && /^}/ { exit }
-     inf { print }' "$SH" \
-    | grep -oE "printf '[a-z]+" | sed "s/printf '//" | sort -u > "$TMP/ifverdicts"
+verdicts_of if_accuracy > "$TMP/ifverdicts"
 awk "/^var IF_ACCURACY = \{/ { inl = 1; next }
      inl && /^\};/ { exit }
      inl" "$JS" \
@@ -209,18 +211,17 @@ for bad in "_('Download')" "_('Upload')"; do
     assert_eq "no extra $bad column appeared" "1" "$n"
 done
 
-# Every field the view reads must be one the backend actually prints.
-# Backslashes stripped: the keys live inside a double-quoted awk printf, so
-# the literal text in the script is \"dev\" rather than "dev".
-ifread=$(awk '/^hist_if_read\(\)/ { inf = 1 }
+# Every field the view reads must be one the backend actually prints: a key
+# of the object if_read() returns.
+ifread=$(awk '/^function if_read\(/ { inf = 1 }
               inf { print }
-              inf && /^}/ { exit }' "$SH" | tr -d '\\')
+              inf && /^}/ { exit }' "$UC")
 for fld in dev role label bytes_in bytes_out last_seen; do
     case "$ifread" in
-        *"\"$fld\""*) PASS=$((PASS + 1)) ;;
+        *"{ $fld: "*|*", $fld: "*) PASS=$((PASS + 1)) ;;
         *)
             FAIL=$((FAIL + 1))
-            printf "FAIL: the view reads '%s' but hist_if_read does not emit it\n" "$fld"
+            printf "FAIL: the view reads '%s' but if_read does not emit it\n" "$fld"
             ;;
     esac
 done
@@ -232,7 +233,7 @@ assert_contains "the view translates the store's placeholders" "function ifText"
 # ── an IP-keyed row must say so ─────────────────────────────────────────────
 # History keyed on an address rather than a MAC is only as stable as the lease.
 # The backend marks it; the view has to surface it or the distinction is lost.
-assert_contains "the backend reports the key kind" 'key_kind' "$SH"
+assert_contains "the backend reports the key kind" 'key_kind:' "$UC"
 assert_contains "the view distinguishes an IP-keyed row" "IP-keyed" "$JS"
 
 # ── every method the view calls must exist and be permitted ────────────────
