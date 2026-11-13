@@ -614,5 +614,40 @@ assert_contains "telegram-test: that token is used" "SECRETTOKENVALUE" "$(cat "$
 OUT=$(tgt "$TOKEN" 1 'Hi {{ name }} on {{router}}')
 assert_eq "telegram-test: a custom message gets the sample values" "Hi TestDevice on OpenWrt" "$(body 3 text)"
 
+# ── the call sites ───────────────────────────────────────────────────────────
+# Each event is raised by the code that does the action, shell or ucode. A
+# port of that code that drops the call would lose the event silently, so the
+# action code (not notify.uc, not comments) must still carry every call site.
+ACT_SRC="$UC_REPO/trafficctl/files"
+call_site() {   # call_site <name> <ERE>
+    local hits f files=()
+    for f in "$ACT_SRC"/usr/libexec/trafficctl/*.sh "$ACT_SRC"/usr/share/ucode/trafficctl/*.uc \
+        "$ACT_SRC"/etc/hotplug.d/dhcp/99-trafficctl-newdevice; do
+        [ "$(basename "$f")" = notify.uc ] || files+=("$f")
+    done
+    hits=$(grep -hE -- "$2" "${files[@]}" 2>/dev/null | grep -vE '^[[:space:]]*(#|//)')
+    if [ -n "$hits" ]; then
+        PASS=$((PASS + 1))
+    else
+        FAIL=$((FAIL + 1))
+        printf "FAIL: call site: %s\n  no line in the action code matches: %s\n" "$1" "$2"
+    fi
+}
+call_site "an internet block raises block_applied" "block_applied.*internet"
+call_site "a WiFi deny raises block_applied" "block_applied.*wifi"
+call_site "a limiter raises limit_applied" "limit_applied.*limiter"
+call_site "a shaper raises limit_applied" "limit_applied.*shaper"
+call_site "an engaged cut raises cut_engaged" "cut_engaged"
+call_site "a DHCP event reaches the device scan" "notify dhcp|notify\.dhcp\("
+# The shell call sites through tctl_notify reach the CLI (TCTL_NOTIFY_CLI).
+CALLS="$UC_TMP/notify_cli.log"
+printf '#!/bin/sh\necho "$*" >> "%s"\n' "$CALLS" > "$MOCKBIN/notify-cli"
+chmod +x "$MOCKBIN/notify-cli"
+TCTL_NOTIFY_CLI="$MOCKBIN/notify-cli" TCTL_VIA=luci TCTL_SRC=192.168.1.2 \
+    sh -c '. "$1"; tctl_notify block_applied ip=192.168.1.9 kind=internet' _ \
+    "$ACT_SRC/usr/libexec/trafficctl/trafficctl-fw.sh" 2>/dev/null
+assert_eq "tctl_notify: hands the event to notify emit with the caller" \
+    "notify emit block_applied ip=192.168.1.9 kind=internet via=luci src=192.168.1.2" "$(cat "$CALLS" 2>/dev/null)"
+
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
