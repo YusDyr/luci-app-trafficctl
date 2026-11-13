@@ -83,6 +83,8 @@ else
     TCTL_RL_UPLOAD6_OK=0
     TCTL_RL_DOWNLOAD6_OK=0
     TCTL_RL_NETDEV_FAILED=0
+    TCTL_RL_DOWNLOAD_ERR=""
+    TCTL_RL_UPLOAD_ERR=""
     tctl_ratelimit_add "$IP" "$RATE" "$COMMENT" "$MODE" "$RATE_UP"
     if [ "$TCTL_RL_NETDEV_FAILED" = "1" ]; then
         echo "{\"ok\":false,\"msg\":\"failed to set rate limit for $IP: cannot create the nftables netdev table (is kmod-nft-netdev installed?)\"}"
@@ -108,7 +110,11 @@ else
     # A half-applied limit is a silent trap: report exactly which direction
     # is live rather than claiming success for both.
     if [ "$TCTL_RL_DOWNLOAD_FAILED" = "1" ] && [ "$TCTL_RL_UPLOAD_FAILED" = "1" ]; then
-        echo "{\"ok\":false,\"msg\":\"failed to set rate limit for $IP (no usable WAN or LAN ingress device)\"}"
+        why="no usable WAN or LAN ingress device"
+        if [ -n "$TCTL_RL_DOWNLOAD_ERR$TCTL_RL_UPLOAD_ERR" ]; then
+            why="${TCTL_RL_DOWNLOAD_ERR:-no usable WAN device}; ${TCTL_RL_UPLOAD_ERR:-no LAN ingress device}"
+        fi
+        echo "{\"ok\":false,\"msg\":\"failed to set rate limit for $IP ($why)\"}"
         exit 1
     fi
     # The mode is persisted with the rate. Without it the restore hook fell back
@@ -131,13 +137,24 @@ else
     NSSNOTE="$(tctl_nss_note)$(tctl_persist_note)"
     NSS="$(tctl_nss_status)"
     PERSIST=$(tctl_persist_enabled && echo true || echo false)
+    # A direction can also be live on some devices and not on others (a port
+    # that refused the rule). Those rules stay in, so the limit is ok, but
+    # the devices it misses and nft's reason are part of the message, and
+    # "partial" says so for a caller that reads fields rather than text.
+    PARTIAL=false
+    PNOTE=""
+    if [ -n "$TCTL_RL_DOWNLOAD_ERR$TCTL_RL_UPLOAD_ERR" ]; then
+        PARTIAL=true
+        PNOTE=" — PARTIAL: ${TCTL_RL_DOWNLOAD_ERR}${TCTL_RL_DOWNLOAD_ERR:+${TCTL_RL_UPLOAD_ERR:+; }}${TCTL_RL_UPLOAD_ERR}"
+    fi
+    # The IPv6 flags and note are what tctl_ratelimit_add found loaded, in
+    # every branch: a v6 rule that is in the kernel is reported as live.
+    FIELDS="\"ok\":true,\"partial\":$PARTIAL,\"ipv6_upload\":$V6UP,\"ipv6_download\":$V6DN,\"nss\":\"$NSS\",\"persist\":$PERSIST"
     if [ "$TCTL_RL_DOWNLOAD_FAILED" = "1" ]; then
-        echo "{\"ok\":true,\"ipv6_upload\":$V6UP,\"ipv6_download\":$V6DN,\"nss\":\"$NSS\",\"persist\":$PERSIST,\"msg\":\"rate limit ${RATE_UP} kbit/s applied to $IP UPLOAD ONLY — WAN device not resolvable$V6NOTE$NSSNOTE\"}"
+        echo "{$FIELDS,\"msg\":\"rate limit ${RATE_UP} kbit/s applied to $IP UPLOAD ONLY — ${TCTL_RL_DOWNLOAD_ERR:-WAN device not resolvable}${TCTL_RL_UPLOAD_ERR:+; $TCTL_RL_UPLOAD_ERR}$V6NOTE$NSSNOTE\"}"
     elif [ "$TCTL_RL_UPLOAD_FAILED" = "1" ]; then
-        # No ingress device means nothing feeds the v6 download set either, so
-        # tctl_ratelimit_add has already reported that half as not live.
-        echo "{\"ok\":true,\"ipv6_upload\":false,\"ipv6_download\":false,\"nss\":\"$NSS\",\"persist\":$PERSIST,\"msg\":\"rate limit ${RATE} kbit/s applied to $IP DOWNLOAD ONLY — no LAN ingress device [IPv4 only]$NSSNOTE\"}"
+        echo "{$FIELDS,\"msg\":\"rate limit ${RATE} kbit/s applied to $IP DOWNLOAD ONLY — ${TCTL_RL_UPLOAD_ERR:-no LAN ingress device}${TCTL_RL_DOWNLOAD_ERR:+; $TCTL_RL_DOWNLOAD_ERR}$V6NOTE$NSSNOTE\"}"
     else
-        echo "{\"ok\":true,\"ipv6_upload\":$V6UP,\"ipv6_download\":$V6DN,\"nss\":\"$NSS\",\"persist\":$PERSIST,\"msg\":\"rate limit $(rate_text) for $IP (both directions, $MODE)$V6NOTE$NSSNOTE\"}"
+        echo "{$FIELDS,\"msg\":\"rate limit $(rate_text) for $IP (both directions, $MODE)$PNOTE$V6NOTE$NSSNOTE\"}"
     fi
 fi
