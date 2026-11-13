@@ -12,7 +12,7 @@ All backend functionality is exposed through the `/usr/sbin/trafficctl` CLI and 
 - **Rate units**: All rate values are in **kbit/s** (kilobits per second).
 - **Exit codes**: 0 on success, 1 on input validation failure.
 - **Label sanitization**: `block`, `unblock`, `ratelimit` and `shape_add` strip their label to `[a-zA-Z0-9_.-]`.
-- **Labels do not identify rules.** A label is recorded in the activity log only. Firewall rule comments are derived from the target (`tctl_block_<slug>`, `rl_ratelimit_<slug>`), so a control created from one surface can be removed from another — a label-derived comment made a block placed in LuCI un-removable from the Telegram bot.
+- **Labels do not identify rules.** A label is recorded in the activity log only. Firewall rule comments are derived from the target (`tctl_block_<slug>`, `rl_ratelimit_<slug>`), so a control created from one surface can be removed from another — a label-derived comment made a block placed in LuCI un-removable from the Telegram bot. Rules written before v1.13.2 still carry such a comment (`tctl_block_tg`, `rl_ratelimit_tg`), shared by every target given that label; on nft, `unblock` and `ratelimit` with rate 0 remove one only when it names the exact target (`ip saddr`, and `ip daddr` for a download limit), so other targets keep theirs.
 - **`log_file` is constrained** to `/tmp/trafficctl/*` or `/var/log/*`, and `max_lines` to 20–100000. The path is both an append target and a `tail`/rewrite target, so an unconstrained value was an arbitrary root read and truncate.
 
 ---

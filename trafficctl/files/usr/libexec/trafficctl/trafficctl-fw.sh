@@ -416,6 +416,53 @@ tctl_ratelimit_remove() {
     nft delete set netdev tm_ratelimit "tctl_v6_$(tctl_target_slug "$ip")" 2>/dev/null || :
 }
 
+# Limits written before v1.13.2 carry the caller's label in the comment
+# (rl_ratelimit_<label>, upload rl_ratelimit_<label>_ul), and every target
+# limited from Telegram shares rl_ratelimit_tg. tctl_ratelimit_remove matches
+# on the comment alone, so given that comment it lifts every one of them. Here
+# a rule also has to name exactly this target: "ip daddr <target>" for the
+# download rule, "ip saddr <target>" for upload. Those releases wrote nothing
+# for IPv6, and their only sets are the meters tctl_d_<slug> / tctl_u_<slug>
+# of "each" mode, named after the target and deleted after their rules, as in
+# tctl_rl_delete_rules. iptables needs none of this: its -D matches -d/-s.
+tctl_ratelimit_remove_legacy() {
+    local ip="$1" comment="$2"
+
+    [ "$TCTL_FW" = "nft" ] || return 0
+    nft -a list table netdev tm_ratelimit 2>/dev/null | awk -v ip="$ip" -v cmt="$comment" '
+        /^[ \t]*chain [a-zA-Z0-9_]+ \{/ { chain = $2; next }
+        {
+            dir = ""
+            for (i = 1; i < NF; i++)
+                if ($i == "comment") {
+                    if ($(i+1) == "\"" cmt "\"") dir = "daddr"
+                    else if ($(i+1) == "\"" cmt "_ul\"") dir = "saddr"
+                    break
+                }
+            if (dir == "") next
+            hit = 0
+            for (i = 1; i + 2 <= NF; i++)
+                if ($i == "ip" && $(i+1) == dir && ($(i+2) == ip || $(i+2) == ip "/32")) { hit = 1; break }
+            if (!hit) next
+            h = ""; m = ""
+            for (i = 1; i < NF; i++) {
+                if ($i == "handle") h = $(i+1)
+                if ($i == "meter") m = $(i+1)
+                if ($i == "add" && substr($(i+1), 1, 1) == "@") m = substr($(i+1), 2)
+            }
+            if (h != "") print "rule", chain, h
+            if (m != "" && !(m in sets)) { sets[m] = 1; order[++ns] = m }
+        }
+        END { for (i = 1; i <= ns; i++) print "set", order[i] }' |
+    while read -r kind a b; do
+        case "$kind" in
+            rule) nft delete rule netdev tm_ratelimit "$a" handle "$b" 2>/dev/null ;;
+            set) nft delete set netdev tm_ratelimit "$a" 2>/dev/null ;;
+        esac
+    done
+    return 0
+}
+
 # Download ceiling in kbit/s of the limit on one address, read from an
 # "nft list table netdev tm_ratelimit" dump on stdin; nothing when it has none.
 #
