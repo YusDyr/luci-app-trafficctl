@@ -95,6 +95,9 @@ cat > "$MOCKBIN/tc" <<MOCK
 echo "\$*" >> "$TC_LOG"
 case "\$*" in
     "class show dev tctl-ifb0") echo "class htb 1:1 root rate 1000Mbit" ;;
+    "filter show dev tctl-ifb0 parent 1:")
+        echo "filter parent 1: protocol ip pref 10 u32 chain 0 fh 800::800 order 2048 key ht 800 bkt 0 *flowid 1:2 not_in_hw"
+        echo "  match c0a80132/ffffffff at 12" ;;
     *"class show"*) exit 0 ;;
 esac
 exit 0
@@ -249,8 +252,9 @@ PATH="$MOCKBIN:$PATH" sh "$SHAPE" remove 192.168.1.50 >/dev/null 2>&1
 TC=$(cat "$TC_LOG")
 assert_contains "shaper: removes LAN class" "class del dev br-lan classid $CID" "$TC"
 assert_contains "shaper: removes IFB class" "class del dev tctl-ifb0 classid $CID" "$TC"
-assert_contains "shaper: removes upload filter" \
-    "filter del dev tctl-ifb0 parent 1:0 prio 10 protocol ip u32 match ip src 192.168.1.50/32" "$TC"
+# By handle: without one, u32 deletes every prio-10 filter on the device.
+assert_contains "shaper: removes upload filter by its handle" \
+    "filter del dev tctl-ifb0 parent 1:0 prio 10 handle 800::800 protocol ip u32" "$TC"
 
 # ── subnet / whole-network targets ───────────────────────────────────────────
 

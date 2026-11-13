@@ -284,6 +284,12 @@ tc filter add dev br-lan parent 1:0 prio 10 protocol ip u32 \
     match ip dst <IP>/32 flowid 1:<hex_id>
 ```
 
+All shapes share prio 10, so a filter is removed by its handle, found in
+`tc filter show` by its flowid or its match key (`shape_filter_handles`). A
+u32 delete without a handle removes every filter of that prio on the device:
+up to v1.30.6 that is what removing or re-applying one shape did, leaving only
+the last shape applied in force.
+
 ---
 
 ## Interface Detection
