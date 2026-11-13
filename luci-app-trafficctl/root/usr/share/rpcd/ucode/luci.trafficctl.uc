@@ -4,8 +4,9 @@
 
 // rpcd-mod-ucode plugin for luci-app-trafficctl: the ubus object
 // luci.trafficctl. rpcd loads this file once, at its start, and calls the
-// methods inside its own process; `/etc/init.d/rpcd restart` picks up a new
-// version (the trafficctl and luci-app-trafficctl postinsts do).
+// methods inside its own process; `/etc/init.d/rpcd reload` picks up a new
+// version and keeps the sessions (the trafficctl and luci-app-trafficctl
+// postinsts do).
 //
 // The settings (uci), their validation, the activity log and the device names
 // are handled here, in process. Everything that reads conntrack, nft or tc,

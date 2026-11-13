@@ -167,9 +167,10 @@ if [ -z "${IPKG_INSTROOT}" ]; then
             /etc/init.d/trafficctl-history restart 2>/dev/null || true
         fi
     fi
-    # The LuCI plugin runs inside rpcd, which loads the modules once.
+    # The LuCI plugin runs inside rpcd, which loads the modules once; a
+    # reload (SIGHUP) re-executes rpcd and keeps its sessions.
     if [ -f /usr/share/rpcd/ucode/luci.trafficctl.uc ]; then
-        /etc/init.d/rpcd restart 2>/dev/null || true
+        /etc/init.d/rpcd reload 2>/dev/null || true
     fi
 fi
 exit 0
@@ -310,7 +311,7 @@ if [ -z "${IPKG_INSTROOT}" ]; then
     fi
     rm -f /tmp/luci-indexcache.*
     rm -rf /tmp/luci-modulecache
-    /etc/init.d/rpcd restart 2>/dev/null || true
+    /etc/init.d/rpcd reload 2>/dev/null || true
 fi
 exit 0
 EOF

@@ -78,7 +78,7 @@ if [ -z "$${IPKG_INSTROOT}" ]; then
 	fi
 	rm -f /tmp/luci-indexcache.*
 	rm -rf /tmp/luci-modulecache
-	/etc/init.d/rpcd restart 2>/dev/null || true
+	/etc/init.d/rpcd reload 2>/dev/null || true
 fi
 exit 0
 endef
