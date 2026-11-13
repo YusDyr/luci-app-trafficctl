@@ -25,6 +25,7 @@
 // /tmp/.trafficctl_known.lock, and /tmp/trafficctl_tg_online.
 //
 //   emit(ev, fields, sync)   { ok, msg }
+//   emit_action(ev, fields)  emit() with via/src from TCTL_VIA/TCTL_SRC; never throws
 //   dispatch(ev, fields, t)  hotplug + senders now: [ { sender, type, ok, msg } ]
 //   scan()                   one pass: { new, online, devices }
 //   watch()                  scan every notify.scan_interval seconds, forever
@@ -692,6 +693,19 @@ function emit(ev, fields, sync) {
 	return { ok: true, msg: 'event sent' };
 }
 
+// For the code that does an action (ctl, cut): emit() with the caller, as
+// tctl_notify sends it from the shell. It never fails the action.
+function emit_action(ev, fields) {
+	fields.via = getenv('TCTL_VIA') || 'cli';
+	fields.src = getenv('TCTL_SRC') || 'local';
+	try {
+		emit(ev, fields);
+	}
+	catch (e) {
+		warn(sprintf('trafficctl: %s not sent: %s\n', ev, e.message));
+	}
+}
+
 // ── the scan ────────────────────────────────────────────────────────────────
 
 // check_new_devices: a MAC missing from the ledger is new; one in it that was
@@ -996,5 +1010,5 @@ function telegram_test(args) {
 	return err ? { ok: false, msg: err } : { ok: true, msg: 'test message sent' };
 }
 
-export { EVENTS, TYPES, emit, dispatch, scan, watch, scan_wanted, dhcp, migrate, senders,
+export { EVENTS, TYPES, emit, emit_action, dispatch, scan, watch, scan_wanted, dhcp, migrate, senders,
 	events_of, test, telegram_test, parse_kv, hotplug_scripts, config_get, config_set };

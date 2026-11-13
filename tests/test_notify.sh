@@ -649,5 +649,27 @@ TCTL_NOTIFY_CLI="$MOCKBIN/notify-cli" TCTL_VIA=luci TCTL_SRC=192.168.1.2 \
 assert_eq "tctl_notify: hands the event to notify emit with the caller" \
     "notify emit block_applied ip=192.168.1.9 kind=internet via=luci src=192.168.1.2" "$(cat "$CALLS" 2>/dev/null)"
 
+# The ucode call sites go through notify.emit_action: the caller from the
+# environment, as tctl_notify adds it.
+reset "config notify 'notify'
+	option enabled '0'"
+mkdir -p "$TCTL_ROOT/etc/hotplug.d/trafficctl"
+: > "$TCTL_ROOT/etc/hotplug.d/trafficctl/50-mine"
+rm -f "$NLOG/hotplug"
+TCTL_VIA=luci TCTL_SRC=192.168.1.2 tcall trafficctl.notify emit_action '"block_applied"' \
+    '{"ip":"192.168.1.9","kind":"wifi"}' >/dev/null 2>&1
+HP=$(cat "$NLOG/hotplug" 2>/dev/null)
+assert_contains "emit_action: the event" "ACTION=block_applied" "$HP"
+assert_contains "emit_action: its fields" "KIND=wifi" "$HP"
+assert_contains "emit_action: via from TCTL_VIA" "VIA=luci" "$HP"
+assert_contains "emit_action: src from TCTL_SRC" "SRC=192.168.1.2" "$HP"
+rm -f "$NLOG/hotplug"
+TCTL_VIA='' TCTL_SRC='' tcall trafficctl.notify emit_action '"cut_engaged"' '{"duration":0}' >/dev/null 2>&1
+HP=$(cat "$NLOG/hotplug" 2>/dev/null)
+assert_contains "emit_action: no caller is cli" "VIA=cli" "$HP"
+assert_contains "emit_action: from local" "SRC=local" "$HP"
+OUT=$(tcall trafficctl.notify emit_action '"no_such_event"' '{}' 2>&1; echo "rc=$?")
+assert_eq "emit_action: an unknown event fails nothing" "rc=0" "$OUT"
+
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
