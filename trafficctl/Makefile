@@ -35,7 +35,7 @@ include $(INCLUDE_DIR)/package.mk
 # together with a hostapd/wpad variant, so depending on it would make this
 # package unselectable on wired-only builds. The WiFi block helpers check for
 # hostapd_cli at run time and fall back to a timed ubus ban
-# (tctl_hostapd_block_iface, tctl_wifi_filter_support in trafficctl-fw.sh).
+# (block_iface in ctl.uc; trafficctl device reports it as wifi_filter).
 # iw stays: it is selectable on every target and only reads station lists.
 # firewall4: blocks are rules in its inet fw4 table, so nftables alone is not
 # enough.

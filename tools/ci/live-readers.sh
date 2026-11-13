@@ -8,6 +8,11 @@
 #   /out/legacy/<command>.json   v1.30.0 trafficctl-<command>.sh
 #   /out/new/<command>.json      /usr/sbin/trafficctl <command>
 #
+# After the comparison, blocks written by v1.30.0 and by the ucode CLI meet on
+# one chain (each removes the other's, restore brings back a v1.30.0 block from
+# its rules.json record) and the DHCP hook applies its default limit:
+# /out/new/interop.txt.
+#
 # tools/ci/live-compare.sh compares them on the host. With capture, it also
 # writes what the kernel listed as replay fixtures for tests/equiv.sh and the
 # unit tests:
@@ -183,9 +188,6 @@ for c in ratelimit-stats shape-stats rules; do
     sh "$L/trafficctl-$c.sh" > "$OUT/legacy/$c.json" 2> "$OUT/legacy/$c.err"
     /usr/sbin/trafficctl "$c" > "$OUT/new/$c.json" 2> "$OUT/new/$c.err"
 done
-# Through the shims, as the DHCP hook's tctl_has_limit reaches them.
-sh -c ". $S/trafficctl-fw.sh; for ip in 192.168.0.60 192.168.0.80 192.168.0.8; do tctl_has_limit \$ip && echo \$ip limited || echo \$ip free; done" \
-    > "$OUT/new/has_limit.txt"
 
 # ── fixtures ─────────────────────────────────────────────────────────────────
 if [ "$MODE" = capture ]; then
@@ -209,6 +211,66 @@ for ip in 192.168.0.51 192.168.0.52; do
 done
 /usr/sbin/trafficctl rules > "$OUT/new/rules-after-unblock.json"
 nft list chain inet fw4 forward > "$OUT/new/fw4-after-unblock.nft"
+
+# ── blocks across the upgrade: v1.30.0 and the ucode writers on one chain ────
+# One line per check in interop.txt, "ok <name>" or "FAIL <name>: <why>";
+# tools/ci/live-compare.sh wants every name ok.
+I="$OUT/new/interop.txt"
+: > "$I"
+check() {   # check <name> <shell test...>
+    n="$1"; shift
+    if eval "$*"; then echo "ok $n" >> "$I"; else echo "FAIL $n: $* (chain: $(nft list chain inet fw4 forward | grep -c comment) rules)" >> "$I"; fi
+}
+rules_of() { nft list chain inet fw4 forward | grep -cE "\"tctl_block_$1(_mac)?\""; }
+printf '1794381090 02:00:00:00:00:53 192.168.0.53 a *\n1794381090 02:00:00:00:00:54 192.168.0.54 b *\n1794381090 02:00:00:00:00:55 192.168.0.55 c *\n' >> /tmp/dhcp.leases
+# Both halves (v4 and the MAC-keyed v6) written by v1.30.0, removed by the
+# ucode unblock; the other way round.
+sh "$L/trafficctl-block.sh" 192.168.0.53 >/dev/null
+check v130-block-both-halves '[ "$(rules_of 192_168_0_53)" = 2 ]'
+/usr/sbin/trafficctl unblock 192.168.0.53 >/dev/null
+check new-unblock-removes-v130-block '[ "$(rules_of 192_168_0_53)" = 0 ]'
+/usr/sbin/trafficctl block 192.168.0.54 >/dev/null
+check new-block-both-halves '[ "$(rules_of 192_168_0_54)" = 2 ]'
+sh "$L/trafficctl-unblock.sh" 192.168.0.54 >/dev/null
+check v130-unblock-removes-new-block '[ "$(rules_of 192_168_0_54)" = 0 ]'
+# The same rule text from both: v1.30.0 reads a ucode block as blocked.
+/usr/sbin/trafficctl block 192.168.0.54 >/dev/null
+check v130-sees-new-block 'sh "$L/trafficctl-block.sh" 192.168.0.54 | grep -q "already blocked"'
+/usr/sbin/trafficctl unblock 192.168.0.54 >/dev/null
+# Restore after a reboot of a block v1.30.0 placed, from its rules.json
+# record: the kernel lost the block, restore puts both halves back and
+# doubles none already there.
+sh "$L/trafficctl-block.sh" 192.168.0.55 >/dev/null 2>&1
+# v1.30.0's own save fails on BusyBox awk ("bad regex '},{'", fixed in
+# v1.30.x), so the record is written by the shell writer the limiter still
+# uses: the same bytes v1.30.x saves.
+sh -c '. /usr/libexec/trafficctl/trafficctl-fw.sh; tctl_persist_save block 192.168.0.55 block_192.168.0.55'
+check shell-saved-the-block 'grep -qF "{\"type\":\"block\",\"ip\":\"192.168.0.55\",\"param\":\"block_192.168.0.55\"}" /etc/trafficctl/rules.json'
+for h in $(nft -a list chain inet fw4 forward | grep -E '"tctl_block_192_168_0_55(_mac)?"' | sed 's/.*# handle //'); do
+    nft delete rule inet fw4 forward handle "$h"
+done
+/usr/sbin/trafficctl restore > "$OUT/new/restore.json"
+check restore-of-a-v130-block '[ "$(rules_of 192_168_0_55)" = 2 ]'
+check restore-doubles-nothing '[ "$(rules_of 192_168_0_50)" = 2 ] && [ "$(rules_of 192_168_0_5)" = 1 ]'
+# A label shared by two devices' pre-v1.13.2 blocks: unblocking one with that
+# label leaves the other (the shell lifted both).
+for ip in 192.168.0.56 192.168.0.57; do
+    nft insert rule inet fw4 forward "ip saddr $ip counter drop comment \"tctl_block_tg\""
+done
+/usr/sbin/trafficctl unblock 192.168.0.56 tg >/dev/null
+check legacy-label-unblock-only-its-own '! nft list chain inet fw4 forward | grep -q "ip saddr 192.168.0.56 " && nft list chain inet fw4 forward | grep -q "ip saddr 192.168.0.57 "'
+/usr/sbin/trafficctl unblock 192.168.0.57 >/dev/null
+check legacy-label-unblock-no-label '! nft list chain inet fw4 forward | grep -q "ip saddr 192.168.0.57 "'
+# The DHCP hook's default limit, on the real limiter: a device already
+# limited (192.168.0.60) is left alone, a new one gets the limit.
+uci set trafficctl.newdevice.enabled=1; uci set trafficctl.newdevice.limit_kbit=3000; uci commit trafficctl
+printf '02:00:00:00:00:01\n' > /etc/trafficctl/seen_macs
+ACTION=add MACADDR=02:00:00:00:00:61 IPADDR=192.168.0.60 HOSTNAME=x /usr/sbin/trafficctl newdevice
+ACTION=add MACADDR=02:00:00:00:00:08 IPADDR=192.168.0.8 HOSTNAME=y /usr/sbin/trafficctl newdevice
+/usr/sbin/trafficctl ratelimit-stats > "$OUT/new/newdevice-stats.json"
+check newdevice-leaves-a-limit "jsonfilter -i '$OUT/new/newdevice-stats.json' -e '@[@.ip=\"192.168.0.60\"].rate_kbit' | grep -qx 5000"
+check newdevice-limits-a-new-device "jsonfilter -i '$OUT/new/newdevice-stats.json' -e '@[@.ip=\"192.168.0.8\"].rate_kbit' | grep -qx 3000"
+check newdevice-marks-both 'grep -qx 02:00:00:00:00:61 /etc/trafficctl/seen_macs && grep -qx 02:00:00:00:00:08 /etc/trafficctl/seen_macs'
 
 [ "$MODE" = capture ] || exit 0
 

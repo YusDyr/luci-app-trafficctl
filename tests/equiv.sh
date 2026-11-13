@@ -7,6 +7,10 @@
 #   cmd/   replayed by PATH mocks for ip, nft, tc, iw, brctl, conntrack, nslookup,
 #          hostapd_cli
 #   ubus/  served by tests/lib/ubus-mock.uc on a private ubusd
+# The writers (block, unblock, the WiFi deny, restore) meet a stateful
+# `inet fw4 forward` instead (tests/lib/nft-fw4.uc) when the case's setup
+# creates root/tmp/nft.state, and a command with no recording succeeds when
+# cmd/<command>.default exists; every write lands in root/tmp/writes.log.
 # Both sides see the real uci, ubus and jsonfilter binaries from build-ucode.sh;
 # logger is recorded to root/tmp/logger.log.
 #
@@ -142,6 +146,43 @@ WIFIALLOW='uci set wireless.default_radio0.macfilter=allow; uci set wireless.def
 CURLF='tmp/curl.log'
 CURLERR='echo "{\\"ok\\":false,\\"error_code\\":400,\\"description\\":\\"Bad Request: chat not found\\"}" > "$W/root/tmp/curl.reply"'
 # ── end notifications ──
+# ── the writers ─────────────────────────────────────────────────────────────
+# A stateful fw4 forward chain; conntrack flushes succeed unrecorded. Both
+# sides log to the root (the later sed of log_file then finds nothing left).
+LOGROOT='sed -i "s#'"'"'/tmp/trafficctl/#'"'"'$W/root/tmp/trafficctl/#" "$W/root/etc/config/trafficctl"'
+FW4="$LOGROOT; printf '{\"next\":20,\"rules\":[]}' > \"\$W/root/tmp/nft.state\"; : > \"\$W/cmd/conntrack.default\""
+# What the writers leave: the writes in order, the saved rules, both logs.
+WR='tmp/writes.log,etc/trafficctl/rules.json,tmp/trafficctl/activity.log,tmp/logger.log'
+CHAIN='nft -a list chain inet fw4 forward'
+# Setup done: what it wrote is not part of either side's result.
+FORGET='rm -f "$W/root/tmp/writes.log" "$W/root/tmp/logger.log" "$W/root/tmp/trafficctl/activity.log"'
+RIP='printf "2: br-lan: <UP>\n    inet 192.168.0.1/24 brd 192.168.0.255 scope global br-lan\n" > "$W/cmd/ip -4 addr show dev br-lan"'
+NSSON='mkdir -p "$W/root/sys/kernel/debug/ecm/ecm_db"; : > "$W/root/sys/kernel/debug/ecm/ecm_db/defunct_all"'
+# Blocks placed by v1.30.0 itself, saved with persist on.
+OLDBLK="$FW4; $PERSIST; sh \"\$LEXEC/trafficctl-block.sh\" 192.168.0.109 >/dev/null; sh \"\$LEXEC/trafficctl-block.sh\" 192.168.0.10 'kids tablet' >/dev/null; $FORGET"
+# Comments from before v1.13.2: the caller's label, not the address. One
+# label per device: with a shared one the shell's unblock also removed the
+# other device's rule, which the port no longer does (tests/test_block.sh).
+TGBLK="$FW4; nft insert rule inet fw4 forward ip saddr 192.168.0.109 counter drop comment '\"tctl_block_tg\"'; nft insert rule inet fw4 forward ip saddr 192.168.0.10 counter drop comment '\"tctl_block_kids\"'; $FORGET"
+OLDLBL="$FW4; nft insert rule inet fw4 forward ip saddr 192.168.0.109 counter drop comment '\"tctl_block_block_192.168.0.109\"'; $FORGET"
+# rules.json as v1.30.0 wrote it, the kernel empty again (a reboot).
+REBOOT="$OLDBLK; printf '{\"next\":40,\"rules\":[]}' > \"\$W/root/tmp/nft.state\"; rm -f \"\$W/root/etc/trafficctl/shapes.json\""
+LHOOK='ACTION=ifup INTERFACE=lan sh "$L/trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes"'
+# The WiFi deny: deny lists on both APs, hostapd_cli alive on both, its
+# writes answered OK.
+NEIGH="for a in 192.168.0.109 192.168.0.102 192.168.0.140; do grep \"^\$a \" \"\$W/cmd/ip neigh show\" > \"\$W/cmd/ip neigh show \$a\"; done"
+MF="$FW4; $NEIGH; uci set wireless.default_radio0.macfilter=deny; uci set wireless.default_radio1.macfilter=deny; uci commit wireless; for i in phy0-ap0 phy1-ap0; do echo PONG > \"\$W/cmd/hostapd_cli -i \$i ping\"; : > \"\$W/cmd/hostapd_cli -i \$i deny_acl SHOW\"; done; echo OK > \"\$W/cmd/hostapd_cli.default\""
+MFDEAD="$FW4; $NEIGH; uci set wireless.default_radio0.macfilter=deny; uci commit wireless"
+MFW="$WR,etc/config/wireless"
+# New devices: the default limit on, a ledger, the limiter and shaper as stubs
+# (their own work is compared elsewhere); the hook is the v1.30.0 one. Not
+# the bot's flag file /tmp/trafficctl_tg_newdev: the port hands an unknown
+# MAC to `trafficctl notify dhcp` instead (tests/test_newdevice.sh).
+ND="$LOGROOT; uci set trafficctl.newdevice.enabled=1; uci set trafficctl.newdevice.limit_kbit=4000; uci commit trafficctl; mkdir -p \"\$W/root/etc/trafficctl\"; printf '02:00:00:00:00:12\n02:00:00:00:00:08\n' > \"\$W/root/etc/trafficctl/seen_macs\""
+NDF='tmp/dispatch.log,etc/trafficctl/seen_macs,tmp/trafficctl/activity.log,tmp/logger.log'
+LND='sed -e "s#$LEXEC/trafficctl-ratelimit.sh#$W/ndstub/trafficctl-ratelimit.sh#" -e "s#$LEXEC/trafficctl-shape.sh#$W/ndstub/trafficctl-shape.sh#" "$L/trafficctl/files/etc/hotplug.d/dhcp/99-trafficctl-newdevice" > "$W/nd-hook"; sh "$W/nd-hook"; echo done'
+NND='ln -sfn "$W/ndstub" "$W/root/usr/libexec/trafficctl"; tctl newdevice; echo done'
+NEWMAC='ACTION=add MACADDR=02:00:00:00:00:99 IPADDR=192.168.0.99 HOSTNAME=newbie'
 
 # ── telegram bot ──
 # The v1.30.0 bot (its notifications off and its ledger seeded, so it only
@@ -309,6 +350,45 @@ tg-test-no-chat | text+$CURLF | router-24.10 | trafficctl-telegram-test.sh 777:A
 tg-test-no-token | text+$CURLF | router-24.10 | trafficctl-telegram-test.sh '' 4242 | tctl telegram-test '' 4242
 tg-test-chat-nan | text+$CURLF | router-24.10 | trafficctl-telegram-test.sh 777:ABC 42a | tctl telegram-test 777:ABC 42a
 tg-test-bad-token | text+$CURLF | router-24.10 | trafficctl-telegram-test.sh 777-ABC 4242 | tctl telegram-test 777-ABC 4242
+block | text+$WR | router-24.10 | trafficctl-block.sh 192.168.0.109; echo rc=\$?; $CHAIN | tctl block 192.168.0.109; echo rc=\$?; $CHAIN | $FW4
+block-lease-mac | text+$WR | router-24.10 | trafficctl-block.sh 192.168.0.102; echo rc=\$?; $CHAIN | tctl block 192.168.0.102; echo rc=\$?; $CHAIN | $FW4
+block-no-mac | text+$WR | router-24.10 | trafficctl-block.sh 192.168.0.9; echo rc=\$?; $CHAIN | tctl block 192.168.0.9; echo rc=\$?; $CHAIN | $FW4
+block-nexthop | text+$WR | router-24.10 | trafficctl-block.sh 192.168.0.200; echo rc=\$?; $CHAIN | tctl block 192.168.0.200; echo rc=\$?; $CHAIN | $FW4; $ROUTED
+block-persist | text+$WR | router-24.10 | trafficctl-block.sh 192.168.0.109 'my label'; echo rc=\$?; $CHAIN | tctl block 192.168.0.109 'my label'; echo rc=\$?; $CHAIN | $FW4; $PERSIST
+block-already | text+$WR | router-24.10 | trafficctl-block.sh 192.168.0.109; echo rc=\$?; $CHAIN | tctl block 192.168.0.109; echo rc=\$?; $CHAIN | $OLDBLK
+block-tg-label | text+$WR | router-24.10 | trafficctl-block.sh 192.168.0.109; echo rc=\$?; $CHAIN | tctl block 192.168.0.109; echo rc=\$?; $CHAIN | $TGBLK
+block-self | text+$WR | router-24.10 | sh:TCTL_SRC=192.168.0.109 sh \"\$LEXEC/trafficctl-block.sh\" 192.168.0.109; echo rc=\$? | TCTL_SRC=192.168.0.109 tctl block 192.168.0.109; echo rc=\$? | $FW4
+block-router | text+$WR | router-24.10 | trafficctl-block.sh 192.168.0.1; echo rc=\$?; $CHAIN | tctl block 192.168.0.1; echo rc=\$?; $CHAIN | $FW4; $RIP
+block-bad | text+$WR | router-24.10 | trafficctl-block.sh 192.168.0.300; echo rc=\$? | tctl block 192.168.0.300; echo rc=\$? | $FW4
+block-usage | text | router-24.10 | trafficctl-block.sh; echo rc=\$? | tctl block; echo rc=\$? | $FW4
+block-nss | text+$WR,sys/kernel/debug/ecm/ecm_db/defunct_all | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-block.sh\" 192.168.0.109 | rmask tctl block 192.168.0.109 | $FW4; $NSSON
+block-nft-fails | text+$WR | router-24.10 | trafficctl-block.sh 192.168.0.109; echo rc=\$? | tctl block 192.168.0.109; echo rc=\$? | : > \"\$W/cmd/conntrack.default\"
+unblock | text+$WR | router-24.10 | trafficctl-unblock.sh 192.168.0.109; echo rc=\$?; $CHAIN | tctl unblock 192.168.0.109; echo rc=\$?; $CHAIN | $OLDBLK
+unblock-label | text+$WR | router-24.10 | trafficctl-unblock.sh 192.168.0.10 'kids tablet'; echo rc=\$?; $CHAIN | tctl unblock 192.168.0.10 'kids tablet'; echo rc=\$?; $CHAIN | $OLDBLK
+unblock-tg-label | text+$WR | router-24.10 | trafficctl-unblock.sh 192.168.0.109 tg; echo rc=\$?; $CHAIN | tctl unblock 192.168.0.109 tg; echo rc=\$?; $CHAIN | $TGBLK
+unblock-v1.13.1 | text+$WR | router-24.10 | trafficctl-unblock.sh 192.168.0.109; echo rc=\$?; $CHAIN | tctl unblock 192.168.0.109; echo rc=\$?; $CHAIN | $OLDLBL
+unblock-none | text+$WR | router-24.10 | trafficctl-unblock.sh 192.168.0.109; echo rc=\$?; $CHAIN | tctl unblock 192.168.0.109; echo rc=\$?; $CHAIN | $FW4
+unblock-bad | text | router-24.10 | trafficctl-unblock.sh 192.168.0.300; echo rc=\$? | tctl unblock 192.168.0.300; echo rc=\$? | $FW4
+unblock-by-v1.30 | text+$WR | router-24.10 | trafficctl-block.sh 192.168.0.109 >/dev/null; sh \"\$LEXEC/trafficctl-unblock.sh\" 192.168.0.109; echo rc=\$?; $CHAIN | tctl block 192.168.0.109 >/dev/null; sh \"\$LEXEC/trafficctl-unblock.sh\" 192.168.0.109; echo rc=\$?; $CHAIN | $FW4; $PERSIST
+restore | text+$WR | router-24.10 | sh:$LHOOK; echo rc=\$?; $CHAIN | tctl restore >/dev/null; echo rc=\$?; $CHAIN | $REBOOT
+restore-persist-off | text+$WR | router-24.10 | sh:$LHOOK; echo rc=\$?; $CHAIN | tctl restore >/dev/null; echo rc=\$?; $CHAIN | $REBOOT; uci set trafficctl.main.persist_rules=0; uci commit trafficctl
+macfilter-add | text+$MFW | router-24.10 | trafficctl-macfilter-add.sh 192.168.0.140; echo rc=\$? | tctl macfilter-add 192.168.0.140; echo rc=\$? | $MF
+macfilter-add-acl | text+$MFW | router-24.10 | trafficctl-macfilter-add.sh 192.168.0.140; echo rc=\$? | tctl macfilter-add 192.168.0.140; echo rc=\$? | $MF; for i in phy0-ap0 phy1-ap0; do echo 02:00:00:00:00:12 > \"\$W/cmd/hostapd_cli -i \$i deny_acl SHOW\"; done
+macfilter-add-lease | text+$MFW | router-24.10 | trafficctl-macfilter-add.sh 192.168.0.102; echo rc=\$? | tctl macfilter-add 192.168.0.102; echo rc=\$? | $MF
+macfilter-add-unknown | text+$MFW | router-24.10 | trafficctl-macfilter-add.sh 192.168.0.9; echo rc=\$? | tctl macfilter-add 192.168.0.9; echo rc=\$? | $MF
+macfilter-add-bad | text | router-24.10 | trafficctl-macfilter-add.sh 192.168.0.300; echo rc=\$? | tctl macfilter-add 192.168.0.300; echo rc=\$? | $MF
+macfilter-add-no-cli | text+$MFW | router-24.10 | trafficctl-macfilter-add.sh 192.168.0.109; echo rc=\$? | tctl macfilter-add 192.168.0.109; echo rc=\$? | $MFDEAD
+macfilter-remove | text+$MFW | router-24.10 | trafficctl-macfilter-remove.sh 192.168.0.109; echo rc=\$? | tctl macfilter-remove 192.168.0.109; echo rc=\$? | $MF; uci add_list wireless.default_radio0.maclist=02:00:00:00:00:08; uci commit wireless
+macfilter-remove-mac | text+$MFW | router-24.10 | trafficctl-macfilter-remove.sh 02:00:00:00:00:08; echo rc=\$? | tctl macfilter-remove 02:00:00:00:00:08; echo rc=\$? | $MF; uci add_list wireless.default_radio1.maclist=02:00:00:00:00:08; uci commit wireless
+macfilter-remove-bad | text | router-24.10 | trafficctl-macfilter-remove.sh nonsense; echo rc=\$? | tctl macfilter-remove nonsense; echo rc=\$? | $MF
+newdevice | text+$NDF | router-24.10 | sh:$NEWMAC; export ACTION MACADDR IPADDR HOSTNAME; $LND | $NEWMAC; export ACTION MACADDR IPADDR HOSTNAME; $NND | $ND
+newdevice-shaper | text+$NDF | router-24.10 | sh:$NEWMAC; export ACTION MACADDR IPADDR HOSTNAME; $LND | $NEWMAC; export ACTION MACADDR IPADDR HOSTNAME; $NND | $ND; uci set trafficctl.newdevice.limit_mode=shaper; uci commit trafficctl
+newdevice-known | text+$NDF | router-24.10 | sh:ACTION=add MACADDR=02:00:00:00:00:08 IPADDR=192.168.0.109 HOSTNAME=x; export ACTION MACADDR IPADDR HOSTNAME; $LND | ACTION=add MACADDR=02:00:00:00:00:08 IPADDR=192.168.0.109 HOSTNAME=x; export ACTION MACADDR IPADDR HOSTNAME; $NND | $ND
+newdevice-seed | text+$NDF | router-24.10 | sh:$NEWMAC; export ACTION MACADDR IPADDR HOSTNAME; $LND | $NEWMAC; export ACTION MACADDR IPADDR HOSTNAME; $NND | $ND; rm \"\$W/root/etc/trafficctl/seen_macs\"
+newdevice-no-ip | text+$NDF | router-24.10 | sh:ACTION=add MACADDR=02:00:00:00:00:98 IPADDR= HOSTNAME=; export ACTION MACADDR IPADDR HOSTNAME; $LND | ACTION=add MACADDR=02:00:00:00:00:98 IPADDR= HOSTNAME=; export ACTION MACADDR IPADDR HOSTNAME; $NND | $ND
+newdevice-limited | text+$NDF | router-24.10 | sh:ACTION=add MACADDR=02:00:00:00:00:98 IPADDR=192.168.0.109 HOSTNAME=x; export ACTION MACADDR IPADDR HOSTNAME; $LND | ACTION=add MACADDR=02:00:00:00:00:98 IPADDR=192.168.0.109 HOSTNAME=x; export ACTION MACADDR IPADDR HOSTNAME; $NND | $ND
+newdevice-off | text+$NDF | router-24.10 | sh:$NEWMAC; export ACTION MACADDR IPADDR HOSTNAME; $LND | $NEWMAC; export ACTION MACADDR IPADDR HOSTNAME; $NND | $ND; uci set trafficctl.newdevice.enabled=0; uci set trafficctl.telegram.enabled=0; uci commit trafficctl
+newdevice-old | text+$NDF | router-24.10 | sh:ACTION=old MACADDR=02:00:00:00:00:99 IPADDR=192.168.0.99 HOSTNAME=x; export ACTION MACADDR IPADDR HOSTNAME; $LND | ACTION=old MACADDR=02:00:00:00:00:99 IPADDR=192.168.0.99 HOSTNAME=x; export ACTION MACADDR IPADDR HOSTNAME; $NND | $ND
 "
 
 # ── telegram bot ── the setups run at case time (msg, cbq, upd, $W)
@@ -386,8 +466,20 @@ cat > "$W/bin/replay" <<EOF
 #!/bin/sh
 # Prints the recorded output of this exact command line, or fails like the
 # command would when the fixture has none.
-f="$W/cmd/\${0##*/} \$*"
-[ -f "\$f" ] || { echo "replay: no fixture for: \${0##*/} \$*" >&2; exit 1; }
+c=\${0##*/}
+if [ "\$c" = nft ] && [ -f "$W/root/tmp/nft.state" ]; then
+    case " \$* " in
+        *" add "*|*" insert "*|*" delete "*|*" create "*|*" flush "*) echo "nft \$*" >> "$W/root/tmp/writes.log" ;;
+    esac
+    NFT_STATE="$W/root/tmp/nft.state" exec "$UCODE" -S "$UC_TESTLIB/nft-fw4.uc" -- "\$@"
+fi
+f="$W/cmd/\$c \$*"
+if [ ! -f "\$f" ] && [ -f "$W/cmd/\$c.default" ]; then
+    echo "\$c \$*" >> "$W/root/tmp/writes.log"
+    cat "$W/cmd/\$c.default"
+    exit 0
+fi
+[ -f "\$f" ] || { echo "replay: no fixture for: \$c \$*" >&2; exit 1; }
 cat "\$f"
 EOF
 for c in ip nft tc iw brctl conntrack nslookup hostapd_cli; do ln -sf replay "$W/bin/$c"; done
@@ -509,6 +601,12 @@ grep -q "^SCRIPTS=\"$BSTUB\"" "$UC_TMP/lbot.sh" && grep -q "^\. $BSTUB/functions
     { echo "FAIL: the legacy bot's scripts were not redirected"; exit 1; }
 # ── end telegram bot ──
 chmod +x "$W/bin/"*
+# The default limit's two appliers, for the newdevice cases.
+mkdir -p "$W/ndstub"
+for s in trafficctl-ratelimit.sh trafficctl-shape.sh; do
+    printf '#!/bin/sh\necho "%s $* via=$TCTL_VIA src=$TCTL_SRC" >> "%s/root/tmp/dispatch.log"\n' "$s" "$W" > "$W/ndstub/$s"
+done
+chmod +x "$W/ndstub/"*
 # A recorded agent feed, read by both netify sides when a case writes it.
 export TCTL_NETIFY_FEED="$W/root/tmp/feed"
 
@@ -664,6 +762,9 @@ case " $PORTED " in *" totals "*) ;; *) echo "FAIL: no ported commands found in 
 # `notify` is new in the CLI, not a port: v1.30.0 has no script for it.
 PORTED=$(printf '%s\n' $PORTED | grep -vx notify | tr '\n' ' ')
 # ── end notifications ──
+# The hotplug hooks' commands replace hook code, not a script the plugin
+# runs: compared in the CLI cases above.
+PORTED=$(printf '%s\n' $PORTED | grep -vxE 'newdevice|restore' | tr '\n' ' ')
 for c in $PORTED; do
     [ -e "$STUBS/trafficctl-$c.sh" ] || { echo "FAIL: ported command $c has no legacy script to stub"; exit 1; }
 done
