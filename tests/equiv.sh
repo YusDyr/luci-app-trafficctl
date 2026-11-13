@@ -913,11 +913,12 @@ PFWRULES='mkdir -p "$W/root/etc/trafficctl"; cp "$W/pfw-rules.json" "$W/root/etc
 # record only: with more, v1.30.0's hook skipped one and applied another twice
 # (each restore rewrote rules.json under its index), and an open port comes
 # back commented "local" where v1.30 wrote "-"; tests/test_portfw.sh covers
-# both. The bad file holds records the hook logged (no rate, rate 0, an
-# address that is none) and one it restored.
+# both. The bad file holds a record the hook logged (an address that is
+# none) and one it restored. A limit with no rate is skipped without a log
+# line (v1.30's hook logged one; tests/test_asymmetric_limits.sh).
 PFWONLY='mkdir -p "$W/root/etc/trafficctl"; printf "%s" "[{\"type\":\"pfw_limit\",\"ip\":\"forward/udp/192.168.0.109/27015-27030\",\"param\":\"8000\"}]" > "$W/root/etc/trafficctl/rules.json"'
 NOFT='sed -i "/^nft list flowtables/d" "$W/root/netfake/calls"'
-PFWBAD='mkdir -p "$W/root/etc/trafficctl"; printf "%s" "[{\"type\":\"pfw_limit\",\"ip\":\"forward/tcp/192.168.0.140/80\",\"param\":\"0\"},{\"type\":\"pfw_limit\",\"ip\":\"forward/tcp/192.168.0.140/81\",\"param\":\"\"},{\"type\":\"pfw_pause\",\"ip\":\"forward/tcp/1.2.3/80\",\"param\":\"1\"},{\"type\":\"pfw_pause\",\"ip\":\"forward/udp/192.168.0.109/27015\",\"param\":\"1\"}]" > "$W/root/etc/trafficctl/rules.json"'
+PFWBAD='mkdir -p "$W/root/etc/trafficctl"; printf "%s" "[{\"type\":\"pfw_pause\",\"ip\":\"forward/tcp/1.2.3/80\",\"param\":\"1\"},{\"type\":\"pfw_pause\",\"ip\":\"forward/udp/192.168.0.109/27015\",\"param\":\"1\"}]" > "$W/root/etc/trafficctl/rules.json"'
 PFWSEED='nft add table inet tctl_pfw; nft add chain inet tctl_pfw pfw_forward x; nft add rule inet tctl_pfw pfw_forward ip daddr 192.168.0.140 tcp dport 80 counter drop comment \"tctl_pfw_pause_tcp_192.168.0.140_80\"; nft add rule inet tctl_pfw pfw_forward ip daddr 192.168.0.109 udp dport 27015-27030 limit rate over 1000 kbytes/second counter drop comment \"tctl_pfw_limit_udp_192.168.0.109_27015-27030\"; : > "$W/root/netfake/calls"'
 CASES+="
 cut-status-off | json | router-24.10 | sh:lcut status | ncut status | $CUTENV

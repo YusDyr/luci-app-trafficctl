@@ -346,9 +346,9 @@ done
 reset_net
 printf '%s' '[{"type":"pfw_limit","ip":"forward/tcp/192.168.0.10/80","param":"0"},{"type":"pfw_pause","ip":"forward/tcp/1.2.3/81","param":"1"}]' > "$RULES"
 : > "$LOGGER_LOG"
-assert_eq "restore: a rate 0 and a bad address fail" '{ "ok": false, "restored": 0, "failed": 2 }' "$(restore)"
-assert_contains "restore: the rate 0 is logged, as v1.30's hook did" "Failed to restore port limit for 80" "$(cat "$LOGGER_LOG")"
-assert_contains "restore: so is the bad address" "Failed to restore port pause for 81" "$(cat "$LOGGER_LOG")"
+assert_eq "restore: a rate 0 is skipped, a bad address fails" '{ "ok": false, "restored": 0, "failed": 1 }' "$(restore)"
+assert_not_contains "restore: the rate 0 is no failure" "port limit for 80" "$(cat "$LOGGER_LOG")"
+assert_contains "restore: the bad address is logged" "Failed to restore port pause for 81" "$(cat "$LOGGER_LOG")"
 write_trafficctl 0
 reset_net
 printf '%s' '[{"type":"pfw_pause","ip":"forward/tcp/192.168.0.10/80","param":"1"}]' > "$RULES"

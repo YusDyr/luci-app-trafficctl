@@ -480,17 +480,18 @@ function restore() {
 		let k = key_parts(ip);
 		if (k[2] == 'local')
 			k[2] = '-';
+		// A limit with no rate has nothing to restore: skipped, not a
+		// failure (v1.30's hook logged one, as it did for the limiter).
+		if (t == 'pfw_limit' && (param == '' || param == '0'))
+			continue;
 		let what = (t == 'pfw_pause') ? 'pause' : 'limit';
 		let argv = (t == 'pfw_pause') ? [ 'pause', ...k ] : [ 'limit', ...k, param ];
-		let rc = 1;
-		// A limit with no rate is not restorable; v1.30's hook logged it.
-		if (t == 'pfw_pause' || (param != '' && param != '0')) {
-			try {
-				rc = main(argv).rc;
-			}
-			catch (e) {
-				rc = 1;
-			}
+		let rc;
+		try {
+			rc = main(argv).rc;
+		}
+		catch (e) {
+			rc = 1;
 		}
 		if (rc == 0)
 			res.restored++;
