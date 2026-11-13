@@ -305,10 +305,15 @@ assert_contains "log: they become spaces" "target=10.0.0.9 [trafficctl] forged d
 printf "config logging 'logging'\n\toption enabled '1'\n\toption log_file '/etc/passwd'\n" > "$R/etc/config/trafficctl"
 lib log '"shape"' '"10.2.0.1"'
 assert_contains "log: a path outside the log dirs falls back to the default" "10.2.0.1" "$(cat "$LOG")"
-for f in /etc/passwd /tmp/trafficctl/../x /tmp/trafficctl/ '/var/log/a b' /var/log/x/..; do
+# With the cases tests/test_regressions.sh ran against the shell's
+# tctl_validate_log_file until 2.0.0.
+for f in /etc/passwd /tmp/trafficctl/../x /tmp/trafficctl/ '/var/log/a b' /var/log/x/.. \
+         /etc/shadow /etc/config/network /tmp/trafficctl/../../etc/shadow /tmp/trafficctl/.. \
+         '/tmp/trafficctl/x;rm -rf /' '/tmp/trafficctl/*' '/tmp/trafficctl/$(whoami)' '/tmp/trafficctl/`id`'; do
     assert_eq "valid_log_file: '$f' refused" "false" "$(lib valid_log_file "$(js "$f")")"
 done
 assert_eq "valid_log_file: /var/log/x.log" "true" "$(lib valid_log_file '"/var/log/x.log"')"
+assert_eq "valid_log_file: /tmp/trafficctl/activity.log" "true" "$(lib valid_log_file '"/tmp/trafficctl/activity.log"')"
 rm -f "$R/etc/config/trafficctl"
 lib log '"shape"' '"10.3.0.1"'
 assert_not_contains "log: off unless enabled" "10.3.0.1" "$(cat "$LOG")"

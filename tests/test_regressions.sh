@@ -6,7 +6,6 @@
 PASS=0
 FAIL=0
 
-BIN="$(cd "$(dirname "$0")/.." && pwd)/trafficctl/files/usr/libexec/trafficctl"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root"
 
 TMPDIR=$(mktemp -d)
@@ -44,47 +43,8 @@ assert_not_contains() {
     fi
 }
 
-# ════════════════════════════════════════════════════════════════════════════
-# 1. log_file is constrained (path traversal / arbitrary root read+truncate)
-# ════════════════════════════════════════════════════════════════════════════
-
-uci() { echo ""; }
-export -f uci
-. "$BIN/trafficctl-fw.sh"
-
-assert_eq "log_file: rejects /etc/shadow" 1 \
-    "$(tctl_validate_log_file '/etc/shadow' && echo 0 || echo 1)"
-assert_eq "log_file: rejects /etc/config/network" 1 \
-    "$(tctl_validate_log_file '/etc/config/network' && echo 0 || echo 1)"
-assert_eq "log_file: rejects traversal out of /tmp/trafficctl" 1 \
-    "$(tctl_validate_log_file '/tmp/trafficctl/../../etc/shadow' && echo 0 || echo 1)"
-assert_eq "log_file: rejects trailing traversal" 1 \
-    "$(tctl_validate_log_file '/tmp/trafficctl/..' && echo 0 || echo 1)"
-assert_eq "log_file: rejects shell metacharacters" 1 \
-    "$(tctl_validate_log_file '/tmp/trafficctl/x;rm -rf /' && echo 0 || echo 1)"
-assert_eq "log_file: rejects glob metacharacters" 1 \
-    "$(tctl_validate_log_file '/tmp/trafficctl/*' && echo 0 || echo 1)"
-assert_eq "log_file: rejects backtick" 1 \
-    "$(tctl_validate_log_file '/tmp/trafficctl/$(whoami)' && echo 0 || echo 1)"
-assert_eq "log_file: accepts /tmp/trafficctl/activity.log" 0 \
-    "$(tctl_validate_log_file '/tmp/trafficctl/activity.log' && echo 0 || echo 1)"
-assert_eq "log_file: accepts /var/log/trafficctl.log" 0 \
-    "$(tctl_validate_log_file '/var/log/trafficctl.log' && echo 0 || echo 1)"
-
-# tctl_log_file falls back to the default when uci returns a rejected value.
-_log_file_with() {
-    (
-        _val="$1"
-        uci() { [ "$3" = "trafficctl.logging.log_file" ] && echo "$_val" || echo ""; }
-        . "$BIN/trafficctl-fw.sh"
-        tctl_log_file
-    )
-}
-assert_eq "log_file: falls back to default for /etc/shadow" \
-    "/tmp/trafficctl/activity.log" "$(_log_file_with '/etc/shadow')"
-assert_eq "log_file: passes through a legitimate value" \
-    "/var/log/trafficctl.log" "$(_log_file_with '/var/log/trafficctl.log')"
-
+# 1. log_file is constrained (path traversal / arbitrary root read+truncate):
+# lib.valid_log_file, tests/test_ucode_lib.sh.
 # logging_config_set, the rpcd method, refuses a bad log_file and a max_lines
 # outside 20..100000 before it writes anything: tests/test_rpcd.sh, which runs
 # the ucode plugin.
