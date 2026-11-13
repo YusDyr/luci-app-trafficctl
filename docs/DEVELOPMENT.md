@@ -214,6 +214,7 @@ Run all tests locally. These run on the host with fake `nft`/`tc`/`ip`/`uci`/
 ```sh
 bash tests/test_fw.sh                 # Firewall helper library
 bash tests/test_direction.sh          # Bidirectional limit/shape, classid allocation
+bash tests/test_shape_filters.sh      # Several shapes keep their filters (stateful tc, tests/lib/tc-htb.sh)
 bash tests/test_meter_per_chain.sh    # Each-mode meters per chain, per-port success, nft 1.0/1.1
 bash tests/test_portfw.sh             # Port-forward control, port ranges
 bash tests/test_names.sh              # Device aliases + reverse-DNS cache

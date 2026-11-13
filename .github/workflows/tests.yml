@@ -32,6 +32,8 @@ jobs:
         run: bash tests/test_netify.sh
       - name: Bidirectional limit/shape tests
         run: bash tests/test_direction.sh
+      - name: Shaper filters
+        run: bash tests/test_shape_filters.sh
       - name: Per-chain limiter meters on a multi-port bridge
         run: bash tests/test_meter_per_chain.sh
       - name: Cumulative byte counter tests

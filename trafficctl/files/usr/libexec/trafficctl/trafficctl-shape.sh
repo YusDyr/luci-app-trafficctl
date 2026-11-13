@@ -185,9 +185,7 @@ ensure_ifb() {
 shape_attach() {
     local dev="$1" match="$2" ip="$3" classid="$4" rate="$5" burst="$6"
 
-    tc filter del dev "$dev" parent 1:0 prio 10 protocol ip u32 match ip "$match" "$ip"/32 2>/dev/null
-    tc qdisc del dev "$dev" parent "$classid" 2>/dev/null
-    tc class del dev "$dev" classid "$classid" 2>/dev/null
+    shape_detach "$dev" "$match" "$ip" "$classid"
 
     ensure_root_qdisc "$dev" || return 1
     tc class add dev "$dev" parent 1:1 classid "$classid" htb \
@@ -197,9 +195,41 @@ shape_attach() {
         match ip "$match" "$ip"/32 flowid "$classid" 2>&1 || return 1
 }
 
+# The handles of the prio-10 filters on a device that send to this class or
+# match this address in this direction (u32 key at offset 16 for "dst", 12 for
+# "src").
+#
+# A u32 "filter del ... prio 10" without a handle deletes every filter of that
+# prio on the device, whatever match follows it. Every shape added (attach
+# detaches first) or removed took all other shapes' filters with it, so only
+# the last one applied was in force, while their classes stayed and the UI
+# listed every device as shaped.
+shape_filter_handles() {
+    local dev="$1" match="$2" ip="$3" classid="$4" key at
+    key=$(echo "$ip" | awk -F. '{ printf "%02x%02x%02x%02x", $1, $2, $3, $4 }')
+    [ "$match" = "dst" ] && at=16 || at=12
+    tc filter show dev "$dev" parent 1: 2>/dev/null | awk -v cid="$classid" -v key="$key/ffffffff" -v at="$at" '
+        $1 == "filter" {
+            fh = ""; pref = ""; flow = ""
+            for (i = 1; i < NF; i++) {
+                if ($i == "pref") pref = $(i+1)
+                if ($i == "fh") fh = $(i+1)
+                if ($i == "flowid" || $i == "*flowid") flow = $(i+1)
+            }
+            if (pref != "10" || flow == "") { fh = ""; next }
+            if (flow == cid && !(fh in seen)) { seen[fh] = 1; print fh }
+            next
+        }
+        fh != "" && $1 == "match" && $2 == key && $3 == "at" && $4 == at && !(fh in seen) {
+            seen[fh] = 1; print fh
+        }'
+}
+
 shape_detach() {
-    local dev="$1" match="$2" ip="$3" classid="$4"
-    tc filter del dev "$dev" parent 1:0 prio 10 protocol ip u32 match ip "$match" "$ip"/32 2>/dev/null
+    local dev="$1" match="$2" ip="$3" classid="$4" h
+    for h in $(shape_filter_handles "$dev" "$match" "$ip" "$classid"); do
+        tc filter del dev "$dev" parent 1:0 prio 10 handle "$h" protocol ip u32 2>/dev/null
+    done
     tc qdisc del dev "$dev" parent "$classid" 2>/dev/null
     tc class del dev "$dev" classid "$classid" 2>/dev/null
 }
