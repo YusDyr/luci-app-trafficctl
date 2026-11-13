@@ -19,7 +19,7 @@ include $(TOPDIR)/rules.mk
 PKG_NAME:=trafficctl
 # Released in lockstep with luci-app-trafficctl: auto-release.yml sets both
 # PKG_VERSIONs to the same value.
-PKG_VERSION:=1.30.5
+PKG_VERSION:=1.30.6
 PKG_RELEASE:=1
 
 PKG_LICENSE:=Apache-2.0
@@ -83,6 +83,7 @@ define Package/trafficctl/install
 	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/portfw.uc $(1)/usr/share/ucode/trafficctl/
 	# PR8 history
 	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/history.uc $(1)/usr/share/ucode/trafficctl/
+	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/limit.uc $(1)/usr/share/ucode/trafficctl/
 	$(INSTALL_DIR) $(1)/usr/libexec/trafficctl
 	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-block.sh $(1)/usr/libexec/trafficctl/
 	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-bytes.sh $(1)/usr/libexec/trafficctl/

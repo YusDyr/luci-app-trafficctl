@@ -43,29 +43,7 @@ assert_eq "invalid IP trailing dot" 1 "$(tctl_validate_ip '192.168.1.1.' && echo
 
 assert_eq "lan device fallback" "br-lan" "$(tctl_get_lan_device)"
 
-# --- tctl_get_wan_device ---
-# With nothing resolvable it must FAIL rather than return the literal "wan":
-# that is an interface name, not a device, and nft silently refuses to hook it.
-
-# tctl_get_wan_device also consults `ip route show default` and then checks the
-# candidate really exists under /sys/class/net. On any host that HAS a default
-# route (i.e. every CI runner) that resolves a genuine device, so the
-# "nothing resolves" precondition below would not hold and these two cases
-# would fail — while the function was in fact behaving correctly. Run them in a
-# subshell that stubs the remaining lookups and points the sysfs probe at an
-# empty directory, so the case is deterministic on every host.
-_EMPTY_SYSFS=$(mktemp -d)
-_wan_device_no_candidates() (
-    ip() { return 1; }
-    ubus() { return 1; }
-    jsonfilter() { return 1; }
-    export TCTL_SYSFS_NET="$_EMPTY_SYSFS"
-    tctl_get_wan_device
-)
-
-assert_eq "wan device: fails when nothing resolves" 1 "$(_wan_device_no_candidates >/dev/null && echo 0 || echo 1)"
-assert_eq "wan device: emits no bogus name" "" "$(_wan_device_no_candidates 2>/dev/null)"
-rmdir "$_EMPTY_SYSFS" 2>/dev/null
+# The WAN device is `trafficctl.limit`'s wan_device now: tests/test_direction.sh.
 
 # --- TCTL_FW ---
 
