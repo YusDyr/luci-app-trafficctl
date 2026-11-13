@@ -175,7 +175,10 @@ fi
 
 # ── Script permissions ─────────────────────────────────────────────────────
 
-for script in $SH_SCRIPTS "$F/usr/sbin/trafficctl" "$F/usr/libexec/trafficctl/trafficctl-telegram.uc"; do
+# The hotplug hooks are sourced by hotplug-call, not run, and are installed
+# with INSTALL_DATA: no exec bit to check there.
+for script in $(ls "$F"/etc/init.d/* "$F"/etc/uci-defaults/*) "$F/www/cgi-bin/trafficctl-metrics" \
+              "$F/usr/sbin/trafficctl" "$F/usr/libexec/trafficctl/trafficctl-telegram.uc"; do
     assert_ok "executable: ${script#"$F"/}" test -x "$script"
 done
 assert_ok "executable: rpcd" test -x "$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"

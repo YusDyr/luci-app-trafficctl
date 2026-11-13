@@ -59,7 +59,7 @@ include $(TOPDIR)/feeds/luci/luci.mk
 #
 # The config mode, the services and the cut release on removal belong to the
 # backend and live in ../trafficctl/Makefile.
-define Package/$(PKG_NAME)/postinst
+define Package/luci-app-trafficctl/postinst
 #!/bin/sh
 if [ -z "$${IPKG_INSTROOT}" ]; then
 	if [ -f /etc/config/trafficctl ]; then

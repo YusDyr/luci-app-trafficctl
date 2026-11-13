@@ -89,7 +89,7 @@ heredoc() {
 
 BE_MK_POSTINST=$(mk_section "$BE_MAKEFILE" 'Package/trafficctl/postinst')
 BE_MK_PRERM=$(mk_section "$BE_MAKEFILE" 'Package/trafficctl/prerm')
-FE_MK_POSTINST=$(mk_section "$FE_MAKEFILE" 'Package/$(PKG_NAME)/postinst')
+FE_MK_POSTINST=$(mk_section "$FE_MAKEFILE" 'Package/luci-app-trafficctl/postinst')
 FE_MK_PRERM=$(mk_section "$FE_MAKEFILE" 'Package/$(PKG_NAME)/prerm')
 BE_IPK_POSTINST=$(heredoc "$IPK" '$BE_CTRL/postinst')
 BE_IPK_PRERM=$(heredoc "$IPK" '$BE_CTRL/prerm')
