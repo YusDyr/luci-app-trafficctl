@@ -886,4 +886,4 @@ function totals(all, sample) {
 // 2022-12 needs a ';' after `export function f() {}`; one list avoids it.
 export { lan_subnets, lan_devices, lan_device, routed_subnets,
 	monitored_subnets, subnets, ifaces, rdns, rdns_refresh, offload_mode, ct_each,
-	bytes, totals, reset };
+	bytes, totals, reset, local_ips };

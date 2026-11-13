@@ -92,15 +92,16 @@ luci-app-trafficctl/                     # repository
 │       │       └── dhcp/99-trafficctl-newdevice    # New-device detection
 │       ├── lib/upgrade/keep.d/trafficctl          # /etc/trafficctl/ kept across sysupgrade
 │       ├── usr/sbin/trafficctl          # The CLI (ucode): subnets, names, rdns, rdns-refresh, ifaces, bytes, totals,
-│       │                                #   ratelimit-stats, shape-stats, rules
+│       │                                #   ratelimit-stats, shape-stats, rules, summary, device, metrics, netify
 │       ├── usr/share/ucode/trafficctl/
 │       │   ├── lib.uc                   # Shared helpers: uci/ubus, commands, JSON, validation, files, log
 │       │   ├── net.uc                   # Subnets, interface roles, reverse DNS, byte samples, totals
-│       │   └── ctl.uc                   # Read-only nft/tc readers: limits, blocks, shapes, the Rules tab
+│       │   ├── ctl.uc                   # Read-only nft/tc readers: limits, blocks, shapes, the Rules tab
+│       │   └── report.uc                # Summary, device detail, Prometheus exporter, netifyd DPI
 │       ├── usr/libexec/trafficctl/
 │       │   ├── trafficctl-fw.sh         # Firewall abstraction (sourced)
-│       │   ├── trafficctl-summary.sh    # All-device summary
-│       │   ├── trafficctl-device.sh     # Per-device detail
+│       │   ├── trafficctl-summary.sh    # Wrapper: `trafficctl summary` (all-device summary)
+│       │   ├── trafficctl-device.sh     # Wrapper: `trafficctl device` (per-device detail)
 │       │   ├── trafficctl-bytes.sh      # Wrapper: `trafficctl bytes` (byte counters for speed)
 │       │   ├── trafficctl-totals.sh     # Wrapper: `trafficctl totals` (lifetime totals, UI + exporter)
 │       │   ├── trafficctl-ifaces.sh     # Wrapper for `trafficctl ifaces`
@@ -191,10 +192,10 @@ function name {}         # use name() {} instead
 
 ```sh
 # Summary
-ssh root@192.168.0.1 '/usr/libexec/trafficctl/trafficctl-summary.sh' | python3 -m json.tool
+ssh root@192.168.0.1 '/usr/sbin/trafficctl summary' | python3 -m json.tool
 
 # Per-device
-ssh root@192.168.0.1 '/usr/libexec/trafficctl/trafficctl-device.sh 192.168.0.111 all' | python3 -m json.tool
+ssh root@192.168.0.1 '/usr/sbin/trafficctl device 192.168.0.111 all' | python3 -m json.tool
 
 # Shaping
 ssh root@192.168.0.1 '/usr/libexec/trafficctl/trafficctl-shape.sh add 192.168.0.100 5000 test'

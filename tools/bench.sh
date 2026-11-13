@@ -1,11 +1,11 @@
 #!/bin/sh
 # SPDX-License-Identifier: Apache-2.0
 # Benchmark gate for the ucode port: wall time and peak RSS of the legacy
-# summary/totals/bytes scripts against `trafficctl summary|totals|bytes`, over
-# synthetic conntrack tables, then of the limiter/shaper readers
-# (ratelimit-stats, shape-stats, rules) over the live nft and tc state. Runs
-# ON the router, or in an OpenWrt rootfs after tools/ci/live-readers.sh bench
-# has built that state:
+# summary/device/totals/bytes scripts against `trafficctl summary|device|
+# totals|bytes`, over synthetic conntrack tables, then of the limiter/shaper
+# readers (ratelimit-stats, shape-stats, rules) over the live nft and tc
+# state. Runs ON the router, or in an OpenWrt rootfs after
+# tools/ci/live-readers.sh bench has built that state:
 #
 #   ssh root@192.168.0.1 sh -s -- 2000 8000 16000 < tools/bench.sh
 #
@@ -105,12 +105,21 @@ new() { TCTL_ROOT="$B/root" "$NEW" "$@"; }
 new_has() { [ -x "$NEW" ] && "$NEW" 2>/dev/null | grep -q "[<|]$1[|>]"; }
 legacy_has() { [ -f "$B/legacy/trafficctl-$1.sh" ] && ! grep -q '^exec /usr/sbin/trafficctl' "$B/legacy/trafficctl-$1.sh"; }
 
+# The device report is timed for the busiest client: gen spreads the entries
+# evenly, so that is the first one.
+DEV_IP=$(awk 'NR == 1 { print $3 }' /tmp/dhcp.leases 2>/dev/null)
+DEV_IP=${DEV_IP:-192.168.0.100}
+
 printf '%-15s %7s %-7s %8s %9s\n' case entries impl wall_ms peak_kB
 for n in "$@"; do
     gen "$n"
-    for case in summary totals bytes; do
-        legacy_has "$case" && cell legacy sh "$B/legacy/trafficctl-$case.sh"
-        new_has "$case" && cell ucode new "$case"
+    for case in summary device totals bytes; do
+        args=""
+        [ "$case" = device ] && args=$DEV_IP
+        # shellcheck disable=SC2086 # args is one address or nothing
+        legacy_has "$case" && cell legacy sh "$B/legacy/trafficctl-$case.sh" $args
+        # shellcheck disable=SC2086
+        new_has "$case" && cell ucode new "$case" $args
     done
 done
 

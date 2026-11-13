@@ -122,29 +122,8 @@ assert_eq "helper up: per-device (meter) upload rule" "2000" "$(rate_up_of 192.1
 assert_eq "helper up: an upload-only rule" "1024" "$(rate_up_of 192.168.1.60)"
 assert_eq "helper up: a download-only rule is not an upload ceiling" "" "$(rate_up_of 192.168.1.50)"
 
-# ── summary: lookup_rate_limit ───────────────────────────────────────────────
-
-LOOKUP="$TMPDIR/lookup.sh"
-sed -n '/^lookup_rate_limit()/,/^}/p' "$BIN/trafficctl-summary.sh" > "$LOOKUP"
-assert_contains "harness: lookup_rate_limit extracted" "lookup_rate_limit()" "$(cat "$LOOKUP")"
-summary_rate() {
-    PATH="$MOCKBIN:$PATH" sh -c ". $FWLIB >/dev/null 2>&1; . $LOOKUP; RL_DUMP=\$(cat $DUMP); lookup_rate_limit $1" 2>&1
-}
-assert_eq "summary: own limit" "5000" "$(summary_rate 192.168.1.5)"
-assert_eq "summary: a kbytes listing is not read as 0" "8192" "$(summary_rate 192.168.1.7)"
-assert_eq "summary: unlimited device reads 0" "0" "$(summary_rate 192.168.1.51)"
-assert_eq "summary up: own upload ceiling" "1000" "$(summary_rate '192.168.1.5 up')"
-assert_eq "summary up: no upload rule reads 0" "0" "$(summary_rate '192.168.1.50 up')"
-assert_contains "summary: the upload ceiling is in the JSON" '"rate_limit_kbit_up":%.0f' "$(cat "$BIN/trafficctl-summary.sh")"
-
-# ── device view uses the same reader ─────────────────────────────────────────
-
-assert_contains "device: reads its limit through tctl_rl_rate_kbit" \
-    'tctl_rl_rate_kbit "$IP"' "$(cat "$BIN/trafficctl-device.sh")"
-assert_contains "device: reads the upload ceiling too" \
-    'tctl_rl_rate_kbit "$IP" saddr' "$(cat "$BIN/trafficctl-device.sh")"
-assert_contains "device: the upload ceiling is in the JSON" \
-    '"rate_limit_kbit_up":%d' "$(cat "$BIN/trafficctl-device.sh")"
+# The summary and the device report read the same dumps in ucode; their
+# lookups are pinned in tests/test_report.sh.
 
 # ── ucode: the same reads from nft -j, on both nft versions ────────────────
 

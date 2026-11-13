@@ -28,7 +28,7 @@ device that could not be resolved). For example:
 
 ```sh
 /usr/libexec/trafficctl/trafficctl-shape.sh status 192.168.1.50
-/usr/libexec/trafficctl/trafficctl-summary.sh | head -c 2000
+/usr/sbin/trafficctl summary | head -c 2000
 logread | grep trafficctl | tail -30
 ```
 

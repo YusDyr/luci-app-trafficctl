@@ -64,6 +64,39 @@ TOTSTATE='printf "192.168.0.119 1503032 819121 97829 103518 1794298352 2142119 1
 GROW='sed -i -e "1,40d" -e "s/ bytes=\([0-9]*\)/ bytes=\11/g" "$W/root/proc/net/nf_conntrack"'
 TOTFILE='tmp/trafficctl_totals.state'
 
+# The reports. A detached refresh the summary starts lands in tmp/spawn.log on
+# both sides (see spawn below), so what it would have started is compared too.
+SPAWNF='tmp/spawn.log,tmp/trafficctl_conn_cache'
+# Blocks (both halves, a v6 half alone) and limits in each unit form, from
+# tests/fixtures/nft-src/summary.nft as each nftables release lists it, and
+# shapes on both directions.
+TCIFB='printf "class htb 1:1 root rate 1Gbit ceil 1Gbit burst 125000b cburst 125000b\nclass htb 1:4 parent 1:1 leaf 8004: prio 0 rate 500Kbit ceil 500Kbit burst 1600b cburst 1600b\n" > "$W/cmd/tc class show dev tctl-ifb0"'
+LIMITS10="nftfix 1.0.2 summary; $TCIFB"
+LIMITS11="nftfix 1.1.6 summary; $TCIFB"
+# Sources the fixture lacks: a client of a routed subnet, one this router
+# NATs, an inbound flow whose LAN end is the reply source, policy-routed
+# (marked) flows, and a dozen unnamed devices for the reverse-DNS cap.
+CTADD='ct() { printf "ipv4     2 tcp      6 300 ESTABLISHED src=%s dst=%s sport=40000 dport=%s packets=1 bytes=%s src=%s dst=%s sport=%s dport=40000 packets=1 bytes=%s [ASSURED] mark=%s zone=0 use=2\n" "$@" >> "$W/root/proc/net/nf_conntrack"; }; ct 10.0.5.9 198.18.0.3 443 1000 198.18.0.3 10.0.5.9 443 2000 0; ct 172.30.0.5 8.8.8.8 53 300 8.8.8.8 203.0.113.2 53 400 0; ct 198.51.100.7 203.0.113.2 8443 50 192.168.0.140 198.51.100.7 8443 70 0; ct 192.168.0.140 1.1.1.1 443 5 1.1.1.1 192.168.0.140 443 6 256; ct 192.168.0.140 9.9.9.9 853 7 9.9.9.9 192.168.0.140 853 8 512; ct 192.168.0.140 1.0.0.1 443 9 1.0.0.1 192.168.0.140 443 10 768; for i in 60 61 62 63 64 65 66 67 68 69 70 71; do ct 192.168.0.$i 198.18.0.3 443 1 198.18.0.3 192.168.0.$i 443 1 0; done; printf "1.1.1.1 dev awg3 table 100 src 10.8.0.2 uid 0\n    cache\n" > "$W/cmd/ip route get 1.1.1.1 mark 256"; printf "local 9.9.9.9 dev lo table local src 127.0.0.1\n" > "$W/cmd/ip route get 9.9.9.9 mark 512"; printf "1.0.0.1 via 10.128.28.1 dev wan src 10.128.28.73\n" > "$W/cmd/ip route get 1.0.0.1 mark 768"'
+IFROLES='printf "# 9999999999\nawg3 vpn 0 0 0 0 Finland\nwan wan 0 0 0 0 -\n" > "$W/root/tmp/trafficctl_ifroles"'
+DSTRESOLV='printf "3.0.18.198.in-addr.arpa\tname = cdn.example.\n" > "$W/cmd/nslookup 198.18.0.3"; printf "1.0.168.192.in-addr.arpa\tname = router.lan.\n" > "$W/cmd/nslookup 192.168.0.1"; printf "x\tname = bad host;rm.\n" > "$W/cmd/nslookup 198.18.0.36"'
+WIFI_ALLOW='uci set wireless.default_radio1.macfilter=allow; uci add_list wireless.default_radio1.maclist=02:00:00:00:00:12; uci commit wireless'
+NORESOLVE='uci set trafficctl.main.resolve_names=0; uci commit trafficctl'
+RDNSC='printf "192.168.0.210 tv.lan 1794229581\n192.168.0.110 - 9999999999\n10.32.55.195 vpn-peer.lan 9999999999\n" >> "$W/root/tmp/trafficctl_rdns_cache"; uci set trafficctl.main.rdns_ttl=x; uci commit trafficctl'
+CONNC='printf "192.168.0.104 5G 1794229581\n192.168.0.104 lan3 1794229582\n192.168.0.113 2.4G 1794229583\n" > "$W/root/tmp/trafficctl_conn_cache"'
+# netifyd up: the default socket path on both sides (the fixture's explicit
+# one is a router path the legacy side would look up as it is).
+NETIFY_ON='uci delete trafficctl.main.netify_socket; uci commit trafficctl; mkdir -p "$W/root/var/run/netifyd"; python3 -c "import socket,sys; socket.socket(socket.AF_UNIX).bind(sys.argv[1])" "$W/root/var/run/netifyd/netifyd.sock"; printf "[{\"ip\":\"192.168.0.140\",\"top\":\"youtube\",\"apps\":[{\"name\":\"youtube\",\"bytes\":900,\"flows\":2},{\"name\":\"dns\",\"bytes\":80,\"flows\":1}]},{\"ip\":\"192.168.0.109\",\"top\":\"netflix\",\"apps\":[{\"name\":\"netflix\",\"bytes\":12,\"flows\":1}]}]\n" > "$W/root/tmp/trafficctl_netify.json"'
+NETIFY_STALE="$NETIFY_ON; touch -d 2020-01-01 \"\$W/root/tmp/trafficctl_netify.json\""
+METRICS='uci set trafficctl.metrics.enabled=1; uci commit trafficctl'
+MAPPS="$METRICS; $NETIFY_ON; uci set trafficctl.metrics.apps=1; uci commit trafficctl"
+MBARE="$METRICS; uci set trafficctl.metrics.state=0; uci set trafficctl.metrics.portfw=0; uci commit trafficctl"
+# Recorded agent output: v5 aggregator records, v4 flow records re-emitted
+# with growing counters under one digest, junk.
+FEED='printf "{\"stats\":[{\"local_ip\":\"192.168.0.140\",\"application_id\":\"10.netify.youtube\",\"download\":700,\"upload\":200},{\"local_ip\":\"192.168.0.140\",\"application_id\":\"5.netify.dns\",\"download\":50,\"upload\":30}]}\n{\"local_ip\":\"192.168.0.109\",\"detected_application_name\":\"netify.netflix\",\"digest\":\"ab\",\"local_bytes\":5,\"other_bytes\":1}\n{\"local_ip\":\"192.168.0.109\",\"detected_application_name\":\"netify.netflix\",\"digest\":\"ab\",\"local_bytes\":10,\"other_bytes\":2}\n{\"local_ip\":\"192.168.0.109\",\"detected_application_name\":\"unknown\",\"detected_protocol_name\":\"Unknown\",\"host_server_name\":\"cdn.ex\$ample.com\",\"total_bytes\":44}\n{\"local_ip\":\"fe80::1\",\"detected_application_name\":\"x\"}\nnot json\n" > "$W/root/tmp/feed"'
+NETIFY_LOCKED='mkdir "$W/root/tmp/trafficctl_netify.lock"'
+NETIFY_OFF='uci set trafficctl.main.netify_enabled=0; uci commit trafficctl'
+SINK='mkdir -p "$W/root/etc/netifyd"; printf "{\n  \"sink_socket\": { \"channels\": { \"x\": { \"bind_address\" : \"tcp://127.0.0.1:1780\" } } }\n}\n" > "$W/root/etc/netifyd/netify-sink-socket.json"'
+NETF='tmp/trafficctl_netify.json'
 # Limiter, block and shaper readers. live: a router state built by the real
 # writers in an OpenWrt rootfs (tools/ci/live-readers.sh capture) with the
 # nft and tc of that release; nftfix: one listing of tests/fixtures/nft-src
@@ -137,6 +170,58 @@ totals-upgrade-state | text-sorted+$TOTFILE | router-24.10 | sh:legacy_tot >/dev
 totals-downgrade | json-set:ip | router-24.10 | sh:legacy_tot >/dev/null; $GROW; masked legacy_tot --all | tctl totals >/dev/null; $GROW; masked legacy_tot --all
 totals-downgrade-state | text-sorted+$TOTFILE | router-24.10 | sh:legacy_tot >/dev/null; $GROW; legacy_tot >/dev/null; echo ran | tctl totals >/dev/null; $GROW; legacy_tot >/dev/null; echo ran
 totals-stale-lock | text-sorted+$TOTFILE | router-24.10 | sh:legacy_tot >/dev/null; [ -d \"\$W/root/tmp/trafficctl_totals.lock.d\" ] && echo held; echo ran | tctl totals >/dev/null; [ -d \"\$W/root/tmp/trafficctl_totals.lock.d\" ] && echo held; echo ran | mkdir \"\$W/root/tmp/trafficctl_totals.lock.d\"
+summary | text+$SPAWNF | router-24.10 | trafficctl-summary.sh; sleep 0.3 | tctl summary; sleep 0.3
+summary-routed | text+$SPAWNF | router-24.10 | trafficctl-summary.sh; sleep 0.3 | tctl summary; sleep 0.3 | $ROUTED
+summary-names | text+$SPAWNF | router-24.10 | trafficctl-summary.sh; sleep 0.3 | tctl summary; sleep 0.3 | $NAMES; $RDNSC; $CONNC
+summary-noresolve | text+$SPAWNF | router-24.10 | trafficctl-summary.sh; sleep 0.3 | tctl summary; sleep 0.3 | $NAMES; $RDNSC; $NORESOLVE
+summary-limits-1.0 | text+$SPAWNF | router-24.10 | trafficctl-summary.sh; sleep 0.3 | tctl summary; sleep 0.3 | $LIMITS10; $WIFI_ALLOW
+summary-limits-1.1 | text+$SPAWNF | router-24.10 | trafficctl-summary.sh; sleep 0.3 | tctl summary; sleep 0.3 | $LIMITS11; $WIFI_ALLOW
+summary-sources | text+$SPAWNF | router-24.10 | trafficctl-summary.sh; sleep 0.3 | tctl summary; sleep 0.3 | $ROUTED; $CTADD
+summary-no-offload | text | router-24.10 | trafficctl-summary.sh | tctl summary | $NOOFFLOAD
+summary-degraded | text | router-24.10 | trafficctl-summary.sh | tctl summary | $SWOFFLOAD
+summary-netify | text+$SPAWNF | router-24.10 | trafficctl-summary.sh; sleep 0.3 | tctl summary; sleep 0.3 | $NETIFY_ON
+summary-netify-stale | text+$SPAWNF | router-24.10 | trafficctl-summary.sh; sleep 0.3 | tctl summary; sleep 0.3 | $NETIFY_STALE
+summary-netify-off | text+$SPAWNF | router-24.10 | trafficctl-summary.sh; sleep 0.3 | tctl summary; sleep 0.3 | $NETIFY_STALE; $NETIFY_OFF
+summary-empty | text+$SPAWNF | router-24.10 | trafficctl-summary.sh | tctl summary | : > \"\$W/root/proc/net/nf_conntrack\"
+device | text+tmp/trafficctl_conn_cache | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" 192.168.0.140 | rmask tctl device 192.168.0.140
+device-tcp | text | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" --proto tcp 192.168.0.109 | rmask tctl device --proto tcp 192.168.0.109
+device-udp | text | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" 192.168.0.210 --proto udp | rmask tctl device 192.168.0.210 --proto udp
+device-rdns | text | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" 192.168.0.101 --rdns | rmask tctl device 192.168.0.101 --rdns | $RESOLV; $NAMES
+device-limits-1.0 | text | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" 192.168.0.140 | rmask tctl device 192.168.0.140 | $LIMITS10; $WIFI_ALLOW
+device-limits-1.1 | text | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" 192.168.0.140 | rmask tctl device 192.168.0.140 | $LIMITS11; $WIFI_ALLOW
+device-v6-block-1.0 | text | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" 192.168.0.109 | rmask tctl device 192.168.0.109 | $LIMITS10
+device-v6-block-1.1 | text | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" 192.168.0.109 | rmask tctl device 192.168.0.109 | $LIMITS11
+device-routed | text+tmp/trafficctl_conn_cache | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" 10.32.55.195 | rmask tctl device 10.32.55.195 | $ROUTED; $RDNSC
+device-offline | text+tmp/trafficctl_conn_cache | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" 192.168.0.104 | rmask tctl device 192.168.0.104 | $CONNC
+device-wifi | text+tmp/trafficctl_conn_cache | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" 192.168.0.102 | rmask tctl device 192.168.0.102
+device-oif | text | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" 192.168.0.140 | rmask tctl device 192.168.0.140 | $CTADD; $IFROLES
+device-oif-noroles | text+tmp/trafficctl_ifroles | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" 192.168.0.140 | rmask tctl device 192.168.0.140 | $CTADD
+device-rdns-dst | text | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" 192.168.0.140 --rdns | rmask tctl device 192.168.0.140 --rdns | $DSTRESOLV
+device-routed-sub | text+tmp/trafficctl_conn_cache | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" 10.0.5.9 | rmask tctl device 10.0.5.9 | $ROUTED; $CTADD
+device-bad | text | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" 192.168.0.300 | rmask tctl device 192.168.0.300
+device-none | text | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-device.sh\" --rdns | rmask tctl device --rdns
+metrics-off | text | router-24.10 | trafficctl-metrics.sh | tctl metrics
+metrics | text-sorted+$SPAWNF,$TOTFILE | router-24.10 | trafficctl-metrics.sh; sleep 0.3 | tctl metrics; sleep 0.3 | $METRICS
+metrics-limits-1.0 | text-sorted | router-24.10 | trafficctl-metrics.sh | tctl metrics | $METRICS; $LIMITS10; $NAMES; $RDNSC
+metrics-limits-1.1 | text-sorted | router-24.10 | trafficctl-metrics.sh | tctl metrics | $METRICS; $LIMITS11; $NAMES; $RDNSC
+metrics-sources-1.0 | text-sorted+$TOTFILE | router-24.10 | trafficctl-metrics.sh | tctl metrics | $METRICS; $ROUTED; $CTADD; $LIMITS10
+metrics-sources-1.1 | text-sorted+$TOTFILE | router-24.10 | trafficctl-metrics.sh | tctl metrics | $METRICS; $ROUTED; $CTADD; $LIMITS11
+metrics-apps | text-sorted | router-24.10 | trafficctl-metrics.sh | tctl metrics | $MAPPS
+metrics-bare | text-sorted | router-24.10 | trafficctl-metrics.sh | tctl metrics | $MBARE
+netify-status | text | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-netify.sh\" status | rmask tctl netify status
+netify-status-on | text | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-netify.sh\" status | rmask tctl netify status | $NETIFY_ON
+netify-status-sink | text | router-24.10 | sh:rmask sh \"\$LEXEC/trafficctl-netify.sh\" status | rmask tctl netify status | $SINK
+netify-list | text | router-24.10 | trafficctl-netify.sh list | tctl netify list | $NETIFY_ON
+netify-list-none | text | router-24.10 | trafficctl-netify.sh list | tctl netify list
+netify-collect | text+$NETF | router-24.10 | trafficctl-netify.sh collect | tctl netify collect | $FEED
+netify-collect-0 | text+$NETF | router-24.10 | trafficctl-netify.sh collect 0 | tctl netify collect 0 | $FEED
+netify-collect-007 | text+$NETF | router-24.10 | trafficctl-netify.sh collect 007 | tctl netify collect 007 | $FEED
+netify-collect-99 | text+$NETF | router-24.10 | trafficctl-netify.sh collect 99 | tctl netify collect 99 | $FEED
+netify-collect-off | text+$NETF | router-24.10 | trafficctl-netify.sh collect | tctl netify collect | $FEED; $NETIFY_OFF
+netify-collect-locked | text+$NETF | router-24.10 | trafficctl-netify.sh collect | tctl netify collect | $FEED; $NETIFY_LOCKED
+netify-collect-nodata | text+$NETF | router-24.10 | trafficctl-netify.sh collect 1 | tctl netify collect 1
+netify-raw | text | router-24.10 | trafficctl-netify.sh raw 5 | tctl netify raw 5 | $FEED
+netify-usage | text | router-24.10 | sh:sh \"\$LEXEC/trafficctl-netify.sh\" bogus; echo rc=\$? | tctl netify bogus; echo rc=\$?
 ratelimit-stats-none | json | router-24.10 | trafficctl-ratelimit-stats.sh | tctl ratelimit-stats
 ratelimit-stats-empty | json | router-24.10 | trafficctl-ratelimit-stats.sh | tctl ratelimit-stats | $EMPTYRL
 ratelimit-stats-live-1.0 | json | router-24.10 | trafficctl-ratelimit-stats.sh | tctl ratelimit-stats | live 1.0.2
@@ -196,8 +281,16 @@ rewrite() {   # rewrite <tree> <its libexec dir>
         -e "s|/var/run/trafficctl|$W/root/var/run/trafficctl|g" \
         -e "s|/etc/init\.d/|$W/root/etc/init.d/|g" \
         -e "s|/etc/config/trafficctl|$W/root/etc/config/trafficctl|g" \
-        -e "s|/sys/kernel/debug/ecm|$W/root/sys/kernel/debug/ecm|g" {} +
+        -e "s|/sys/kernel/debug/ecm|$W/root/sys/kernel/debug/ecm|g" \
+        -e "s|/var/run/netifyd/|$W/root/var/run/netifyd/|g" \
+        -e "s|/etc/netifyd/|$W/root/etc/netifyd/|g" {} +
 }
+# The summary's detached refreshes, as the spawn log records the port's.
+sed -i -e "s|/usr/libexec/trafficctl/trafficctl-rdns-refresh\.sh|$W/bin/spawn rdns-refresh|" \
+    -e "s|/usr/libexec/trafficctl/trafficctl-netify\.sh collect|$W/bin/spawn netify collect|" \
+    "$LEXEC/trafficctl-summary.sh"
+grep -q "$W/bin/spawn netify collect" "$LEXEC/trafficctl-summary.sh" ||
+    { echo "FAIL: the legacy summary's spawns were not redirected"; exit 1; }
 rewrite "$L" "$LEXEC"
 rewrite "$C" "$CEXEC"
 
@@ -238,7 +331,13 @@ cat > "$W/bin/logger" <<EOF
 #!/bin/sh
 echo "\$*" >> "$W/root/tmp/logger.log"
 EOF
+cat > "$W/bin/spawn" <<EOF
+#!/bin/sh
+echo "\$*" >> "$W/root/tmp/spawn.log"
+EOF
 chmod +x "$W/bin/"*
+# A recorded agent feed, read by both netify sides when a case writes it.
+export TCTL_NETIFY_FEED="$W/root/tmp/feed"
 
 compare() {   # compare <mode> <legacy file> <new file>; 0 = equal
     case "$1" in
@@ -278,6 +377,25 @@ trim() { printf '%s' "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
 # For sh: cases. total_since is "now" for a device first seen in this run,
 # and the two sides do not run in the same second.
 legacy_tot() { sh "$LEXEC/trafficctl-totals.sh" "$@"; }
+# The new side's root: the CLI the reports spawn (the spawn log), and the
+# current scripts the ported code still runs, rewritten like the legacy ones.
+cli_root() {
+    mkdir -p "$W/root/usr/sbin" "$W/root/usr/libexec"
+    ln -sfn "$CEXEC" "$W/root/usr/libexec/trafficctl"
+    ln -sf "$W/bin/spawn" "$W/root/usr/sbin/trafficctl"
+}
+# A report as compact JSON in its own key order, then its exit status: the
+# clock (device timestamp, netify cache_age) and the root prefix masked.
+rmask() {
+    local rc
+    "$@" > "$W/masked.json"; rc=$?
+    jq -c --arg r "$W/root" 'walk(if type == "string" then (split($r) | join("")) else . end)
+        | if type == "object" then
+            (if has("timestamp") then .timestamp = 0 else . end)
+            | (if has("cache_age") then .cache_age = (.cache_age >= 0) else . end)
+          else . end' "$W/masked.json" 2>/dev/null || cat "$W/masked.json"
+    echo "rc=$rc"
+}
 masked() {
     "$@" > "$W/masked.json"
     jq -c 'map(if (.total_since | type) == "number" and .total_since > now - 3600 then .total_since = "<now>" else . end)' "$W/masked.json"
@@ -293,6 +411,8 @@ fi
 while IFS='|' read -r name mode fixture legacy new setup; do
     name=$(trim "$name")
     [ -n "$name" ] || continue
+    # EQUIV_ONLY=<ERE> runs the matching cases only, for a look by hand.
+    [ -z "${EQUIV_ONLY:-}" ] || [[ "$name" =~ $EQUIV_ONLY ]] || continue
     mode=$(trim "$mode"); fixture=$(trim "$fixture")
     legacy=$(trim "$legacy"); new=$(trim "$new"); setup=$(trim "$setup")
     files=""
@@ -312,6 +432,7 @@ while IFS='|' read -r name mode fixture legacy new setup; do
     [ -z "$files" ] || with_files "$W/legacy.out" "$files"
 
     fresh_root "$fixture" "$setup"
+    cli_root
     (export TCTL_ROOT="$W/root" PATH="$W/bin:$PATH"; eval "$new") > "$W/new.out" 2> "$W/new.err"
     [ -z "$files" ] || with_files "$W/new.out" "$files"
     ubus_stop
@@ -581,6 +702,7 @@ RPASS=0
 while IFS='|' read -r name mode scripts method input setup; do
     name=$(trim "$name")
     [ -n "$name" ] || continue
+    [ -z "${EQUIV_ONLY:-}" ] || [[ "rpcd-$name" =~ $EQUIV_ONLY ]] || continue
     mode=$(trim "$mode"); scripts=$(trim "$scripts"); method=$(trim "$method")
     input=$(trim "$input"); setup=$(trim "$setup")
     files=""

@@ -495,8 +495,7 @@ assert_eq "filter support: wifi + hostapd_cli = full" "full" "$(filter_support)"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STATUS_JS="$ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js"
-assert_contains "device.sh emits wifi_filter" \
-    '"wifi_filter":"%s"' "$(cat "$BIN/trafficctl-device.sh")"
+# `trafficctl device` reports it as wifi_filter: tests/test_report.sh.
 assert_contains "view passes wifi_filter to the WiFi button" \
     "updateWifiBtn(data.wifi_blocked, !!data.mac, data.wifi_filter)" "$(cat "$STATUS_JS")"
 assert_contains "view hides the WiFi button where there is no wifi" \
@@ -536,11 +535,8 @@ assert_contains "row: frontend consumes wifi_block_pending" \
     "wifi_block_pending" "$(cat "$STATUS_JS")"
 
 # A device on the deny list that is still associated is not blocked, and the
-# backend has to say so for the row to be able to.
-assert_contains "summary.sh emits wifi_block_pending" \
-    '"wifi_block_pending":%s' "$(cat "$ROOT/trafficctl/files/usr/libexec/trafficctl/trafficctl-summary.sh")"
-assert_contains "device.sh emits wifi_block_pending" \
-    '"wifi_block_pending":%s' "$(cat "$ROOT/trafficctl/files/usr/libexec/trafficctl/trafficctl-device.sh")"
+# backend has to say so for the row to be able to: wifi_block_pending, from
+# the summary and the device report (tests/test_report.sh).
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

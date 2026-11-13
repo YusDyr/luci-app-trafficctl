@@ -101,6 +101,7 @@ for f in \
   /usr/sbin/trafficctl \
   /usr/share/ucode/trafficctl/lib.uc \
   /usr/share/ucode/trafficctl/net.uc \
+  /usr/share/ucode/trafficctl/report.uc \
   /usr/libexec/trafficctl/trafficctl-summary.sh \
   /usr/libexec/trafficctl/trafficctl-fw.sh \
   /usr/libexec/trafficctl/trafficctl-device.sh \
@@ -161,9 +162,13 @@ for c in "/usr/sbin/trafficctl names list" "/usr/libexec/trafficctl/trafficctl-n
     out=$($c 2>&1)
     [ "$out" = "[]" ] || { echo "CLI FAILED: $c printed: $out"; exit 1; }
 done
-for c in subnets ifaces bytes totals "totals --all"; do
+for c in subnets ifaces bytes totals "totals --all" summary "netify list"; do
     out=$(/usr/sbin/trafficctl $c 2>&1)
     case "$out" in "["*"]") ;; *) echo "CLI FAILED: trafficctl $c printed: $out"; exit 1 ;; esac
+done
+for c in "/usr/sbin/trafficctl metrics" /usr/libexec/trafficctl/trafficctl-metrics.sh; do
+    out=$($c 2>&1)
+    case "$out" in "# trafficctl metrics are disabled"*) ;; *) echo "CLI FAILED: $c printed: $out"; exit 1 ;; esac
 done
 if /usr/sbin/trafficctl bogus >/dev/null 2>&1; then
     echo "CLI FAILED: an unknown command exited 0"; exit 1

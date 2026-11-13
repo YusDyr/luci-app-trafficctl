@@ -399,36 +399,8 @@ printf '8\tv4\ttctl_block_192_168_1_50\t192.168.1.50\n' > "$FW4_STATE"
 assert_eq "is_blocked: still true for a v4-only rule from an older version" \
     "YES" "$(fw 'tctl_is_blocked 192.168.1.50 && echo YES || echo NO')"
 
-# The summary table has its own copy of this logic against a prefetched dump.
-# Extract it and drive it directly rather than standing up a whole poll.
-LOOKUPS="$TMPDIR/lookups.sh"
-sed -n '/^lookup_blocked()/,/^}/p;/^lookup_block_bytes()/,/^}/p' \
-    "$BIN/trafficctl-summary.sh" > "$LOOKUPS"
-assert_contains "harness: the summary lookups were extracted" "lookup_blocked()" "$(cat "$LOOKUPS")"
-assert_contains "harness: the byte lookup was extracted too" "lookup_block_bytes()" "$(cat "$LOOKUPS")"
-
-summary_lookup() {
-    local dump="$1" call="$2"
-    PATH="$MOCKBIN:$PATH" sh -c ". $FW >/dev/null 2>&1; . $LOOKUPS; FWD_DUMP='$dump'; $call" 2>&1
-}
-
-V6_ONLY_DUMP='		meta nfproto ipv6 ether saddr aa:bb:cc:dd:ee:50 counter packets 3 bytes 300 drop comment "tctl_block_192_168_1_50_mac"'
-BOTH_DUMP="		ip saddr 192.168.1.50 counter packets 1 bytes 100 drop comment \"tctl_block_192_168_1_50\"
-$V6_ONLY_DUMP"
-
-assert_eq "summary: reports blocked when only the IPv6 rule is present" \
-    "1" "$(summary_lookup "$V6_ONLY_DUMP" 'lookup_blocked 192.168.1.50')"
-assert_eq "summary: does not attribute it to a prefix-sharing address" \
-    "0" "$(summary_lookup "$V6_ONLY_DUMP" 'lookup_blocked 192.168.1.5')"
-assert_eq "summary: unblocked device still reads 0" \
-    "0" "$(summary_lookup "" 'lookup_blocked 192.168.1.50')"
-
-# Counting only the v4 rule would make a dual-stack device's dropped bytes read
-# low for the same reason the traffic used to escape entirely.
-assert_eq "summary: block bytes sum both halves" \
-    "400" "$(summary_lookup "$BOTH_DUMP" 'lookup_block_bytes 192.168.1.50')"
-assert_eq "summary: block bytes are 0 with no rule at all" \
-    "0" "$(summary_lookup "" 'lookup_block_bytes 192.168.1.50')"
+# The summary and the device report read the same rule forms, the MAC half
+# included: tests/test_report.sh.
 
 # ── rate limiter: upload over IPv6 ───────────────────────────────────────────
 
