@@ -1412,11 +1412,13 @@ while IFS='|' read -r name mode scripts method input setup; do
 
     fresh_root router-24.10 "$setup"
     rpcd_side new "$scripts" "$method" "$input" > "$W/new.out" 2> "$W/new.err"
+    # The reply itself, before normalise appends the files.
+    new_replied=$([ -s "$W/new.out" ] && echo yes || echo no)
     normalise "$W/new.out" "$files"
     ubus_stop
     if [ -n "${RPCD_REFUSED[$name]:-}" ]; then
         want="Command failed: ${RPCD_REFUSED[$name]}"
-        if [ ! -s "$W/new.out" ] && grep -qxF "$want" "$W/new.err"; then
+        if [ "$new_replied" = no ] && grep -qxF "$want" "$W/new.err"; then
             PASS=$((PASS + 1)); RREFUSED=$((RREFUSED + 1))
         else
             FAIL=$((FAIL + 1)); echo "FAIL: rpcd $name: rpcd should refuse it ($want)"
