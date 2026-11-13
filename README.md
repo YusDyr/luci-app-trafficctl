@@ -197,6 +197,7 @@ I hope it turns out as useful for you as it has been for me.
 | `luci-base` | Web interface | Always required |
 | `rpcd` | Backend RPC | Always required |
 | `rpcd-mod-ucode` | Runs the rpcd plugin | Always required |
+| `rpcd-mod-file` | The plugin runs the CLI through `file.exec` | Always required (luci-base pulls it in) |
 | `tc-full` + `kmod-sched-core` + `kmod-sched-htb` | Traffic shaping | For HTB/fq_codel queues |
 | `kmod-ifb` | Upload shaping | Without it the shaper applies to download only, and reports that |
 | `iw-full` | Interface detection | WiFi band identification |

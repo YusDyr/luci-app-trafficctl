@@ -289,7 +289,7 @@ mkdir -p "$CTRL"
 cat > "$CTRL/control" <<EOF
 Package: $PKG_NAME
 Version: ${PKG_VERSION}-${PKG_RELEASE}
-Depends: $BE_NAME (= ${PKG_VERSION}-${PKG_RELEASE}), $TG_NAME (= ${PKG_VERSION}-${PKG_RELEASE}), $BE_DEPENDS, $FE_EXTRA_DEPENDS, luci-base, rpcd, rpcd-mod-ucode
+Depends: $BE_NAME (= ${PKG_VERSION}-${PKG_RELEASE}), $TG_NAME (= ${PKG_VERSION}-${PKG_RELEASE}), $BE_DEPENDS, $FE_EXTRA_DEPENDS, luci-base, rpcd, rpcd-mod-ucode, rpcd-mod-file
 Source: https://github.com/YusDyr/luci-app-trafficctl
 License: Apache-2.0
 Section: luci

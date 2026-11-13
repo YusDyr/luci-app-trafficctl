@@ -235,8 +235,11 @@ function send(x, v) {
 			x.req.error(ST_NO_DATA);
 	}
 	catch (e) {
-		// Replied already: rpcd's guard timer was first.
-		warn(sprintf('luci.trafficctl %s: %s\n', x.method, e.message));
+		// Replied already: rpcd's guard timer was first (its exec
+		// timeout, rpcd -t, is below the plugin's limit). One line in
+		// the log, since the caller only saw "Request timed out".
+		warn(sprintf('luci.trafficctl %s: the reply came after rpcd timed the call out, dropped (%s)\n',
+			x.method, e.message));
 	}
 }
 

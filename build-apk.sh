@@ -288,7 +288,7 @@ chmod +x "$SCRIPTS"/*
 # The backend is pinned to the same version, as in build-ipk.sh.
 APK_FILE=$(build_apk "$PKG_NAME" luci \
     "Per-device traffic monitoring, rate limiting (nftables), traffic shaping (tc/HTB), internet blocking, WiFi MAC filtering, and Telegram bot control." \
-    "${BE_NAME}=${PKG_VERSION}-r${PKG_RELEASE} ${TG_NAME}=${PKG_VERSION}-r${PKG_RELEASE} $BE_DEPENDS $FE_EXTRA_DEPENDS luci-base rpcd rpcd-mod-ucode" "$DATA" "$SCRIPTS")
+    "${BE_NAME}=${PKG_VERSION}-r${PKG_RELEASE} ${TG_NAME}=${PKG_VERSION}-r${PKG_RELEASE} $BE_DEPENDS $FE_EXTRA_DEPENDS luci-base rpcd rpcd-mod-ucode rpcd-mod-file" "$DATA" "$SCRIPTS")
 
 # --- Translations, one package per language ---
 #

@@ -34,8 +34,10 @@ LUCI_DESCRIPTION:=Per-device traffic monitoring, rate limiting (nftables), \
 # and with it here an upgrade from 1.30.x keeps a bot that was running.
 #
 # rpcd-mod-ucode runs the rpcd plugin (/usr/share/rpcd/ucode/luci.trafficctl.uc)
-# inside rpcd. Releases up to 1.30.x shipped it as an exec plugin.
-LUCI_DEPENDS:=+trafficctl +trafficctl-telegram +conntrack +curl +tc +iw +kmod-nft-netdev +firewall4 +ucode +ucode-mod-fs +ucode-mod-uci +ucode-mod-ubus +hostapd-utils +luci-base +rpcd +rpcd-mod-ucode
+# inside rpcd. Releases up to 1.30.x shipped it as an exec plugin. The plugin
+# runs the CLI through rpcd's file.exec, which is rpcd-mod-file (luci-base
+# pulls it in too).
+LUCI_DEPENDS:=+trafficctl +trafficctl-telegram +conntrack +curl +tc +iw +kmod-nft-netdev +firewall4 +ucode +ucode-mod-fs +ucode-mod-uci +ucode-mod-ubus +hostapd-utils +luci-base +rpcd +rpcd-mod-ucode +rpcd-mod-file
 LUCI_PKGARCH:=all
 
 include $(TOPDIR)/feeds/luci/luci.mk

@@ -41,6 +41,8 @@ add() {
 mkdir -p /var/lock /var/run /tmp/trafficctl /etc/trafficctl
 [ -e /usr/lib/rpcd/ucode.so ] || add rpcd-mod-ucode
 [ -e /usr/lib/rpcd/ucode.so ] || die "no rpcd-mod-ucode for this image"
+[ -e /usr/lib/rpcd/file.so ] || add rpcd-mod-file
+[ -e /usr/lib/rpcd/file.so ] || die "no rpcd-mod-file (file.exec) for this image"
 for m in fs uci ubus; do
     [ -e "/usr/lib/ucode/$m.so" ] || add "ucode-mod-$m"
 done
@@ -60,7 +62,7 @@ until ubus list luci.trafficctl >/dev/null 2>&1; do
     [ "$i" -lt 20 ] || die "rpcd never registered luci.trafficctl"
     sleep 1
 done
-say "rpcd $(opkg list-installed rpcd 2>/dev/null || apk info -v rpcd 2>/dev/null | head -n 1)"
+say "rpcd $(opkg list-installed rpcd 2>/dev/null || apk list -I rpcd 2>/dev/null | head -n 1)"
 
 alive() { kill -0 "$RPCD_PID" 2>/dev/null; }
 
