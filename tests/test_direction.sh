@@ -11,11 +11,15 @@ FAIL=0
 
 BIN="$(cd "$(dirname "$0")/.." && pwd)/trafficctl/files/usr/libexec/trafficctl"
 
-TMPDIR=$(mktemp -d)
-trap 'rm -rf "$TMPDIR"' EXIT
-MOCKBIN="$TMPDIR/bin"
-mkdir -p "$MOCKBIN"
-NFT_LOG="$TMPDIR/nft.log"
+# The limiter is `trafficctl ratelimit` (ucode); the shaper is still the shell
+# script, run with its own fakes below.
+# shellcheck source=tests/lib/ucode.sh
+. "$(dirname "$0")/lib/ucode.sh"
+# shellcheck source=tests/lib/limit_env.sh
+. "$UC_TESTLIB/limit_env.sh"
+TMPDIR="$UC_TMP/shaper"
+SHBIN="$TMPDIR/bin"
+mkdir -p "$SHBIN"
 TC_LOG="$TMPDIR/tc.log"
 
 assert_eq() {
@@ -38,123 +42,37 @@ assert_contains() {
     fi
 }
 
-# ── mocks ────────────────────────────────────────────────────────────────────
-cat > "$MOCKBIN/uci" <<'MOCK'
-#!/bin/sh
-case "$3" in
-    network.wan.device) echo "eth1" ;;
-    network.lan.device) echo "br-lan" ;;
-    # Patterns quoted: [0] is a glob character class otherwise, so these
-    # would never match the literal uci key.
-    "firewall.@zone[0].name") echo "lan" ;;
-    "firewall.@zone[0].network") echo "lan" ;;
-    *) exit 1 ;;
-esac
-MOCK
-
-cat > "$MOCKBIN/ubus" <<'MOCK'
-#!/bin/sh
-case "$2" in
-    network.interface.wan) echo '{"l3_device":"eth1"}' ;;
-    *) echo '{"l3_device":"br-lan","ipv4-address":[{"address":"192.168.1.1","mask":24}]}' ;;
-esac
-MOCK
-
-# Parses its stdin rather than hardcoding, so the wan/lan distinction survives.
-cat > "$MOCKBIN/jsonfilter" <<'MOCK'
-#!/bin/sh
-input=$(cat)
-case "$2" in
-    '@.l3_device') echo "$input" | sed -n 's/.*"l3_device":"\([^"]*\)".*/\1/p' ;;
-    '@["ipv4-address"][0].address') echo "$input" | sed -n 's/.*"address":"\([^"]*\)".*/\1/p' ;;
-    '@["ipv4-address"][0].mask') echo "$input" | sed -n 's/.*"mask":\([0-9]*\).*/\1/p' ;;
-esac
-MOCK
-
-IP_LOG="$TMPDIR/ip.log"
-cat > "$MOCKBIN/ip" <<MOCK
-#!/bin/sh
-echo "\$*" >> "$IP_LOG"
-case "\$*" in
-    "link show tctl-ifb0") exit 1 ;;   # not created yet
-esac
-exit 0
-MOCK
-
-cat > "$MOCKBIN/nft" <<MOCK
-#!/bin/sh
-echo "\$*" >> "$NFT_LOG"
-case "\$*" in
-    "list tables") echo "table inet fw4" ;;
-esac
-exit 0
-MOCK
-
-cat > "$MOCKBIN/tc" <<MOCK
-#!/bin/sh
-echo "\$*" >> "$TC_LOG"
-case "\$*" in
-    "class show dev tctl-ifb0") echo "class htb 1:1 root rate 1000Mbit" ;;
-    *"class show"*) exit 0 ;;
-esac
-exit 0
-MOCK
-
-chmod +x "$MOCKBIN"/*
-
-# tc needs the WAN device to look present
-mkdir -p "$TMPDIR/sys/class/net/eth1"
-
 # br-lan is a bridge with two physical ports. Ingress hooks must land on the
 # PORTS: a netdev ingress hook bound to the bridge itself never sees bridged
 # traffic, which is how upload limiting silently did nothing.
-mkdir -p "$TMPDIR/sys/class/net/br-lan/brif/lan1" \
-         "$TMPDIR/sys/class/net/br-lan/brif/lan2"
-export TCTL_SYSFS_NET="$TMPDIR/sys/class/net"
+lt_net br-lan lan1 lan2
 
 # ── WAN device resolution ────────────────────────────────────────────────────
 # The old code fell back to the literal string "wan", which is an interface
 # name rather than a device: nft rejected the chain and download limiting
 # silently did nothing.
-WANDEV=$(PATH="$MOCKBIN:$PATH" sh -c ". $BIN/trafficctl-fw.sh; tctl_get_wan_device")
-assert_contains "wan: resolves to a real device" "eth1" "$WANDEV"
+wan() { PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" tcall trafficctl.limit wan_device 2>&1; }
+assert_eq "wan: resolves to a real device" "eth1" "$(wan)"
 
 # With no resolvable candidate, it must fail rather than emit a bogus name.
-cat > "$MOCKBIN/ubus" <<'MOCK'
-#!/bin/sh
-echo '{}'
-MOCK
-cat > "$MOCKBIN/uci_nowan" <<'MOCK'
-#!/bin/sh
-exit 1
-MOCK
-chmod +x "$MOCKBIN/ubus" "$MOCKBIN/uci_nowan"
-OUT=$(PATH="$MOCKBIN:$PATH" sh -c "cp $MOCKBIN/uci_nowan $MOCKBIN/uci; . $BIN/trafficctl-fw.sh; tctl_get_wan_device || echo NO_WAN" 2>/dev/null)
-assert_contains "wan: reports failure instead of the literal 'wan'" "NO_WAN" "$OUT"
-
-# restore working mocks
-cat > "$MOCKBIN/uci" <<'MOCK'
-#!/bin/sh
-case "$3" in
-    network.wan.device) echo "eth1" ;;
-    network.lan.device) echo "br-lan" ;;
-    "firewall.@zone[0].name") echo "lan" ;;
-    "firewall.@zone[0].network") echo "lan" ;;
-    *) exit 1 ;;
-esac
-MOCK
-cat > "$MOCKBIN/ubus" <<'MOCK'
-#!/bin/sh
-case "$2" in
-    network.interface.wan) echo '{"l3_device":"eth1"}' ;;
-    *) echo '{"l3_device":"br-lan","ipv4-address":[{"address":"192.168.1.1","mask":24}]}' ;;
-esac
-MOCK
-chmod +x "$MOCKBIN/uci" "$MOCKBIN/ubus"
+printf '{}\n' > "$LT/ubus/network.interface.wan@status.json"
+ubus_stop; ubus_start "$LT/ubus"
+cp "$ROOT/etc/config/network" "$TMPDIR/network"
+printf "config interface 'lan'\n\toption device 'br-lan'\n\nconfig interface 'wan'\n\toption device 'wan'\n" > "$ROOT/etc/config/network"
+assert_eq "wan: reports failure instead of the literal 'wan'" "" "$(wan)"
+# The default route is the last candidate, and is checked in sysfs too.
+echo "default via 203.0.113.1 dev eth1 proto static" > "$STATE/route"
+assert_eq "wan: the default route's device" "eth1" "$(wan)"
+echo "default via 203.0.113.1 dev wan proto static" > "$STATE/route"
+assert_eq "wan: a default route over a device sysfs lacks is no answer" "" "$(wan)"
+: > "$STATE/route"
+cp "$TMPDIR/network" "$ROOT/etc/config/network"
+printf '{"up":true,"l3_device":"eth1"}\n' > "$LT/ubus/network.interface.wan@status.json"
+ubus_stop; ubus_start "$LT/ubus"
 
 # ── limiter: both directions ─────────────────────────────────────────────────
-: > "$NFT_LOG"
-PATH="$MOCKBIN:$PATH" sh -c ". $BIN/trafficctl-fw.sh; tctl_ratelimit_add 192.168.1.50 5000 rl_test" >/dev/null 2>&1
+lt_reset
+lt_run ratelimit 192.168.1.50 5000 rl_test >/dev/null
 NFT=$(cat "$NFT_LOG")
 
 # Download is policed at LAN EGRESS on the BRIDGE. At WAN ingress the packet
@@ -190,11 +108,98 @@ else
     PASS=$((PASS + 1))
 fi
 
+# A kernel without the egress hook (< 5.16): download falls back to WAN
+# ingress, and only then.
+lt_reset
+OUT=$(NFT_FAIL_HOOKS="dl_br_lan" lt_run ratelimit 192.168.1.50 5000)
+NFT=$(cat "$NFT_LOG")
+assert_contains "limiter: no egress hook: WAN ingress fallback" \
+    "add chain netdev tm_ratelimit dl { type filter hook ingress device eth1 priority -200" "$NFT"
+assert_eq "limiter: no egress hook: download rule on the fallback chain" "dl -" "$(lt_rules_of rl_ratelimit_192_168_1_50)"
+assert_contains "limiter: no egress hook: complete, the LAN errors dropped" '"partial":false' "$OUT"
+
 # ── limiter: removal clears both ─────────────────────────────────────────────
 : > "$NFT_LOG"
-PATH="$MOCKBIN:$PATH" sh -c ". $BIN/trafficctl-fw.sh; tctl_ratelimit_remove 192.168.1.50 rl_test" >/dev/null 2>&1
+lt_run ratelimit 192.168.1.50 0 rl_test >/dev/null
 NFT=$(cat "$NFT_LOG")
 assert_contains "limiter: removal scans the whole table" "list table netdev tm_ratelimit" "$NFT"
+assert_eq "limiter: removal leaves nothing" "" "$(lt_rules_of rl_ratelimit_192_168_1_50; lt_rules_of rl_ratelimit_192_168_1_50_ul)"
+
+# kmod-nft-netdev missing: every chain would fail, so it stops and says why.
+lt_reset
+OUT=$(NFT_FAIL_TABLE=1 lt_run ratelimit 192.168.1.50 5000)
+assert_contains "limiter: no netdev family: refused with the package to install" \
+    'cannot create the nftables netdev table (is kmod-nft-netdev installed?)' "$OUT"
+assert_contains "limiter: no netdev family: logged with nft's error" \
+    'rate limit: cannot create nft table netdev tm_ratelimit (kmod-nft-netdev missing?): Error: Could not process rule: Operation not supported' "$(cat "$LOGGER_LOG")"
+
+# ── shaper mocks ─────────────────────────────────────────────────────────────
+cat > "$SHBIN/uci" <<'MOCK'
+#!/bin/sh
+case "$3" in
+    network.wan.device) echo "eth1" ;;
+    network.lan.device) echo "br-lan" ;;
+    # Patterns quoted: [0] is a glob character class otherwise, so these
+    # would never match the literal uci key.
+    "firewall.@zone[0].name") echo "lan" ;;
+    "firewall.@zone[0].network") echo "lan" ;;
+    *) exit 1 ;;
+esac
+MOCK
+
+cat > "$SHBIN/ubus" <<'MOCK'
+#!/bin/sh
+case "$2" in
+    network.interface.wan) echo '{"l3_device":"eth1"}' ;;
+    *) echo '{"l3_device":"br-lan","ipv4-address":[{"address":"192.168.1.1","mask":24}]}' ;;
+esac
+MOCK
+
+# Parses its stdin rather than hardcoding, so the wan/lan distinction survives.
+cat > "$SHBIN/jsonfilter" <<'MOCK'
+#!/bin/sh
+input=$(cat)
+case "$2" in
+    '@.l3_device') echo "$input" | sed -n 's/.*"l3_device":"\([^"]*\)".*/\1/p' ;;
+    '@["ipv4-address"][0].address') echo "$input" | sed -n 's/.*"address":"\([^"]*\)".*/\1/p' ;;
+    '@["ipv4-address"][0].mask') echo "$input" | sed -n 's/.*"mask":\([0-9]*\).*/\1/p' ;;
+esac
+MOCK
+
+IP_LOG="$TMPDIR/ip.log"
+cat > "$SHBIN/ip" <<MOCK
+#!/bin/sh
+echo "\$*" >> "$IP_LOG"
+case "\$*" in
+    "link show tctl-ifb0") exit 1 ;;   # not created yet
+esac
+exit 0
+MOCK
+
+cat > "$SHBIN/nft" <<MOCK
+#!/bin/sh
+echo "\$*" >> "$NFT_LOG"
+case "\$*" in
+    "list tables") echo "table inet fw4" ;;
+esac
+exit 0
+MOCK
+
+cat > "$SHBIN/tc" <<MOCK
+#!/bin/sh
+echo "\$*" >> "$TC_LOG"
+case "\$*" in
+    "class show dev tctl-ifb0") echo "class htb 1:1 root rate 1000Mbit" ;;
+    *"class show"*) exit 0 ;;
+esac
+exit 0
+MOCK
+
+chmod +x "$SHBIN"/*
+
+mkdir -p "$TMPDIR/sys/class/net/eth1" "$TMPDIR/sys/class/net/br-lan/brif/lan1" \
+         "$TMPDIR/sys/class/net/br-lan/brif/lan2"
+export TCTL_SYSFS_NET="$TMPDIR/sys/class/net"
 
 # ── shaper: both directions ──────────────────────────────────────────────────
 : > "$TC_LOG"
@@ -203,7 +208,7 @@ sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" \
     -e "s|SHAPES_FILE=\"/etc/trafficctl/shapes.json\"|SHAPES_FILE=\"$TMPDIR/shapes.json\"|" \
     -e "s|/sys/class/net/|$TMPDIR/sys/class/net/|g" \
     "$BIN/trafficctl-shape.sh" > "$SHAPE"
-OUT=$(PATH="$MOCKBIN:$PATH" sh "$SHAPE" add 192.168.1.50 5000 2>&1)
+OUT=$(PATH="$SHBIN:$PATH" sh "$SHAPE" add 192.168.1.50 5000 2>&1)
 TC=$(cat "$TC_LOG")
 
 assert_contains "shaper: add reports success" '"ok":true' "$OUT"
@@ -245,7 +250,7 @@ fi
 
 # ── shaper: removal clears both ──────────────────────────────────────────────
 : > "$TC_LOG"
-PATH="$MOCKBIN:$PATH" sh "$SHAPE" remove 192.168.1.50 >/dev/null 2>&1
+PATH="$SHBIN:$PATH" sh "$SHAPE" remove 192.168.1.50 >/dev/null 2>&1
 TC=$(cat "$TC_LOG")
 assert_contains "shaper: removes LAN class" "class del dev br-lan classid $CID" "$TC"
 assert_contains "shaper: removes IFB class" "class del dev tctl-ifb0 classid $CID" "$TC"
@@ -254,12 +259,8 @@ assert_contains "shaper: removes upload filter" \
 
 # ── subnet / whole-network targets ───────────────────────────────────────────
 
-RL="$TMPDIR/ratelimit.sh"
-sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" \
-    "$BIN/trafficctl-ratelimit.sh" > "$RL"
-
-: > "$NFT_LOG"
-OUT=$(PATH="$MOCKBIN:$PATH" sh "$RL" 10.0.20.0/24 5000 2>&1)
+lt_reset
+OUT=$(lt_run ratelimit 10.0.20.0/24 5000)
 NFT=$(cat "$NFT_LOG")
 assert_contains "subnet: accepted" '"ok":true' "$OUT"
 assert_contains "subnet: defaults to per-device buckets" 'each' "$OUT"
@@ -270,29 +271,29 @@ assert_contains "subnet: download meter keyed by daddr" \
 assert_contains "subnet: upload meter keyed by saddr" \
     "ip saddr 10.0.20.0/24 meter tctl_m_10_0_20_0_24_ul_lan1 { ip saddr limit rate over 625000 bytes/second }" "$NFT"
 
-: > "$NFT_LOG"
-OUT=$(PATH="$MOCKBIN:$PATH" sh "$RL" 10.0.20.0/24 5000 "" shared 2>&1)
+lt_reset
+OUT=$(lt_run ratelimit 10.0.20.0/24 5000 "" shared)
 NFT=$(cat "$NFT_LOG")
 assert_contains "subnet: shared mode is an aggregate bucket" \
     "ip daddr 10.0.20.0/24 limit rate over 625000 bytes/second" "$NFT"
 
-: > "$NFT_LOG"
-OUT=$(PATH="$MOCKBIN:$PATH" sh "$RL" all 2000 2>&1)
+lt_reset
+OUT=$(lt_run ratelimit all 2000)
 NFT=$(cat "$NFT_LOG")
 assert_contains "all: whole network accepted" '"ok":true' "$OUT"
 assert_contains "all: expands to 0.0.0.0/0 with per-device buckets" \
     "ip saddr 0.0.0.0/0 meter tctl_m_0_0_0_0_0_ul_lan2" "$NFT"
 
 # A single host stays a plain per-host bucket.
-: > "$NFT_LOG"
-PATH="$MOCKBIN:$PATH" sh "$RL" 10.0.20.122 1000 >/dev/null 2>&1
+lt_reset
+lt_run ratelimit 10.0.20.122 1000 >/dev/null 2>&1
 NFT=$(cat "$NFT_LOG")
 assert_contains "host: no meter for a single address" \
     "ip saddr 10.0.20.122 limit rate over 125000 bytes/second" "$NFT"
 
-OUT=$(PATH="$MOCKBIN:$PATH" sh "$RL" '10.0.20.0/99' 1000 2>&1)
+OUT=$(lt_run ratelimit '10.0.20.0/99' 1000)
 assert_contains "invalid prefix rejected" '"ok":false' "$OUT"
-OUT=$(PATH="$MOCKBIN:$PATH" sh "$RL" 'bad;target' 1000 2>&1)
+OUT=$(lt_run ratelimit 'bad;target' 1000)
 assert_contains "invalid target rejected" '"ok":false' "$OUT"
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
