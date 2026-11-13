@@ -156,6 +156,15 @@ const commands = {
 		return 0;
 	},
 	// ── end notifications ──
+
+	// The bot is its own process in package trafficctl-telegram (see the
+	// file): run it in the foreground, as the init script does.
+	telegram: (args) => {
+		let bot = '/usr/libexec/trafficctl/trafficctl-telegram.uc';
+		if (!lib.is_file(bot))
+			return result({ ok: false, msg: 'trafficctl-telegram is not installed' });
+		return lib.passthru([ lib.path(bot), ...args ]);
+	},
 };
 
 // Commands the shell scripts still serve: run with our arguments, stdin,

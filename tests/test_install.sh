@@ -1,18 +1,18 @@
 #!/bin/sh
 # Runs INSIDE an OpenWrt rootfs Docker container.
-# Usage: sh /tests/test_install.sh /dist/trafficctl.ipk /dist/luci-app-trafficctl.ipk
-#    or: sh /tests/test_install.sh /dist/trafficctl.apk /dist/luci-app-trafficctl.apk
-# Detects format by extension. Installs both packages in one run, verifies the
-# files and who owns them, then removes both.
+# Usage: sh /tests/test_install.sh /dist/trafficctl.ipk /dist/trafficctl-telegram.ipk /dist/luci-app-trafficctl.ipk
+#    or: sh /tests/test_install.sh /dist/trafficctl.apk /dist/trafficctl-telegram.apk /dist/luci-app-trafficctl.apk
+# Detects format by extension. Installs the three packages in one run, verifies
+# the files and who owns them, then removes them.
 set -e
 
-[ "$#" -ge 2 ] || { echo "usage: $0 <trafficctl package> <luci-app-trafficctl package>"; exit 1; }
+[ "$#" -ge 3 ] || { echo "usage: $0 <trafficctl package> <trafficctl-telegram package> <luci-app-trafficctl package>"; exit 1; }
 PKG="$1"
 for p in "$@"; do
     [ -f "$p" ] || { echo "Package not found: $p"; exit 1; }
     [ "${p##*.}" = "${PKG##*.}" ] || { echo "Mixed package formats: $*"; exit 1; }
 done
-PKGS="trafficctl luci-app-trafficctl"
+PKGS="trafficctl trafficctl-telegram luci-app-trafficctl"
 
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
@@ -110,6 +110,8 @@ for f in \
   /usr/libexec/trafficctl/trafficctl-ifaces.sh \
   /usr/libexec/trafficctl/trafficctl-rdns-refresh.sh \
   /usr/libexec/trafficctl/trafficctl-telegram.sh \
+  /usr/libexec/trafficctl/trafficctl-telegram.uc \
+  /usr/share/ucode/trafficctl/telegram.uc \
   /usr/libexec/trafficctl/trafficctl-telegram-test.sh \
   /usr/libexec/trafficctl/trafficctl-block.sh \
   /usr/libexec/trafficctl/trafficctl-unblock.sh \
@@ -242,7 +244,6 @@ for f in \
   /usr/share/ucode/trafficctl/lib.uc \
   /usr/libexec/trafficctl/trafficctl-fw.sh \
   /etc/config/trafficctl \
-  /etc/init.d/trafficctl-telegram \
   /etc/init.d/trafficctl-notify \
   /usr/share/ucode/trafficctl/notify.uc \
   /etc/hotplug.d/iface/99-trafficctl-shapes \
@@ -250,6 +251,14 @@ for f in \
   /www/cgi-bin/trafficctl-metrics; do
   o=$(owner_of "$f")
   [ "$o" = trafficctl ] || { echo "WRONG OWNER: $f is owned by '$o', expected trafficctl"; exit 1; }
+done
+for f in \
+  /etc/init.d/trafficctl-telegram \
+  /usr/libexec/trafficctl/trafficctl-telegram.sh \
+  /usr/libexec/trafficctl/trafficctl-telegram.uc \
+  /usr/share/ucode/trafficctl/telegram.uc; do
+  o=$(owner_of "$f")
+  [ "$o" = trafficctl-telegram ] || { echo "WRONG OWNER: $f is owned by '$o', expected trafficctl-telegram"; exit 1; }
 done
 for f in \
   /usr/libexec/rpcd/luci.trafficctl \
@@ -283,10 +292,11 @@ case "$PKG" in
         # in opkg's DB — remove it the real way and require success.
         # The web interface first: it depends on the backend.
         opkg remove luci-app-trafficctl || { echo "REMOVAL FAILED: opkg remove luci-app-trafficctl returned non-zero"; exit 1; }
+        opkg remove trafficctl-telegram || { echo "REMOVAL FAILED: opkg remove trafficctl-telegram returned non-zero"; exit 1; }
         opkg remove trafficctl || { echo "REMOVAL FAILED: opkg remove trafficctl returned non-zero"; exit 1; }
         ;;
     *.apk)
-        apk del luci-app-trafficctl trafficctl || {
+        apk del luci-app-trafficctl trafficctl-telegram trafficctl || {
             echo "REMOVAL FAILED: apk del returned non-zero"; exit 1; }
         ;;
 esac
@@ -302,6 +312,7 @@ for f in \
   /www/luci-static/resources/view/trafficctl/status.js \
   /www/luci-static/resources/view/trafficctl/status.css \
   /etc/init.d/trafficctl-telegram \
+  /usr/share/ucode/trafficctl/telegram.uc \
   /etc/init.d/trafficctl-notify \
   /www/cgi-bin/trafficctl-metrics; do
   [ -f "$f" ] && { echo "REMOVAL FAILED: $f still exists"; exit 1; }

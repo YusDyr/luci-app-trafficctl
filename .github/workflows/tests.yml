@@ -26,12 +26,6 @@ jobs:
         run: bash tests/test_portfw.sh
       - name: Bidirectional limit/shape tests
         run: bash tests/test_direction.sh
-      - name: Telegram unit tests
-        run: bash tests/test_telegram.sh
-      - name: Telegram mock tests
-        run: bash tests/test_telegram_mock.sh
-      - name: Telegram E2E tests
-        run: bash tests/test_telegram_e2e.sh
       - name: Security tests
         run: bash tests/test_security.sh
       - name: Block/unblock tests
@@ -142,6 +136,10 @@ jobs:
       # methods and telegram-test (trafficctl.notify).
       - name: Notification tests
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_notify.sh
+      # Commands, callbacks, the device cache and the CLI command
+      # (trafficctl.telegram, package trafficctl-telegram).
+      - name: Telegram bot tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_telegram_bot.sh
       - name: rpcd plugin tests
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_rpcd.sh
       # Every rpc.declare in the views against the plugin's list.

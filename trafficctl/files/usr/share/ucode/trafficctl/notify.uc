@@ -497,21 +497,8 @@ function message(ev, f, t, template) {
 }
 
 // ── transports ──────────────────────────────────────────────────────────────
-// Everything goes to curl as a config file on stdin: the URL may hold a
-// token, and an argument list is readable by every local user.
-
-const CSTR = { '\\': '\\\\', '"': '\\"', '\n': '\\n', '\r': '\\r', '\t': '\\t' };
-
-function cstr(s) {
-	return '"' + replace(s, /[\\"\n\r\t]/g, (c) => CSTR[c]) + '"';
-}
-
-function curl_cfg(url, headers, body) {
-	let c = 'url = ' + cstr(url) + '\n';
-	for (let h in headers)
-		c += 'header = ' + cstr(h) + '\n';
-	return c + 'data-raw = ' + cstr(body) + '\n';
-}
+// Everything goes to curl as a config file on stdin (lib.curl_config): the
+// URL may hold a token, and an argument list is readable by every local user.
 
 // A header value or a URL: one line, nothing curl's config would take apart.
 function header_ok(v) {
@@ -529,7 +516,7 @@ function http_status(code) {
 
 function post_status(url, headers, body) {
 	return http_status(lib.pipe("curl -s -m 10 -X POST -o /dev/null -w '%{http_code}' --config -",
-		curl_cfg(url, headers, body)));
+		lib.curl_config(url, headers, body)));
 }
 
 const TG_TOKEN_RE = /^[0-9]+:[A-Za-z0-9_-]+$/;
@@ -538,7 +525,7 @@ const TG_CHAT_RE = /^-?[0-9]+$/;
 // sendMessage: null when Telegram took it, else the reason.
 function tg_send(token, chat, text) {
 	let out = lib.pipe('curl -s -m 10 -X POST --config -',
-		curl_cfg('https://api.telegram.org/bot' + token + '/sendMessage', [ 'Content-Type: application/json' ],
+		lib.curl_config('https://api.telegram.org/bot' + token + '/sendMessage', [ 'Content-Type: application/json' ],
 			'{"chat_id":' + lib.to_json(chat) + ',"text":' + lib.to_json(text) + ',"parse_mode":"HTML"}'));
 	let r = null;
 	try {

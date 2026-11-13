@@ -14,16 +14,19 @@ luci-app-trafficctl — OpenWrt LuCI plugin for real-time traffic monitoring and
 
 ## Directory Structure
 
-The repository is a feed with two packages, each in its own top-level directory
-(feed-compatible layout — `./scripts/feeds update` finds each Makefile with
-`-mindepth 1`). Both are released in lockstep with the same PKG_VERSION.
+The repository is a feed with two package directories (feed-compatible
+layout — `./scripts/feeds update` finds each Makefile with `-mindepth 1`).
+All packages are released in lockstep with the same PKG_VERSION.
 
 - `trafficctl/`: the backend, openwrt/packages style (`package.mk`). Owns the
   helpers, `/etc/config/trafficctl` (the conffile), init.d, hotplug.d, keep.d
   and the metrics CGI. Its Makefile lists every file by name;
-  `tests/test_package_split.sh` checks that list against `files/`.
+  `tests/test_package_split.sh` checks that list against `files/`. The same
+  Makefile builds `trafficctl-telegram`, the bot (`telegram.uc`, its entry
+  point, the wrapper and its init script), with `DEPENDS:=+trafficctl +curl`.
 - `luci-app-trafficctl/`: the web interface (`luci.mk`). Owns the views, the
-  rpcd plugin, menu.d, acl.d and po/. `LUCI_DEPENDS:=+trafficctl ...`.
+  rpcd plugin, menu.d, acl.d and po/.
+  `LUCI_DEPENDS:=+trafficctl +trafficctl-telegram ...`.
 
 Releases up to 1.28.x were one package, `luci-app-trafficctl`, holding all of
 it. The upgrade moves the backend files and the conffile to `trafficctl`:
@@ -51,6 +54,7 @@ trafficctl/
     ctl.uc                                  — Read-only readers: nft -j limits/blocks, tc shapes, the Rules tab list
     report.uc                               — Read-only reports: summary, device detail, Prometheus exporter, netifyd DPI
     notify.uc                               — Notification events (ubus trafficctl.notify, hotplug.d/trafficctl) and senders (telegram, ntfy, webhook, mail); the device scan
+    telegram.uc                             — Telegram bot (package trafficctl-telegram): commands, device menu, actions through the CLI
   files/usr/libexec/trafficctl/
     trafficctl-fw.sh                        — Shared library (nft helpers, validation, persistence)
     trafficctl-summary.sh                   — Wrapper: `trafficctl summary` (all devices, JSON array; the LuCI poll)
@@ -73,11 +77,12 @@ trafficctl/
     trafficctl-totals.sh                    — Wrapper: `trafficctl totals` (monotonic lifetime totals; the ONLY accumulator, UI + Prometheus share its store)
     trafficctl-rdns.sh                      — Wrapper: `trafficctl rdns`
     trafficctl-rules.sh                     — Wrapper: `trafficctl rules` (every restriction, online or not; live + saved state; "Rules" tab)
-    trafficctl-telegram.sh                  — Telegram bot daemon (long polling)
+    trafficctl-telegram.uc                  — The bot's process (imports lib + telegram only); run by its init script and `trafficctl telegram`
+    trafficctl-telegram.sh                  — Wrapper: `trafficctl telegram`
     trafficctl-telegram-test.sh             — Wrapper: `trafficctl telegram-test` (send a test message to Telegram)
   files/etc/config/trafficctl                — UCI config (conffile, installed 0600)
   files/etc/init.d/
-    trafficctl-telegram                     — procd init script for the bot
+    trafficctl-telegram                     — procd init script for the bot (package trafficctl-telegram)
     trafficctl-history                      — history sampler
     trafficctl-cut                          — procd keeper for the global cut (auto-revert + re-assert)
     trafficctl-notify                       — procd service for the new/known device scan (`trafficctl notify watch`), only when wanted

@@ -1,8 +1,9 @@
 #!/bin/bash
-# The backend and the web interface are two packages: trafficctl (helpers,
-# config, services, hotplug, keep.d, metrics CGI) and luci-app-trafficctl (rpcd
-# plugin, views, menu, ACL, translations). Releases up to 1.28.x shipped all of
-# it as luci-app-trafficctl.
+# The backend and the web interface are separate packages: trafficctl (helpers,
+# config, services, hotplug, keep.d, metrics CGI), trafficctl-telegram (the
+# bot, from the same Makefile) and luci-app-trafficctl (rpcd plugin, views,
+# menu, ACL, translations). Releases up to 1.28.x shipped all of it as
+# luci-app-trafficctl, releases up to 1.30.x the bot in trafficctl.
 #
 # trafficctl/Makefile lists every file it installs by name, so a file added
 # under trafficctl/files/ and not to the Makefile would build fine and silently
@@ -28,22 +29,32 @@ assert_eq() {
 }
 
 # ── trafficctl/Makefile installs exactly the tree under files/ ──────────────
+# Between its two packages, each file once.
 
-INSTALL=$(awk '/^define Package\/trafficctl\/install$/{f=1;next} f&&/^endef/{exit} f' "$BE_MK")
-assert_eq "trafficctl/Makefile has an install section" "yes" "$([ -n "$INSTALL" ] && echo yes || echo no)"
-
+mk_define() { awk -v want="define $1" '$0 == want {f=1;next} f&&/^endef/{exit} f' "$BE_MK"; }
 # "<macro> <source path relative to files/> <destination dir>" per installed file.
-LISTED=$(printf '%s\n' "$INSTALL" | awk '
+listed() {
+    printf '%s\n' "$1" | awk '
     $1 ~ /^\$\(INSTALL_(BIN|CONF|DATA)\)$/ {
         src = $2; sub(/^\.\/files\//, "", src)
         dst = $3; sub(/^\$\(1\)\//, "", dst); sub(/\/$/, "", dst)
         m = $1; gsub(/[$()]/, "", m)
         print m, src, dst
-    }')
+    }'
+}
 TREE=$(cd "$REPO_ROOT/trafficctl/files" && find . -type f | sed 's|^\./||' | LC_ALL=C sort)
-
-assert_eq "every file under trafficctl/files is installed, and nothing else" \
-    "$TREE" "$(printf '%s\n' "$LISTED" | awk '{print $2}' | LC_ALL=C sort)"
+ALL=
+for pkg in trafficctl trafficctl-telegram; do
+INSTALL=$(mk_define "Package/$pkg/install")
+assert_eq "trafficctl/Makefile has an install section for $pkg" "yes" "$([ -n "$INSTALL" ] && echo yes || echo no)"
+LISTED=$(listed "$INSTALL")
+ALL="$ALL$LISTED
+"
+[ "$pkg" = trafficctl-telegram ] && assert_eq "trafficctl-telegram installs the bot and nothing else" \
+    "etc/init.d/trafficctl-telegram
+usr/libexec/trafficctl/trafficctl-telegram.sh
+usr/libexec/trafficctl/trafficctl-telegram.uc
+usr/share/ucode/trafficctl/telegram.uc" "$(printf '%s\n' "$LISTED" | awk '{print $2}' | LC_ALL=C sort)"
 
 while read -r macro src dst; do
     [ -n "$src" ] || continue
@@ -65,6 +76,15 @@ while read -r macro src dst; do
 done <<EOF
 $LISTED
 EOF
+done
+
+assert_eq "every file under trafficctl/files is installed by one package, and nothing else" \
+    "$TREE" "$(printf '%s' "$ALL" | awk 'NF {print $2}' | LC_ALL=C sort)"
+for b in build-ipk.sh build-apk.sh; do
+    assert_eq "$b moves the files of trafficctl-telegram to it" \
+        "$(mk_define Package/trafficctl-telegram/install | awk '$1 ~ /INSTALL_(BIN|DATA)/ {sub(/^\.\/files\//, "", $2); print $2}' | LC_ALL=C sort)" \
+        "$(sed -n 's/^TG_FILES="\(.*\)"$/\1/p' "$REPO_ROOT/$b" | tr ' ' '\n' | LC_ALL=C sort)"
+done
 
 assert_eq "the config is the trafficctl conffile" "/etc/config/trafficctl" \
     "$(awk '/^define Package\/trafficctl\/conffiles$/{f=1;next} f&&/^endef/{exit} f' "$BE_MK")"
@@ -81,13 +101,16 @@ usr/share/rpcd/acl.d/luci-app-trafficctl.json" "$FE_ROOT"
 
 # ── Package relationships ────────────────────────────────────────────────────
 
-# The web interface calls the helpers, so it depends on the backend.
-assert_eq "LUCI_DEPENDS starts with +trafficctl" "1" \
-    "$(grep -cE '^LUCI_DEPENDS:=\+trafficctl( |$)' "$FE_MK")"
+# The web interface calls the helpers, so it depends on the backend, and it
+# configures the bot, which an upgrade from 1.30.x must keep.
+assert_eq "LUCI_DEPENDS starts with +trafficctl +trafficctl-telegram" "1" \
+    "$(grep -cE '^LUCI_DEPENDS:=\+trafficctl \+trafficctl-telegram( |$)' "$FE_MK")"
+assert_eq "trafficctl-telegram depends on trafficctl and curl" "+trafficctl +curl" \
+    "$(mk_define Package/trafficctl-telegram | sed -n 's/^[[:space:]]*DEPENDS:=//p')"
 # The backend's own dependencies are repeated on luci-app-trafficctl: without
 # them opkg removes conntrack, curl, iw and hostapd-utils as orphans of the old
 # single package in the same run that installs trafficctl.
-BE_DEPS=$(sed -n 's/^[[:space:]]*DEPENDS:=//p' "$BE_MK")
+BE_DEPS=$(mk_define Package/trafficctl | sed -n 's/^[[:space:]]*DEPENDS:=//p')
 FE_DEPS=$(sed -n 's/^LUCI_DEPENDS:=//p' "$FE_MK")
 for d in $BE_DEPS; do
     case " $FE_DEPS " in
@@ -112,9 +135,13 @@ for mk in "$BE_MK" "$FE_MK"; do
     assert_eq "no CONFLICTS in ${mk#"$REPO_ROOT"/}" "0" "$(grep -cE '^[[:space:]]*(LUCI_)?CONFLICTS[[:space:]]*[:+?]?=' "$mk")"
 done
 
-assert_eq "trafficctl is architecture independent" "1" "$(grep -cE '^[[:space:]]*PKGARCH:=all$' "$BE_MK")"
-assert_eq "trafficctl ends with BuildPackage" \
-    '$(eval $(call BuildPackage,trafficctl))' "$(grep -v '^[[:space:]]*$' "$BE_MK" | tail -1)"
+for pkg in trafficctl trafficctl-telegram; do
+    assert_eq "$pkg is architecture independent" "1" \
+        "$(mk_define "Package/$pkg" | grep -cE '^[[:space:]]*PKGARCH:=all$')"
+done
+assert_eq "trafficctl/Makefile ends with a BuildPackage per package" \
+    '$(eval $(call BuildPackage,trafficctl))
+$(eval $(call BuildPackage,trafficctl-telegram))' "$(grep -v '^[[:space:]]*$' "$BE_MK" | tail -2)"
 # Every openwrt/luci application Makefile ends with this comment; luci.mk makes
 # the BuildPackage call itself, so an explicit one would be a duplicate.
 assert_eq "luci-app-trafficctl ends with the buildroot signature" \

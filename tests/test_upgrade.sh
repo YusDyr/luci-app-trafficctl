@@ -2,14 +2,16 @@
 # Runs INSIDE an OpenWrt rootfs Docker container.
 # Usage: sh /tests/test_upgrade.sh <old packages...> -- <new packages...>
 #   e.g. sh /tests/test_upgrade.sh /dist-old/luci-app-trafficctl.ipk \
-#            -- /dist/trafficctl.ipk /dist/luci-app-trafficctl.ipk
+#            -- /dist/trafficctl.ipk /dist/trafficctl-telegram.ipk /dist/luci-app-trafficctl.ipk
 # Verifies upgrade scenario: install previous release, then install current build.
 # Asserts config files are preserved and upgrade hooks don't crash.
 #
 # Releases up to 1.28.x are ONE package, luci-app-trafficctl, that also carries
 # the backend; later releases ship the backend as trafficctl. Upgrading from the
 # single package is the case that matters most: every backend file, and the
-# conffile, changes owner in the same run.
+# conffile, changes owner in the same run. Releases up to 1.30.x carry the bot
+# in trafficctl; after that it is trafficctl-telegram, and its files change
+# owner the same way.
 set -e
 
 OLD_PKGS=
@@ -168,7 +170,7 @@ if [ -e /lib/upgrade/keep.d/luci-app-trafficctl ]; then
 fi
 
 # Exactly one copy of each package installed?
-for name in trafficctl luci-app-trafficctl; do
+for name in trafficctl trafficctl-telegram luci-app-trafficctl; do
     if [ "$FMT" = ipk ]; then
         COUNT=$(opkg list-installed | awk -v n="$name" '$1 == n' | wc -l)
     else
@@ -192,11 +194,18 @@ owner_of() {
     fi
 }
 for f in /usr/libexec/trafficctl/trafficctl-fw.sh /etc/config/trafficctl \
-         /etc/init.d/trafficctl-telegram /www/cgi-bin/trafficctl-metrics \
-         /lib/upgrade/keep.d/trafficctl; do
+         /www/cgi-bin/trafficctl-metrics /lib/upgrade/keep.d/trafficctl; do
     o=$(owner_of "$f")
     [ "$o" = trafficctl ] || { echo "FAIL: $f is owned by '$o' after the upgrade, expected trafficctl"; exit 1; }
 done
+for f in /etc/init.d/trafficctl-telegram /usr/libexec/trafficctl/trafficctl-telegram.sh; do
+    o=$(owner_of "$f")
+    [ "$o" = trafficctl-telegram ] || { echo "FAIL: $f is owned by '$o' after the upgrade, expected trafficctl-telegram"; exit 1; }
+done
+if [ "$FMT" = ipk ] && grep -q 'trafficctl-telegram' /usr/lib/opkg/info/trafficctl.list; then
+    echo "FAIL: trafficctl still lists the bot's files"
+    exit 1
+fi
 o=$(owner_of /usr/libexec/rpcd/luci.trafficctl)
 [ "$o" = luci-app-trafficctl ] || { echo "FAIL: the rpcd plugin is owned by '$o', expected luci-app-trafficctl"; exit 1; }
 echo "OK: backend files owned by trafficctl, the rpcd plugin by luci-app-trafficctl"

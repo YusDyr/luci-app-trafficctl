@@ -3,12 +3,16 @@
 # Requires: apk-tools compiled with -Dminimal=false (provides 'apk mkpkg')
 # Usage: sh build-apk.sh <version> <release>
 # Output: dist/trafficctl_<version>-r<release>_noarch.apk (the backend),
+#         dist/trafficctl-telegram_<version>-r<release>_noarch.apk (the bot),
 #         dist/luci-i18n-trafficctl-<lang>_<version>-r<release>_noarch.apk,
 #         dist/luci-app-trafficctl_<version>-r<release>_noarch.apk (last line)
 set -e
 
 PKG_NAME="luci-app-trafficctl"
 BE_NAME="trafficctl"
+TG_NAME="trafficctl-telegram"
+# The bot's files under trafficctl/files (Package/trafficctl-telegram/install).
+TG_FILES="usr/share/ucode/trafficctl/telegram.uc usr/libexec/trafficctl/trafficctl-telegram.sh usr/libexec/trafficctl/trafficctl-telegram.uc etc/init.d/trafficctl-telegram"
 PKG_VERSION="${1:-1.0.0}"
 PKG_RELEASE="${2:-1}"
 
@@ -133,11 +137,12 @@ if [ -z "${IPKG_INSTROOT}" ]; then
     if [ -x /usr/sbin/trafficctl ]; then
         /usr/sbin/trafficctl notify migrate >/dev/null 2>&1 || true
     fi
-    # Restarted, not started: a bot of a release up to 1.30.x runs the device
-    # scan itself, which the notification watcher took over.
-    if [ -x /etc/init.d/trafficctl-telegram ] && [ "$(uci -q get trafficctl.telegram.enabled)" = "1" ]; then
-        /etc/init.d/trafficctl-telegram enable 2>/dev/null || true
-        /etc/init.d/trafficctl-telegram restart 2>/dev/null || true
+    # A bot of a release up to 1.30.x lost its files to trafficctl-telegram
+    # with this upgrade. Without that package it would run on until the next
+    # reboot, and rc.d would keep links to a missing init script.
+    if [ ! -e /etc/init.d/trafficctl-telegram ]; then
+        ubus call service delete '{"name":"trafficctl-telegram"}' >/dev/null 2>&1 || true
+        rm -f /etc/rc.d/S99trafficctl-telegram /etc/rc.d/K10trafficctl-telegram
     fi
     # The watcher decides for itself whether anything wants the scan.
     if [ -x /etc/init.d/trafficctl-notify ]; then
@@ -159,21 +164,8 @@ exit 0
 SCRIPT
 cp "$BE_SCRIPTS/post-install" "$BE_SCRIPTS/post-upgrade"
 
-cat > "$BE_SCRIPTS/pre-upgrade" <<'SCRIPT'
-#!/bin/sh
-# Stop telegram bot before upgrade to avoid stale process
-if [ -z "${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-telegram ]; then
-    /etc/init.d/trafficctl-telegram stop 2>/dev/null || true
-fi
-exit 0
-SCRIPT
-
 cat > "$BE_SCRIPTS/pre-deinstall" <<'SCRIPT'
 #!/bin/sh
-if [ -z "${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-telegram ]; then
-    /etc/init.d/trafficctl-telegram stop 2>/dev/null || true
-    /etc/init.d/trafficctl-telegram disable 2>/dev/null || true
-fi
 if [ -z "${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-notify ]; then
     /etc/init.d/trafficctl-notify stop 2>/dev/null || true
     /etc/init.d/trafficctl-notify disable 2>/dev/null || true
@@ -191,13 +183,66 @@ exit 0
 SCRIPT
 chmod +x "$BE_SCRIPTS"/*
 
+# ── trafficctl-telegram: the bot ───────────────────────────────────────────
+# The files of Package/trafficctl-telegram/install in trafficctl/Makefile,
+# moved out of the backend's tree.
+TG_DATA="$WORKDIR/telegram-data"
+for f in $TG_FILES; do
+    mkdir -p "$TG_DATA/$(dirname "$f")"
+    mv "$BE_DATA/$f" "$TG_DATA/$f"
+done
+chmod +x "$TG_DATA/usr/libexec/trafficctl/"* "$TG_DATA/etc/init.d/"*
+
+TG_SCRIPTS="$WORKDIR/telegram-scripts"
+mkdir -p "$TG_SCRIPTS"
+
+# The same steps as Package/trafficctl-telegram/postinst and prerm in
+# trafficctl/Makefile, after an install and after an upgrade.
+cat > "$TG_SCRIPTS/post-install" <<'SCRIPT'
+#!/bin/sh
+# Restarted, not started: a bot of a release up to 1.30.x runs the device scan
+# itself, which the notification watcher took over. Enabled in rc.d and
+# started only when trafficctl.telegram.enabled is 1, so what runs now is what
+# runs after the next reboot.
+if [ -z "${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-telegram ] && [ "$(uci -q get trafficctl.telegram.enabled)" = "1" ]; then
+    /etc/init.d/trafficctl-telegram enable 2>/dev/null || true
+    /etc/init.d/trafficctl-telegram restart 2>/dev/null || true
+fi
+exit 0
+SCRIPT
+cp "$TG_SCRIPTS/post-install" "$TG_SCRIPTS/post-upgrade"
+
+cat > "$TG_SCRIPTS/pre-upgrade" <<'SCRIPT'
+#!/bin/sh
+# Stop the bot before the upgrade replaces it.
+if [ -z "${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-telegram ]; then
+    /etc/init.d/trafficctl-telegram stop 2>/dev/null || true
+fi
+exit 0
+SCRIPT
+
+cat > "$TG_SCRIPTS/pre-deinstall" <<'SCRIPT'
+#!/bin/sh
+if [ -z "${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-telegram ]; then
+    /etc/init.d/trafficctl-telegram stop 2>/dev/null || true
+    /etc/init.d/trafficctl-telegram disable 2>/dev/null || true
+fi
+exit 0
+SCRIPT
+chmod +x "$TG_SCRIPTS"/*
+
 # replaces: releases up to 1.28.x shipped these files in luci-app-trafficctl.
 # Lets this package be added on its own, or before the new
 # luci-app-trafficctl, over an old install. The SDK build cannot set it and
 # does not need it when both are upgraded in one transaction.
 build_apk "$BE_NAME" net \
-    "Per-device traffic monitoring (conntrack), rate limiting (nftables), traffic shaping (tc/HTB), internet blocking, WiFi MAC filtering, a global internet cut, a Telegram bot and a Prometheus exporter. The web interface is luci-app-trafficctl. WiFi MAC filtering needs hostapd-utils (optional; without it a WiFi block is a temporary ban)." \
+    "Per-device traffic monitoring (conntrack), rate limiting (nftables), traffic shaping (tc/HTB), internet blocking, WiFi MAC filtering, a global internet cut, device notifications and a Prometheus exporter. The web interface is luci-app-trafficctl, the Telegram bot trafficctl-telegram. WiFi MAC filtering needs hostapd-utils (optional; without it a WiFi block is a temporary ban)." \
     "$BE_DEPENDS" "$BE_DATA" "$BE_SCRIPTS" "$PKG_NAME"
+
+# replaces: releases up to 1.30.x shipped the bot in trafficctl.
+build_apk "$TG_NAME" net \
+    "A Telegram bot for trafficctl: device status, and block, WiFi block, limit and shape buttons per device." \
+    "${BE_NAME}=${PKG_VERSION}-r${PKG_RELEASE} curl" "$TG_DATA" "$TG_SCRIPTS" "$BE_NAME"
 
 # ── luci-app-trafficctl: the web interface ─────────────────────────────────
 DATA="$WORKDIR/data"
@@ -230,7 +275,7 @@ chmod +x "$SCRIPTS"/*
 # The backend is pinned to the same version, as in build-ipk.sh.
 APK_FILE=$(build_apk "$PKG_NAME" luci \
     "Per-device traffic monitoring, rate limiting (nftables), traffic shaping (tc/HTB), internet blocking, WiFi MAC filtering, and Telegram bot control." \
-    "${BE_NAME}=${PKG_VERSION}-r${PKG_RELEASE} $BE_DEPENDS $FE_EXTRA_DEPENDS luci-base rpcd" "$DATA" "$SCRIPTS")
+    "${BE_NAME}=${PKG_VERSION}-r${PKG_RELEASE} ${TG_NAME}=${PKG_VERSION}-r${PKG_RELEASE} $BE_DEPENDS $FE_EXTRA_DEPENDS luci-base rpcd" "$DATA" "$SCRIPTS")
 
 # --- Translations, one package per language ---
 #

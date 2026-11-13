@@ -159,11 +159,11 @@ jobs:
       - name: Collect APK
         run: |
           mkdir -p dist
-          cp /tmp/luci-app-trafficctl*.ipk /tmp/trafficctl_*.ipk dist/ 2>/dev/null || true
-          # The web interface and the backend (trafficctl-<ver>.apk). -name
-          # matches the whole basename, so "trafficctl-[0-9]*" cannot pick up
-          # luci-app-trafficctl-*.
-          for pkg in luci-app-trafficctl trafficctl; do
+          cp /tmp/luci-app-trafficctl*.ipk /tmp/trafficctl_*.ipk /tmp/trafficctl-telegram_*.ipk dist/ 2>/dev/null || true
+          # The web interface, the backend (trafficctl-<ver>.apk) and the bot.
+          # -name matches the whole basename, so "trafficctl-[0-9]*" cannot
+          # pick up luci-app-trafficctl-* or trafficctl-telegram-*.
+          for pkg in luci-app-trafficctl trafficctl trafficctl-telegram; do
             APK=$(find bin/ -name "${pkg}-[0-9]*.apk" 2>/dev/null | head -1)
             if [ -z "$APK" ]; then
               echo "::error::$pkg APK not found in SDK output"
@@ -182,6 +182,8 @@ jobs:
           ln -f dist/luci-app-trafficctl_0.0.0-test_noarch.apk dist/luci-app-trafficctl.apk
           ln -f dist/trafficctl_0.0.0-test-1_all.ipk dist/trafficctl.ipk
           ln -f dist/trafficctl_0.0.0-test_noarch.apk dist/trafficctl.apk
+          ln -f dist/trafficctl-telegram_0.0.0-test-1_all.ipk dist/trafficctl-telegram.ipk
+          ln -f dist/trafficctl-telegram_0.0.0-test_noarch.apk dist/trafficctl-telegram.apk
           ls -l dist/
 
       - uses: actions/upload-artifact@v5
@@ -253,7 +255,8 @@ jobs:
           # Addressed through the version-free aliases both builders create,
           # so this works whether the packages came from this workflow's own
           # build or from the caller's release build.
-          # Both packages, backend first: luci-app-trafficctl depends on it.
+          # The three packages, backend first: luci-app-trafficctl depends on
+          # it and on the bot.
           EXT="${{ steps.fmt.outputs.format }}"
           set +e
           docker run --rm \
@@ -261,7 +264,7 @@ jobs:
             -v "$PWD/dist:/dist" \
             -v "$PWD/tests:/tests" \
             "$IMAGE" \
-            /tests/test_install.sh "/dist/trafficctl.$EXT" "/dist/luci-app-trafficctl.$EXT"
+            /tests/test_install.sh "/dist/trafficctl.$EXT" "/dist/trafficctl-telegram.$EXT" "/dist/luci-app-trafficctl.$EXT"
           rc=$?
           set -e
           # 78 means the image's package feeds were unreachable, so the test
@@ -435,9 +438,14 @@ jobs:
           fi
           OLD_PKGS="/dist-old/$(basename "$OLD_PKG")"
           # Releases up to 1.28.x are one package; later ones also ship the
-          # backend as trafficctl, which then has to be part of the old install.
-          OLD_BE=$(find dist-old -maxdepth 1 -name 'trafficctl*.${{ matrix.format }}' | sort | head -1)
-          [ -n "$OLD_BE" ] && OLD_PKGS="/dist-old/$(basename "$OLD_BE") $OLD_PKGS"
+          # backend as trafficctl, which then has to be part of the old install,
+          # and releases after 1.30.x the bot as trafficctl-telegram.
+          # "trafficctl[._]" and "trafficctl-telegram[._]": the bare
+          # "trafficctl*" also matches the bot.
+          for p in trafficctl-telegram trafficctl; do
+            OLD_P=$(find dist-old -maxdepth 1 \( -name "$p.${{ matrix.format }}" -o -name "${p}_*.${{ matrix.format }}" \) | sort | head -1)
+            [ -n "$OLD_P" ] && OLD_PKGS="/dist-old/$(basename "$OLD_P") $OLD_PKGS"
+          done
           echo "Old packages: $OLD_PKGS"
 
           IMAGE="ghcr.io/openwrt/rootfs:${{ matrix.image }}"
@@ -454,7 +462,7 @@ jobs:
             -v "$PWD/dist-old:/dist-old" \
             -v "$PWD/tests:/tests" \
             "$IMAGE" \
-            /tests/test_upgrade.sh $OLD_PKGS -- /dist/trafficctl.ipk /dist/luci-app-trafficctl.ipk
+            /tests/test_upgrade.sh $OLD_PKGS -- /dist/trafficctl.ipk /dist/trafficctl-telegram.ipk /dist/luci-app-trafficctl.ipk
 
   # ──────────────────────────────────────────────────────────────────────────
   # Dependencies — verify install fails cleanly when deps are missing, and
@@ -498,4 +506,4 @@ jobs:
             -v "$PWD/dist:/dist" \
             -v "$PWD/tests:/tests" \
             "$IMAGE" \
-            /tests/test_dependencies.sh "/dist/trafficctl.$EXT" "/dist/luci-app-trafficctl.$EXT"
+            /tests/test_dependencies.sh "/dist/trafficctl.$EXT" "/dist/trafficctl-telegram.$EXT" "/dist/luci-app-trafficctl.$EXT"

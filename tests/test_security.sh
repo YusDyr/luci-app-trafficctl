@@ -2,14 +2,9 @@
 # Security tests: validate input sanitization and injection resistance
 # against the REAL functions, not local redefinitions.
 #
-# The previous version of this file defined its own sanitize_mac,
-# sanitize_name, validate_cb_ip, validate_cb_param and json_escape and
-# asserted against those copies. None of those names exist in trafficctl-fw.sh
-# or trafficctl-telegram.sh — the real MAC/name sanitizer is add_known_mac()'s
-# inline `tr -cd`, the real callback validation is inline in handle_callback(),
-# and the real JSON escaping is tg_json_escape() — so a reviewer deleting the
-# actual validation left this file 30/0 green. Everything below now sources
-# or invokes the production scripts.
+# An earlier version of this file defined its own sanitizers and asserted
+# against those copies, so deleting the real validation left it green.
+# Everything below sources or invokes the production code.
 
 PASS=0
 FAIL=0
@@ -18,8 +13,6 @@ BIN="$(cd "$(dirname "$0")/.." && pwd)/trafficctl/files/usr/libexec/trafficctl"
 
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
-MOCKBIN="$TMPDIR/bin"
-mkdir -p "$MOCKBIN"
 
 assert_eq() {
     local desc="$1" expected="$2" actual="$3"
@@ -84,108 +77,15 @@ assert_eq "cidr_spec: a leading-zero octet refused" 1 "$(tctl_cidr_spec 010.0.0.
 # written to disk, moved to trafficctl.notify: tests/test_notify.sh drives it
 # with an injected name.
 
-# The callback cases below source a neutered copy of the bot (main() suppressed).
-mkdir -p "$TMPDIR/lib"
-cat > "$TMPDIR/lib/functions.sh" <<'MOCK'
-config_load() { :; }
-config_get() { eval "$2=\"\${4:-}\""; }
-MOCK
-
-NEUTERED="$TMPDIR/telegram_neutered.sh"
-sed -e "s|\. /lib/functions\.sh|. $TMPDIR/lib/functions.sh|" \
-    -e '$s|^main$|:|' \
-    "$BIN/trafficctl-telegram.sh" > "$NEUTERED"
-tail -1 "$NEUTERED" | grep -q '^main$' && {
-    echo "FAIL: harness bug — could not neuter main(), refusing to run"
-    exit 1
-}
-
-# ── Callback data validation (real handle_callback in the telegram bot) ────
-# Route through an unknown verb ("noop") so validation runs but no real
-# sub-script is dispatched to.
-
-cat > "$MOCKBIN/curl" <<MOCK
-#!/bin/sh
-echo "\$*" >> "$TMPDIR/curl.log"
-cat > /dev/null
-echo '{"ok":true}'
-MOCK
-chmod +x "$MOCKBIN/curl"
-
-# handle_callback dispatches unknown sub-scripts by path when the verb
-# matches a real action (block/unblock/etc); "noop"/"limit" never reach that,
-# so no stub scripts are needed for these validation-only assertions.
-cb_test() {
-    : > "$TMPDIR/curl.log"
-    PATH="$MOCKBIN:$PATH" sh -c "
-    . '$NEUTERED'
-    handle_callback 'cbid1' '$1' 'msg1'
-    " >/dev/null 2>&1
-    cat "$TMPDIR/curl.log"
-}
-
-OUT=$(cb_test 'act:noop:192.168.0.1')
-assert_not_contains "cb ip: valid" "$OUT" "invalid IP"
-
-OUT=$(cb_test 'act:noop:192.168.0.1;whoami')
-assert_contains "cb ip: injection semicolon" "$OUT" "invalid IP"
-
-OUT=$(cb_test 'act:noop:1.1.1.1|cat')
-assert_contains "cb ip: injection pipe" "$OUT" "invalid IP"
-
-OUT=$(cb_test 'act:noop:abc.def.ghi.jkl')
-assert_contains "cb ip: letters" "$OUT" "invalid IP"
-
-OUT=$(cb_test 'act:limit:192.168.0.1:10000')
-assert_not_contains "cb param: valid rate" "$OUT" "invalid param"
-
-OUT=$(cb_test 'act:limit:192.168.0.1:10000;rm')
-assert_contains "cb param: injection" "$OUT" "invalid param"
-
-OUT=$(cb_test 'act:limit:192.168.0.1:abc')
-assert_contains "cb param: letters" "$OUT" "invalid param"
-
-# ── JSON escaping (real tg_json_escape) ─────────────────────────────────────
-
-ESCAPED=$(sh -c ". '$NEUTERED'; tg_json_escape 'he said \"hi\"'")
-assert_not_contains "json escape: no raw quotes" "$ESCAPED" '"hi"'
-assert_contains "json escape: quote is escaped" "$ESCAPED" '\"hi\"'
-
-ESCAPED=$(sh -c ". '$NEUTERED'; tg_json_escape 'hello world'")
-assert_eq "json escape: normal preserved" "hello world" "$ESCAPED"
-
-# ── No secrets in output ────────────────────────────────────────────────────
-
-assert_not_contains "no hardcoded tokens in scripts" "$(cat "$BIN"/trafficctl-telegram.sh)" "BOT_TOKEN_VALUE"
-assert_not_contains "no test credentials" "$(cat "$BIN"/trafficctl-telegram.sh)" "123456:ABC"
-
-# The bot token must reach curl via stdin (a --config file), never argv,
-# because argv is world-readable via ps/proc. Verify against the real tg_api.
-: > "$TMPDIR/curl.log"
-CURL_ARGV_LOG="$TMPDIR/curl_argv.log"
-cat > "$MOCKBIN/curl" <<MOCK
-#!/bin/sh
-echo "\$*" >> "$CURL_ARGV_LOG"
-cat >> "$TMPDIR/curl.log"
-echo '{"ok":true}'
-MOCK
-chmod +x "$MOCKBIN/curl"
-
-PATH="$MOCKBIN:$PATH" sh -c "
-. '$NEUTERED'
-TG_TOKEN='123456:SUPERSECRETTOKEN'
-TG_CHAT_ID='999'
-tg_send 'hello'
-" >/dev/null 2>&1
-
-assert_not_contains "bot token never appears in curl argv" "$(cat "$CURL_ARGV_LOG")" "SUPERSECRETTOKEN"
-assert_contains "bot token reaches curl via stdin instead" "$(cat "$TMPDIR/curl.log")" "SUPERSECRETTOKEN"
+# ── The Telegram bot ───────────────────────────────────────────────────────
+# Callback validation, the token off curl's argv and the JSON bodies moved to
+# tests/test_telegram_bot.sh with the bot (trafficctl.telegram).
 
 # ── ucode: one place builds shell command lines ─────────────────────────────
 # lib.uc's run()/lines()/sh() are the only callers of popen() and system(),
 # and every value in their command goes through q(): tests/lib/uc_cmd_lint.py.
 UC_DIR="$BIN/../../share/ucode/trafficctl"
-UC_FILES="$UC_DIR/*.uc $BIN/../../sbin/trafficctl $(dirname "$0")/../luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
+UC_FILES="$UC_DIR/*.uc $BIN/*.uc $BIN/../../sbin/trafficctl $(dirname "$0")/../luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
 LINT="$(dirname "$0")/lib/uc_cmd_lint.py"
 # shellcheck disable=SC2086 # a glob on purpose
 assert_eq "ucode: commands quoted, popen/system only in lib.uc" "" \

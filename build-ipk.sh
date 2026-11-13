@@ -6,9 +6,13 @@ PKG_VERSION="${1:-1.0.0}"
 PKG_RELEASE="${2:-1}"
 PKG_ARCH="all"
 
-# The two packages, in the feed-compatible subdirectory layout: the backend
-# (trafficctl) and the web interface that depends on it (luci-app-trafficctl).
+# The packages, in the feed-compatible subdirectory layout: the backend
+# (trafficctl), the Telegram bot (trafficctl-telegram, from the same
+# directory) and the web interface that depends on both (luci-app-trafficctl).
 BE_NAME="trafficctl"
+TG_NAME="trafficctl-telegram"
+# The bot's files under trafficctl/files (Package/trafficctl-telegram/install).
+TG_FILES="usr/share/ucode/trafficctl/telegram.uc usr/libexec/trafficctl/trafficctl-telegram.sh usr/libexec/trafficctl/trafficctl-telegram.uc etc/init.d/trafficctl-telegram"
 TCTL_ROOT="$(dirname "$0")"
 SRC="$TCTL_ROOT/${PKG_NAME}"
 BACKEND_SRC="$TCTL_ROOT/${BE_NAME}"
@@ -96,8 +100,9 @@ Architecture: $PKG_ARCH
 Maintainer: Denis Iusupov <yusdyr@gmail.com>
 Description: Per-device traffic monitoring (conntrack), rate limiting
  (nftables), traffic shaping (tc/HTB), internet blocking, WiFi MAC
- filtering, a global internet cut, a Telegram bot and a Prometheus exporter.
- The web interface is luci-app-trafficctl. WiFi MAC filtering needs
+ filtering, a global internet cut, device notifications and a Prometheus
+ exporter. The web interface is luci-app-trafficctl, the Telegram bot
+ trafficctl-telegram. WiFi MAC filtering needs
  hostapd-utils (optional; without it a WiFi block is a temporary ban).
 EOF
 
@@ -107,15 +112,6 @@ EOF
 # opkg complain "Failed to open file" on every install.
 cat > "$BE_CTRL/conffiles" <<EOF
 /etc/config/trafficctl
-EOF
-
-cat > "$BE_CTRL/preinst" <<'EOF'
-#!/bin/sh
-# Stop telegram bot before upgrade to avoid stale process
-if [ -z "${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-telegram ]; then
-    /etc/init.d/trafficctl-telegram stop 2>/dev/null || true
-fi
-exit 0
 EOF
 
 # The same steps as Package/trafficctl/postinst in trafficctl/Makefile, which
@@ -144,11 +140,12 @@ if [ -z "${IPKG_INSTROOT}" ]; then
     if [ -x /usr/sbin/trafficctl ]; then
         /usr/sbin/trafficctl notify migrate >/dev/null 2>&1 || true
     fi
-    # Restarted, not started: a bot of a release up to 1.30.x runs the device
-    # scan itself, which the notification watcher took over.
-    if [ -x /etc/init.d/trafficctl-telegram ] && [ "$(uci -q get trafficctl.telegram.enabled)" = "1" ]; then
-        /etc/init.d/trafficctl-telegram enable 2>/dev/null || true
-        /etc/init.d/trafficctl-telegram restart 2>/dev/null || true
+    # A bot of a release up to 1.30.x lost its files to trafficctl-telegram
+    # with this upgrade. Without that package it would run on until the next
+    # reboot, and rc.d would keep links to a missing init script.
+    if [ ! -e /etc/init.d/trafficctl-telegram ]; then
+        ubus call service delete '{"name":"trafficctl-telegram"}' >/dev/null 2>&1 || true
+        rm -f /etc/rc.d/S99trafficctl-telegram /etc/rc.d/K10trafficctl-telegram
     fi
     # The watcher decides for itself whether anything wants the scan.
     if [ -x /etc/init.d/trafficctl-notify ]; then
@@ -171,10 +168,6 @@ EOF
 
 cat > "$BE_CTRL/prerm" <<'EOF'
 #!/bin/sh
-if [ -z "${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-telegram ]; then
-    /etc/init.d/trafficctl-telegram stop 2>/dev/null || true
-    /etc/init.d/trafficctl-telegram disable 2>/dev/null || true
-fi
 if [ -z "${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-notify ]; then
     /etc/init.d/trafficctl-notify stop 2>/dev/null || true
     /etc/init.d/trafficctl-notify disable 2>/dev/null || true
@@ -191,7 +184,71 @@ if [ -z "${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-cut ]; then
 fi
 exit 0
 EOF
-chmod +x "$BE_CTRL/preinst" "$BE_CTRL/postinst" "$BE_CTRL/prerm"
+chmod +x "$BE_CTRL/postinst" "$BE_CTRL/prerm"
+
+# ── trafficctl-telegram: the bot ───────────────────────────────────────────
+# The files of Package/trafficctl-telegram/install in trafficctl/Makefile,
+# moved out of the backend's tree.
+TG_STAGE="$WORKDIR/telegram"
+TG_DATA="$TG_STAGE/data"
+for f in $TG_FILES; do
+    mkdir -p "$TG_DATA/$(dirname "$f")"
+    mv "$BE_DATA/$f" "$TG_DATA/$f"
+done
+chmod +x "$TG_DATA/usr/libexec/trafficctl/"* "$TG_DATA/etc/init.d/"*
+
+TG_CTRL="$TG_STAGE/control"
+mkdir -p "$TG_CTRL"
+
+# Replaces: releases up to 1.30.x shipped these files in trafficctl, so this
+# package installs over one of those in either order.
+cat > "$TG_CTRL/control" <<EOF
+Package: $TG_NAME
+Version: ${PKG_VERSION}-${PKG_RELEASE}
+Depends: $BE_NAME (= ${PKG_VERSION}-${PKG_RELEASE}), curl
+Replaces: $BE_NAME
+Source: https://github.com/YusDyr/luci-app-trafficctl
+License: Apache-2.0
+Section: net
+Architecture: $PKG_ARCH
+Maintainer: Denis Iusupov <yusdyr@gmail.com>
+Description: A Telegram bot for trafficctl: device status, and block, WiFi
+ block, limit and shape buttons per device.
+EOF
+
+cat > "$TG_CTRL/preinst" <<'EOF'
+#!/bin/sh
+# Stop the bot before the upgrade replaces it.
+if [ -z "${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-telegram ]; then
+    /etc/init.d/trafficctl-telegram stop 2>/dev/null || true
+fi
+exit 0
+EOF
+
+# The same steps as Package/trafficctl-telegram/postinst and prerm in
+# trafficctl/Makefile; tests/test_postinst_parity.sh keeps the copies in step.
+cat > "$TG_CTRL/postinst" <<'EOF'
+#!/bin/sh
+# Restarted, not started: a bot of a release up to 1.30.x runs the device scan
+# itself, which the notification watcher took over. Enabled in rc.d and
+# started only when trafficctl.telegram.enabled is 1, so what runs now is what
+# runs after the next reboot.
+if [ -z "${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-telegram ] && [ "$(uci -q get trafficctl.telegram.enabled)" = "1" ]; then
+    /etc/init.d/trafficctl-telegram enable 2>/dev/null || true
+    /etc/init.d/trafficctl-telegram restart 2>/dev/null || true
+fi
+exit 0
+EOF
+
+cat > "$TG_CTRL/prerm" <<'EOF'
+#!/bin/sh
+if [ -z "${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-telegram ]; then
+    /etc/init.d/trafficctl-telegram stop 2>/dev/null || true
+    /etc/init.d/trafficctl-telegram disable 2>/dev/null || true
+fi
+exit 0
+EOF
+chmod +x "$TG_CTRL/preinst" "$TG_CTRL/postinst" "$TG_CTRL/prerm"
 
 # ── luci-app-trafficctl: the web interface ─────────────────────────────────
 STAGE="$WORKDIR/main"
@@ -220,7 +277,7 @@ mkdir -p "$CTRL"
 cat > "$CTRL/control" <<EOF
 Package: $PKG_NAME
 Version: ${PKG_VERSION}-${PKG_RELEASE}
-Depends: $BE_NAME (= ${PKG_VERSION}-${PKG_RELEASE}), $BE_DEPENDS, $FE_EXTRA_DEPENDS, luci-base, rpcd
+Depends: $BE_NAME (= ${PKG_VERSION}-${PKG_RELEASE}), $TG_NAME (= ${PKG_VERSION}-${PKG_RELEASE}), $BE_DEPENDS, $FE_EXTRA_DEPENDS, luci-base, rpcd
 Source: https://github.com/YusDyr/luci-app-trafficctl
 License: Apache-2.0
 Section: luci
@@ -248,6 +305,7 @@ chmod +x "$CTRL/postinst"
 
 # Printed first; callers taking the last line of stdout get luci-app-trafficctl.
 assemble_ipk "$BE_NAME" "$PKG_ARCH" "$BE_STAGE"
+assemble_ipk "$TG_NAME" "$PKG_ARCH" "$TG_STAGE"
 
 # Translations, one package per language, mirroring what the feed build
 # produces. Printed BEFORE luci-app-trafficctl so that callers taking the last

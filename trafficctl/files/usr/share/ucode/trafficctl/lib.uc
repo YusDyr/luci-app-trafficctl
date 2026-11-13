@@ -41,6 +41,9 @@
 //   sh(cmd, ms)                   exit status, all output dropped
 //   pipe(cmd, input)              run() with input on cmd's stdin, so a
 //                                 secret need not be in anybody's argv
+//   curl_config(url, headers, body)
+//                                 a curl --config for `curl ... --config -`
+//                                 (with pipe): URL, headers and body off argv
 //   passthru(argv)                argv[0] run directly (no shell) on our
 //                                 stdin/stdout/stderr: its exit status
 // JSON
@@ -308,6 +311,22 @@ function pipe(cmd, input) {
 	let out = fs_readfile(tmp);
 	unlink(tmp);
 	return out ?? '';
+}
+
+// curl's config syntax: a double-quoted value with backslash escapes.
+const CSTR = { '\\': '\\\\', '"': '\\"', '\n': '\\n', '\r': '\\r', '\t': '\\t' };
+
+function cstr(s) {
+	return '"' + replace(s, /[\\"\n\r\t]/g, (c) => CSTR[c]) + '"';
+}
+
+// The URL may hold a token and the body a secret: an argument list is
+// readable by every local user, a config on stdin is not.
+function curl_config(url, headers, body) {
+	let c = 'url = ' + cstr(url) + '\n';
+	for (let h in headers)
+		c += 'header = ' + cstr(h) + '\n';
+	return c + 'data-raw = ' + cstr(body) + '\n';
 }
 
 function passthru(argv) {
@@ -893,6 +912,6 @@ export { path, pid, reset, plain, cursor, uci_get, uci_words, uci_foreach, commi
 	names_list, names_map, names_set, names_remove, seen_ready, seen_count,
 	seen_known, seen_mark, seen_seed };
 // What the rpcd plugin and the CLI's legacy commands need.
-export { qv, pipe, passthru, set_context, run_rc, ubus_list };
+export { qv, pipe, passthru, set_context, run_rc, ubus_list, curl_config };
 // The notification events (trafficctl.notify).
 export { ubus_event };
