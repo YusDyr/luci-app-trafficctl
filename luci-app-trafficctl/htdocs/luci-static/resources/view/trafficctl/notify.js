@@ -249,9 +249,10 @@ function senderCard(type, cfg) {
 			{ v: 4, l: '4' }, { v: 5, l: '5' }], parseInt(s.priority, 10) || 0);
 		body.appendChild(E('div', { 'class': 'tg-row' }, [E('span', { 'class': 'tg-label' }, _('Priority:')), prio.el]));
 	}
-	if (type === 'mail' && !cfg.msmtp)
+	if (type === 'mail' && !cfg.msmtp) {
 		body.appendChild(E('div', { 'class': 'tg-row', 'style': 'font-size:12px;color:var(--tc-warn)' },
 			_('Email needs msmtp: opkg install msmtp, then set up /etc/msmtprc.')));
+	}
 
 	var tpl = null;
 	if (type === 'telegram') {
@@ -271,7 +272,7 @@ function senderCard(type, cfg) {
 		reply(st, callNotifySet(type, en.input.checked, evs.values().join(' '), undefined, undefined,
 			v.bot_token, v.chat_id, tpl ? tpl.area.value : undefined, v.server, v.topic, v.token,
 			prio ? prio.value() : undefined, v.url, v.auth, v.to, v.from, v.account)).then(function(res) {
-			if (res && res.ok)
+			if (res && res.ok) {
 				Object.keys(inputs).forEach(function(k) {
 					if (inputs[k]._secret && inputs[k].value !== '') {
 						s[k + '_set'] = true;
@@ -279,6 +280,7 @@ function senderCard(type, cfg) {
 						inputs[k].placeholder = '••••••••  ✓ ' + _('saved');
 					}
 				});
+			}
 		});
 	});
 	test.addEventListener('click', function() {

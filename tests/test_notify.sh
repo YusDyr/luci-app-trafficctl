@@ -124,7 +124,7 @@ MOCK
 
 # A fresh case: empty logs and state, the given config.
 reset() {   # reset <config text>
-    rm -rf "$NLOG" "$TCTL_ROOT/etc" "$TCTL_ROOT/tmp" "$TCTL_ROOT/proc"
+    rm -rf "${NLOG:?}" "${TCTL_ROOT:?}/etc" "${TCTL_ROOT:?}/tmp" "${TCTL_ROOT:?}/proc"
     mkdir -p "$NLOG" "$TCTL_ROOT/etc/config" "$TCTL_ROOT/etc/trafficctl" "$TCTL_ROOT/tmp/.uci" \
         "$TCTL_ROOT/proc/net"
     rm -f "$TCTL_ROOT/usr/bin/msmtp"
