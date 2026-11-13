@@ -18,14 +18,10 @@ while ! tc qdisc show dev "$(tctl_get_lan_device)" >/dev/null 2>&1; do
     sleep 0.5 2>/dev/null || sleep 1
 done
 
-# At boot ifup lan can run before fw4 has loaded its ruleset, and blocks are
-# inserted into inet fw4 forward (up to 10 seconds).
-tries=0
-while ! nft list table inet fw4 >/dev/null 2>&1; do
-    tries=$((tries + 1))
-    [ "$tries" -ge 20 ] && break
-    sleep 0.5 2>/dev/null || sleep 1
-done
+# Saved blocks (persist_rules): `trafficctl restore` waits up to 10 seconds
+# for fw4, which at boot can load its ruleset after ifup lan, and logs each
+# block it could not put back.
+/usr/sbin/trafficctl restore >/dev/null 2>&1
 
 # Restore shaping rules
 if [ -f "$SHAPES_FILE" ]; then
@@ -43,7 +39,8 @@ if [ -f "$SHAPES_FILE" ]; then
     done
 fi
 
-# Restore blocks and ratelimits (if persist enabled)
+# Restore ratelimits and port-forward controls (if persist enabled); blocks
+# went back above
 if [ -f "$RULES_FILE" ] && tctl_persist_enabled; then
     # How many records there are comes from the file, not from a constant.
     # `seq 0 99` stopped at the hundredth, so every rule past it was silently
@@ -69,10 +66,6 @@ if [ -f "$RULES_FILE" ] && tctl_persist_enabled; then
         [ -z "$ip" ] && continue
 
         case "$type" in
-            block)
-                tctl_block_add "$ip" "$(tctl_block_comment "$ip")" 2>/dev/null || \
-                    logger -t trafficctl "Failed to restore block for $ip"
-                ;;
             ratelimit)
                 # Records written before the mode was stored have none; they
                 # get the same default the CLI would have given the target, so

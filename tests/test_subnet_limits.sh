@@ -289,7 +289,16 @@ sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FW|" \
     -e "s|RULES_FILE=\"/etc/trafficctl/rules.json\"|RULES_FILE=\"$RULES\"|" \
     -e "s|SHAPES_FILE=\"/etc/trafficctl/shapes.json\"|SHAPES_FILE=\"$SHAPES\"|" \
     -e "s|/etc/trafficctl/cut.state|$TMP/cut.state|" \
+    -e "s|/usr/sbin/trafficctl|$TMP/tctl-cli|" \
     "$HOTPLUG" > "$HOOK"
+# The blocks go back through `trafficctl restore`, on the same fake nft and
+# the same rules.json.
+mkdir -p "$TMP/root/etc/trafficctl" "$TMP/root/etc/config"
+ln -sf "$RULES" "$TMP/root/etc/trafficctl/rules.json"
+printf "config trafficctl 'main'\n\toption persist_rules '1'\n" > "$TMP/root/etc/config/trafficctl"
+printf '#!/bin/sh\nTCTL_ROOT="%s" exec "%s" -S -L "%s" -- "%s" "$@"\n' "$TMP/root" "$UCODE" "$UC_LIB" \
+    "$UC_REPO/trafficctl/files/usr/sbin/trafficctl" > "$TMP/tctl-cli"
+chmod +x "$TMP/tctl-cli"
 assert_not_contains "harness: the hook's rules path was redirected" \
     "/etc/trafficctl/rules.json" "$(cat "$HOOK")"
 
@@ -367,7 +376,7 @@ assert_contains "restore: a legacy host record still applies" \
 assert_not_contains "restore: a host needs no meter" "meter" "$RESTORED"
 
 # At boot ifup lan can come before fw4 has loaded its ruleset. A block restored
-# then went nowhere, so the hook waits for inet fw4 first.
+# then went nowhere, so `trafficctl restore` waits for inet fw4 first.
 echo 2 > "$TMP/fw4_late"
 RESTORED=$(restore '[{"type":"block","ip":"192.168.1.60","param":""}]')
 assert_terminated "restore: the loop ended on its own"
@@ -411,7 +420,7 @@ assert_terminated "restore: a hundred-and-one records end the loop on their own"
 # header carries no condition, and the only way out is the absent-record
 # sentinel. Comments are stripped first because the hook's own comment quotes
 # `seq 0 99` while explaining why it is gone.
-RULES_LOOP=$(awk '/^# Restore blocks and ratelimits/ { f = 1 } f { print } f && /^fi$/ { exit }' \
+RULES_LOOP=$(awk '/^# Restore ratelimits/ { f = 1 } f { print } f && /^fi$/ { exit }' \
              "$HOTPLUG" | grep -v '^[[:space:]]*#')
 assert_not_contains "restore: the loop bound is not a counted range" "seq " "$RULES_LOOP"
 assert_contains "restore: the loop header carries no bound at all" "while :; do" "$RULES_LOOP"
