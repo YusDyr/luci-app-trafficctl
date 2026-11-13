@@ -582,7 +582,10 @@ and the two are merged:
   `tctl_block_block_<ip>` or a typed label from LuCI) works with any label,
   the empty one the Rules tab sends included: `trafficctl-unblock.sh` also
   removes every drop rule on that exact `ip saddr` whose comment starts with
-  `tctl_block_`.
+  `tctl_block_`. On nft the label never selects a rule: such a comment was
+  shared by every device blocked with that label, so unblocking one device
+  leaves the others blocked. On iptables the label comment is still tried,
+  always together with `-s <ip>`.
 - `applied`: in the kernel or on the radio now. `persisted`: survives a reboot.
   A saved record that is not applied is restored at the next `ifup lan`; a live
   rule that is not saved is lost at the next reboot. Live rates win over saved ones.

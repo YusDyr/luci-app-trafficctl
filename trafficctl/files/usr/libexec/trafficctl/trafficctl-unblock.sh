@@ -23,9 +23,16 @@ COMMENT=$(tctl_block_comment "$IP")
 
 # Rules written before comments were derived from the address carry the caller's
 # label, so a block placed from LuCI could not be removed from Telegram. The
-# Rules tab lists them and unblocks with no label at all.
-tctl_block_remove "$IP" "tctl_block_${LABEL}" 2>/dev/null
-tctl_block_remove_legacy "$IP" 2>/dev/null
+# Rules tab lists them and unblocks with no label at all. On nft they are found
+# by address (tctl_block_remove_legacy), never by the label: tctl_block_remove
+# matches on the comment alone, and tctl_block_tg was shared by every device
+# blocked from Telegram, so unblocking one lifted all their blocks. iptables -D
+# also matches -s, so there the label is safe and still the only way in.
+if [ "$TCTL_FW" = "nft" ]; then
+    tctl_block_remove_legacy "$IP" 2>/dev/null
+else
+    tctl_block_remove "$IP" "tctl_block_${LABEL}" 2>/dev/null
+fi
 
 if tctl_block_remove "$IP" "$COMMENT"; then
     tctl_persist_enabled && tctl_persist_remove "block" "$IP"

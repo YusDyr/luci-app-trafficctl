@@ -191,6 +191,7 @@ NFT
 cat > "$MOCKBIN/nft" <<MOCK
 #!/bin/sh
 case "\$*" in
+    "list tables") echo "table inet fw4" ;;
     "-a list chain inet fw4 forward") cat "$LISTING" ;;
     delete\ rule*) for a in "\$@"; do h="\$a"; done; echo "\$h" >> "$DELETED" ;;
 esac
@@ -206,6 +207,33 @@ assert_eq "unblock, legacy label: deletes the Telegram-placed rule, nothing else
 : > "$DELETED"
 run_unblock 192.168.1.41 "" >/dev/null
 assert_eq "unblock, legacy label: a label typed in the UI" "52" "$(sort -u "$DELETED" | tr '\n' ' ' | sed 's/ $//')"
+
+# ── unblock with a shared legacy label lifts only that device's block ───────
+# Every device blocked from Telegram before v1.13.2 got the comment
+# tctl_block_tg, and tctl_block_remove matches on the comment alone. v1.30.5
+# also removed tctl_block_<label>, so unblocking 192.168.1.40 from Telegram
+# (label tg) lifted 192.168.1.4's block too. The other device's IPv6 half
+# carries its own comment and stays as well.
+cat > "$LISTING" <<'NFT'
+table inet fw4 {
+	chain forward {
+		ip saddr 192.168.1.40 counter packets 1 bytes 1 drop comment "tctl_block_tg" # handle 61
+		ip saddr 192.168.1.4 counter packets 1 bytes 1 drop comment "tctl_block_tg" # handle 62
+		meta nfproto ipv6 ether saddr aa:bb:cc:dd:ee:04 counter packets 1 bytes 1 drop comment "tctl_block_192_168_1_4_mac" # handle 63
+		ip saddr 192.168.1.41 counter packets 1 bytes 1 drop comment "tctl_block_kids" # handle 64
+		ip saddr 192.168.1.42 counter packets 1 bytes 1 drop comment "tctl_block_kids" # handle 65
+	}
+}
+NFT
+: > "$DELETED"
+OUT=$(run_unblock 192.168.1.40 tg)
+assert_contains "unblock, shared legacy label: reports ok" '"ok":true' "$OUT"
+assert_eq "unblock, shared legacy label: the other tg device stays blocked" "61" \
+    "$(sort -u "$DELETED" | tr '\n' ' ' | sed 's/ $//')"
+: > "$DELETED"
+run_unblock 192.168.1.41 kids >/dev/null
+assert_eq "unblock, shared legacy label: a label typed in the UI" "64" \
+    "$(sort -u "$DELETED" | tr '\n' ' ' | sed 's/ $//')"
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
