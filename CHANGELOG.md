@@ -17,7 +17,12 @@ rest) are gone.
   becomes `trafficctl ratelimit 192.168.1.50 2000`. Nothing can source
   `trafficctl-fw.sh` any more.
 - Upgrade `trafficctl`, `trafficctl-telegram` and `luci-app-trafficctl`
-  together: the 2.0.0 web interface and bot need the 2.0.0 backend.
+  together: the 2.0.0 web interface and bot need the 2.0.0 backend, and
+  depend on it by version. A 1.30.x web interface does not work with the
+  2.0.0 backend; upgrading `trafficctl` alone under it prints and logs
+  "upgrade luci-app-trafficctl too".
+- Error messages name the command: `usage: trafficctl shape add <ip> ...`
+  instead of `usage: trafficctl-shape.sh add <ip> ...`.
 - The `ifup lan` hook now runs `trafficctl restore` alone, which also puts back
   the saved port-forward controls and a cut kept across a reboot (v1.30.x's
   hook did those two itself).

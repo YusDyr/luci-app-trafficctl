@@ -155,8 +155,9 @@ assert_eq "save: the write fails" "false" "$(ucnowrite persist_save '"block"' '"
 assert_eq "save: a failed write keeps the populated file" "$BEFORE" "$(cat "$RULES")"
 assert_eq "remove: the write fails" "false" "$(ucnowrite persist_remove '"block"' '"192.168.1.10"')"
 assert_eq "remove: a failed write keeps the populated file" "$BEFORE" "$(cat "$RULES")"
-assert_eq "a failed write leaves no temporary file" "" \
-    "$(ls -a "$(dirname "$RULES")" | grep 'rules\.json\.tmp\.')"
+LEFT=
+for f in "$RULES".tmp.*; do [ -e "$f" ] && LEFT="$LEFT $f"; done
+assert_eq "a failed write leaves no temporary file" "" "$LEFT"
 # The shell interpolated the label as it came; one with a quote made the file
 # unparseable for every reader. Escaped now (a declared difference).
 rm -f "$RULES"
