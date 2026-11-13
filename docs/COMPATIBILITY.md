@@ -72,6 +72,16 @@ the LuCI connections page uses. It is provided by `rpcd-mod-rrdns`, which ships 
 
 BusyBox `nslookup` (always available) is used as a fallback if rpcd-mod-rrdns is absent.
 
+`network.rrdns` asks the first `nameserver` in `/etc/resolv.conf` on port 53. Its
+`port` argument cannot be used from LuCI: it is declared as a 16-bit integer, JSON
+numbers arrive as 32-bit ones, and rpcd ignores the mismatched field, so the query
+goes to port 53 anyway. With AdGuard Home on port 53 and dnsmasq moved to another
+port, the device view's destination names come from AdGuard Home, which resolves
+public PTR queries through its upstreams. Its default `ratelimit: 20` drops anything beyond 20
+queries a second from one client, the router included, so the view sends at most
+16 new lookups per poll (#165). `trafficctl.main.rdns_server` (device names for
+routed clients) takes `host:port` entries, e.g. `127.0.0.1:54`.
+
 ### For Interface Detection (optional)
 
 | Package | Purpose | Notes |
