@@ -1,28 +1,27 @@
 # test_subnet_limits.sh: one per-device subnet limit, the whole network
 # (target "all", 0.0.0.0/0, per-device by default), one aggregate subnet limit
 # and a host limit, each copied onto two bridges with different counters, and
-# the upload rules of the two per-device targets. The guest chain's meters
-# have their own names: nft 1.0.2 refuses a second meter of the same name in
-# another chain ("Resource busy"), so the writer's one name per target only
-# loads on 1.1.
+# the upload rules of the two per-device targets. Meters are named per chain,
+# tctl_m_<slug>_<chain>, as the writer has named them since 1.30.5: nft 1.0.2
+# refuses a second meter of the same name in another chain ("Resource busy").
 table netdev tm_ratelimit {
 	chain dl_br_lan {
 		type filter hook egress device "br-lan" priority filter; policy accept;
-		ip daddr 192.168.20.0/24 meter tctl_d_192_168_20_0_24 { ip daddr limit rate over 2500000 bytes/second } counter packets 12 bytes 3456 drop comment "rl_ratelimit_192_168_20_0_24"
-		ip daddr 0.0.0.0/0 meter tctl_d_0_0_0_0_0 { ip daddr limit rate over 1250000 bytes/second } counter packets 30 bytes 4000 drop comment "rl_ratelimit_0_0_0_0_0"
+		ip daddr 192.168.20.0/24 meter tctl_m_192_168_20_0_24_dl_br_lan { ip daddr limit rate over 2500000 bytes/second } counter packets 12 bytes 3456 drop comment "rl_ratelimit_192_168_20_0_24"
+		ip daddr 0.0.0.0/0 meter tctl_m_0_0_0_0_0_dl_br_lan { ip daddr limit rate over 1250000 bytes/second } counter packets 30 bytes 4000 drop comment "rl_ratelimit_0_0_0_0_0"
 		ip daddr 10.0.0.0/24 limit rate over 1250000 bytes/second counter packets 40 bytes 5000 drop comment "rl_ratelimit_10_0_0_0_24"
 		ip daddr 192.168.1.50 limit rate over 625000 bytes/second counter packets 7 bytes 900 drop comment "rl_ratelimit_192_168_1_50"
 	}
 	chain dl_br_guest {
 		type filter hook egress device "br-guest" priority filter; policy accept;
-		ip daddr 192.168.20.0/24 meter tctl_d_192_168_20_0_24_g { ip daddr limit rate over 2500000 bytes/second } counter packets 8 bytes 1544 drop comment "rl_ratelimit_192_168_20_0_24"
-		ip daddr 0.0.0.0/0 meter tctl_d_0_0_0_0_0_g { ip daddr limit rate over 1250000 bytes/second } counter packets 2 bytes 600 drop comment "rl_ratelimit_0_0_0_0_0"
+		ip daddr 192.168.20.0/24 meter tctl_m_192_168_20_0_24_dl_br_guest { ip daddr limit rate over 2500000 bytes/second } counter packets 8 bytes 1544 drop comment "rl_ratelimit_192_168_20_0_24"
+		ip daddr 0.0.0.0/0 meter tctl_m_0_0_0_0_0_dl_br_guest { ip daddr limit rate over 1250000 bytes/second } counter packets 2 bytes 600 drop comment "rl_ratelimit_0_0_0_0_0"
 		ip daddr 10.0.0.0/24 limit rate over 1250000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_10_0_0_0_24"
 		ip daddr 192.168.1.50 limit rate over 625000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_50"
 	}
 	chain ul_lan1 {
 		type filter hook ingress device "lan1" priority -200; policy accept;
-		ip saddr 192.168.20.0/24 meter tctl_u_192_168_20_0_24 { ip saddr limit rate over 2500000 bytes/second } counter packets 3 bytes 300 drop comment "rl_ratelimit_192_168_20_0_24_ul"
-		ip saddr 0.0.0.0/0 meter tctl_u_0_0_0_0_0 { ip saddr limit rate over 250000 bytes/second } counter packets 1 bytes 100 drop comment "rl_ratelimit_0_0_0_0_0_ul"
+		ip saddr 192.168.20.0/24 meter tctl_m_192_168_20_0_24_ul_lan1 { ip saddr limit rate over 2500000 bytes/second } counter packets 3 bytes 300 drop comment "rl_ratelimit_192_168_20_0_24_ul"
+		ip saddr 0.0.0.0/0 meter tctl_m_0_0_0_0_0_ul_lan1 { ip saddr limit rate over 250000 bytes/second } counter packets 1 bytes 100 drop comment "rl_ratelimit_0_0_0_0_0_ul"
 	}
 }

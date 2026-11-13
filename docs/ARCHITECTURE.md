@@ -188,8 +188,8 @@ The file `trafficctl-fw.sh` is sourced by all scripts and provides firewall func
 
 | Function | Implementation |
 |----------|----------------|
-| `tctl_ratelimit_add` | `nft add rule netdev tm_ratelimit dl ip daddr ... limit rate over ... drop` |
-| `tctl_ratelimit_remove` | Delete rules by handle from `netdev tm_ratelimit dl` |
+| `tctl_ratelimit_add` | `netdev tm_ratelimit`: `ip daddr ... limit rate over ... drop` on every LAN device's egress chain `dl_<dev>` (WAN ingress chain `dl` on kernels without egress), `ip saddr ...` on every bridge port's ingress chain `ul_<port>`; in `each` mode one meter per chain (`tctl_rl_meter_name`). A device that refuses its rule is logged and reported (`partial`); the rules on the other devices stay |
+| `tctl_ratelimit_remove` | `tctl_rl_delete_rules`: rules by exact comment and handle across all chains, then the meter sets those rules named (nftables 1.1 keeps them) |
 | `tctl_block_add` | `nft add rule inet fw4 forward ip saddr ... drop` |
 | `tctl_block_remove` | Delete rules by handle from `inet fw4 forward` |
 | `tctl_is_blocked` | grep nft forward chain |
@@ -228,12 +228,12 @@ rootfs and compares the v1.30.0 readers with the CLI on that state. The
 bridge has two dummy ports, so the upload rules land on more than one
 `ul_<port>` chain. The container runs on the CI host's kernel, which has the
 netdev egress hook, so the job never takes the WAN-ingress `dl` fallback that
-22.03's 5.10 kernel needs. On 22.03 the second port also shows a writer bug,
-fixed separately: an each-mode limit gives its upload meter the same name in
-every `ul_<port>` chain, nftables 1.0.2 refuses the second one ("Resource
-busy"), and the writer still reports success, so `ul_lan2` has no IPv4
-upload rule for those targets. Both readers report that same state, so the
-comparison keeps them.
+22.03's 5.10 kernel needs. The second port is also where the each-mode
+writer bug of 1.30.4 and earlier showed on 22.03: every `ul_<port>` chain got
+the same meter name, nftables 1.0.2 refused the second one ("Resource busy")
+and `ul_lan2` had no IPv4 upload rule. Since 1.30.5 every chain has its own
+meter, and the job checks that `ul_lan2` holds the upload rule of each
+each-mode target before it compares the readers.
 
 ---
 

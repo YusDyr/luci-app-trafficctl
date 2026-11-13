@@ -24,6 +24,8 @@ jobs:
         run: bash tests/test_fw.sh
       - name: Bidirectional limit/shape tests
         run: bash tests/test_direction.sh
+      - name: Per-chain limiter meters on a multi-port bridge
+        run: bash tests/test_meter_per_chain.sh
       - name: Telegram unit tests
         run: bash tests/test_telegram.sh
       - name: Telegram mock tests
