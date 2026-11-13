@@ -1,8 +1,9 @@
 #!/bin/sh
 # Live check of the read-only nft/tc readers, run INSIDE an OpenWrt rootfs
 # container with NET_ADMIN (see .github/workflows/compat.yml, job
-# live-readers). The current shell writers build real kernel state (blocks,
-# rate limits, shapes) on a bridge with two dummy ports, then the v1.30.0
+# live-readers). The current writers (the ucode CLI behind the script
+# wrappers) build real kernel state (blocks, rate limits, shapes) on a bridge
+# with two dummy ports, then the v1.30.0
 # shell readers and the ucode CLI report it, each into its own file:
 #
 #   /out/legacy/<command>.json   v1.30.0 trafficctl-<command>.sh
@@ -115,8 +116,7 @@ uci set trafficctl.main.persist_rules=1
 uci commit trafficctl
 
 # No netifd: a private ubusd on the default socket, so the ubus CLI (the
-# shell shaper) and the ucode module (the limiter) meet the same
-# network.interface.
+# v1.30.0 readers) and the ucode modules meet the same network.interface.
 cat > "$W/ubus/network.interface@dump.json" <<'EOF'
 {"interface":[{"interface":"lan","up":true,"device":"br-lan","l3_device":"br-lan","ipv4-address":[{"address":"192.168.0.1","mask":24}]},{"interface":"wan","up":true,"device":"wan","l3_device":"wan","ipv4-address":[{"address":"203.0.113.2","mask":24}]}]}
 EOF

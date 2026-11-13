@@ -107,7 +107,7 @@ method because it returns the contents of the configured log file.
 | `ratelimit_stats` | `trafficctl ratelimit-stats` (ucode) | (none) | read |
 | `subnets` | `trafficctl subnets` (ucode) | (none) | read |
 | `shape_stats` | `trafficctl shape-stats` (ucode) | (none) | read |
-| `shape_status` | `trafficctl-shape.sh status` | `ip` | read |
+| `shape_status` | `trafficctl shape status` (ucode) | `ip` | read |
 | `names_list` | (in plugin) | (none) | read |
 | `portfw_list` | `trafficctl portfw list` (ucode) | (none) | read |
 | `rules_list` | `trafficctl rules list` (ucode) | (none) | read |
@@ -123,8 +123,8 @@ method because it returns the contents of the configured log file.
 | `block` | `trafficctl block` (ucode) | `ip`, `label` | write |
 | `unblock` | `trafficctl unblock` (ucode) | `ip`, `label` | write |
 | `ratelimit` | `trafficctl ratelimit` (ucode) | `ip` (host, CIDR or `all`), `rate_kbit`, `label`, `mode` (`each`\|`shared`) | write |
-| `shape_add` | `trafficctl-shape.sh add` | `ip`, `rate_kbit`, `label` | write |
-| `shape_remove` | `trafficctl-shape.sh remove` | `ip`, `label` | write |
+| `shape_add` | `trafficctl shape add` (ucode) | `ip`, `rate_kbit`, `label`, `rate_kbit_up` | write |
+| `shape_remove` | `trafficctl shape remove` (ucode) | `ip`, `label` | write |
 | `macfilter_add` | `trafficctl macfilter-add` (ucode) | `ip` | write |
 | `macfilter_remove` | `trafficctl macfilter-remove` (ucode) | `ip` or `mac` (`mac` wins when both are sent) | write |
 | `name_set` | (in plugin) | `ip`, `name` (empty `name` clears the alias) | write |
@@ -1020,23 +1020,64 @@ neither.
 
 ---
 
-### trafficctl-shape.sh
+### trafficctl shape
 
-Manage tc/HTB traffic shaping.
+Set, remove or show a shape (tc/HTB, a queue, both directions). The ucode CLI,
+`trafficctl/files/usr/share/ucode/trafficctl/shape.uc`;
+`trafficctl-shape.sh` is a wrapper that runs it with the same arguments.
 
-**Arguments:** `<add|remove|status> <ip> [rate_kbit] [label]`
+**Arguments:** `<add|remove|status> <ip> [rate_kbit] [label] [upload_kbit]`
+
+A host only (no CIDR, no `all`). Download is an HTB class on the LAN device
+(`match ip dst`), upload a class with the same classid on the IFB device
+`tctl-ifb0`, fed by `mirred` from the ingress of every LAN port (`match ip
+src`). `upload_kbit` empty or absent is the download rate; without `kmod-ifb`
+only download is shaped and the message says so. The label is accepted and
+not used.
 
 **Output (add):**
 ```json
-{"ok": true, "msg": "shape 10000 kbit/s applied to 192.168.0.111 (class 1:6f)"}
+{"ok": true, "nss": "absent", "msg": "shape 8000 kbit/s down, 1000 kbit/s up applied to 192.168.0.50 both directions (class 1:2)"}
 ```
 
 **Output (status):**
 ```json
-{"ok": true, "ip": "192.168.0.111", "classid": "1:6f", "info": "rate 10000Kbit"}
+{"ok": true, "ip": "192.168.0.50", "classid": "1:2", "info": "8Mbit"}
 ```
 
-**Persistence:** Writes to `/etc/trafficctl/shapes.json` on every add/remove.
+Errors are `{"ok": false, "msg": "..."}` with exit status 1: an invalid
+address or rate (whole kbit/s, 1 to the limiter's maximum), no free classid,
+a root qdisc another QoS setup owns (SQM's cake, a foreign HTB tree: declined,
+never torn down), or `tc setup failed for <ip> on <dev>`.
+
+**Persistence:** `/etc/trafficctl/shapes.json`, written on every add and
+remove whatever `persist_rules` says, in the bytes the shell shaper wrote
+(`{"ip":...,"rate_kbit":...,"classid":"1:<hex>"[,"rate_kbit_up":...]}`, one
+array, mode 0644, replaced atomically) and under the same mkdir lock,
+`/tmp/trafficctl_shapes.lock.d` (taken over after 5 s). A record the shell's
+pattern would not have matched is dropped on the next write, as before.
+`trafficctl restore` (the `ifup lan` hook) applies every record again and
+counts them in its `restored`/`failed`; a record it cannot apply is logged as
+`Failed to restore shape for <ip> (<rate>kbit)`, and nothing is written to the
+activity log. The hook no longer has a shape loop of its own.
+
+**Differences from the shell shaper (v1.30.6):**
+
+- A shape's u32 filters are deleted by their handle. The shell deleted by prio
+  (`tc filter del ... prio 10 ... match ip dst <ip>/32`), and with no handle
+  the kernel deletes every filter of that prio on the device, whatever the
+  match: each shape added or removed took the filters of all the other shapes
+  with it, so only the last one applied was in force while the others' classes
+  stayed and the UI showed them shaped. On a restore this left one shape of
+  all those saved.
+- stdout is the JSON reply only; the shell printed tc's error text before the
+  `tc setup failed` reply.
+- The restore takes each record as it is (two records for one address are both
+  applied, the last wins), skips a record with an empty address, and logs a
+  record with an invalid rate, which the shell handed to the shaper and
+  dropped without a word. Its exit status is 1 when a record failed.
+- The default limit for new devices (`trafficctl newdevice`, mode `shaper`)
+  applies the shape in process instead of running `trafficctl-shape.sh`.
 
 ---
 

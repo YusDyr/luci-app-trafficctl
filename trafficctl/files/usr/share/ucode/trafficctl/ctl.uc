@@ -51,7 +51,8 @@
 //                            word (acl, ban, none, no-radio)
 //   has_limit(ip)            a limit or shape, live or saved
 //   newdevice(env)           trafficctl newdevice: the DHCP hook's ACTION,
-//                            MACADDR, IPADDR and HOSTNAME
+//                            MACADDR, IPADDR and HOSTNAME; the default limit
+//                            in process (limit.ratelimit or shape.main)
 //   restore()                trafficctl restore: the saved blocks, once fw4
 //                            is up; { ok, restored, failed }
 
