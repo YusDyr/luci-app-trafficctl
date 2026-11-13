@@ -10,6 +10,7 @@
 import * as lib from 'trafficctl.lib';
 import * as net from 'trafficctl.net';
 import * as ctl from 'trafficctl.ctl';
+import * as limit from 'trafficctl.limit';
 import * as report from 'trafficctl.report';
 import * as notify from 'trafficctl.notify';
 // ── PR7: cut, portfw ──
@@ -142,8 +143,28 @@ const commands = {
 	newdevice: () => ctl.newdevice({ ACTION: getenv('ACTION'), MACADDR: getenv('MACADDR'),
 		IPADDR: getenv('IPADDR'), HOSTNAME: getenv('HOSTNAME') }),
 
-	// The iface hotplug hook on ifup lan: the saved blocks.
-	restore: () => result(ctl.restore()),
+	ratelimit: (args) => replied(limit.ratelimit(args)),
+
+	// The iface hotplug hook on ifup lan: the saved blocks, then the saved
+	// limits. Counted together; each failure is in syslog. Each half on its
+	// own: an error in the blocks must not leave every limit off until the
+	// next ifup.
+	restore: () => {
+		let r = { ok: true, restored: 0, failed: 0 };
+		for (let half in [ [ 'blocks', ctl.restore ], [ 'limits', limit.restore ] ]) {
+			try {
+				let h = half[1]();
+				r.restored += h.restored;
+				r.failed += h.failed;
+			}
+			catch (e) {
+				r.failed++;
+				lib.logger(sprintf('restore: %s failed: %s', half[0], e.message));
+			}
+		}
+		r.ok = (r.failed == 0);
+		return result(r);
+	},
 
 	netify: (args) => {
 		let r = report.netify(args);
@@ -225,7 +246,6 @@ const commands = {
 // stdout and exit status, so a port only moves an entry up into commands.
 const LEGACY = {
 	bytes: 'trafficctl-bytes.sh',
-	ratelimit: 'trafficctl-ratelimit.sh',
 	shape: 'trafficctl-shape.sh',
 	totals: 'trafficctl-totals.sh',
 };

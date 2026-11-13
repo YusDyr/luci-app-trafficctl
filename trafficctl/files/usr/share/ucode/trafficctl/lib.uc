@@ -38,8 +38,9 @@
 //   qv(argv)                      q() of each element, joined by spaces
 //   run(cmd, ms)                  stdout as a string, stderr dropped, no stdin;
 //                                 with ms, cmd is one program, killed after ms
-//   run_rc(cmd, ms)               run() with a timeout: { out, rc }, rc the
-//                                 exit status, -9 when it was killed
+//   run_rc(cmd, ms, err)          run() with a timeout: { out, rc }, rc the
+//                                 exit status, -9 when it was killed; with
+//                                 err, stderr is in out too (ms may be null)
 //   lines(cmd, ms)                run() split into lines
 //   sh(cmd, ms)                   exit status, all output dropped
 //   pipe(cmd, input)              run() with input on cmd's stdin, so a
@@ -112,6 +113,9 @@
 //   nss_status()                  absent, stopped or active (Qualcomm ECM)
 //   nss_note(), persist_note()    the suffix, '' when nothing to say
 //   nss_defunct()                 flush the flows ECM already accelerates
+// Rule names and syslog
+//   slug(target)                  '.' and '/' as '_': nft comments, set names
+//   logger(msg)                   syslog, tag trafficctl
 
 import { popen, readfile as fs_readfile, writefile, open, stat, mkdir, rmdir,
 	unlink, rename, chmod, readlink, dirname, basename, lsdir } from 'fs';
@@ -251,8 +255,9 @@ function run(cmd, ms) {
 }
 
 // run() with a timeout and the exit status: the rpcd plugin has to answer
-// before rpcd kills it, and has to tell a timeout from an empty reply.
-function run_rc(cmd, ms) {
+// before rpcd kills it, and has to tell a timeout from an empty reply. err:
+// the limiter reports nft's reason for each rule it could not add.
+function run_rc(cmd, ms, err) {
 	// Created here and exclusively, as in pipe().
 	let tmp = path('/tmp/.trafficctl_run.' + pid());
 	unlink(tmp);
@@ -260,7 +265,7 @@ function run_rc(cmd, ms) {
 	if (!f)
 		return { out: '', rc: -1 };
 	f.close();
-	let rc = system('exec >' + q(tmp) + ' 2>/dev/null </dev/null; exec ' + cmd, ms);
+	let rc = system('exec >' + q(tmp) + (err ? ' 2>&1' : ' 2>/dev/null') + ' </dev/null; exec ' + cmd, ms);
 	let out = fs_readfile(tmp);
 	unlink(tmp);
 	return { out: out ?? '', rc };
@@ -789,6 +794,16 @@ function env_or(name, dflt) {
 	return (v == null || v == '') ? dflt : v;
 }
 
+// A target as it goes into an nft comment or set name (tctl_target_slug).
+function slug(t) {
+	return replace('' + t, /[.\/]/g, '_');
+}
+
+// syslog, tag trafficctl: what failed, for the operator reading logread.
+function logger(msg) {
+	sh('logger -t trafficctl ' + q(msg));
+}
+
 function log(action, target, detail, via, src) {
 	if (uci_get('trafficctl', 'logging', 'enabled') != '1')
 		return;
@@ -1053,4 +1068,4 @@ export { qv, pipe, passthru, set_context, run_rc, ubus_list, curl_config };
 export { ubus_event };
 // The block, WiFi and new-device commands.
 export { append, uci_cli, persist_enabled, persist_save, persist_remove, persist_note,
-	nss_status, nss_note, nss_defunct };
+	nss_status, nss_note, nss_defunct, slug, logger };

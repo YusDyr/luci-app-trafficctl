@@ -88,13 +88,13 @@ luci-app-trafficctl/                     # repository
 │       │   ├── config/trafficctl        # UCI config (the conffile)
 │       │   ├── init.d/                  # trafficctl-telegram, trafficctl-history, trafficctl-cut
 │       │   └── hotplug.d/
-│       │       ├── iface/99-trafficctl-shapes      # Restore on boot (blocks via `trafficctl restore`)
+│       │       ├── iface/99-trafficctl-shapes      # Restore on boot (blocks, limits via `trafficctl restore`)
 │       │       └── dhcp/99-trafficctl-newdevice    # New-device detection: `trafficctl newdevice`
 │       ├── lib/upgrade/keep.d/trafficctl          # /etc/trafficctl/ kept across sysupgrade
 │       ├── usr/sbin/trafficctl          # The CLI (ucode): subnets, names, rdns, rdns-refresh, ifaces, bytes, totals,
 │       │                                #   ratelimit-stats, shape-stats, rules, summary, device, metrics, netify,
 │       │                                #   block, unblock, macfilter-add, macfilter-remove, newdevice, restore,
-│       │                                #   cut, portfw, history
+│       │                                #   cut, portfw, history, ratelimit
 │       ├── usr/share/ucode/trafficctl/
 │       │   ├── lib.uc                   # Shared helpers: uci/ubus, commands, JSON, validation, files, log
 │       │   ├── net.uc                   # Subnets, interface roles, reverse DNS, byte samples, totals
@@ -102,7 +102,8 @@ luci-app-trafficctl/                     # repository
 │       │   ├── report.uc                # Summary, device detail, Prometheus exporter, netifyd DPI
 │       │   ├── cut.uc                   # Global internet cut: nft -f ruleset, state, keeper loop
 │       │   ├── portfw.uc                # Port-forward list, pause, limit (inet tctl_pfw)
-│       │   └── history.uc               # Usage history store: flush, keeper, read, periods, prune
+│       │   ├── history.uc               # Usage history store: flush, keeper, read, periods, prune
+│       │   └── limit.uc                 # Per-device limiter (netdev tm_ratelimit), its restore
 │       ├── usr/libexec/trafficctl/
 │       │   ├── trafficctl-fw.sh         # Firewall abstraction (sourced)
 │       │   ├── trafficctl-summary.sh    # Wrapper: `trafficctl summary` (all-device summary)
@@ -114,7 +115,7 @@ luci-app-trafficctl/                     # repository
 │       │   ├── trafficctl-unblock.sh    # Wrapper: `trafficctl unblock`
 │       │   ├── trafficctl-shape.sh      # tc/HTB shaping
 │       │   ├── trafficctl-shape-stats.sh      # Wrapper: `trafficctl shape-stats`
-│       │   ├── trafficctl-ratelimit.sh  # nft policer
+│       │   ├── trafficctl-ratelimit.sh  # Wrapper: `trafficctl ratelimit` (nft policer)
 │       │   ├── trafficctl-ratelimit-stats.sh  # Wrapper: `trafficctl ratelimit-stats`
 │       │   ├── trafficctl-macfilter-add.sh     # Wrapper: `trafficctl macfilter-add`
 │       │   ├── trafficctl-macfilter-remove.sh  # Wrapper: `trafficctl macfilter-remove`
@@ -236,6 +237,7 @@ Run all tests locally. These run on the host with fake `nft`/`tc`/`ip`/`uci`/
 bash tests/test_fw.sh                 # Firewall helper library
 bash tests/test_direction.sh          # Bidirectional limit/shape, classid allocation
 bash tests/test_meter_per_chain.sh    # Each-mode meters per chain, per-port success, nft 1.0/1.1
+bash tests/test_limit_inputs.sh       # Limiter: device names, v6 set timeout, rules.json fields, 1.30.x padded masks
 bash tests/test_netify.sh             # Netify (DPI) integration
 bash tests/test_openwrt_compat.sh     # BusyBox ash compatibility / no bashisms
 bash tests/test_security.sh           # Input validation and injection resistance
@@ -316,7 +318,7 @@ their own — everything else is reached through `workflow_call`:
 | `tests.yml` | called by `ci.yml` | Unit, mock, E2E, security, and build tests |
 | `shellcheck.yml` | called by `ci.yml` | ShellCheck (`-S warning`) on every script with a shell shebang |
 | `eslint.yml` | called by `ci.yml` | ESLint on the frontend — `ecmaVersion: 5` plus `no-restricted-syntax`, so ES6 syntax fails the build |
-| `compat.yml` | PR, called by `auto-release.yml` | OpenWrt rootfs compatibility (52 version/arch combos); installs the built package and tests upgrades; job `live-ratelimit` runs `tools/ci/live-ratelimit.sh` (real nft, a bridge with two dummy ports) on 22.03.7 and 25.12.4 |
+| `compat.yml` | PR, called by `auto-release.yml` | OpenWrt rootfs compatibility (52 version/arch combos); installs the built package and tests upgrades; job `live-ratelimit` runs `tools/ci/live-ratelimit.sh` (the ucode limiter on real nft, a bridge with two dummy ports, a private ubusd) on 22.03.7 and 25.12.4 |
 | `auto-release.yml` | push to main | Waits for `ci.yml` **and** `compat.yml`, then bumps the version, tags, builds and publishes; job `pages` then rebuilds the signed opkg/apk feed on GitHub Pages with `tools/build-feed.sh` |
 
 The nesting is why the leaf workflows carry no `push`/`pull_request` triggers.

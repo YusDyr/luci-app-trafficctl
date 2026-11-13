@@ -22,21 +22,8 @@ jobs:
         run: sudo apt-get install -y --no-install-recommends busybox-static mawk
       - name: Shell unit tests
         run: bash tests/test_fw.sh
-      - name: Bidirectional limit/shape tests
-        run: bash tests/test_direction.sh
-      - name: Per-chain limiter meters on a multi-port bridge
-        run: bash tests/test_meter_per_chain.sh
       - name: Security tests
         run: bash tests/test_security.sh
-      - name: IPv6 enforcement tests (limiter)
-        run: bash tests/test_ipv6.sh
-      - name: Qualcomm NSS reporting tests
-        run: bash tests/test_nss.sh
-      # Independent up/down ceilings. Most of the risk is the shapes.json
-      # record format: a record the extraction pattern misses disappears from
-      # the classid allocator and two devices end up sharing an HTB class.
-      - name: Asymmetric rate limit tests
-        run: bash tests/test_asymmetric_limits.sh
       # Slices the CIDR helpers out of status.js and runs them under node —
       # the only frontend logic with a wrong answer an operator cannot see.
       - name: Subnet target warning (frontend slices)
@@ -129,6 +116,24 @@ jobs:
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_macfilter.sh
       - name: New device default-limit tests
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_newdevice.sh
+      # The limiter (trafficctl.limit) and the shaper beside it, still shell.
+      - name: Bidirectional limit/shape tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_direction.sh
+      - name: Per-chain limiter meters on a multi-port bridge
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_meter_per_chain.sh
+      # Device names, the v6 set timeout and rules.json fields as they reach
+      # nft; 1.30.x's zero-padded masks; one restore half failing.
+      - name: Limiter input tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_limit_inputs.sh
+      - name: IPv6 enforcement tests (limiter)
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_ipv6.sh
+      - name: Qualcomm NSS reporting tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_nss.sh
+      # Independent up/down ceilings. Most of the risk is the shapes.json
+      # record format: a record the extraction pattern misses disappears from
+      # the classid allocator and two devices end up sharing an HTB class.
+      - name: Asymmetric rate limit tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_asymmetric_limits.sh
       - name: Persistence tests (rules.json, restore, the shared lock)
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_persistence.sh
       - name: Rules tab backend tests

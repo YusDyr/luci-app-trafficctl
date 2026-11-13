@@ -12,7 +12,7 @@ All backend functionality is exposed through the `/usr/sbin/trafficctl` CLI and 
 - **Rate units**: All rate values are in **kbit/s** (kilobits per second).
 - **Exit codes**: 0 on success, 1 on input validation failure.
 - **Label sanitization**: `block`, `unblock`, `ratelimit` and `shape_add` strip their label to `[a-zA-Z0-9_.-]`.
-- **Labels do not identify rules.** A label is recorded in the activity log only. Firewall rule comments are derived from the target (`tctl_block_<slug>`, `rl_ratelimit_<slug>`), so a control created from one surface can be removed from another — a label-derived comment made a block placed in LuCI un-removable from the Telegram bot.
+- **Labels do not identify rules.** A label is recorded in the activity log only. Firewall rule comments are derived from the target (`tctl_block_<slug>`, `rl_ratelimit_<slug>`), so a control created from one surface can be removed from another — a label-derived comment made a block placed in LuCI un-removable from the Telegram bot. Rules written before v1.13.2 still carry such a comment (`tctl_block_tg`, `rl_ratelimit_tg`), shared by every target given that label; `unblock` and `ratelimit` with rate 0 remove one only when it names the exact target (`ip saddr`, and `ip daddr` for a download limit), so other targets keep theirs.
 - **`log_file` is constrained** to `/tmp/trafficctl/*` or `/var/log/*`, and `max_lines` to 20–100000. The path is both an append target and a `tail`/rewrite target, so an unconstrained value was an arbitrary root read and truncate.
 
 ---
@@ -122,7 +122,7 @@ method because it returns the contents of the configured log file.
 | `cut_set` | `trafficctl cut engage`/`release` (ucode) | `active` (bool), `duration` (seconds, `0` = indefinite), `persist` (bool) | write |
 | `block` | `trafficctl block` (ucode) | `ip`, `label` | write |
 | `unblock` | `trafficctl unblock` (ucode) | `ip`, `label` | write |
-| `ratelimit` | `trafficctl-ratelimit.sh` | `ip` (host, CIDR or `all`), `rate_kbit`, `label`, `mode` (`each`\|`shared`) | write |
+| `ratelimit` | `trafficctl ratelimit` (ucode) | `ip` (host, CIDR or `all`), `rate_kbit`, `label`, `mode` (`each`\|`shared`) | write |
 | `shape_add` | `trafficctl-shape.sh add` | `ip`, `rate_kbit`, `label` | write |
 | `shape_remove` | `trafficctl-shape.sh remove` | `ip`, `label` | write |
 | `macfilter_add` | `trafficctl macfilter-add` (ucode) | `ip` | write |
@@ -897,11 +897,13 @@ form are still read, and removed by a resume or a new limit.
 
 ---
 
-### trafficctl-ratelimit.sh
+### trafficctl ratelimit
 
-Set or remove a rate limit (policer, both directions).
+Set or remove a rate limit (policer, both directions). The ucode CLI,
+`trafficctl/files/usr/share/ucode/trafficctl/limit.uc`;
+`trafficctl-ratelimit.sh` is a wrapper that runs it with the same arguments.
 
-**Arguments:** `<target> <rate_kbit> [label] [each|shared]`
+**Arguments:** `<target> <rate_kbit> [label] [each|shared] [upload_kbit]`
 
 Rate of `0` removes the limit.
 
@@ -923,11 +925,11 @@ usual reason to limit a subnet at all — must ask for `shared` explicitly.
 
 ```sh
 # 20 Mbit shared by the whole IoT VLAN
-trafficctl-ratelimit.sh 192.168.20.0/24 20000 "iot-cap" shared
+trafficctl ratelimit 192.168.20.0/24 20000 "iot-cap" shared
 # 5 Mbit for each device on the guest VLAN
-trafficctl-ratelimit.sh 10.0.0.0/24 5000 "guest-cap" each
+trafficctl ratelimit 10.0.0.0/24 5000 "guest-cap" each
 # remove (mode is irrelevant when removing)
-trafficctl-ratelimit.sh 192.168.20.0/24 0 "iot-cap"
+trafficctl ratelimit 192.168.20.0/24 0 "iot-cap"
 ```
 
 **Output:**
@@ -961,9 +963,29 @@ loaded:
 When a direction went in on no device at all, the message says `UPLOAD ONLY`
 or `DOWNLOAD ONLY` with the reason. `ok` is `false` only if nothing went in, in
 either direction. Applying the limit again (or the next `ifup lan`) replaces
-the rules and fills the missing device in. The restore hook logs
+the rules and fills the missing device in. The restore (`trafficctl
+restore`, run by the `ifup lan` hook) logs
 `Restored ratelimit for <target> (<rate>kbit) PARTIALLY: ...` for a partial
-restore and `Failed to restore ratelimit ...` when nothing went in.
+restore and `Failed to restore ratelimit ...` when nothing went in. A saved
+record with an invalid rate or target is skipped with a `Not restoring
+ratelimit for ...` line, and the records after it are still restored. A rate
+saved as anything but a string or a number (`true`, an object) is an invalid
+rate too. The blocks and the limits are restored independently: an error in
+one is logged (`restore: blocks failed: ...`) and counted, and the other still
+runs.
+
+**Device names are checked.** A LAN device, bridge port or WAN device whose
+name the kernel could not have made (more than 15 characters, a space, a `/`,
+anything but letters, digits and `._@-`) never reaches nft: it is skipped,
+named with the odd characters masked in the result (`lan2?x: invalid device
+name`) and in syslog.
+
+**Zero-padded masks from 1.30.x.** Releases up to 1.30.6 accepted
+`10.0.0.0/024` and kept it as typed, in `rules.json` and in the rule comment
+(`rl_ratelimit_10_0_0_0_024`). The target is now read in its normal form,
+`10.0.0.0/24`: setting or removing a limit in either spelling also removes the
+padded rules and record, and the restore puts a padded record back as
+`10.0.0.0/24` (the record itself is left as it is).
 
 **Meters are per chain.** In `each` mode every chain gets its own meter,
 `tctl_m_<target slug>_<chain>` (`tctl_m_10_0_20_0_24_ul_lan1`). Releases up to
@@ -1093,7 +1115,7 @@ caused the event never waits on the network.
 |-------|------------|--------|
 | `new_device` | the device scan, the DHCP hotplug | `mac`, `ip`, `name`, `link` |
 | `known_device` | the device scan (a known MAC back online) | `mac`, `ip`, `name`, `link` |
-| `limit_applied` | `trafficctl-ratelimit.sh`, `trafficctl-shape.sh add` | `ip`, `rate_kbit`, `rate_kbit_up`, `mode` (`limiter`\|`shaper`) |
+| `limit_applied` | `trafficctl ratelimit` (`limit.uc`), `trafficctl-shape.sh add` | `ip`, `rate_kbit`, `rate_kbit_up`, `mode` (`limiter`\|`shaper`) |
 | `block_applied` | `trafficctl block`, `trafficctl macfilter-add` (when the deny took) | `ip`, `mac`, `kind` (`internet`\|`wifi`) |
 | `cut_engaged` | `trafficctl cut engage` (not its boot restore) | `duration` (seconds left, `0` = indefinite), `persist` |
 

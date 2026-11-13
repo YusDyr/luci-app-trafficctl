@@ -736,15 +736,11 @@ function rules_list() {
 const FW4 = [ 'chain', 'inet', 'fw4', 'forward' ];
 const CT_MS = 5000;
 
-function slug(t) {
-	return replace('' + t, /[.\/]/g, '_');
-}
-
 // From the target, never the caller's label: the label once made LuCI's and
 // the bot's comment for the same device differ, and neither could remove the
 // other's rule.
 function block_comment(ip) {
-	return 'tctl_block_' + slug(ip);
+	return 'tctl_block_' + lib.slug(ip);
 }
 
 // Any drop on the address counts, so a block from before v1.13.2 (the
@@ -1079,10 +1075,6 @@ function has_limit(ip) {
 	return index(lib.readfile(RULES) ?? '', key) >= 0 || index(lib.readfile(SHAPES) ?? '', key) >= 0;
 }
 
-function logger(msg) {
-	lib.sh('logger -t trafficctl ' + lib.q(msg));
-}
-
 // Two consumers of "this MAC is new", independent of each other: the bot's
 // notification keys off its own telegram_known.json, the default limit off
 // the seen-MAC ledger, because a limit must not be applied twice or by
@@ -1111,7 +1103,7 @@ function newdevice(env) {
 	if (!lib.seen_ready()) {
 		lib.seen_seed();
 		lib.seen_mark(mac);
-		logger(sprintf('newdevice: seeded the seen-MAC ledger (%d devices); no limit applied on this pass', lib.seen_count()));
+		lib.logger(sprintf('newdevice: seeded the seen-MAC ledger (%d devices); no limit applied on this pass', lib.seen_count()));
 		return 0;
 	}
 	if (lib.seen_known(mac))
@@ -1121,18 +1113,18 @@ function newdevice(env) {
 	lib.seen_mark(mac);
 
 	if (ip == '') {
-		logger(sprintf('newdevice: %s is new but has no address yet; no limit applied', mac));
+		lib.logger(sprintf('newdevice: %s is new but has no address yet; no limit applied', mac));
 		return 0;
 	}
 	if (has_limit(ip)) {
-		logger(sprintf('newdevice: %s (%s) already has a limit; left alone', ip, mac));
+		lib.logger(sprintf('newdevice: %s (%s) already has a limit; left alone', ip, mac));
 		return 0;
 	}
 
 	let shaper = (lib.uci_get('trafficctl', 'newdevice', 'limit_mode') == 'shaper');
 	let argv = shaper
 		? [ lib.path('/usr/libexec/trafficctl/trafficctl-shape.sh'), 'add', ip, kbit, 'shape_' + ip ]
-		: [ lib.path('/usr/libexec/trafficctl/trafficctl-ratelimit.sh'), ip, kbit, 'rl_ratelimit_' + slug(ip) ];
+		: [ lib.path('/usr/libexec/trafficctl/trafficctl-ratelimit.sh'), ip, kbit, 'rl_ratelimit_' + lib.slug(ip) ];
 	if (lib.sh('TCTL_VIA=newdevice TCTL_SRC=hotplug ' + lib.qv(argv)) == 0) {
 		// The limiter logs its own entry with the via/src above; the shaper
 		// logs nothing.
@@ -1140,7 +1132,7 @@ function newdevice(env) {
 			lib.log('shape_set', ip, kbit + 'kbit default for new device ' + mac, 'newdevice', 'hotplug');
 	}
 	else
-		logger(sprintf('newdevice: failed to apply %skbit to %s (%s)', kbit, ip, mac));
+		lib.logger(sprintf('newdevice: failed to apply %skbit to %s (%s)', kbit, ip, mac));
 	return 0;
 }
 
@@ -1179,7 +1171,7 @@ function restore() {
 			res.restored++;
 		else {
 			res.failed++;
-			logger('Failed to restore block for ' + ip);
+			lib.logger('Failed to restore block for ' + ip);
 		}
 	}
 	res.ok = (res.failed == 0);
