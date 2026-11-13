@@ -301,8 +301,10 @@ jobs:
             echo "Stable URLs (always point to the latest release):"
             echo "\`\`\`"
             echo "wget https://github.com/${{ github.repository }}/releases/latest/download/trafficctl.ipk"
+            echo "wget https://github.com/${{ github.repository }}/releases/latest/download/trafficctl-telegram.ipk"
             echo "wget https://github.com/${{ github.repository }}/releases/latest/download/luci-app-trafficctl.ipk"
             echo "wget https://github.com/${{ github.repository }}/releases/latest/download/trafficctl.apk"
+            echo "wget https://github.com/${{ github.repository }}/releases/latest/download/trafficctl-telegram.apk"
             echo "wget https://github.com/${{ github.repository }}/releases/latest/download/luci-app-trafficctl.apk"
             echo "\`\`\`"
             echo ""
@@ -313,19 +315,23 @@ jobs:
             echo "Install over the current version — both package managers upgrade in"
             echo "place, so there is no need to remove the old one first. Coming from 1.28.x"
             echo "or older, the backend moves from luci-app-trafficctl into trafficctl in"
-            echo "the same run."
+            echo "the same run. trafficctl-telegram is the Telegram bot, part of trafficctl"
+            echo "up to 1.30.x; luci-app-trafficctl depends on it, and a router without"
+            echo "LuCI that runs the bot needs it installed too."
             echo ""
             echo "\`\`\`sh"
             echo "cd /tmp"
             echo "# OpenWrt 22.03 - 24.10"
             echo "wget https://github.com/${{ github.repository }}/releases/latest/download/trafficctl.ipk"
+            echo "wget https://github.com/${{ github.repository }}/releases/latest/download/trafficctl-telegram.ipk"
             echo "wget https://github.com/${{ github.repository }}/releases/latest/download/luci-app-trafficctl.ipk"
-            echo "opkg install /tmp/trafficctl.ipk /tmp/luci-app-trafficctl.ipk"
+            echo "opkg install /tmp/trafficctl.ipk /tmp/trafficctl-telegram.ipk /tmp/luci-app-trafficctl.ipk"
             echo ""
             echo "# OpenWrt 25.12+ / snapshot"
             echo "wget https://github.com/${{ github.repository }}/releases/latest/download/trafficctl.apk"
+            echo "wget https://github.com/${{ github.repository }}/releases/latest/download/trafficctl-telegram.apk"
             echo "wget https://github.com/${{ github.repository }}/releases/latest/download/luci-app-trafficctl.apk"
-            echo "apk add --allow-untrusted /tmp/trafficctl.apk /tmp/luci-app-trafficctl.apk"
+            echo "apk add --allow-untrusted /tmp/trafficctl.apk /tmp/trafficctl-telegram.apk /tmp/luci-app-trafficctl.apk"
             echo ""
             echo "# required either way - rpcd caches the backend"
             echo "/etc/init.d/rpcd restart"
@@ -390,6 +396,8 @@ jobs:
           ln -f dist/luci-app-trafficctl_*_all.ipk dist/luci-app-trafficctl.ipk
           ln -f dist/trafficctl_*_all.ipk dist/trafficctl_all.ipk
           ln -f dist/trafficctl_*_all.ipk dist/trafficctl.ipk
+          ln -f dist/trafficctl-telegram_*_all.ipk dist/trafficctl-telegram_all.ipk
+          ln -f dist/trafficctl-telegram_*_all.ipk dist/trafficctl-telegram.ipk
           cp dist/*.ipk /tmp/
 
       # Secrets are not readable from step `if:` expressions, so detect them
@@ -465,7 +473,7 @@ jobs:
           # luci-i18n-trafficctl-* as well as the main package: build-ipk.sh
           # emits one translation package per language and the SDK action wiped
           # dist/, so a glob anchored on the main package name drops them.
-          cp /tmp/luci-*trafficctl*.ipk /tmp/trafficctl_*.ipk dist/ 2>/dev/null || true
+          cp /tmp/luci-*trafficctl*.ipk /tmp/trafficctl_*.ipk /tmp/trafficctl-telegram_*.ipk dist/ 2>/dev/null || true
           # The SDK builds the translation subpackages alongside the main one.
           # Renamed to the release version rather than copied verbatim: the SDK
           # names them from its own APK_VERSION, which is a date-and-commit
@@ -481,11 +489,12 @@ jobs:
             _name=$(printf '%s' "$_base" | sed -E 's/-[0-9][^-]*\..*$//; s/\.apk$//')
             cp "$_apk" "dist/${_name}_${{ needs.prepare.outputs.new_version }}-r1_noarch.apk"
           done
-          # The web interface and the backend (trafficctl-<ver>.apk), under the
-          # release names. -name matches the whole basename, so
-          # "trafficctl-[0-9]*" cannot pick up luci-app-trafficctl-*.
+          # The web interface, the backend (trafficctl-<ver>.apk) and the bot,
+          # under the release names. -name matches the whole basename, so
+          # "trafficctl-[0-9]*" cannot pick up luci-app-trafficctl-* or
+          # trafficctl-telegram-*.
           V="${{ needs.prepare.outputs.new_version }}"
-          for pkg in luci-app-trafficctl trafficctl; do
+          for pkg in luci-app-trafficctl trafficctl trafficctl-telegram; do
             APK=$(find bin/ -name "${pkg}-[0-9]*.apk" 2>/dev/null | head -1)
             if [ -z "$APK" ]; then
               echo "::error::$pkg APK not found in SDK output"
@@ -498,6 +507,8 @@ jobs:
           ln -f "dist/luci-app-trafficctl_${V}-r1_noarch.apk" dist/luci-app-trafficctl.apk
           ln -f "dist/trafficctl_${V}-r1_noarch.apk" dist/trafficctl_noarch.apk
           ln -f "dist/trafficctl_${V}-r1_noarch.apk" dist/trafficctl.apk
+          ln -f "dist/trafficctl-telegram_${V}-r1_noarch.apk" dist/trafficctl-telegram_noarch.apk
+          ln -f "dist/trafficctl-telegram_${V}-r1_noarch.apk" dist/trafficctl-telegram.apk
 
       - name: Build .apk (standalone, unsigned fallback)
         if: needs.prepare.outputs.bump != 'none' && steps.apk_secrets.outputs.have != '1'

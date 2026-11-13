@@ -4,8 +4,11 @@
 # modules, the helper scripts, the init scripts, the
 # hotplug hooks, the config and the metrics CGI. Everything except the LuCI
 # view and its rpcd plugin, which stay in ../luci-app-trafficctl, so the
-# backend can run (Telegram bot, Prometheus exporter, the helpers from a
+# backend can run (notifications, Prometheus exporter, the helpers from a
 # shell) on a router without LuCI.
+#
+# The Telegram bot is a second package from this Makefile, trafficctl-telegram:
+# a resident process that a router without a bot should not carry.
 #
 # An upgrade from a release that still shipped everything in
 # luci-app-trafficctl needs nothing special here: opkg and apk both hand a
@@ -47,14 +50,29 @@ define Package/trafficctl
   PKGARCH:=all
 endef
 
+define Package/trafficctl-telegram
+  SECTION:=net
+  CATEGORY:=Network
+  TITLE:=Telegram bot for trafficctl
+  URL:=https://github.com/YusDyr/luci-app-trafficctl
+  DEPENDS:=+trafficctl +curl
+  PKGARCH:=all
+endef
+
 define Package/trafficctl/description
  Per-device traffic monitoring (conntrack), rate limiting (nftables),
  traffic shaping (tc/HTB), internet blocking, WiFi MAC filtering, a global
- internet cut, a Telegram bot and a Prometheus exporter. The web interface
- is luci-app-trafficctl.
+ internet cut, device notifications and a Prometheus exporter. The web
+ interface is luci-app-trafficctl, the Telegram bot trafficctl-telegram.
  WiFi MAC filtering needs hostapd-utils, which is optional so the package can
  be installed on wired-only builds. Without it a WiFi block is a temporary
  (one hour) hostapd ban over ubus.
+endef
+
+define Package/trafficctl-telegram/description
+ A Telegram bot for trafficctl: device status, and block, WiFi block,
+ limit and shape buttons per device. Configured in /etc/config/trafficctl
+ (section telegram) or from luci-app-trafficctl.
 endef
 
 # Only list files that ship in the package and may be user-edited.
@@ -68,8 +86,9 @@ define Build/Compile
 endef
 
 # Every file is listed by name rather than globbed. tests/test_package_split.sh
-# compares this list with the tree under files/, so a new file that is not
-# added here fails the suite instead of going missing from the release.
+# compares this list and the one of trafficctl-telegram with the tree under
+# files/, so a new file that is not added here fails the suite instead of
+# going missing from the release.
 define Package/trafficctl/install
 	$(INSTALL_DIR) $(1)/usr/sbin
 	$(INSTALL_BIN) ./files/usr/sbin/trafficctl $(1)/usr/sbin/
@@ -109,7 +128,6 @@ define Package/trafficctl/install
 	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-subnets.sh $(1)/usr/libexec/trafficctl/
 	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-summary.sh $(1)/usr/libexec/trafficctl/
 	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-telegram-test.sh $(1)/usr/libexec/trafficctl/
-	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-telegram.sh $(1)/usr/libexec/trafficctl/
 	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-totals.sh $(1)/usr/libexec/trafficctl/
 	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-unblock.sh $(1)/usr/libexec/trafficctl/
 	$(INSTALL_DIR) $(1)/etc/config
@@ -118,7 +136,6 @@ define Package/trafficctl/install
 	$(INSTALL_BIN) ./files/etc/init.d/trafficctl-cut $(1)/etc/init.d/
 	$(INSTALL_BIN) ./files/etc/init.d/trafficctl-history $(1)/etc/init.d/
 	$(INSTALL_BIN) ./files/etc/init.d/trafficctl-notify $(1)/etc/init.d/
-	$(INSTALL_BIN) ./files/etc/init.d/trafficctl-telegram $(1)/etc/init.d/
 	$(INSTALL_DIR) $(1)/etc/uci-defaults
 	$(INSTALL_BIN) ./files/etc/uci-defaults/80_trafficctl-notify $(1)/etc/uci-defaults/
 	$(INSTALL_DIR) $(1)/etc/hotplug.d/dhcp
@@ -142,9 +159,11 @@ endef
 # gone, and an upgrade brought it back until the reboot after that. When the
 # flag is 1 the service is enabled and started; when it is 0 nothing is
 # started or enabled (the init script would not start the bot anyway). The
-# same goes for history.enabled. rc.d is never disabled here: the SDK's
-# default_postinst, which runs after this script, enables every init script
-# on a fresh install, and the flag check in each service keeps that harmless.
+# same goes for history.enabled, and for the bot, which is its own package
+# now: trafficctl-telegram's postinst applies the rule to it. rc.d is never
+# disabled here: the SDK's default_postinst, which runs after this script,
+# enables every init script on a fresh install, and the flag check in each
+# service keeps that harmless.
 #
 # The history sampler is a long-running loop that calls its sibling scripts by
 # absolute path. Releases up to 1.28.0 installed them under /usr/local/bin, so
@@ -188,11 +207,18 @@ if [ -z "$${IPKG_INSTROOT}" ]; then
 	if [ -x /usr/sbin/trafficctl ]; then
 		/usr/sbin/trafficctl notify migrate >/dev/null 2>&1 || true
 	fi
-	# Restarted, not started: a bot of a release up to 1.30.x runs the device
-	# scan itself, which the notification watcher took over.
-	if [ -x /etc/init.d/trafficctl-telegram ] && [ "$$(uci -q get trafficctl.telegram.enabled)" = "1" ]; then
-		/etc/init.d/trafficctl-telegram enable 2>/dev/null || true
-		/etc/init.d/trafficctl-telegram restart 2>/dev/null || true
+	# A bot of a release up to 1.30.x lost its files to trafficctl-telegram
+	# with this upgrade. Without that package it would run on until the next
+	# reboot (and scan for devices, which the watcher took over), and rc.d
+	# would keep links to a missing init script.
+	if [ ! -e /etc/init.d/trafficctl-telegram ]; then
+		ubus call service delete '{"name":"trafficctl-telegram"}' >/dev/null 2>&1 || true
+		rm -f /etc/rc.d/S99trafficctl-telegram /etc/rc.d/K10trafficctl-telegram
+		# Headless (no luci-app-trafficctl to pull it in): say so where
+		# the operator will look.
+		if [ "$$(uci -q get trafficctl.telegram.enabled)" = "1" ]; then
+			logger -t trafficctl "The Telegram bot is stopped: it is the package trafficctl-telegram now; install it (opkg install trafficctl-telegram, or apk add trafficctl-telegram) to run it again" 2>/dev/null || true
+		fi
 	fi
 	# The watcher decides for itself whether anything wants the scan.
 	if [ -x /etc/init.d/trafficctl-notify ]; then
@@ -226,4 +252,38 @@ fi
 exit 0
 endef
 
+# Restarted, not started: a bot of a release up to 1.30.x runs the device
+# scan itself, which the notification watcher took over. The flag rule is
+# trafficctl's (above). trafficctl's postinst has run by now: the package
+# manager configures a dependency first, so the Telegram options of 1.30.x
+# have already moved to the notification senders.
+define Package/trafficctl-telegram/postinst
+#!/bin/sh
+if [ -z "$${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-telegram ] && [ "$$(uci -q get trafficctl.telegram.enabled)" = "1" ]; then
+	/etc/init.d/trafficctl-telegram enable 2>/dev/null || true
+	/etc/init.d/trafficctl-telegram restart 2>/dev/null || true
+fi
+exit 0
+endef
+
+define Package/trafficctl-telegram/prerm
+#!/bin/sh
+if [ -z "$${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-telegram ]; then
+	/etc/init.d/trafficctl-telegram stop 2>/dev/null || true
+	/etc/init.d/trafficctl-telegram disable 2>/dev/null || true
+fi
+exit 0
+endef
+
+define Package/trafficctl-telegram/install
+	$(INSTALL_DIR) $(1)/usr/share/ucode/trafficctl
+	$(INSTALL_DATA) ./files/usr/share/ucode/trafficctl/telegram.uc $(1)/usr/share/ucode/trafficctl/
+	$(INSTALL_DIR) $(1)/usr/libexec/trafficctl
+	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-telegram.sh $(1)/usr/libexec/trafficctl/
+	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-telegram.uc $(1)/usr/libexec/trafficctl/
+	$(INSTALL_DIR) $(1)/etc/init.d
+	$(INSTALL_BIN) ./files/etc/init.d/trafficctl-telegram $(1)/etc/init.d/
+endef
+
 $(eval $(call BuildPackage,trafficctl))
+$(eval $(call BuildPackage,trafficctl-telegram))

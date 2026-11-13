@@ -197,6 +197,45 @@ LND='sh "$L5/trafficctl/files/etc/hotplug.d/dhcp/99-trafficctl-newdevice"; echo 
 NND='tctl newdevice; echo done'
 NEWMAC='ACTION=add MACADDR=02:00:00:00:00:99 IPADDR=192.168.0.99 HOSTNAME=newbie'
 
+# ── telegram bot ──
+# The v1.30.0 bot (its notifications off and its ledger seeded, so it only
+# answers) and trafficctl-telegram.uc, each fed the same getUpdates replies by
+# the curl mock: botcfg, then upd <result list>... adds one reply per argument
+# (msg/cbq build the updates). An exhausted queue ends the bot (the mock kills
+# its process group). Compared: the requests (tmp/curl.log), what the bot ran
+# (tmp/bot.log: name, arguments and caller variables; the summary is not
+# logged, as the two sides' 5 s device cache need not expire at the same
+# moments), the offset file and the log lines.
+BOTF='tmp/curl.log,tmp/bot.log,tmp/trafficctl_tg_offset,tmp/logger.log'
+TGDEVS='[{"ip":"192.168.0.101","name":"Kitchen tablet","conn_type":"5G","blocked":false,"wifi_blocked":false,"rate_limit_kbit":0,"shape_kbit":0},{"ip":"192.168.0.102","name":"TV (4K)","conn_type":"lan1","blocked":true,"wifi_blocked":false,"rate_limit_kbit":8000,"rate_limit_kbit_up":2000,"shape_kbit":0},{"ip":"192.168.0.103","name":"","conn_type":"2.4G","blocked":false,"wifi_blocked":true,"rate_limit_kbit":3000,"rate_limit_kbit_up":0,"shape_kbit":5000,"shape_kbit_up":5000},{"ip":"192.168.0.104","name":"Пётр'"'"'s phone","conn_type":"wifi","blocked":false,"wifi_blocked":false,"rate_limit_kbit":0,"shape_kbit":4000,"shape_kbit_up":1000},{"ip":"192.168.0.105","name":"averyveryverylongname","conn_type":"routed","blocked":"1","wifi_blocked":"0","rate_limit_kbit":"0","shape_kbit":0}]'
+# shellcheck disable=SC2034 # read by the bot-status-clean case
+TGCLEAN='[{"ip":"192.168.0.101","name":"Kitchen tablet","conn_type":"5G","blocked":false,"wifi_blocked":false,"rate_limit_kbit":0,"shape_kbit":0},{"ip":"192.168.0.103","name":"","conn_type":"lan2","blocked":false,"wifi_blocked":false,"rate_limit_kbit":0,"shape_kbit":0}]'
+botcfg() {   # botcfg [uci option=value...]: the bot on, chat 4242, the devices above
+    local o
+    uci set trafficctl.telegram=telegram
+    uci set trafficctl.telegram.enabled=1
+    uci set trafficctl.telegram.bot_token=777:ABC
+    uci set trafficctl.telegram.chat_id=4242
+    uci set trafficctl.telegram.notify_new_device=0
+    uci set trafficctl.telegram.notify_known_device=0
+    for o in "$@"; do uci set "trafficctl.telegram.$o"; done
+    uci commit trafficctl
+    mkdir -p "$W/root/etc/trafficctl"
+    printf '[{"mac":"02:00:00:00:00:99","name":"seed","ip":"192.168.0.99","first_seen":1}]\n' \
+        > "$W/root/etc/trafficctl/telegram_known.json"
+    printf '%s\n' "$TGDEVS" > "$W/root/tmp/tg.summary"
+}
+upd() { local r; for r in "$@"; do printf '{"ok":true,"result":[%s]}\n' "$r"; done >> "$W/root/tmp/tg.updates"; }
+msg() { printf '{"update_id":%s,"message":{"message_id":5,"chat":{"id":%s},"text":"%s"}}' "$1" "$2" "$3"; }
+cbq() { printf '{"update_id":%s,"callback_query":{"id":"cb%s","data":"%s","message":{"message_id":77,"chat":{"id":%s}}}}' "$1" "$1" "$3" "$2"; }
+lbot() { timeout 120 setsid sh "$UC_TMP/lbot.sh"; echo "rc=$?"; }
+nbot() {
+    ln -sf "$BSTUB/cli" "$W/root/usr/sbin/trafficctl"
+    timeout 120 setsid "$UCODE" -S -L "$UC_LIB" "$UC_REPO/trafficctl/files/usr/libexec/trafficctl/trafficctl-telegram.uc"
+    echo "rc=$?"
+}
+# ── end telegram bot ──
+
 # The limiter: an empty netdev table, conntrack flushes answered, both logs in
 # the root. RLW adds the table as each side leaves it.
 RL="$LOGROOT; mkdir -p \"\$W/root/tmp/nft-netdev\"; : > \"\$W/cmd/conntrack.default\"; rm -f \"\$W/root/etc/trafficctl/shapes.json\""
@@ -465,6 +504,34 @@ shape-restore-old | text+$STW | router-24.10 | sh:$L5HOOK >/dev/null; sttnf | tc
 shape-restore-no-ifb | text+$STW | router-24.10 | sh:TC_NO_IFB=1 $L5HOOK >/dev/null; echo rc=\$?; sttnf | TC_NO_IFB=1 tctl restore >/dev/null; echo rc=\$?; sttnf | $STSET; $STNOPERSIST
 "
 
+# ── telegram bot ── the setups run at case time (msg, cbq, upd, $W)
+BOT_CASES=$(cat <<'EOF'
+bot-help | text+$BOTF | router-24.10 | sh:lbot | nbot | botcfg; upd "$(msg 10 4242 /help)" "$(msg 11 4242 /start),$(msg 12 999 /help),$(msg 13 4242 hello)" "$(msg 14 4242 /help@trafficctl_bot)"
+bot-group-chat | text+$BOTF | router-24.10 | sh:lbot | nbot | botcfg chat_id=-100123; upd "$(msg 3 -100123 /status)" "$(msg 4 4242 /status)"
+bot-devices | text+$BOTF | router-24.10 | sh:lbot | nbot | botcfg; upd "$(msg 1 4242 /devices)"
+bot-devices-empty | text+$BOTF | router-24.10 | sh:lbot | nbot | botcfg; echo "[]" > "$W/root/tmp/tg.summary"; upd "$(msg 1 4242 /devices),$(msg 2 4242 /status)"
+bot-devices-none | text+$BOTF | router-24.10 | sh:lbot | nbot | botcfg; : > "$W/root/tmp/tg.summary"; upd "$(msg 1 4242 /devices),$(msg 2 4242 /status)"
+bot-status | text+$BOTF | router-24.10 | sh:lbot | nbot | botcfg; upd "$(msg 1 4242 /status)"
+bot-status-clean | text+$BOTF | router-24.10 | sh:lbot | nbot | botcfg; printf "%s\n" "$TGCLEAN" > "$W/root/tmp/tg.summary"; upd "$(msg 1 4242 /status)"
+bot-no-control | text+$BOTF | router-24.10 | sh:lbot | nbot | botcfg control_enabled=0; upd "$(msg 1 4242 /help),$(msg 2 4242 /devices),$(cbq 3 4242 act:block:192.168.0.101)"
+bot-menu | text+$BOTF | router-24.10 | sh:lbot | nbot | botcfg; upd "$(cbq 1 4242 act:menu:192.168.0.101),$(cbq 2 4242 act:menu:192.168.0.102)" "$(cbq 3 4242 act:menu:192.168.0.103),$(cbq 4 4242 act:menu:192.168.0.104),$(cbq 5 4242 act:menu:192.168.0.105)" "$(cbq 6 4242 act:menu:192.168.0.200)"
+bot-buttons-off | text+$BOTF | router-24.10 | sh:lbot | nbot | botcfg btn_block_inet=0 btn_block_wifi=0 btn_limiter=0 btn_shaper=0; upd "$(cbq 1 4242 act:menu:192.168.0.103)"
+bot-buttons-some | text+$BOTF | router-24.10 | sh:lbot | nbot | botcfg btn_block_inet=0 btn_shaper=0; upd "$(cbq 1 4242 act:menu:192.168.0.104),$(cbq 2 4242 act:menu:192.168.0.102)"
+bot-actions | text+$BOTF | router-24.10 | sh:lbot | nbot | botcfg; upd "$(cbq 1 4242 act:block:192.168.0.101),$(cbq 2 4242 act:unblock:192.168.0.102)" "$(cbq 3 4242 act:wblock:192.168.0.104),$(cbq 4 4242 act:wunblock:192.168.0.103)" "$(cbq 5 4242 act:limit:192.168.0.101:5000),$(cbq 6 4242 act:unlimit:192.168.0.102)" "$(cbq 7 4242 act:shape:192.168.0.101:100000),$(cbq 8 4242 act:unshape:192.168.0.103)"
+bot-action-replies | text+$BOTF | router-24.10 | sh:lbot | nbot | botcfg; echo '{"ok":true}' > "$W/root/tmp/tg.reply.trafficctl-block"; echo '{"ok":false,"msg":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}' > "$W/root/tmp/tg.reply.trafficctl-ratelimit"; echo 'not json' > "$W/root/tmp/tg.reply.trafficctl-shape"; upd "$(cbq 1 4242 act:block:192.168.0.101),$(cbq 2 4242 act:limit:192.168.0.101:2000),$(cbq 3 4242 act:shape:192.168.0.101:1000)"
+bot-callback-bad | text+$BOTF | router-24.10 | sh:lbot | nbot | botcfg; upd "$(cbq 1 4242 act:menu:192.168.1),$(cbq 2 4242 act:limit:192.168.0.101:5k),$(cbq 3 4242 act:bogus:192.168.0.101),$(cbq 4 4242 garbage),$(cbq 5 999 act:block:192.168.0.101)" "$(cbq 6 4242 act:back),$(cbq 7 4242 act:menu),$(cbq 8 4242 act:back:anything)"
+bot-offset | text+$BOTF | router-24.10 | sh:lbot | nbot | botcfg; echo 41 > "$W/root/tmp/trafficctl_tg_offset"; upd "" "$(msg 50 4242 /help),$(msg 52 4242 /nope)" '{"message":{"chat":{"id":4242},"text":"/help"}}'
+bot-poll-low | text+$BOTF | router-24.10 | sh:lbot | nbot | botcfg poll_interval=1; upd ""
+bot-poll-nan | text+$BOTF | router-24.10 | sh:lbot | nbot | botcfg poll_interval=fast; upd ""
+bot-poll-high | text+$BOTF | router-24.10 | sh:lbot | nbot | botcfg poll_interval=25; upd ""
+bot-disabled | text+$BOTF | router-24.10 | sh:lbot | nbot | botcfg enabled=0
+bot-no-token | text+$BOTF | router-24.10 | sh:lbot | nbot | botcfg bot_token=
+bot-no-chat | text+$BOTF | router-24.10 | sh:lbot | nbot | botcfg; uci delete trafficctl.telegram.chat_id; uci commit trafficctl
+EOF
+)
+CASES="$CASES${BOT_CASES//\$BOTF/$BOTF}
+"
+# ── end telegram bot ──
 # ── PR8 history (`trafficctl history`, history.uc) ──────────────────────────
 # Both sides write the default store, /etc/trafficctl/history, which the
 # rewrite and TCTL_ROOT both put in the case's root. The new side's `flush`
@@ -714,7 +781,7 @@ EOF
 # root/tmp/curl.log, the reply comes from root/tmp/curl.reply.
 cat > "$W/bin/curl" <<EOF
 #!/usr/bin/env python3
-import json, re, sys
+import json, os, re, signal, sys
 root = "$W/root"
 url, body, argv = '', '', sys.argv[1:]
 for i, a in enumerate(argv):
@@ -736,12 +803,65 @@ except ValueError:
     pass
 with open(root + '/tmp/curl.log', 'a') as f:
     f.write('url=%s body=%s\\n' % (url, body))
+# ── telegram bot ── getUpdates replies come from root/tmp/tg.updates, one
+# per line; past the last, the bot's process group is ended.
+if url.endswith('/getUpdates') and os.path.exists(root + '/tmp/tg.updates'):
+    n = int(open(root + '/tmp/tg.n').read()) if os.path.exists(root + '/tmp/tg.n') else 0
+    q = open(root + '/tmp/tg.updates').read().splitlines()
+    if n >= len(q):
+        os.killpg(os.getpgrp(), signal.SIGTERM)
+    open(root + '/tmp/tg.n', 'w').write(str(n + 1))
+    sys.stdout.write(q[n])
+    sys.exit(0)
+# ── end telegram bot ──
 try:
     sys.stdout.write(open(root + '/tmp/curl.reply').read())
 except OSError:
     sys.stdout.write('{"ok":true,"result":{}}')
 EOF
 # ── end notifications ──
+# ── telegram bot ──
+# What the bot runs: the summary prints root/tmp/tg.summary, every other
+# command root/tmp/tg.reply.<script> or a reply of its own, and logs to
+# root/tmp/bot.log. The legacy bot reaches the stubs as its scripts, the port
+# through the CLI stub (`trafficctl <cmd>` is the script trafficctl-<cmd>.sh).
+BSTUB="$UC_TMP/bstub"
+mkdir -p "$BSTUB"
+cat > "$BSTUB/stub" <<EOF
+#!/bin/sh
+n=\${0##*/}
+if [ "\$n" = trafficctl-summary.sh ]; then
+    cat "$W/root/tmp/tg.summary" 2>/dev/null
+    exit 0
+fi
+{ printf '%s' "\$n"; for a in "\$@"; do printf ' [%s]' "\$a"; done
+  printf ' via=%s src=%s user=%s\n' "\$TCTL_VIA" "\$TCTL_SRC" "\$TCTL_USER"; } >> "$W/root/tmp/bot.log"
+f="$W/root/tmp/tg.reply.\${n%.sh}"
+if [ -f "\$f" ]; then cat "\$f"; else printf '{"ok":true,"msg":"%s done"}\n' "\${n%.sh}"; fi
+EOF
+for s in summary block unblock macfilter-add macfilter-remove ratelimit shape; do
+    ln -sf stub "$BSTUB/trafficctl-$s.sh"
+done
+cat > "$BSTUB/cli" <<EOF
+#!/bin/sh
+c=\$1
+shift
+exec "$BSTUB/trafficctl-\$c.sh" "\$@"
+EOF
+# config_load/config_get over the uci mock, unset options taking the default.
+cat > "$BSTUB/functions.sh" <<'EOF'
+config_load() { __PKG="$1"; }
+config_get() {
+    local __v
+    if __v=$(uci -q get "$__PKG.$2.$3"); then eval "$1=\$__v"; else eval "$1=\$4"; fi
+}
+EOF
+chmod +x "$BSTUB/stub" "$BSTUB/cli"
+sed -e "s|^SCRIPTS=.*|SCRIPTS=\"$BSTUB\"|" -e "s|^\. /lib/functions\.sh|. $BSTUB/functions.sh|" \
+    "$LEXEC/trafficctl-telegram.sh" > "$UC_TMP/lbot.sh"
+grep -q "^SCRIPTS=\"$BSTUB\"" "$UC_TMP/lbot.sh" && grep -q "^\. $BSTUB/functions.sh" "$UC_TMP/lbot.sh" ||
+    { echo "FAIL: the legacy bot's scripts were not redirected"; exit 1; }
+# ── end telegram bot ──
 chmod +x "$W/bin/"*
 
 # ── PR7: cut, portfw ────────────────────────────────────────────────────────

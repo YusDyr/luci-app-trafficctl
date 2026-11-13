@@ -1293,33 +1293,77 @@ from `notify_telegram.template`).
 
 ## Telegram Bot
 
-### trafficctl-telegram.sh
+### trafficctl telegram (package `trafficctl-telegram`)
 
-Bot daemon using Telegram long polling. Runs under procd.
+```
+trafficctl telegram
+```
+
+Bot daemon using Telegram long polling, in ucode (`trafficctl.telegram`,
+`/usr/share/ucode/trafficctl/telegram.uc`). It is its own process,
+`/usr/libexec/trafficctl/trafficctl-telegram.uc`, which imports only `lib` and
+the bot, so the resident bot does not load the CLI's other modules; procd runs
+that file (`/etc/init.d/trafficctl-telegram`), and `trafficctl telegram` and
+`trafficctl-telegram.sh` run it too. Without the package, `trafficctl telegram`
+replies `{"ok":false,"msg":"trafficctl-telegram is not installed"}`, exit 1.
+
+It reads `trafficctl.telegram` (`enabled`, `bot_token`, `chat_id`,
+`poll_interval` in seconds, at least 2, default 3, `control_enabled`, `btn_*`) at start and every
+60 s, exits 0 when `enabled` is not 1 and 1 without a token or chat id. The
+token is in the request URL, which goes to curl in a config on stdin, never in
+argv. The poll offset is `/tmp/trafficctl_tg_offset`; the device list is the
+summary, cached 5 s in `/tmp/trafficctl_tg_devices.json`. Actions run the
+CLI with `TCTL_VIA=telegram`, `TCTL_SRC=telegram:<chat_id>`,
+`TCTL_USER=telegram-bot`.
+
+`poll_interval` is the long-poll timeout and is capped at 25 s, under curl's
+30 s. A refused or unanswered poll is retried every 5 s and logged once when
+the outage starts and once when it ends. The loop runs `gc()` every 20 polls.
+
+Updates are authorised by chat: a message or a button press is obeyed when
+it comes from `chat_id`, whoever sent it. In a group chat every member
+controls the router, as in 1.30.x.
+
+Downgrading to 1.30.x: remove `trafficctl-telegram` first; 1.30.x ships the
+bot inside its single package and would conflict with the file owner.
 
 **Commands:**
 - `/devices` -- inline keyboard with all active devices
 - `/status` -- text summary of blocked/limited devices
 - `/help` -- usage
 
+Only messages and callbacks from `chat_id` are answered.
+
 **Callback data format:** `act:<verb>:<ip>[:<param>]`
 
 | Callback | Action |
 |----------|--------|
 | `act:menu:<ip>` | Show device action buttons |
-| `act:block:<ip>` | Block internet |
-| `act:unblock:<ip>` | Unblock internet |
-| `act:wblock:<ip>` | Block WiFi |
-| `act:wunblock:<ip>` | Unblock WiFi |
-| `act:limit:<ip>:<rate>` | Apply limiter (rate in kbit/s) |
-| `act:unlimit:<ip>` | Remove limiter |
-| `act:shape:<ip>:<rate>` | Apply shaper |
-| `act:unshape:<ip>` | Remove shaper |
+| `act:block:<ip>` | Block internet (`trafficctl block <ip> tg`) |
+| `act:unblock:<ip>` | Unblock internet (`trafficctl unblock <ip> tg`) |
+| `act:wblock:<ip>` | Block WiFi (`trafficctl macfilter-add <ip>`) |
+| `act:wunblock:<ip>` | Unblock WiFi (`trafficctl macfilter-remove <ip>`) |
+| `act:limit:<ip>:<rate>` | Apply limiter, rate in kbit/s (`trafficctl ratelimit <ip> <rate> tg`) |
+| `act:unlimit:<ip>` | Remove limiter (`trafficctl ratelimit <ip> 0 tg`) |
+| `act:shape:<ip>:<rate>` | Apply shaper (`trafficctl shape add <ip> <rate> tg`) |
+| `act:unshape:<ip>` | Remove shaper (`trafficctl shape remove <ip>`) |
 | `act:back` | Return to device list |
 
-**Known devices file:** `/etc/trafficctl/telegram_known.json` -- tracks MACs for new device notifications.
-Since 1.31 the scan behind those notifications is `trafficctl notify watch`
-(see [Notifications](#notifications)); the bot no longer runs it.
+The address must be dotted digits and the rate digits (`invalid IP`,
+`invalid param`), anything else is refused before a command is built. The
+toast is the action's `msg`, cut to 196 bytes on a character boundary.
+
+Differences from the v1.30.0 shell bot: device names are HTML-escaped (a `<`
+used to break `parse_mode=HTML`) and sent with their backslashes as they are
+(printf `%b` used to interpret them); the toast is cut on a UTF-8 boundary; an
+empty device list gives a keyboard that is valid JSON (v1.30.0 built `[]]}`);
+a garbage or empty offset file means offset 0; callback data with a control
+character is refused; a summary that is not JSON reads as no devices.
+
+**Known devices file:** `/etc/trafficctl/telegram_known.json` -- tracks MACs
+for new device notifications. Since 1.31 the scan behind those notifications
+is `trafficctl notify watch` (see [Notifications](#notifications)); the bot no
+longer runs it, and notifications do not need the bot package.
 
 ### trafficctl-telegram-test.sh (`trafficctl telegram-test`)
 

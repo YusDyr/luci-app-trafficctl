@@ -41,13 +41,15 @@ cd "$(dirname "$0")/.."
 REPO=$(pwd)
 
 rm -rf dist/
-# One path per line: trafficctl first, the translation packages next, the
-# luci-app-trafficctl package last.
+# One path per line: trafficctl first, trafficctl-telegram second, the
+# translation packages next, the luci-app-trafficctl package last.
 OUT=$(./build-ipk.sh 0.0.1-test 1)
 BE_IPK=$(echo "$OUT" | head -1)
+TG_IPK=$(echo "$OUT" | sed -n 2p)
 IPK=$(echo "$OUT" | tail -1)
 
 assert_eq "first output is the trafficctl ipk" "trafficctl_0.0.1-test-1_all.ipk" "$(basename "$BE_IPK")"
+assert_eq "second output is the trafficctl-telegram ipk" "trafficctl-telegram_0.0.1-test-1_all.ipk" "$(basename "$TG_IPK")"
 assert_eq "last output is the luci-app ipk" "luci-app-trafficctl_0.0.1-test-1_all.ipk" "$(basename "$IPK")"
 
 TMPDIR=$(mktemp -d)
@@ -90,12 +92,38 @@ done
 assert_contains "be: postinst removes the opkg backup" "$(cat "$TMPDIR/be/ctrl/postinst")" "trafficctl-opkg.backup"
 assert_contains "be: summary script" "$DATA" "usr/libexec/trafficctl/trafficctl-summary.sh"
 assert_contains "be: hotplug script" "$DATA" "etc/hotplug.d/iface/99-trafficctl-shapes"
-assert_contains "be: init script" "$DATA" "etc/init.d/trafficctl-telegram"
+assert_contains "be: init script" "$DATA" "etc/init.d/trafficctl-notify"
+assert_not_contains "be: no bot (trafficctl-telegram)" "$DATA" 'trafficctl-telegram\(\.sh\|\.uc\)*$'
+assert_not_contains "be: no bot module" "$DATA" "telegram.uc"
+assert_contains "be: the notification test sender stays" "$DATA" "usr/libexec/trafficctl/trafficctl-telegram-test.sh"
 assert_contains "be: config" "$DATA" "etc/config/trafficctl$"
 assert_contains "be: keep.d" "$DATA" "lib/upgrade/keep.d/trafficctl$"
 assert_contains "be: metrics cgi" "$DATA" "www/cgi-bin/trafficctl-metrics"
 assert_not_contains "be: no rpcd plugin" "$DATA" "usr/libexec/rpcd/"
 assert_not_contains "be: no frontend" "$DATA" "luci-static"
+
+# ── trafficctl-telegram ───────────────────────────────────────────────────────
+unpack "$TG_IPK" tg
+CTRL=$(cat "$TMPDIR/tg/ctrl/control")
+DATA=$(cat "$TMPDIR/tg/data.list")
+assert_contains "tg: package name" "$CTRL" "^Package: trafficctl-telegram$"
+assert_contains "tg: version" "$CTRL" "^Version: 0.0.1-test-1$"
+assert_contains "tg: arch is all" "$CTRL" "^Architecture: all$"
+assert_contains "tg: depends on the same trafficctl and curl" "$CTRL" "^Depends: trafficctl (= 0.0.1-test-1), curl$"
+assert_contains "tg: replaces trafficctl, which carried the bot up to 1.30.x" "$CTRL" "^Replaces: trafficctl$"
+assert_not_contains "tg: no Conflicts" "$CTRL" "^Conflicts:"
+assert_eq "tg: no conffiles (the config is trafficctl's)" "no" "$([ -f "$TMPDIR/tg/ctrl/conffiles" ] && echo yes || echo no)"
+for s in preinst postinst prerm; do
+    assert_eq "tg: $s present" "yes" "$([ -f "$TMPDIR/tg/ctrl/$s" ] && echo yes || echo no)"
+done
+assert_eq "tg: the bot's files and their directories" \
+    "./etc/init.d/trafficctl-telegram ./usr/libexec/trafficctl/trafficctl-telegram.sh ./usr/libexec/trafficctl/trafficctl-telegram.uc ./usr/share/ucode/trafficctl/telegram.uc" \
+    "$(grep -v '/$' "$TMPDIR/tg/data.list" | grep -vx '\.' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
+mkdir -p "$TMPDIR/tg/data"
+tar xzf "$TMPDIR/tg/data.tar.gz" -C "$TMPDIR/tg/data"
+for f in etc/init.d/trafficctl-telegram usr/libexec/trafficctl/trafficctl-telegram.sh usr/libexec/trafficctl/trafficctl-telegram.uc; do
+    assert_eq "tg: $f is executable" yes "$([ -x "$TMPDIR/tg/data/$f" ] && echo yes || echo no)"
+done
 
 # ── luci-app-trafficctl ──────────────────────────────────────────────────────
 unpack "$IPK" fe
@@ -105,6 +133,7 @@ assert_contains "fe: package name" "$CTRL" "^Package: luci-app-trafficctl$"
 assert_contains "fe: version" "$CTRL" "^Version: 0.0.1-test-1$"
 assert_contains "fe: arch is all" "$CTRL" "^Architecture: all$"
 assert_contains "fe: depends on the same trafficctl" "$CTRL" "^Depends: trafficctl (= 0.0.1-test-1)"
+assert_contains "fe: depends on the same trafficctl-telegram" "$CTRL" "^Depends:.* trafficctl-telegram (= 0.0.1-test-1),"
 assert_contains "fe: depends on luci-base" "$CTRL" "^Depends:.*luci-base"
 # Kept on the web interface so the upgrade from 1.28.0 does not orphan it.
 assert_contains "fe: keeps hostapd-utils" "$CTRL" "^Depends:.*hostapd-utils"
