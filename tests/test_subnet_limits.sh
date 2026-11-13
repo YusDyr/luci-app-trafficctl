@@ -35,7 +35,6 @@ NFT_LOG="$TMP/nft.log"
 # rename a new file over it).
 RULES="$TMP/root/etc/trafficctl/rules.json"
 mkdir -p "$TMP/root/etc/trafficctl" "$TMP/root/etc/config" "$TMP/root/tmp"
-SHAPES="$TMP/shapes.json"
 
 assert_eq() {
     local desc="$1" expected="$2" actual="$3"
@@ -194,18 +193,9 @@ export TCTL_SYSFS_NET="$TMP/sys/class/net"
 # seams to the shipped script.
 FW="$TMP/trafficctl-fw.sh"
 sed -e "s|TCTL_RULES_FILE=\"/etc/trafficctl/rules.json\"|TCTL_RULES_FILE=\"$RULES\"|" \
-    -e "s|TCTL_SHAPES_FILE=\"/etc/trafficctl/shapes.json\"|TCTL_SHAPES_FILE=\"$SHAPES\"|" \
     "$BIN/trafficctl-fw.sh" > "$FW"
 assert_not_contains "harness: no production rules path survived the rewrite" \
     "TCTL_RULES_FILE=\"/etc/trafficctl/rules.json" "$(cat "$FW")"
-
-# Every script under test sources fw.sh by absolute path too.
-patch_script() {
-    sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FW|" \
-        -e "s|SHAPES_FILE=\"/etc/trafficctl/shapes.json\"|SHAPES_FILE=\"$SHAPES\"|" \
-        "$1" > "$2"
-    chmod +x "$2"
-}
 # The same router for the ucode CLI: lan (br-lan, 10.10.4.128/25), a guest
 # VLAN (br-guest, 192.168.20.0/24) and wan, as the uci and ubus fakes above.
 printf "config trafficctl 'main'\n\toption persist_rules '1'\n" > "$TMP/root/etc/config/trafficctl"
@@ -303,7 +293,6 @@ assert_eq "persist: a block record is unchanged" \
 HOOK="$TMP/99-trafficctl-shapes"
 sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FW|" \
     -e "s|RULES_FILE=\"/etc/trafficctl/rules.json\"|RULES_FILE=\"$RULES\"|" \
-    -e "s|SHAPES_FILE=\"/etc/trafficctl/shapes.json\"|SHAPES_FILE=\"$SHAPES\"|" \
     -e "s|/etc/trafficctl/cut.state|$TMP/cut.state|" \
     -e "s|/usr/sbin/trafficctl|$TMP/tctl-cli|" \
     "$HOTPLUG" > "$HOOK"
@@ -456,45 +445,8 @@ assert_contains "restore: a record after a malformed one is still restored" \
 
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# 4. The shaper declining under SQM says so
-# ════════════════════════════════════════════════════════════════════════════
-#
-# The requester in #64 runs SQM. Refusing to replace a root qdisc it does not
-# recognise is deliberate — it is what stops this app destroying an SQM setup —
-# but the refusal used to surface as "tc setup failed", which reads as a bug
-# and does not point anywhere. The limiter is a policer, owns no qdisc, and is
-# the answer on such a router; a subnet target only ever uses it.
-patch_script "$BIN/trafficctl-shape.sh" "$TMP/shape.sh"
-
-cat > "$MOCKBIN/tc" <<'MOCK'
-#!/bin/sh
-case "$*" in
-    "qdisc show dev br-lan") echo "qdisc cake 8001: root refcnt 2 bandwidth 100Mbit" ;;
-    *"class show"*) exit 0 ;;
-esac
-exit 0
-MOCK
-chmod +x "$MOCKBIN/tc"
-
-SQM_OUT=$(PATH="$MOCKBIN:$PATH" sh "$TMP/shape.sh" add 192.168.1.50 5000 2>/dev/null)
-assert_contains "shaper: declines rather than claiming success under SQM" '"ok":false' "$SQM_OUT"
-assert_contains "shaper: names the root qdisc as the reason" "root qdisc" "$SQM_OUT"
-assert_contains "shaper: points at the limiter, which coexists with SQM" "limiter" "$SQM_OUT"
-
-# A qdisc the kernel or OpenWrt put there carries no configuration worth
-# keeping, so that path must NOT produce the decline message.
-cat > "$MOCKBIN/tc" <<'MOCK'
-#!/bin/sh
-case "$*" in
-    "qdisc show dev br-lan") echo "qdisc fq_codel 0: root refcnt 2" ;;
-esac
-exit 0
-MOCK
-chmod +x "$MOCKBIN/tc"
-PLAIN_OUT=$(PATH="$MOCKBIN:$PATH" sh "$TMP/shape.sh" add 192.168.1.50 5000 2>/dev/null)
-assert_not_contains "shaper: a default root qdisc is not reported as somebody's QoS" \
-    "will not be torn down" "$PLAIN_OUT"
+# 4. The shaper declining under SQM says so: `trafficctl shape` since the
+# ucode port, tests/test_shape.sh.
 
 # ── the default itself ──────────────────────────────────────────────────────
 mode_of() { tcall trafficctl.limit default_mode "\"$1\"" 2>/dev/null; }
