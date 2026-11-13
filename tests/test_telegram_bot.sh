@@ -194,6 +194,20 @@ t0=$(date +%s)
 bot > /dev/null
 assert_eq "refused poll: retried once" 2 "$(req getUpdates | wc -l | tr -d ' ')"
 assert_eq "refused poll: after 5 s" 1 "$(( $(date +%s) - t0 >= 5 ))"
+assert_eq "refused poll: logged" "-t trafficctl-tg Bot started, chat_id=4242
+-t trafficctl-tg getUpdates failed (409), retrying every 5 s" "$(cat "$NLOG/logger")"
+# An outage is logged when it starts and when it ends, not at every retry.
+reset
+{ echo 'not json'; echo '{"ok":false,"error_code":502}'; echo '{"ok":true,"result":[]}'; } > "$NLOG/updates"
+bot > /dev/null
+assert_eq "outage: logged once, and its end" "-t trafficctl-tg Bot started, chat_id=4242
+-t trafficctl-tg getUpdates failed: no answer from api.telegram.org, retrying every 5 s
+-t trafficctl-tg getUpdates works again" "$(cat "$NLOG/logger")"
+# The long poll stays under curl's 30 s.
+reset poll_interval=300
+upd ""
+bot > /dev/null
+assert_eq "poll_interval: capped at 25" 25 "$(req getUpdates | head -1 | jq .timeout)"
 
 # ── commands ─────────────────────────────────────────────────────────────────
 reset

@@ -1145,6 +1145,17 @@ summary, cached 5 s in `/tmp/trafficctl_tg_devices.json`. Actions run the
 CLI with `TCTL_VIA=telegram`, `TCTL_SRC=telegram:<chat_id>`,
 `TCTL_USER=telegram-bot`.
 
+`poll_interval` is the long-poll timeout and is capped at 25 s, under curl's
+30 s. A refused or unanswered poll is retried every 5 s and logged once when
+the outage starts and once when it ends. The loop runs `gc()` every 20 polls.
+
+Updates are authorised by chat: a message or a button press is obeyed when
+it comes from `chat_id`, whoever sent it. In a group chat every member
+controls the router, as in 1.30.x.
+
+Downgrading to 1.30.x: remove `trafficctl-telegram` first; 1.30.x ships the
+bot inside its single package and would conflict with the file owner.
+
 **Commands:**
 - `/devices` -- inline keyboard with all active devices
 - `/status` -- text summary of blocked/limited devices

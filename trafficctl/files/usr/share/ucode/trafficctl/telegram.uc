@@ -49,13 +49,20 @@ function opt(o, d) {
 	return lib.uci_get('trafficctl', 'telegram', o) ?? d;
 }
 
+const POLL_MAX = 25;
+// One gc() per this many polls: the loop runs for months, and ucode only
+// collects reference cycles when asked (as notify's watch() does).
+const GC_EVERY = 20;
+
 function load_config() {
 	lib.reset();
 	cfg = {
 		enabled: opt('enabled', '0'),
 		token: opt('bot_token', ''),
 		chat: opt('chat_id', ''),
-		poll: lib.valid_int(opt('poll_interval', '3'), 2) ?? 3,
+		// The long-poll timeout, kept under curl's 30 s (api()): a longer one
+		// is cut off by curl on every quiet poll and logged as a failure.
+		poll: min(lib.valid_int(opt('poll_interval', '3'), 2) ?? 3, POLL_MAX),
 		control: opt('control_enabled', '1'),
 		btn_inet: opt('btn_block_inet', '1'),
 		btn_wifi: opt('btn_block_wifi', '1'),
@@ -423,14 +430,24 @@ function run() {
 		return 1;
 	}
 	logger('Bot started, chat_id=' + cfg.chat);
-	let offset = read_offset(), reload_at = time() + RELOAD;
+	let offset = read_offset(), reload_at = time() + RELOAD, polls = 0, up = true;
 	while (true) {
+		if (++polls % GC_EVERY == 0)
+			gc();
 		let r = parse(api('getUpdates', { offset, timeout: cfg.poll,
 			allowed_updates: [ 'message', 'callback_query' ] }));
 		if (type(r) != 'object' || r.ok !== true || type(r.result) != 'array') {
+			// Once per outage, not once per retry every 5 s.
+			if (up)
+				logger('getUpdates failed' + ((type(r) == 'object' && r.error_code != null)
+					? ' (' + r.error_code + ')' : ': no answer from api.telegram.org') + ', retrying every 5 s');
+			up = false;
 			sleep(5000);
 			continue;
 		}
+		if (!up)
+			logger('getUpdates works again');
+		up = true;
 		// The shell bot stopped at the first empty element; so does this.
 		for (let u in r.result) {
 			if (u == null)

@@ -305,7 +305,10 @@ The app is three packages, released together with the same version:
 
 A router without LuCI needs only `trafficctl`, and `trafficctl-telegram` for
 the bot. Upgrading such a router from 1.30.x with only `trafficctl` stops the
-bot: add `trafficctl-telegram` to the same command to keep it.
+bot (the postinst says so in the system log): add `trafficctl-telegram` to the
+same command to keep it. To go back to 1.30.x, remove `trafficctl-telegram`
+first (`opkg remove trafficctl-telegram` / `apk del trafficctl-telegram`):
+1.30.x's single package holds the bot's files itself.
 
 Releases up to 1.28.x shipped both as `luci-app-trafficctl` alone. Upgrading
 from one of them moves the backend files into `trafficctl` and keeps your
@@ -566,6 +569,8 @@ opkg install trafficctl-telegram
 3. In LuCI, expand **Settings > Telegram Bot**, enter token and chat ID, click **Test**, then **Save**.
 4. In Telegram, send `/devices` to see the device list with action buttons.
 5. Which events reach the chat, and the new device message, are set on the **Notifications** tab (Telegram card). The bot does not have to run for notifications.
+
+The bot obeys the chat, not a person: with a group's chat ID, every member of that group can block, limit and unblock devices (as in 1.30.x). Use your private chat with the bot unless that is what you want.
 
 ### Notifications (optional)
 

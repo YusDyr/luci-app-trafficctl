@@ -201,6 +201,11 @@ if [ -z "$${IPKG_INSTROOT}" ]; then
 	if [ ! -e /etc/init.d/trafficctl-telegram ]; then
 		ubus call service delete '{"name":"trafficctl-telegram"}' >/dev/null 2>&1 || true
 		rm -f /etc/rc.d/S99trafficctl-telegram /etc/rc.d/K10trafficctl-telegram
+		# Headless (no luci-app-trafficctl to pull it in): say so where
+		# the operator will look.
+		if [ "$$(uci -q get trafficctl.telegram.enabled)" = "1" ]; then
+			logger -t trafficctl "The Telegram bot is stopped: it is the package trafficctl-telegram now; install it (opkg install trafficctl-telegram, or apk add trafficctl-telegram) to run it again" 2>/dev/null || true
+		fi
 	fi
 	# The watcher decides for itself whether anything wants the scan.
 	if [ -x /etc/init.d/trafficctl-notify ]; then
