@@ -196,6 +196,16 @@ for reader in socat nc; do
         "$UC_REPO/trafficctl/files/usr/sbin/trafficctl" netify status 2>&1)
     assert_contains "status ($reader): running with a socket" '"running":true' "$STATUS"
     assert_contains "status ($reader): names the reader" "\"reader\":\"$reader\"" "$STATUS"
+    # `raw 0`: a zero window still ends (v1.30.0's `timeout 0` stopped the
+    # reader after about a second); no timeout would read until the agent
+    # hangs up, 8 s here and never on a router.
+    start=$(date +%s)
+    OUT=$(PATH="$TMPDIR/only-$reader" TCTL_ROOT="$ROOT" "$UCODE" -S -L "$UC_LIB" -- \
+        "$UC_REPO/trafficctl/files/usr/sbin/trafficctl" netify raw 0 2>&1)
+    took=$(( $(date +%s) - start ))
+    if [ "$took" -le 4 ]; then PASS=$((PASS + 1)); else
+        FAIL=$((FAIL + 1)); echo "FAIL: raw 0 ($reader): the read took ${took}s"; fi
+    assert_contains "raw 0 ($reader): what arrived in that second" '10.0.20.190' "$OUT"
 done
 kill "$SERVER" 2>/dev/null
 assert_contains "socket: the cache holds what the socket sent" '"ip":"10.0.20.190","top":"claude"' "$(cat "$CACHE" 2>/dev/null)"

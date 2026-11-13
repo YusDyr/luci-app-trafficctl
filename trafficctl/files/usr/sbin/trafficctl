@@ -154,7 +154,11 @@ try {
 }
 catch (e) {
 	warn(sprintf('trafficctl %s: %s\n%s\n', cmd, e.message, e.stacktrace?.[0]?.context ?? ''));
-	out(fallback(cmd, ARGV, 'internal error: ' + e.message));
+	// The metrics CGI has already sent an OpenMetrics Content-Type, so a JSON
+	// body would fail the whole scrape; an empty one is a scrape with no
+	// series, and the error is on stderr (syslog under uhttpd).
+	if (cmd != 'metrics')
+		out(fallback(cmd, ARGV, 'internal error: ' + e.message));
 	rc = 1;
 }
 exit(rc);

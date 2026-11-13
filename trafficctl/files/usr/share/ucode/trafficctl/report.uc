@@ -529,7 +529,7 @@ function summary() {
 
 	let st = wifi_stations();
 	let br = bridge_macs(net.lan_devices());
-	let cache = lib.file_lines(CONN_CACHE), cache_dirty = false;
+	let cache = lib.file_lines(CONN_CACHE), puts = [];
 	let pending = [], rows = [];
 
 	for (let ip in ips) {
@@ -573,7 +573,7 @@ function summary() {
 			}
 			if (ctype != '') {
 				cache = cache_put(cache, ip, ctype, now);
-				cache_dirty = true;
+				push(puts, [ ip, ctype ]);
 			}
 			else if (ON_LINK[neigh_state[ip] ?? ''])
 				ctype = 'ethernet';
@@ -605,8 +605,14 @@ function summary() {
 		});
 	}
 
-	if (cache_dirty)
-		lib.write_atomic(CONN_CACHE, join('\n', cache) + '\n');
+	// Replayed onto the file as it is now, not the copy read before the
+	// rows: a `device` call writing its entry meanwhile keeps it.
+	if (length(puts)) {
+		let fresh = lib.file_lines(CONN_CACHE);
+		for (let p in puts)
+			fresh = cache_put(fresh, p[0], p[1], now);
+		lib.write_atomic(CONN_CACHE, join('\n', fresh) + '\n');
+	}
 	// Whatever is still unnamed: detached and capped, the names land in the
 	// cache and show on the next poll.
 	if (length(pending))
@@ -959,7 +965,10 @@ function netify_feed(secs) {
 	}
 	else
 		return '';
-	return lib.run(lib.qv(argv), secs * 1000);
+	// The sink never closes the stream, and lib.run(cmd, 0) means no timeout:
+	// `raw 0` would read forever. BusyBox `timeout 0` stopped it after about
+	// a second, so that is the floor.
+	return lib.run(lib.qv(argv), ((secs > 0) ? secs : 1) * 1000);
 }
 
 function netify_status() {

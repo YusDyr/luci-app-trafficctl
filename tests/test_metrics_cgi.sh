@@ -167,5 +167,24 @@ assert_contains "end to end: the byte families are there" "# TYPE trafficctl_dev
 OUT=$(QUERY_STRING="token=nope" PATH="$MOCKBIN:$PATH" sh "$CGI_E2E" 2>&1)
 assert_not_contains "end to end: a wrong token never reaches the CLI" "trafficctl_up" "$OUT"
 
+# An exporter that fails after the CGI sent its Content-Type: the CLI's JSON
+# error object would make the scrape unparseable, so the body stays empty
+# (no trafficctl_up: the exporter did not run) and the error goes to stderr.
+BROKEN="$TMPDIR/broken"
+mkdir -p "$BROKEN/trafficctl"
+cp "$UC_LIB"/trafficctl/*.uc "$BROKEN/trafficctl/"
+sed 's|^function metrics(src) {$|&\n\tdie("uci: cannot read trafficctl");|' "$UC_LIB/trafficctl/report.uc" \
+    > "$BROKEN/trafficctl/report.uc"
+grep -q 'cannot read trafficctl' "$BROKEN/trafficctl/report.uc" || { echo "FAIL: the exporter was not broken"; exit 1; }
+cat > "$TMPDIR/cli" <<EOF
+#!/bin/sh
+TCTL_ROOT="$E2E_ROOT" exec "$UCODE" -S -L "$BROKEN" -- "$UC_REPO/trafficctl/files/usr/sbin/trafficctl" "\$@"
+EOF
+OUT=$(QUERY_STRING="token=supersecret123" PATH="$MOCKBIN:$PATH" sh "$CGI_E2E" 2>"$TMPDIR/cgi.err")
+assert_eq "exporter error: the headers, then an empty body" \
+    "Content-Type: text/plain; version=0.0.4; charset=utf-8" "$(printf '%s\n' "$OUT" | tr -d '\r' | grep .)"
+assert_not_contains "exporter error: no JSON in the scrape" '"ok":false' "$OUT"
+assert_contains "exporter error: said on stderr" "cannot read trafficctl" "$(cat "$TMPDIR/cgi.err")"
+
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
