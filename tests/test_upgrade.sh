@@ -107,9 +107,12 @@ done
 
 # ── Step 2: tag config file to verify preservation ────────────────────────────
 [ -f /etc/config/trafficctl ] || touch /etc/config/trafficctl
-echo "# UPGRADE_MARKER_$(date +%s)" >> /etc/config/trafficctl
-MARKER=$(grep UPGRADE_MARKER /etc/config/trafficctl)
-echo "Marker line added to /etc/config/trafficctl: $MARKER"
+# A section, not a comment: the upgrade from 1.30.x moves the Telegram
+# notification options once (`trafficctl notify migrate` in the postinst), and
+# uci keeps every section and option when it saves but drops comments.
+MARKER="m$(date +%s)"
+printf "\nconfig marker 'upgrade_marker'\n\toption id '%s'\n" "$MARKER" >> /etc/config/trafficctl
+echo "Marker section added to /etc/config/trafficctl: $MARKER"
 
 # ── Step 3: install NEW on top ────────────────────────────────────────────────
 # Real package-manager upgrade, so the config-preservation assertion below
@@ -125,7 +128,7 @@ echo "New version installed: ${NEW_VER:-unknown}"
 echo "=== Verification ==="
 
 # Config preserved?
-if grep -q UPGRADE_MARKER /etc/config/trafficctl 2>/dev/null; then
+if [ "$(uci -q get trafficctl.upgrade_marker.id)" = "$MARKER" ]; then
     echo "OK: config file marker preserved across upgrade"
 else
     echo "FAIL: /etc/config/trafficctl marker lost — config was overwritten"

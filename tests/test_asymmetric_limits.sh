@@ -350,6 +350,51 @@ assert_contains "a pre-feature shape restores its upload at the download rate" \
     "class add dev tctl-ifb0 parent 1:1 classid 1:4 htb rate 5000kbit" "$(cat "$TC_LOG")"
 assert_not_contains "and gains no upload field" "rate_kbit_up" "$(cat "$SHAPES")"
 
+# A restore puts back what was there: no "Limit applied" per device on every
+# boot. The same shaper call made by hand does announce itself. The shaper is
+# ucode (shape.uc): its event goes out through notify.uc.
+st_reset
+lt_events_on
+printf '[{"ip":"192.168.1.93","rate_kbit":5000,"classid":"1:4"}]' > "$SHAPES"
+printf '[{"type":"ratelimit","ip":"192.168.1.93","param":"8000","mode":"each"}]' > "$RULES"
+lt_run restore >/dev/null
+assert_contains "restore: the shape is put back" "class add dev br-lan parent 1:1 classid 1:4 htb rate 5000kbit" "$(cat "$TC_LOG")"
+assert_eq "restore: the shape and the limit put back announce nothing" "" "$(cat "$EVENTS_LOG")"
+st_run add 192.168.1.94 20000 shape_192.168.1.94 2000 >/dev/null
+assert_eq "shaper: a shape added by hand announces itself, with both rates" \
+    "ACTION=limit_applied IP=192.168.1.94 MODE=shaper RATE_KBIT=20000 RATE_KBIT_UP=2000 SRC=local VIA=cli" "$(cat "$EVENTS_LOG")"
+: > "$EVENTS_LOG"
+st_run add 192.168.1.94 abc >/dev/null
+st_run remove 192.168.1.94 >/dev/null
+assert_eq "shaper: a removal or a refused rate announces nothing" "" "$(cat "$EVENTS_LOG")"
+TCTL_NOTIFY=0 st_run add 192.168.1.95 5000 >/dev/null
+assert_eq "shaper: TCTL_NOTIFY=0 (the ifup hook) keeps it quiet" "" "$(cat "$EVENTS_LOG")"
+lt_events_off
+printf '[]' > "$RULES"
+
+# The limiter is ucode (limit.uc): its event goes out through notify.uc.
+lt_reset
+lt_events_on
+rl 192.168.1.95 8000 rl_test each 800 >/dev/null
+assert_eq "limiter: a limit set by hand announces itself, with both rates" \
+    "ACTION=limit_applied IP=192.168.1.95 MODE=limiter RATE_KBIT=8000 RATE_KBIT_UP=800 SRC=local VIA=cli" "$(cat "$EVENTS_LOG")"
+: > "$EVENTS_LOG"
+rl 192.168.1.96 8000 rl_test each >/dev/null
+assert_contains "limiter: a symmetric limit gives the same rate up" "RATE_KBIT_UP=8000" "$(cat "$EVENTS_LOG")"
+: > "$EVENTS_LOG"
+rl 192.168.1.96 0 rl_test >/dev/null
+rl 192.168.1.97 abc rl_test >/dev/null
+assert_eq "limiter: a removal or a refused rate announces nothing" "" "$(cat "$EVENTS_LOG")"
+TCTL_NOTIFY=0 rl 192.168.1.98 8000 rl_test each >/dev/null
+assert_eq "limiter: TCTL_NOTIFY=0 (the ifup hook) keeps it quiet" "" "$(cat "$EVENTS_LOG")"
+lt_reset
+printf '[{"type":"ratelimit","ip":"192.168.1.99","param":"8000","mode":"each"}]' > "$RULES"
+lt_run restore >/dev/null
+assert_contains "limiter: the restore puts the limit back" "rl_ratelimit_192_168_1_99" "$(lt_table)"
+assert_eq "limiter: ...and announces nothing, even with events wanted" "" "$(cat "$EVENTS_LOG")"
+lt_events_off
+lt_reset
+
 # ════════════════════════════════════════════════════════════════════════════
 # 5. The rpcd surface
 # ════════════════════════════════════════════════════════════════════════════

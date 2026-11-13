@@ -19,6 +19,8 @@
 #   lt_rules_of <comment>     "<chain> <meter or ->" of each rule with exactly
 #                             that comment
 #   lt_reset                  empty nft state, logs and rules.json
+#   lt_events_on / _off       notification events to EVENTS_LOG, one line each
+#                             (the hotplug-call mock under ROOT, run in-line)
 #
 # NFT_EMU (1.0, 1.1) and the NFT_FAIL_* knobs of nft-netdev.sh are read from
 # the environment of each lt_run.
@@ -110,6 +112,26 @@ lt_reset() {
     mkdir -p "$NFT_STATE"
     : > "$NFT_LOG"; : > "$LOGGER_LOG"; : > "$CONNTRACK_LOG"
     printf '[]\n' > "$RULES"
+}
+
+EVENTS_LOG="$STATE/events.log"
+: > "$EVENTS_LOG"
+mkdir -p "$ROOT/sbin"
+cat > "$ROOT/sbin/hotplug-call" <<MOCK
+#!/bin/sh
+env | grep -E '^(ACTION|IP|MODE|RATE_KBIT|RATE_KBIT_UP|VIA|SRC)=' | sort | tr '\\n' ' ' | sed 's/ \$//' >> "$EVENTS_LOG"
+echo >> "$EVENTS_LOG"
+MOCK
+chmod +x "$ROOT/sbin/hotplug-call"
+lt_events_on() {
+    mkdir -p "$ROOT/etc/hotplug.d/trafficctl"
+    : > "$ROOT/etc/hotplug.d/trafficctl/50-test"
+    : > "$EVENTS_LOG"
+    export TCTL_NOTIFY_SYNC=1
+}
+lt_events_off() {
+    rm -f "$ROOT/etc/hotplug.d/trafficctl/50-test"
+    unset TCTL_NOTIFY_SYNC
 }
 
 lt_cfg

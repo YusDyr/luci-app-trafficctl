@@ -44,7 +44,7 @@ qualify the WiFi block button.
 ```
 trafficctl/
   Makefile                                  — OpenWrt package Makefile (package.mk, explicit INSTALL_* per file)
-  files/usr/sbin/trafficctl                 — ucode CLI: subnets, names, rdns, rdns-refresh, ifaces, bytes, totals, ratelimit-stats, shape-stats, rules, summary, device, metrics, netify, block, unblock, macfilter-add, macfilter-remove, newdevice, restore, cut, portfw, history, ratelimit, shape (more move here)
+  files/usr/sbin/trafficctl                 — ucode CLI: subnets, names, rdns, rdns-refresh, ifaces, bytes, totals, ratelimit-stats, shape-stats, rules, summary, device, metrics, netify, block, unblock, macfilter-add, macfilter-remove, newdevice, restore, cut, portfw, history, ratelimit, shape, notify, telegram-test (more move here)
   files/usr/share/ucode/trafficctl/
     lib.uc                                  — Shared ucode helpers; its header is the API doc
     net.uc                                  — Subnets, interface roles, reverse DNS, byte samples, lifetime totals
@@ -55,6 +55,7 @@ trafficctl/
     history.uc                              — Durable usage history: flush, keeper, read, periods, prune, status
     limit.uc                                — The per-device limiter (netdev tm_ratelimit) and its restore
     shape.uc                                — The shaper (tc/HTB on the LAN device and an IFB), shapes.json and its restore
+    notify.uc                               — Notification events (ubus trafficctl.notify, hotplug.d/trafficctl) and senders (telegram, ntfy, webhook, mail); the device scan
   files/usr/libexec/trafficctl/
     trafficctl-fw.sh                        — Shared library (nft helpers, validation, persistence)
     trafficctl-summary.sh                   — Wrapper: `trafficctl summary` (all devices, JSON array; the LuCI poll)
@@ -79,12 +80,14 @@ trafficctl/
     trafficctl-history.sh                   — Wrapper: `trafficctl history` (usage history store; the keeper is `trafficctl history keeper`)
     trafficctl-rules.sh                     — Wrapper: `trafficctl rules` (every restriction, online or not; live + saved state; "Rules" tab)
     trafficctl-telegram.sh                  — Telegram bot daemon (long polling)
-    trafficctl-telegram-test.sh             — Send test message to Telegram
+    trafficctl-telegram-test.sh             — Wrapper: `trafficctl telegram-test` (send a test message to Telegram)
   files/etc/config/trafficctl                — UCI config (conffile, installed 0600)
   files/etc/init.d/
     trafficctl-telegram                     — procd init script for the bot
     trafficctl-history                      — procd keeper for the history store (`trafficctl history keeper`)
     trafficctl-cut                          — procd keeper for the global cut, `trafficctl cut keeper` (auto-revert + re-assert)
+    trafficctl-notify                       — procd service for the new/known device scan (`trafficctl notify watch`), only when wanted
+  files/etc/uci-defaults/80_trafficctl-notify — `trafficctl notify migrate` (the bot's notification options to notify_telegram)
   files/etc/hotplug.d/
     iface/99-trafficctl-shapes              — Restore on boot (ifup lan): blocks, rate limits and shapes via `trafficctl restore`, then port-forward controls and a kept cut
     dhcp/99-trafficctl-newdevice            — New device detection via DHCP events: runs `trafficctl newdevice`
@@ -97,6 +100,7 @@ luci-app-trafficctl/
     status.js                               — Main frontend (single-file LuCI view, "Devices" tab)
     rules.js                                — "Rules" tab (all restrictions, offline devices included)
     portfw.js                               — "Port Forwards" tab (inbound traffic control)
+    notify.js                               — "Notifications" tab (senders, their events, the device scan)
     status.css                              — Frontend styles (shared by both views)
   root/usr/libexec/rpcd/
     luci.trafficctl                         — rpcd exec plugin (ucode): settings, names, activity log in process; the rest via /usr/sbin/trafficctl

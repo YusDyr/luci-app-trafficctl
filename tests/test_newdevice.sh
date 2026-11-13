@@ -239,13 +239,17 @@ setnd 1 '4000;reboot' limiter
 assert_empty "a rate that is not a number is a no-op" \
     "$(run_newdevice add aa:bb:cc:dd:ee:f3 192.168.1.96)"
 
-# ── the Telegram notification queue ─────────────────────────────────────────
-# Independent of the default limit: keyed on the bot's own known list.
-NOTIFY="$ROOT/tmp/trafficctl_tg_newdev"
+# ── the new-device notification ─────────────────────────────────────────────
+# Independent of the default limit: an unknown MAC (not in telegram_known.json)
+# goes to `trafficctl notify dhcp`, detached, which decides whether anybody
+# listens (tests/test_notify.sh); a known one costs nothing.
+NLOG="$STATE/notify.log"
+mkdir -p "$ROOT/usr/sbin"
+printf '#!/bin/sh\necho "$*" >> "%s"\n' "$NLOG" > "$ROOT/usr/sbin/trafficctl"
+chmod +x "$ROOT/usr/sbin/trafficctl"
 fw_cfg 0
-printf "\nconfig telegram 'telegram'\n\toption enabled '1'\n" >> "$ROOT/etc/config/trafficctl"
 printf '{"aa:bb:cc:dd:ee:01":1}\n' > "$ROOT/etc/trafficctl/telegram_known.json"
-rm -f "$NOTIFY"
+rm -f "$NLOG"
 PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" ACTION=add MACADDR=aa:bb:cc:dd:ee:a1 IPADDR=192.168.1.97 HOSTNAME=laptop \
     tctl newdevice >/dev/null 2>&1
 PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" ACTION=add MACADDR=aa:bb:cc:dd:ee:01 IPADDR=192.168.1.5 \
@@ -253,8 +257,16 @@ PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" ACTION=add MACADDR=aa:bb:cc:dd:ee:01 IPA
 # bash exports its own HOSTNAME; the hook hands dnsmasq's on, empty here.
 PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" ACTION=add MACADDR=aa:bb:cc:dd:ee:a2 HOSTNAME='' \
     tctl newdevice >/dev/null 2>&1
-assert_eq "telegram: an unknown MAC is queued, a known one is not; ? and unknown fill the gaps" \
-    "$(printf 'aa:bb:cc:dd:ee:a1\t192.168.1.97\tlaptop\naa:bb:cc:dd:ee:a2\t?\tunknown')" "$(cat "$NOTIFY" 2>/dev/null)"
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    [ "$(wc -l < "$NLOG" 2>/dev/null)" -ge 2 ] 2>/dev/null && break
+    sleep 0.2
+done
+assert_eq "notify: an unknown MAC goes to notify dhcp with its lease, a known one does not" \
+    "$(printf 'notify dhcp aa:bb:cc:dd:ee:a1 192.168.1.97 laptop\nnotify dhcp aa:bb:cc:dd:ee:a2  ')" \
+    "$(sort "$NLOG" 2>/dev/null)"
+assert_eq "notify: the bot's old queue file is not written" "no" \
+    "$([ -e "$ROOT/tmp/trafficctl_tg_newdev" ] && echo yes || echo no)"
+rm -f "$ROOT/usr/sbin/trafficctl"
 
 # ── the hotplug hook ────────────────────────────────────────────────────────
 # A wrapper now: what matters is that it filters as before and hands the

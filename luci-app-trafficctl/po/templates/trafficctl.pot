@@ -70,6 +70,9 @@ msgstr ""
 msgid "Accelerates routing in the kernel via nftables flowtable. Speed monitoring and traffic shaping work normally."
 msgstr ""
 
+msgid "Access token:"
+msgstr ""
+
 msgid "Accumulated on the router"
 msgstr ""
 
@@ -124,6 +127,9 @@ msgstr ""
 msgid "All of"
 msgstr ""
 
+msgid "Always"
+msgstr ""
+
 msgid "App"
 msgstr ""
 
@@ -137,6 +143,9 @@ msgid "Apply"
 msgstr ""
 
 msgid "Applying…"
+msgstr ""
+
+msgid "Authorization header:"
 msgstr ""
 
 msgid "Auto-refresh interval for summary table"
@@ -155,6 +164,9 @@ msgid "Block Internet"
 msgstr ""
 
 msgid "Block WiFi"
+msgstr ""
+
+msgid "Block applied"
 msgstr ""
 
 msgid "Blocked from WiFi (MAC deny list)"
@@ -286,7 +298,7 @@ msgstr ""
 msgid "Custom"
 msgstr ""
 
-msgid "Customize message"
+msgid "Customize the new device message"
 msgstr ""
 
 msgid "Custom…"
@@ -314,6 +326,9 @@ msgid "Device hostname from DHCP lease"
 msgstr ""
 
 msgid "Device name"
+msgstr ""
+
+msgid "Device scan:"
 msgstr ""
 
 msgid "Devices"
@@ -379,6 +394,12 @@ msgstr ""
 msgid "Edit"
 msgstr ""
 
+msgid "Email"
+msgstr ""
+
+msgid "Email needs msmtp: opkg install msmtp, then set up /etc/msmtprc."
+msgstr ""
+
 msgid "Enabled"
 msgstr ""
 
@@ -388,6 +409,9 @@ msgstr ""
 msgid "Enter a download rate above zero."
 msgstr ""
 
+msgid "Events:"
+msgstr ""
+
 msgid "Every block, speed limit, shape and WiFi block the router holds, including those on devices that are offline. Each rule keeps applying while its device is away, so this is the place to find and lift it."
 msgstr ""
 
@@ -395,6 +419,9 @@ msgid "Every device in"
 msgstr ""
 
 msgid "Every device this router forwards for"
+msgstr ""
+
+msgid "Every event is also sent as a ubus event:"
 msgstr ""
 
 msgid "Exact. These are the router's own interface counters, so flow offloading does not undercount them — with offloading on, this table is more trustworthy than the device table above. A link that goes down restarts its counter: the traffic it carried between the last sample and the restart is lost."
@@ -451,10 +478,16 @@ msgstr ""
 msgid "Forwarded traffic only — this kernel cannot install the prerouting rule, so traffic handled by a transparent proxy on the router would not be caught."
 msgstr ""
 
+msgid "From:"
+msgstr ""
+
 msgid "Full control"
 msgstr ""
 
 msgid "Gbit/s"
+msgstr ""
+
+msgid "General"
 msgstr ""
 
 msgid "Give upload its own ceiling instead of matching download"
@@ -473,9 +506,6 @@ msgid "Group"
 msgstr ""
 
 msgid "Group connections table rows"
-msgstr ""
-
-msgid "HTML:"
 msgstr ""
 
 msgid "Hardware MAC address"
@@ -556,6 +586,9 @@ msgstr ""
 msgid "Internet blocked"
 msgstr ""
 
+msgid "Internet cut"
+msgstr ""
+
 msgid "Internet is cut for all devices"
 msgstr ""
 
@@ -568,7 +601,7 @@ msgstr ""
 msgid "Kept after reboot — undoing it needs LAN or physical access."
 msgstr ""
 
-msgid "Known devices"
+msgid "Known device online"
 msgstr ""
 
 msgid "LAN keeps working"
@@ -587,6 +620,9 @@ msgid "Lended / Borrowed"
 msgstr ""
 
 msgid "Limit"
+msgstr ""
+
+msgid "Limit applied"
 msgstr ""
 
 msgid "Limit inbound to %s"
@@ -661,7 +697,10 @@ msgstr ""
 msgid "New Device Defaults"
 msgstr ""
 
-msgid "New devices"
+msgid "New and known device messages, and the message template, are set on the Notifications tab."
+msgstr ""
+
+msgid "New device"
 msgstr ""
 
 msgid "No MAC address is known for this device, so its history is keyed on its IP address. If that address is reassigned, earlier traffic recorded here may belong to a different device."
@@ -757,6 +796,9 @@ msgstr ""
 msgid "Open DHCP/DNS bindings"
 msgstr ""
 
+msgid "Open Notifications"
+msgstr ""
+
 msgid "OpenWrt: Flow offloading ↗"
 msgstr ""
 
@@ -842,6 +884,9 @@ msgid "Presence"
 msgstr ""
 
 msgid "Preview:"
+msgstr ""
+
+msgid "Priority:"
 msgstr ""
 
 msgid "Proto"
@@ -952,6 +997,9 @@ msgstr ""
 msgid "Save as router default"
 msgstr ""
 
+msgid "Saved"
+msgstr ""
+
 msgid "Saved, applies when WiFi starts"
 msgstr ""
 
@@ -967,7 +1015,19 @@ msgstr ""
 msgid "Saving…"
 msgstr ""
 
+msgid "Scripts and ubus"
+msgstr ""
+
+msgid "Scripts installed: %d"
+msgstr ""
+
 msgid "Search device (name, IP, MAC)…"
+msgstr ""
+
+msgid "Send notifications"
+msgstr ""
+
+msgid "Send test"
 msgstr ""
 
 msgid "Sending…"
@@ -977,6 +1037,9 @@ msgid "Sent"
 msgstr ""
 
 msgid "Sent by this interface"
+msgstr ""
+
+msgid "Server:"
 msgstr ""
 
 msgid "Service"
@@ -1159,6 +1222,12 @@ msgstr ""
 msgid "The router offloads established connections from the CPU to the hardware (NIC/SoC), achieving 2–3× higher throughput and lower CPU usage."
 msgstr ""
 
+msgid "The scan for new and known devices is not running: no sender takes those events."
+msgstr ""
+
+msgid "The scan for new and known devices is running."
+msgstr ""
+
 msgid "The store directory is not writable yet."
 msgstr ""
 
@@ -1174,6 +1243,9 @@ msgstr ""
 msgid "To restore speed monitoring:"
 msgstr ""
 
+msgid "To:"
+msgstr ""
+
 msgid "Token:"
 msgstr ""
 
@@ -1184,6 +1256,9 @@ msgid "Top application by traffic (needs the netifyd DPI agent)"
 msgstr ""
 
 msgid "Top talkers"
+msgstr ""
+
+msgid "Topic:"
 msgstr ""
 
 msgid "Total"
@@ -1234,6 +1309,9 @@ msgstr ""
 msgid "UL Speed"
 msgstr ""
 
+msgid "URL:"
+msgstr ""
+
 msgid "Unblock Internet"
 msgstr ""
 
@@ -1274,6 +1352,12 @@ msgid "Waiting for a second sample…"
 msgstr ""
 
 msgid "Waiting for the first byte sample."
+msgstr ""
+
+msgid "Webhook"
+msgstr ""
+
+msgid "When needed"
 msgstr ""
 
 msgid "When this device last moved any traffic, not when it was last connected"
@@ -1330,6 +1414,9 @@ msgstr ""
 msgid "all active blocks, limits, and shapes"
 msgstr ""
 
+msgid "and runs the scripts in"
+msgstr ""
+
 msgid "at least"
 msgstr ""
 
@@ -1375,6 +1462,9 @@ msgstr ""
 msgid "days ago"
 msgstr ""
 
+msgid "default"
+msgstr ""
+
 msgid "device connections"
 msgstr ""
 
@@ -1397,6 +1487,12 @@ msgid "dropped"
 msgstr ""
 
 msgid "each"
+msgstr ""
+
+msgid "error"
+msgstr ""
+
+msgid "every"
 msgstr ""
 
 msgid "every device"
@@ -1453,9 +1549,6 @@ msgstr ""
 msgid "last flush"
 msgstr ""
 
-msgid "line break"
-msgstr ""
-
 msgid "may use"
 msgstr ""
 
@@ -1463,6 +1556,9 @@ msgid "min"
 msgstr ""
 
 msgid "min ago"
+msgstr ""
+
+msgid "msmtp account:"
 msgstr ""
 
 msgid "network interface"
@@ -1475,6 +1571,9 @@ msgid "nftables: Flowtables ↗"
 msgstr ""
 
 msgid "nothing dropped yet"
+msgstr ""
+
+msgid "ntfy"
 msgstr ""
 
 msgid "of its own."
@@ -1493,6 +1592,9 @@ msgid "online"
 msgstr ""
 
 msgid "open port"
+msgstr ""
+
+msgid "optional"
 msgstr ""
 
 msgid "own-rate vs parent-rate packets"
@@ -1567,6 +1669,9 @@ msgstr ""
 msgid "shared between them"
 msgstr ""
 
+msgid "the bot token from Settings"
+msgstr ""
+
 msgid "these are never limited by this setting."
 msgstr ""
 
@@ -1586,6 +1691,9 @@ msgid "undercounted"
 msgstr ""
 
 msgid "value"
+msgstr ""
+
+msgid "with ACTION set to the event and the fields in upper case (IP, MAC, NAME, ...)."
 msgstr ""
 
 msgid "↑ UL"

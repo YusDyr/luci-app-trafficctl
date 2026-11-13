@@ -60,6 +60,7 @@ import * as lib from 'trafficctl.lib';
 import * as net from 'trafficctl.net';
 import * as limit from 'trafficctl.limit';
 import * as shape from 'trafficctl.shape';
+import * as notify from 'trafficctl.notify';
 
 const RULES = '/etc/trafficctl/rules.json';
 const SHAPES = '/etc/trafficctl/shapes.json';
@@ -838,6 +839,7 @@ function block(ip, label) {
 	if (persist)
 		lib.persist_save('block', ip, label);
 	lib.log('block', ip, label, getenv('TCTL_VIA'), src);
+	notify.emit_action('block_applied', { ip, mac: b.mac ?? '', kind: 'internet' });
 
 	// Which families are covered, said rather than left to be found out.
 	let note = '';
@@ -1050,6 +1052,8 @@ function macfilter(op, arg) {
 			: sprintf('MAC %s removed from the wifi filter, but the radio ACL could not be read back: it may still be blocked. Install hostapd-utils, or restart wifi', mac);
 	lib.log((op == 'add') ? 'wifi_block' : 'wifi_unblock', ip, 'MAC=' + mac + ' enforce=' + enf,
 		getenv('TCTL_VIA'), getenv('TCTL_SRC'));
+	if (op == 'add' && ok)
+		notify.emit_action('block_applied', { ip, mac, kind: 'wifi' });
 	// Exit 0 either way, as the scripts did: the reply says how far it got.
 	return reply({ ok, enforcement: enf, msg }, 0);
 }
@@ -1057,7 +1061,6 @@ function macfilter(op, arg) {
 // ── new devices (the DHCP hotplug hook) ─────────────────────────────────────
 
 const KNOWN = '/etc/trafficctl/telegram_known.json';
-const NOTIFY = '/tmp/trafficctl_tg_newdev';
 
 // A limit somebody set deliberately, live or saved: after a reboot the
 // restore hook runs only on ifup lan, and a default limit applied before
@@ -1084,12 +1087,11 @@ function newdevice(env) {
 	if (env.ACTION != 'add' || mac == '')
 		return 0;
 
-	if (lib.uci_get('trafficctl', 'telegram', 'enabled') == '1' &&
-	    index(lib.readfile(KNOWN) ?? '', '"' + mac + '"') < 0) {
-		lib.mkdir_p('/tmp');
-		lib.append(NOTIFY, sprintf('%s\t%s\t%s\n', mac, (ip != '') ? ip : '?',
-			(env.HOSTNAME != null && env.HOSTNAME != '') ? env.HOSTNAME : 'unknown'));
-	}
+	// Only an unknown MAC costs a notify start; `trafficctl notify dhcp`
+	// decides whether anybody listens, detached so dnsmasq never waits on
+	// the network.
+	if (index(lib.readfile(KNOWN) ?? '', '"' + mac + '"') < 0)
+		lib.sh(lib.qv([ lib.path('/usr/sbin/trafficctl'), 'notify', 'dhcp', mac, ip, env.HOSTNAME ?? '' ]) + ' &');
 
 	if (lib.uci_get('trafficctl', 'newdevice', 'enabled') != '1')
 		return 0;

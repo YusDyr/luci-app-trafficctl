@@ -145,8 +145,14 @@ assert_contains "trafficctl build-apk.sh post-install tightens the config mode" 
 # 4. The Telegram bot follows its uci flag: enabled in rc.d and started when
 #    trafficctl.telegram.enabled is 1, so it is still there after a reboot.
 #    The postinst used to start it unconditionally and never enable it, so an
-#    upgrade revived a bot that the next reboot would drop again.
-for step in "/etc/init.d/trafficctl-telegram enable" "/etc/init.d/trafficctl-telegram start"; do
+#    upgrade revived a bot that the next reboot would drop again. It is
+#    RESTARTED: a bot of a release up to 1.30.x runs the device scan that the
+#    notification watcher (trafficctl-notify) took over, and a plain start
+#    leaves that old process running, so every new device is announced twice.
+#    The notification options move before either service starts.
+for step in "/etc/init.d/trafficctl-telegram enable" "/etc/init.d/trafficctl-telegram restart" \
+    "/usr/sbin/trafficctl notify migrate" \
+    "/etc/init.d/trafficctl-notify enable" "/etc/init.d/trafficctl-notify restart"; do
     assert_contains "trafficctl Makefile postinst runs '$step'" "$step" "$BE_MK_POSTINST"
     assert_contains "trafficctl build-ipk.sh postinst runs '$step'" "$step" "$BE_IPK_POSTINST"
     assert_contains "trafficctl build-apk.sh post-install runs '$step'" "$step" "$BE_APK_POSTINST"
@@ -277,7 +283,7 @@ run_postinst() { # <script> <telegram flag> <history flag> <history in rc.d: 0|1
     printf '%s\n' "$2" > "$FAKE/telegram.flag"
     printf '%s\n' "$3" > "$FAKE/history.flag"
     [ "$4" = 1 ] && : > "$FAKE/rc.d/trafficctl-history"
-    for svc in trafficctl-telegram trafficctl-history trafficctl-cut; do
+    for svc in trafficctl-telegram trafficctl-history trafficctl-notify trafficctl-cut; do
         cat > "$FAKE/etc/init.d/$svc" <<FAKEINIT
 #!/bin/sh
 echo "$svc \$1" >> "$FAKE/calls"
@@ -305,6 +311,11 @@ echo "nft \$*" >> "$FAKE/calls"
 [ -e "$FAKE/nft.table" ] || { echo "Error: No such file or directory" >&2; exit 1; }
 FAKENFT
     chmod +x "$FAKE/bin/nft"
+    cat > "$FAKE/bin/trafficctl" <<FAKECLI
+#!/bin/sh
+echo "trafficctl \$*" >> "$FAKE/calls"
+FAKECLI
+    chmod +x "$FAKE/bin/trafficctl"
     [ "${6:-0}" = 1 ] && : > "$FAKE/nft.table"
     # A boot link for the cut keeper, as releases up to 1.30.1 left behind.
     : > "$FAKE/rc.d/S95trafficctl-cut"
@@ -312,7 +323,7 @@ FAKENFT
     mkdir -p "$FAKE/run"
     [ "${7:-0}" = 1 ] && : > "$FAKE/run/cut.state"
     sed -e "s|/etc/init.d/|$FAKE/etc/init.d/|g" -e "s|/etc/config/|$FAKE/etc/config/|g" \
-        -e "s|/etc/rc.d/|$FAKE/rc.d/|g" -e "s|/var/run/trafficctl/|$FAKE/run/|g" "$1" > "$FAKE/postinst"
+        -e "s|/etc/rc.d/|$FAKE/rc.d/|g" -e "s|/var/run/trafficctl/|$FAKE/run/|g" -e "s|/usr/sbin/trafficctl|$FAKE/bin/trafficctl|g" "$1" > "$FAKE/postinst"
     # shellcheck disable=SC2086 # SHELL_CMD may be "busybox ash"
     IPKG_INSTROOT="${5:-}" PATH="$FAKE/bin:$PATH" ${SHELL_CMD:-sh} "$FAKE/postinst" >/dev/null 2>&1
     echo "$?" > "$FAKE/rc"
@@ -328,7 +339,12 @@ for f in "$TMP/trafficctl.postinst" "$TMP/ipk.postinst" "$TMP/apk.postinst"; do
     run_postinst "$f" 1 1 0
     assert_eq "$n: the old boot link of the cut keeper is removed" no "$(in_rcd S95trafficctl-cut)"
     assert_eq "$n, telegram.enabled=1: the bot is enabled in rc.d" yes "$(in_rcd trafficctl-telegram)"
-    assert_eq "$n, telegram.enabled=1: the bot is started" 1 "$(calls 'trafficctl-telegram start')"
+    assert_eq "$n, telegram.enabled=1: the bot is restarted" 1 "$(calls 'trafficctl-telegram restart')"
+    assert_eq "$n: the Telegram notification options are migrated" 1 "$(calls 'trafficctl notify migrate')"
+    assert_eq "$n: the migration runs before the bot restarts" "trafficctl notify migrate" \
+        "$(grep -m1 -E '^trafficctl( notify migrate|-telegram restart)' "$FAKE/calls")"
+    assert_eq "$n: the notification watcher is enabled in rc.d" yes "$(in_rcd trafficctl-notify)"
+    assert_eq "$n: the notification watcher is restarted" 1 "$(calls 'trafficctl-notify restart')"
     assert_eq "$n, history.enabled=1: the sampler is enabled in rc.d" yes "$(in_rcd trafficctl-history)"
     assert_eq "$n, history.enabled=1: the sampler is restarted" 1 "$(calls 'trafficctl-history restart')"
 

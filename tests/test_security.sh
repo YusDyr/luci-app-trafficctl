@@ -79,13 +79,12 @@ assert_eq "target: /0 allowed" "10.0.0.0/0" "$(tctl_validate_target 10.0.0.0/0)"
 assert_eq "cidr_spec: a leading-zero prefix refused" 1 "$(tctl_cidr_spec 10.0.0.0/08 >/dev/null && echo 0 || echo 1)"
 assert_eq "cidr_spec: a leading-zero octet refused" 1 "$(tctl_cidr_spec 010.0.0.0/8 >/dev/null && echo 0 || echo 1)"
 
-# ── MAC / name sanitization (real add_known_mac from the telegram bot) ────
-# add_known_mac is the only place production code sanitizes a MAC/name pair
-# before writing it to disk (`tr -cd 'a-fA-F0-9:'` / `tr -cd 'a-zA-Z0-9 _.-'`
-# inline in trafficctl-telegram.sh). Drive it through the real function by
-# sourcing a neutered copy of the daemon (main() suppressed) rather than
-# re-typing the same tr expression here.
+# ── MAC / name sanitization ─────────────────────────────────────────────────
+# The known-device ledger, the one place a MAC/name pair from a DHCP client is
+# written to disk, moved to trafficctl.notify: tests/test_notify.sh drives it
+# with an injected name.
 
+# The callback cases below source a neutered copy of the bot (main() suppressed).
 mkdir -p "$TMPDIR/lib"
 cat > "$TMPDIR/lib/functions.sh" <<'MOCK'
 config_load() { :; }
@@ -100,47 +99,6 @@ tail -1 "$NEUTERED" | grep -q '^main$' && {
     echo "FAIL: harness bug — could not neuter main(), refusing to run"
     exit 1
 }
-
-KNOWN_TEST="$TMPDIR/known.json"
-echo '[]' > "$KNOWN_TEST"
-
-sh -c "
-. '$NEUTERED'
-KNOWN_FILE='$KNOWN_TEST'
-add_known_mac 'aa:bb:cc:dd:ee:ff' 'MyPhone' '192.168.0.1'
-"
-STORED=$(cat "$KNOWN_TEST")
-assert_contains "mac/name sanitize: normal mac preserved" "$STORED" "aa:bb:cc:dd:ee:ff"
-assert_contains "mac/name sanitize: normal name preserved" "$STORED" "MyPhone"
-
-: > "$KNOWN_TEST"; echo '[]' > "$KNOWN_TEST"
-sh -c "
-. '$NEUTERED'
-KNOWN_FILE='$KNOWN_TEST'
-add_known_mac 'aa:bb:cc:dd:ee:ff\"; rm -rf /' 'evil\"};\$(rm -rf /);{\"' '192.168.0.1'
-"
-STORED=$(cat "$KNOWN_TEST")
-# The stored record is itself JSON, so a naive `sed 's/.*"mac":"\([^"]*\)".*'`
-# field-extraction would stop at the FIRST embedded quote in an unsanitized
-# value and silently "pass" no matter what — which is exactly the injected
-# payload here (the mac/name sanitizers strip quotes too, along with
-# semicolons/parens/dollar-signs, so a correctly sanitized entry never
-# contains those characters anywhere; an unsanitized one does). So check the
-# raw stored document for characters that are never legitimate in this file's
-# structure (only "{}":,. and alphanumerics ever appear in a clean entry).
-assert_not_contains "sanitize: no semicolon reaches disk" "$STORED" ";"
-assert_not_contains "sanitize: no dollar-paren reaches disk" "$STORED" '$('
-assert_not_contains "sanitize: no closing-paren reaches disk" "$STORED" ")"
-assert_not_contains "sanitize: no raw slash (from injected path) reaches disk" "$STORED" "/"
-
-: > "$KNOWN_TEST"; echo '[]' > "$KNOWN_TEST"
-sh -c "
-. '$NEUTERED'
-KNOWN_FILE='$KNOWN_TEST'
-add_known_mac 'aa:bb:cc:dd:ee:ff' 'My Phone' '192.168.0.1'
-"
-STORED=$(cat "$KNOWN_TEST")
-assert_contains "name sanitize: spaces preserved (allowed charset)" "$STORED" "My Phone"
 
 # ── Callback data validation (real handle_callback in the telegram bot) ────
 # Route through an unknown verb ("noop") so validation runs but no real

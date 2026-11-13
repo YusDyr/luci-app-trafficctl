@@ -315,11 +315,9 @@ names — see the "Writing tests" section of `CONTRIBUTING.md` for why, and use
 - Callback handling (block, unblock, limit, shape, WiFi block)
 - Authorization (unauthorized chat rejection)
 - Input validation (invalid IP in callbacks)
-- New device detection and notifications
-- Known device online notifications
 - DHCP trigger processing
-- Template tag substitution (17 tags: `{{name}}`, `{{ip}}`, `{{mac}}`, `{{link}}`, `{{date}}`, `{{time}}`, `{{datetime}}`, `{{router}}`, `{{ssid}}`, `{{signal}}`, `{{freq}}`, `{{iface}}`, `{{clients}}`, `{{uptime}}`, `{{wan_ip}}`, `{{load}}`, `{{conns}}`)
-- Notification throttling
+
+**Notification tests** (`test_notify.sh`, in the ucode job) cover `trafficctl.notify`: the events on ubus and through hotplug-call, every sender against a curl/msmtp mock (the token never in argv), the event filter and the master switch, the device scan and its ledger (sanitised names, seeding), the new device template (17 tags: `{{name}}`, `{{ip}}`, `{{mac}}`, `{{link}}`, `{{date}}`, `{{time}}`, `{{datetime}}`, `{{router}}`, `{{ssid}}`, `{{signal}}`, `{{freq}}`, `{{iface}}`, `{{clients}}`, `{{uptime}}`, `{{wan_ip}}`, `{{load}}`, `{{conns}}`), the migration of the bot's options, the rpcd `notify_*` methods and `telegram-test`.
 
 ### CI
 

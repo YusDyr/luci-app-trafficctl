@@ -496,8 +496,8 @@ Telegram API  ←──curl long poll──  trafficctl-telegram.sh (procd)
 - **Polling:** `getUpdates?timeout=N` acts as both fetch and sleep — no separate timer needed.
 - **Security:** Only responds to messages from the configured `chat_id`. Unauthorized messages are silently dropped.
 - **Device cache:** Summary output is cached for 5 seconds in `/tmp/trafficctl_tg_devices.json`.
-- **Known devices:** `/etc/trafficctl/telegram_known.json` tracks MACs for new device notifications.
-- **Configuration:** UCI section `trafficctl.telegram` with token, chat_id, notification and button toggles. Token is masked (never returned to the frontend).
+- **Notifications:** since 1.31 the bot only takes commands. New device and known device messages come from `trafficctl.notify` (`notify.uc`): its device scan runs as `/etc/init.d/trafficctl-notify` and keeps the bot's ledger, `/etc/trafficctl/telegram_known.json`; the Telegram sender (`notify_telegram`) uses the bot's token and chat unless it has its own. Every event also goes out on ubus (`trafficctl.notify`) and to `/etc/hotplug.d/trafficctl/`. See `docs/API.md`, "Notifications".
+- **Configuration:** UCI section `trafficctl.telegram` with token, chat_id and button toggles. Token is masked (never returned to the frontend).
 - **Init:** procd `respawn 3600 5 5` + `service_triggers` for auto-reload on UCI commit.
 
 ---

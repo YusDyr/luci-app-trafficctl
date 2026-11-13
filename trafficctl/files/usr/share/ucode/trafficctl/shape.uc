@@ -18,7 +18,7 @@
 //   status(ip)               the download class's rate
 //   main(args, quiet)        trafficctl shape <add|remove|status> <ip>
 //                            [rate_kbit] [label] [rate_up]: { reply, rc };
-//                            quiet (the restore): nothing announced
+//                            quiet (the restore): no limit_applied event
 //   restore()                every record of shapes.json (ifup lan), quiet
 //
 // Download is shaped on the LAN device's egress (match ip dst), upload on an
@@ -31,6 +31,7 @@ import { dirname } from 'fs';
 import * as lib from 'trafficctl.lib';
 import * as net from 'trafficctl.net';
 import * as limit from 'trafficctl.limit';
+import * as notify from 'trafficctl.notify';
 
 const SHAPES = '/etc/trafficctl/shapes.json';
 // Shared with every other writer of shapes.json, the shell shaper of older
@@ -401,9 +402,12 @@ function main(args, quiet) {
 	if (limit.valid_rate(up) == null)
 		return fail(sprintf('invalid upload rate: expected whole kbit/s, 1 to %d', limit.MAX_KBIT));
 	let r = apply(ip, int(rate), int(up));
-	// An announcement of an applied shape goes here, behind !quiet: the
-	// restore passes quiet (the shell hook of #156 runs the shaper with
-	// TCTL_NOTIFY=0), so a reboot does not announce every saved shape again.
+	// Announced as the shell shaper did (tctl_notify after the save), but not
+	// by the restore, which passes quiet: a reboot does not announce every
+	// saved shape again. emit_action also stays silent under TCTL_NOTIFY=0,
+	// which the ifup hook exports for everything it runs.
+	if (r.rc == 0 && !quiet)
+		notify.emit_action('limit_applied', { ip, rate_kbit: int(rate), rate_kbit_up: int(up), mode: 'shaper' });
 	return r;
 }
 

@@ -24,6 +24,8 @@
 #                         are $FW_RADIOS (default wifi0); cli_mode.<ap> in
 #                         STATE sets one AP's cli mode apart
 #   fw_clear              empty the logs (not the state)
+#   fw_events_on/_off     the notification events fired, one line each in
+#                         EVENTS_LOG (through the hotplug outlet)
 #
 # uci is the real CLI (UCODE_PREFIX) behind a logging wrapper, so a test reads
 # both the call and the file it changed. The hostapd_cli fake is stateful:
@@ -138,6 +140,30 @@ fw_flush() {
 }
 fw_clear() {
     : > "$NFT_LOG"; : > "$UCI_LOG"; : > "$CONNTRACK_LOG"; : > "$HOSTAPD_LOG"; : > "$LOGGER_LOG"; : > "$UBUS_LOG"
+    : > "$EVENTS_LOG"
+}
+
+# The notification events an action fires, seen through the hotplug outlet
+# (tests/test_notify.sh covers the outlet itself): with fw_events_on every
+# event lands in EVENTS_LOG as one line, "ACTION=... IP=... KIND=..." with
+# the variables sorted, dispatched inline (TCTL_NOTIFY_SYNC=1).
+EVENTS_LOG="$STATE/events.log"
+: > "$EVENTS_LOG"
+mkdir -p "$ROOT/sbin"
+cat > "$ROOT/sbin/hotplug-call" <<MOCK
+#!/bin/sh
+env | grep -E '^(ACTION|IP|MAC|KIND|MODE|RATE_KBIT|DURATION|PERSIST|VIA|SRC)=' | sort | tr '\\n' ' ' | sed 's/ \$//' >> "$EVENTS_LOG"
+echo >> "$EVENTS_LOG"
+MOCK
+chmod +x "$ROOT/sbin/hotplug-call"
+fw_events_on() {
+    mkdir -p "$ROOT/etc/hotplug.d/trafficctl"
+    : > "$ROOT/etc/hotplug.d/trafficctl/50-test"
+    export TCTL_NOTIFY_SYNC=1
+}
+fw_events_off() {
+    rm -f "$ROOT/etc/hotplug.d/trafficctl/50-test"
+    unset TCTL_NOTIFY_SYNC
 }
 
 fw_wifi() {

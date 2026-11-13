@@ -786,6 +786,53 @@ assert_empty "keep.d: the cut state is deliberately NOT carried across a sysupgr
     "$(grep -F 'cut.state' "$KEEPD")"
 
 # ════════════════════════════════════════════════════════════════════════════
+# The cut_engaged notification
+# ════════════════════════════════════════════════════════════════════════════
+
+# v1.30.0's do_engage announced a new cut with the time it has left and the
+# opt-in; a restore after a reboot is not a new cut. Seen through the hotplug
+# outlet, dispatched inline.
+EVENTS="$TMP/events.log"
+mkdir -p "$ROOT/sbin" "$ROOT/etc/hotplug.d/trafficctl"
+: > "$ROOT/etc/hotplug.d/trafficctl/50-test"
+cat > "$ROOT/sbin/hotplug-call" <<MOCK
+#!/bin/sh
+env | grep -E '^(ACTION|DURATION|PERSIST|VIA|SRC)=' | sort | tr '\\n' ' ' | sed 's/ \$//' >> "$EVENTS"
+echo >> "$EVENTS"
+MOCK
+chmod +x "$ROOT/sbin/hotplug-call"
+export TCTL_NOTIFY_SYNC=1
+reset_state
+: > "$EVENTS"
+run_cut engage 900 0 >/dev/null
+assert_eq "event: an engaged cut fires cut_engaged with the time it has left" \
+    "ACTION=cut_engaged DURATION=900 PERSIST=0 SRC=local VIA=cli" "$(cat "$EVENTS")"
+reset_state
+: > "$EVENTS"
+TCTL_VIA=luci TCTL_SRC=192.168.1.7 run_cut engage 0 1 >/dev/null
+assert_eq "event: an indefinite, kept cut: duration 0, persist 1, the caller" \
+    "ACTION=cut_engaged DURATION=0 PERSIST=1 SRC=192.168.1.7 VIA=luci" "$(cat "$EVENTS")"
+: > "$EVENTS"
+run_cut release >/dev/null
+assert_eq "event: a release fires nothing" "" "$(cat "$EVENTS")"
+reset_state
+run_cut engage 900 1 >/dev/null
+rm -rf "$ROOT/var/run/trafficctl"
+rm -f "$CHAIN"
+keeper_gone
+: > "$EVENTS"
+run_cut restore >/dev/null
+assert_eq "event: the restore did put the cut back" "yes" "$(has_chain)"
+assert_eq "event: a restore after a reboot fires nothing" "" "$(cat "$EVENTS")"
+reset_state
+: > "$EVENTS"
+: > "$ROOT/etc/config/firewall"
+run_cut engage 900 0 >/dev/null
+assert_eq "event: a refused cut fires nothing" "" "$(cat "$EVENTS")"
+unset TCTL_NOTIFY_SYNC
+rm -r "$ROOT/etc/hotplug.d"
+
+# ════════════════════════════════════════════════════════════════════════════
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

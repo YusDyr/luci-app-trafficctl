@@ -142,37 +142,7 @@ run() {
     PATH="$MOCKBIN:$PATH" sh -c ". '$NEUTERED'; $1"
 }
 
-# ── format_new_device_msg: default template (real function) ────────────────
-
-test_format_default() {
-    local result
-    result=$(run "format_new_device_msg 'MacBook' '192.168.0.50' 'aa:bb:cc:dd:ee:ff' '5G'")
-    assert_contains "default msg has name" "MacBook" "$result"
-    assert_contains "default msg has IP" "192.168.0.50" "$result"
-    assert_contains "default msg has MAC" "aa:bb:cc:dd:ee:ff" "$result"
-    assert_contains "default msg has link" "5G" "$result"
-    assert_contains "default msg has emoji" "🆕" "$result"
-    assert_contains "default msg has HTML bold" "<b>" "$result"
-}
-
-# ── format_new_device_msg: custom template (real function + real helpers) ──
-# Exercises get_router_vars, get_wifi_info and get_device_conns for real —
-# the previous version faked format_new_device_msg's body with its own awk
-# gsub script and never called any of those.
-
-test_format_custom() {
-    local result
-    result=$(run "
-        TG_NOTIFY_TEMPLATE='{{name}} joined at {{time}} via {{link}} (clients={{clients}}, wan={{wan_ip}})'
-        format_new_device_msg 'iPhone' '192.168.0.99' '11:22:33:44:55:66' 'wifi'
-    ")
-    assert_contains "custom template: name substituted" "iPhone" "$result"
-    assert_contains "custom template: link substituted" "wifi" "$result"
-    assert_contains "custom template: clients count substituted (fake dhcp.leases is empty)" "clients=" "$result"
-    assert_not_contains "custom template: clients placeholder actually resolved, not left literal" "{{clients}}" "$result"
-    assert_contains "custom template: wan_ip from real network_get_ipaddr stub" "wan=1.2.3.4" "$result"
-    assert_not_contains "custom template: unresolved placeholder left behind" "{{" "$result"
-}
+# The new device message and its template: tests/test_notify.sh.
 
 # ── build_device_keyboard / build_action_keyboard (real functions) ─────────
 
@@ -232,8 +202,6 @@ test_control_guard() {
 
 # ── Run all tests ────────────────────────────────────────────────────────────
 
-test_format_default
-test_format_custom
 test_keyboard_structure
 test_control_guard
 

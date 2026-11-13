@@ -418,5 +418,27 @@ OUT=$(run_add 192.168.1.50)
 assert_contains "two APs, both ACLs: acl" '"enforcement":"acl"' "$OUT"
 set_runtime ok ok
 
+# ── the block_applied notification ──────────────────────────────────────────
+# As v1.30.0's macfilter-add.sh: kind wifi, only when the deny took (ok:true),
+# never for a removal.
+unset FW_RADIOS
+set_runtime ok ok
+set_uci_single_iface "deny" ""
+fw_events_on
+OUT=$(TCTL_VIA=telegram TCTL_SRC=tg run_add 192.168.1.50)
+assert_contains "event: the WiFi deny went in" '"ok":true' "$OUT"
+assert_eq "event: a WiFi deny fires block_applied, kind wifi, with via/src" \
+    "ACTION=block_applied IP=192.168.1.50 KIND=wifi MAC=aa:bb:cc:dd:ee:ff SRC=tg VIA=telegram" \
+    "$(cat "$EVENTS_LOG")"
+OUT=$(run_remove 192.168.1.50)
+assert_eq "event: a WiFi allow fires nothing" "" "$(cat "$EVENTS_LOG")"
+set_runtime silent noban
+set_uci_single_iface "deny" ""
+OUT=$(run_add 192.168.1.50)
+assert_contains "event: the radio refused the deny" '"ok":false' "$OUT"
+assert_eq "event: a deny that did not take fires nothing" "" "$(cat "$EVENTS_LOG")"
+fw_events_off
+set_runtime ok ok
+
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

@@ -14,6 +14,7 @@
 
 import { stdin } from 'fs';
 import * as lib from 'trafficctl.lib';
+import * as notify from 'trafficctl.notify';
 
 const CLI = '/usr/sbin/trafficctl';
 
@@ -58,6 +59,13 @@ const SIGNATURES = {
 		notify_template: 'str', btn_block_inet: 'bool', btn_block_wifi: 'bool',
 		btn_limiter: 'bool', btn_shaper: 'bool' },
 	telegram_test: { bot_token: 'str', chat_id: 'str', message: 'str' },
+	// ── notifications ──
+	notify_config_get: {},
+	notify_config_set: { sender: 'str', enabled: 'bool', events: 'str', scan: 'str', scan_interval: 'int',
+		bot_token: 'str', chat_id: 'str', template: 'str', server: 'str', topic: 'str', token: 'str',
+		priority: 'int', url: 'str', auth: 'str', to: 'str', 'from': 'str', account: 'str' },
+	notify_test: { sender: 'str' },
+	// ── end notifications ──
 	newdevice_config_get: {},
 	newdevice_config_set: { enabled: 'bool', limit_kbit: 'int', limit_mode: 'str' },
 	logging_config_get: {},
@@ -160,7 +168,7 @@ const READ_ONLY = {
 	shape_status: true, rules_list: true, config_get: true, telegram_config_get: true,
 	logging_config_get: true, newdevice_config_get: true, history_status: true,
 	history_read: true, history_read_ifaces: true, history_periods: true,
-	history_config_get: true,
+	history_config_get: true, notify_config_get: true,
 };
 
 function caller(a, method) {
@@ -327,6 +335,43 @@ function history_dir_ok(d) {
 }
 
 // ── methods ─────────────────────────────────────────────────────────────────
+
+// The notify_telegram sender, once the bot's notification options moved
+// there (`trafficctl notify migrate`); null before.
+function tg_sender() {
+	return filter(notify.senders(), (x) => x.type == 'telegram' && !x.legacy)[0];
+}
+
+// telegram_config_set's notification keys, written to that sender.
+function tg_sender_set(x, a) {
+	let c = lib.cursor(), ev = notify.events_of(x.s), any = false;
+	for (let k in [ 'new_device', 'known_device' ]) {
+		let v = arg(a, 'notify_' + k), keep = [];
+		if (v == '')
+			keep = ev;
+		else {
+			any = true;
+			for (let e in ev)
+				if (e != k)
+					push(keep, e);
+			if (v == 'true')
+				push(keep, k);
+		}
+		ev = keep;
+	}
+	if (any) {
+		if (length(ev))
+			c.set('trafficctl', x.name, 'events', ev);
+		c.set('trafficctl', x.name, 'enabled', length(ev) ? '1' : '0');
+	}
+	if (exists(a, 'notify_template')) {
+		let tpl = arg(a, 'notify_template');
+		if (tpl == '')
+			c.delete('trafficctl', x.name, 'template');
+		else
+			c.set('trafficctl', x.name, 'template', tpl);
+	}
+}
 
 function telegram_defaults() {
 	return { enabled: false, bot_token: '', bot_token_set: false, chat_id: '', poll_interval: 3,
@@ -534,7 +579,7 @@ const methods = {
 		let t = (o) => uget('telegram', o);
 		let on = (o) => (t(o) ?? '1') != '0';
 		let token = t('bot_token') ?? '';
-		return {
+		let r = {
 			enabled: t('enabled') == '1',
 			// Never the token itself: the UI shows a mask and sends it back.
 			bot_token: (token != '') ? '***' : '',
@@ -551,10 +596,23 @@ const methods = {
 			btn_shaper: on('btn_shaper'),
 			bot_running: bot_running(),
 		};
+		// Since 1.31 the notification options belong to the notify_telegram
+		// sender (the Notifications tab); the old keys read it back.
+		let x = tg_sender();
+		if (x) {
+			let ev = notify.events_of(x.s), on_ = (x.s.enabled ?? '1') == '1';
+			r.notify_new_device = on_ && index(ev, 'new_device') >= 0;
+			r.notify_known_device = on_ && index(ev, 'known_device') >= 0;
+			r.notify_template = x.s.template ?? '';
+		}
+		return r;
 	},
 
 	telegram_config_set: (a) => {
 		ensure_section('telegram');
+		let x = tg_sender();
+		if (x)
+			tg_sender_set(x, a);
 		let v = arg(a, 'enabled');
 		if (v != '')
 			uset('telegram', 'enabled', bool01(v));
@@ -567,11 +625,12 @@ const methods = {
 			if (v != '')
 				uset('telegram', o, v);
 		}
-		uset('telegram', 'notify_template', arg(a, 'notify_template'));
+		if (!x)
+			uset('telegram', 'notify_template', arg(a, 'notify_template'));
 		for (let o in [ 'notify_new_device', 'notify_known_device', 'control_enabled', 'btn_block_inet',
 		                'btn_block_wifi', 'btn_limiter', 'btn_shaper' ]) {
 			v = arg(a, o);
-			if (v != '')
+			if (v != '' && (!x || substr(o, 0, 7) != 'notify_'))
 				uset('telegram', o, bool01(v));
 		}
 		let err = save('trafficctl');
@@ -598,6 +657,41 @@ const methods = {
 			'TCTL_VIA=luci TCTL_SRC=' + lib.q(who.src) + ' TCTL_USER=' + lib.q(who.user) + ' ' +
 			lib.qv([ lib.path(CLI), 'telegram-test', '-', chat, arg(a, 'message') ]), token + '\n');
 	},
+
+	// ── notifications ──
+	notify_config_get: () => notify.config_get(),
+
+	// One sender (sender: a type or a section name) or, with no sender, the
+	// global options. The bot's old options move first, so the tab never
+	// edits a sender that a later migration would overwrite.
+	notify_config_set: (a) => {
+		notify.migrate();
+		let o = {};
+		for (let k in keys(SIGNATURES.notify_config_set))
+			if (exists(a, k) && a[k] != null)
+				o[k] = arg(a, k);
+		let r = notify.config_set(o);
+		if (!r.ok) {
+			lib.cursor().revert('trafficctl');
+			return r;
+		}
+		let err = save('trafficctl');
+		if (err)
+			return err;
+		lib.log('notify_config_change', r.sender ?? 'notify', '', 'luci', who.src);
+		init_script('trafficctl-notify', 'enable');
+		init_script('trafficctl-notify', 'restart', true);
+		return OK;
+	},
+
+	notify_test: (a) => {
+		let r = run_cli([ 'notify', 'test', arg(a, 'sender') ]);
+		if (r.err)
+			return fail(r.err);
+		lib.log('notify_test', arg(a, 'sender'), '', 'luci', who.src);
+		return r.out;
+	},
+	// ── end notifications ──
 
 	logging_config_get: () => {
 		let l = (o) => uget('logging', o);
