@@ -294,25 +294,35 @@ function empty_ledger(t) {
 
 // add_known_mac: a first entry replaces the '[]' (no newline after it), every
 // later one goes before the closing bracket of each line ending in one.
+// True only for the caller that added the MAC: the check is repeated under
+// the lock, because the DHCP hook (`notify dhcp`) and the scan race for the
+// same new device and only one of them may announce it. Without the lock
+// nothing is written: a lost entry is announced again at the next sighting,
+// a clobbered file loses every entry another writer added meanwhile.
 function add_known(mac, name, ip) {
 	mac = replace(mac, /[^a-fA-F0-9:]/g, '');
 	name = replace(name, /[^a-zA-Z0-9 _.-]/g, '');
 	ip = replace(ip, /[^0-9.]/g, '');
 	let e = sprintf('{"mac":"%s","name":"%s","ip":"%s","first_seen":%d}', mac, name, ip, now());
-	let locked = lib.lock(KNOWN_LOCK, 100, 30, true);
-	let t = lib.readfile(KNOWN), data;
-	if (empty_ledger(t))
-		data = '[' + e + ']';
-	else {
-		let l = split(t, '\n');
-		if (l[-1] == '')
-			pop(l);
-		data = join('\n', map(l, (x) => replace(x, /\]$/, () => ',' + e + ']'))) + '\n';
+	if (!lib.lock(KNOWN_LOCK, 100, 30, true)) {
+		logger('Known-device ledger busy, ' + mac + ' not recorded');
+		return false;
 	}
-	lib.mkdir_p('/etc/trafficctl');
-	let ok = lib.write_atomic(KNOWN, data);
-	if (locked)
-		lib.unlock(KNOWN_LOCK);
+	let ok = false;
+	if (!is_known(mac)) {
+		let t = lib.readfile(KNOWN), data;
+		if (empty_ledger(t))
+			data = '[' + e + ']';
+		else {
+			let l = split(t, '\n');
+			if (l[-1] == '')
+				pop(l);
+			data = join('\n', map(l, (x) => replace(x, /\]$/, () => ',' + e + ']'))) + '\n';
+		}
+		lib.mkdir_p('/etc/trafficctl');
+		ok = !!lib.write_atomic(KNOWN, data);
+	}
+	lib.unlock(KNOWN_LOCK);
 	return ok;
 }
 
@@ -708,11 +718,15 @@ function emit(ev, fields, sync) {
 
 // For the code that does an action (ctl, cut): emit() with the caller, as
 // tctl_notify sends it from the shell. It never fails the action.
+// TCTL_NOTIFY=0 (the ifup restore hook) puts back what was there: no event.
 function emit_action(ev, fields) {
-	fields.via = getenv('TCTL_VIA') || 'cli';
-	fields.src = getenv('TCTL_SRC') || 'local';
+	if (getenv('TCTL_NOTIFY') == '0')
+		return;
 	try {
-		emit(ev, fields);
+		let f = (type(fields) == 'object') ? { ...fields } : {};
+		f.via = getenv('TCTL_VIA') || 'cli';
+		f.src = getenv('TCTL_SRC') || 'local';
+		emit(ev, f);
 	}
 	catch (e) {
 		warn(sprintf('trafficctl: %s not sent: %s\n', ev, e.message));
@@ -730,9 +744,11 @@ function scan() {
 	for (let mac in macs) {
 		if (!is_known(mac)) {
 			let i = resolve(mac);
-			add_known(mac, i.name, i.ip);
-			emit('new_device', { mac, ip: i.ip, name: i.name, link: i.link }, true);
-			res.new++;
+			// Another writer (the DHCP hook) may have announced it first.
+			if (add_known(mac, i.name, i.ip)) {
+				emit('new_device', { mac, ip: i.ip, name: i.name, link: i.link }, true);
+				res.new++;
+			}
 		}
 		else if (prev != null && index(prev, mac) < 0) {
 			let i = resolve(mac);
@@ -763,17 +779,19 @@ function watch() {
 
 // process_dhcp_triggers, for one lease, as dnsmasq reports it.
 function dhcp(mac, ip, name) {
-	if (!lib.plain(mac) || mac == '')
+	mac = lib.plain(mac) ? lc(mac) : '';
+	if (!match(mac, MAC_RE))
 		return { ok: false, msg: 'usage: trafficctl notify dhcp <mac> [ip] [name]' };
 	if (!scan_wanted())
 		return { ok: true, msg: 'not watching for devices' };
-	mac = lc(mac);
 	load_known();
 	if (is_known(mac))
 		return { ok: true, msg: 'known device' };
 	ip = (lib.plain(ip) && ip != '') ? ip : '?';
 	name = (lib.plain(name) && name != '') ? name : 'unknown';
-	add_known(mac, name, ip);
+	// The scan may have recorded and announced it since the check above.
+	if (!add_known(mac, name, ip))
+		return { ok: true, msg: 'known device' };
 	emit('new_device', { mac, ip, name, link: 'dhcp' }, true);
 	return { ok: true, msg: 'new device' };
 }

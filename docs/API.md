@@ -1026,8 +1026,13 @@ caused the event never waits on the network.
 | `new_device` | the device scan, the DHCP hotplug | `mac`, `ip`, `name`, `link` |
 | `known_device` | the device scan (a known MAC back online) | `mac`, `ip`, `name`, `link` |
 | `limit_applied` | `trafficctl-ratelimit.sh`, `trafficctl-shape.sh add` | `ip`, `rate_kbit`, `rate_kbit_up`, `mode` (`limiter`\|`shaper`) |
-| `block_applied` | `trafficctl-block.sh`, `trafficctl-macfilter-add.sh` | `ip`, `mac`, `kind` (`internet`\|`wifi`) |
+| `block_applied` | `trafficctl block`, `trafficctl macfilter-add` (when the deny took) | `ip`, `mac`, `kind` (`internet`\|`wifi`) |
 | `cut_engaged` | `trafficctl-cut.sh engage` | `duration` (seconds left, `0` = indefinite), `persist` |
+
+Putting saved rules back is not an event: the `ifup lan` restore hook sets
+`TCTL_NOTIFY=0`, which `tctl_notify` and `notify.emit_action` honour, so a
+reboot sends no "Limit applied" per device. A block already in place, an
+unblock and a refused action send nothing either.
 
 Every event also carries `via` (`luci`, `telegram`, `cli`) and `src` (the
 caller's address or `local`). Unknown fields are dropped, and so is a text
@@ -1075,7 +1080,15 @@ config notify_mail 'notify_mail'
 - **mail**: a plain-text message through `msmtp`.
 
 Tokens and URLs go to curl as a config file on stdin, never in an argument
-list (`ps` shows argv to every local user).
+list (`ps` shows argv to every local user). The LuCI ACL grants no direct uci
+access: the views read the settings through `luci.trafficctl`, which shows
+every token and `auth` as `***`.
+
+Delivery is one attempt per event and sender: there is no retry, rate limit or
+coalescing, so a sender that answers 429 (Telegram's flood limit, ntfy's
+quota) loses that message, and a burst of events is a burst of requests. The
+scan sends synchronously; a config change restarts `trafficctl-notify`, and a
+send in flight at that moment is lost with it.
 
 ### The device scan
 
@@ -1088,7 +1101,11 @@ only when `trafficctl notify wanted` says something listens: `scan '1'`, or
 through `trafficctl notify dhcp`. The scan keeps the bot's state files:
 `/etc/trafficctl/telegram_known.json` (the known-device ledger; a missing or
 empty one is seeded from what is on the network, so switching notifications on
-does not report the whole LAN) and `/tmp/trafficctl_tg_online`.
+does not report the whole LAN) and `/tmp/trafficctl_tg_online`. The scan and
+`notify dhcp` see a new device at the same time; each checks the ledger again
+under `/tmp/.trafficctl_known.lock` before adding it, and only the one that
+added it sends `new_device`. When the lock cannot be had within 10 s nothing
+is written, and the device is reported at its next sighting.
 
 ### CLI
 
@@ -1104,8 +1121,9 @@ trafficctl notify test <sender>                    # a test message through one 
 ```
 
 Shell scripts emit through `tctl_notify <event> key=value...`
-(`trafficctl-fw.sh`), which adds `via` and `src`; ucode callers use
-`notify.emit(ev, fields)`.
+(`trafficctl-fw.sh`), the ucode action code through
+`notify.emit_action(ev, fields)`; both add `via` and `src` (`TCTL_VIA`,
+`TCTL_SRC`) and never fail the action.
 
 ### Migration
 
@@ -1117,6 +1135,12 @@ those options into one: the events that were on, `enabled` as the bot's
 `enabled` (off when no event was on), the template. It removes the old
 options. Until it has run, the old options act as a Telegram sender, so
 notifications keep working mid-upgrade.
+
+A downgrade to 1.30.x does not move them back: 1.30's bot finds no
+`notify_new_device`, `notify_known_device` or `notify_template` and sends no
+device notifications, with the built-in message, until they are set again
+(`uci set trafficctl.telegram.notify_new_device=1`, and the template copied
+from `notify_telegram.template`).
 
 ---
 

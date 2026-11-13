@@ -7,6 +7,10 @@
 
 [ "$ACTION" = "ifup" ] && [ "$INTERFACE" = "lan" ] || exit 0
 
+# Everything below puts back what was there before: no "Limit applied" or
+# "Internet blocked" notification per device on every boot or ifup.
+export TCTL_NOTIFY=0
+
 SHAPES_FILE="/etc/trafficctl/shapes.json"
 RULES_FILE="/etc/trafficctl/rules.json"
 

@@ -430,6 +430,32 @@ reset "config notify 'notify'"
 echo "$OTHER" > "$KNOWN"
 OUT=$(tctl notify dhcp aa:bb:cc:dd:ee:ff 192.168.1.66 x)
 assert_eq "dhcp: nothing watching, the ledger is left alone" '{"ok":true,"msg":"not watching for devices"}' "$OUT"
+reset "$SCAN"
+echo "$OTHER" > "$KNOWN"
+OUT=$(tctl notify dhcp 'not-a-mac' 192.168.1.66 x)
+assert_contains "dhcp: a MAC that is not one is refused" '"ok":false' "$OUT"
+assert_eq "dhcp: and not recorded" "$OTHER" "$(cat "$KNOWN")"
+
+# The DHCP hook and the scan see the same new device at the same moment: one
+# message, one ledger entry, whoever wins.
+reset "$SCAN"
+echo "$P8LEASE" > "$LEASES"; echo "$P8" > "$NLOG/neigh"; echo "$OTHER" > "$KNOWN"
+for _ in 1 2 3 4 5 6; do
+    tctl notify dhcp e6:f8:0a:1b:2c:3d 192.168.1.88 Pixel-8 >/dev/null 2>&1 &
+    tctl notify scan >/dev/null 2>&1 &
+done
+wait
+assert_eq "race: the new device is recorded once" 1 "$(grep -o '"mac":"e6:f8:0a:1b:2c:3d"' "$KNOWN" | wc -l | tr -d ' ')"
+assert_eq "race: and announced once" 1 "$(curls)"
+assert_eq "race: the ledger is still JSON" ok "$(python3 -c 'import json,sys; [json.loads(l) for l in open(sys.argv[1])]; print("ok")' "$KNOWN" 2>&1)"
+# A ledger somebody else holds is not written behind their back.
+reset "$SCAN"
+echo "$OTHER" > "$KNOWN"
+mkdir -p "$TCTL_ROOT/tmp/.trafficctl_known.lock"
+OUT=$(tctl notify dhcp 12:34:56:78:9a:bc 192.168.1.70 x)
+rmdir "$TCTL_ROOT/tmp/.trafficctl_known.lock"
+assert_eq "lock busy: nothing written" "$OTHER" "$(cat "$KNOWN")"
+assert_eq "lock busy: nothing announced" 0 "$(curls)"
 
 # ── the new device template ──────────────────────────────────────────────────
 
@@ -617,28 +643,41 @@ assert_eq "telegram-test: a custom message gets the sample values" "Hi TestDevic
 # ── the call sites ───────────────────────────────────────────────────────────
 # Each event is raised by the code that does the action, shell or ucode. A
 # port of that code that drops the call would lose the event silently, so the
-# action code (not notify.uc, not comments) must still carry every call site.
+# action code (not notify.uc, not comments) must still carry every call: the
+# call itself, tctl_notify or emit_action with the event and its kind, not a
+# log line that names the event. Comment lines are dropped and each file is
+# read as one line, so a call spread over several lines still counts. The
+# behaviour behind each call is tested where the action is: test_block.sh,
+# test_macfilter.sh, test_newdevice.sh, test_asymmetric_limits.sh.
 ACT_SRC="$UC_REPO/trafficctl/files"
 call_site() {   # call_site <name> <ERE>
-    local hits f files=()
+    local f files=()
     for f in "$ACT_SRC"/usr/libexec/trafficctl/*.sh "$ACT_SRC"/usr/share/ucode/trafficctl/*.uc \
         "$ACT_SRC"/etc/hotplug.d/dhcp/99-trafficctl-newdevice; do
         [ "$(basename "$f")" = notify.uc ] || files+=("$f")
     done
-    hits=$(grep -hE -- "$2" "${files[@]}" 2>/dev/null | grep -vE '^[[:space:]]*(#|//)')
-    if [ -n "$hits" ]; then
+    if for f in "${files[@]}"; do grep -vE '^[[:space:]]*(#|//)' "$f" | tr '\n\t' '  '; echo; done |
+        grep -qE -- "$2"; then
         PASS=$((PASS + 1))
     else
         FAIL=$((FAIL + 1))
-        printf "FAIL: call site: %s\n  no line in the action code matches: %s\n" "$1" "$2"
+        printf "FAIL: call site: %s\n  no call in the action code matches: %s\n" "$1" "$2"
     fi
 }
-call_site "an internet block raises block_applied" "block_applied.*internet"
-call_site "a WiFi deny raises block_applied" "block_applied.*wifi"
-call_site "a limiter raises limit_applied" "limit_applied.*limiter"
-call_site "a shaper raises limit_applied" "limit_applied.*shaper"
-call_site "an engaged cut raises cut_engaged" "cut_engaged"
-call_site "a DHCP event reaches the device scan" "notify dhcp|notify\.dhcp\(|'notify', 'dhcp'"
+ea() {   # ea <event> [<field>: <value>]: emit_action('<event>', { ... <field>: '<value>' ... })
+    printf "emit_action\\\\( *'%s'" "$1"
+    [ -n "$2" ] && printf ", *\\\\{[^}]*%s: *'%s'" "$2" "$3"
+}
+call_site "an internet block raises block_applied" \
+    "tctl_notify +block_applied[^;)]*kind=internet|$(ea block_applied kind internet)"
+call_site "a WiFi deny raises block_applied" \
+    "tctl_notify +block_applied[^;)]*kind=wifi|$(ea block_applied kind wifi)"
+call_site "a limiter raises limit_applied" \
+    "tctl_notify +limit_applied[^;)]*mode=limiter|$(ea limit_applied mode limiter)"
+call_site "a shaper raises limit_applied" \
+    "tctl_notify +limit_applied[^;)]*mode=shaper|$(ea limit_applied mode shaper)"
+call_site "an engaged cut raises cut_engaged" "tctl_notify +cut_engaged|$(ea cut_engaged)"
+call_site "a DHCP event reaches the device scan" "trafficctl notify dhcp|'notify', *'dhcp'"
 # The shell call sites through tctl_notify reach the CLI (TCTL_NOTIFY_CLI).
 CALLS="$UC_TMP/notify_cli.log"
 printf '#!/bin/sh\necho "$*" >> "%s"\n' "$CALLS" > "$MOCKBIN/notify-cli"
@@ -648,6 +687,11 @@ TCTL_NOTIFY_CLI="$MOCKBIN/notify-cli" TCTL_VIA=luci TCTL_SRC=192.168.1.2 \
     "$ACT_SRC/usr/libexec/trafficctl/trafficctl-fw.sh" 2>/dev/null
 assert_eq "tctl_notify: hands the event to notify emit with the caller" \
     "notify emit block_applied ip=192.168.1.9 kind=internet via=luci src=192.168.1.2" "$(cat "$CALLS" 2>/dev/null)"
+rm -f "$CALLS"
+TCTL_NOTIFY=0 TCTL_NOTIFY_CLI="$MOCKBIN/notify-cli" \
+    sh -c '. "$1"; tctl_notify limit_applied ip=192.168.1.9 mode=shaper' _ \
+    "$ACT_SRC/usr/libexec/trafficctl/trafficctl-fw.sh" 2>/dev/null
+assert_eq "tctl_notify: TCTL_NOTIFY=0 (a restore) sends nothing" "" "$(cat "$CALLS" 2>/dev/null)"
 
 # The ucode call sites go through notify.emit_action: the caller from the
 # environment, as tctl_notify adds it.
@@ -670,6 +714,13 @@ assert_contains "emit_action: no caller is cli" "VIA=cli" "$HP"
 assert_contains "emit_action: from local" "SRC=local" "$HP"
 OUT=$(tcall trafficctl.notify emit_action '"no_such_event"' '{}' 2>&1; echo "rc=$?")
 assert_eq "emit_action: an unknown event fails nothing" "rc=0" "$OUT"
+rm -f "$NLOG/hotplug"
+OUT=$(tcall trafficctl.notify emit_action '"cut_engaged"' 'null' 2>&1; echo "rc=$?")
+assert_eq "emit_action: no fields fails nothing" "rc=0" "$OUT"
+assert_contains "emit_action: no fields, still the event" "ACTION=cut_engaged" "$(cat "$NLOG/hotplug" 2>/dev/null)"
+rm -f "$NLOG/hotplug"
+TCTL_NOTIFY=0 tcall trafficctl.notify emit_action '"block_applied"' '{"ip":"192.168.1.9","kind":"internet"}' >/dev/null 2>&1
+assert_eq "emit_action: TCTL_NOTIFY=0 (a restore) sends nothing" "no" "$([ -f "$NLOG/hotplug" ] && echo yes || echo no)"
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
