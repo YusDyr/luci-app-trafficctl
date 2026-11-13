@@ -149,7 +149,7 @@ sequenceDiagram
 
     opt rDNS resolution (if enabled)
         B->>R: network.rrdns.lookup(addrs[], timeout, limit)
-        Note over R: rpcd-mod-rrdns resolves all IPs in one batch
+        Note over R: at most 16 new addresses per poll; a reply is kept even if a newer poll has started
         R-->>B: {ip1: "host1", ip2: "host2", ...}
     end
 ```

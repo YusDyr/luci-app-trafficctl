@@ -167,7 +167,7 @@ I hope it turns out as useful for you as it has been for me.
 - **Rules tab** -- Every block, speed limit (subnets included), shape and WiFi block in one list, including those on devices that are offline and so missing from the device table. Shows the target, the hostname, whether each rule is in effect now and whether it survives a reboot, with Edit, Remove and Apply.
 - **Port Forwards tab** -- Inbound traffic control for DNAT port forwards and router-local open ports: live connection/client/byte stats per forward, instant pause/resume (drop rule, no firewall reload) and inbound rate limiting.
 - **Live Speed Polling** -- Optional polling with configurable interval (Off/1/2/5/10/30s) and averaging window (5s-5min); shows sparkline per device with spike filtering. Both can be stored as router-wide defaults via UCI (`poll_interval`, `avg_window`) for browsers that have not chosen their own.
-- **Reverse DNS** -- Optional hostname resolution for external destination IPs with in-memory cache (no repeated lookups).
+- **Reverse DNS** -- Optional hostname resolution for external destination IPs with in-memory cache (no repeated lookups). At most 16 new lookups per device poll, so it also works behind resolvers that rate-limit the router, such as AdGuard Home on port 53 with dnsmasq moved to another port.
 - **Searchable Device Picker** -- Command palette (search by name, IP, or MAC) with recent devices quick-access bar stored in localStorage.
 - **Telegram Bot** -- Optional bot for remote control: device list, block/unblock, rate limit, shape traffic, new device notifications. Runs on the router via long polling, no external server needed.
 - **New Device Detection** -- Discovers new devices via three sources: ARP table, DHCP leases, Wi-Fi station list. Instant DHCP hotplug trigger for near-realtime alerts.
@@ -586,6 +586,12 @@ opkg install curl
 - Log file: `/tmp/trafficctl/activity.log` (volatile; survives until reboot). Path and max lines are configurable via UCI.
 - Optionally duplicates to syslog (`logger -t trafficctl`) for remote log collection.
 - Per-category toggles: blocks, ratelimits, shapes, telegram, config changes.
+
+### Reverse DNS
+
+- The rDNS toggle in the device view resolves the connection table's public destinations through rpcd's `network.rrdns`, which asks the first `nameserver` in `/etc/resolv.conf` on port 53, the same resolver `nslookup` uses on the router. Nothing needs configuring when AdGuard Home owns port 53 and dnsmasq has moved: AdGuard Home resolves public PTR queries through its own upstreams.
+- A device poll sends at most 16 new lookups. AdGuard Home's default `ratelimit: 20` (queries per second per client, and the router is one client) drops the rest of a larger burst without an answer; up to v1.30.7 that left a device with more than 20 destinations without any names. Names arrive over a few polls instead, and a destination without a PTR record is asked again after a minute.
+- Device names for clients without a DHCP lease here (routed, downstream) come from `trafficctl.main.rdns_server`: a space-separated list of resolvers tried before the system resolver. An entry can carry a port, e.g. `uci set trafficctl.main.rdns_server='127.0.0.1:54'` to ask dnsmasq on port 54 directly for its lease names.
 
 ### WiFi MAC Filtering
 
