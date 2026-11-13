@@ -169,6 +169,10 @@ applies to the stored value, which `uci` can set past the plugin: it refuses
 `..`, quoting characters and any path that names a bare root once `//` and
 `/./` fold away (`/mnt/.`, `/mnt/./`), and accepts `/mnt//x` and `/mnt/./x`,
 as v1.30.0 did. A refused value falls back to `/etc/trafficctl/history`.
+The check is on the path as written: a symlink in it is not resolved, so a
+store dir that is a symlink is written through, and prune deletes period
+files wherever it points. `prune` deletes only files named like a period
+(`2026-11.tsv`, `2026-11-11.tsv`, `2026-W46.tsv` and their `.if.tsv`).
 
 **Failures.** A setter whose commit fails (a read-only or full overlay)
 replies `{"ok":false,"msg":"could not save the trafficctl settings"}` (or

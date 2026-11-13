@@ -38,6 +38,11 @@
 //   reset (reboot), so the flush rebaselines and adds nothing: a reboot costs
 //   at most one interval of traffic instead of corrupting the period. The
 //   cursor is tmpfs so that it dies together with the accumulator it tracks.
+//   The cursor advances only after the period file is renamed into place; a
+//   kill that lands after an NFS rename has taken effect but before the
+//   cursor is written folds that interval in twice.
+//   A period file that exists and cannot be read (EIO, mode 000) is never
+//   rewritten: the flush fails with "read failed" and keeps the cursor.
 //
 // HOW ACCURATE THE STORED NUMBERS ARE
 //   1. Uncountered offload ("degraded"): an offloaded flow's conntrack
@@ -57,7 +62,10 @@
 //   `trafficctl history flush-now`, under timeout(1) where the system has it
 //   and under system()'s own kill in any case; the keeper and the `flush`
 //   command wait for it at most GUARD_MS. A failure parks history in a
-//   visible error state instead of retrying silently.
+//   visible error state instead of retrying silently. The bound holds unless
+//   the kernel cannot kill the writer: system() waits for the child after
+//   SIGKILL, and a process in uninterruptible sleep (D state, a hard NFS
+//   mount) dies only when the I/O returns.
 
 import * as lib from 'trafficctl.lib';
 import * as net from 'trafficctl.net';
@@ -105,10 +113,15 @@ const GC_TICKS = 32;
 // awk's "$n + 0": the integer prefix, else 0. The store only ever holds
 // integers; a hand-edited "1.5" reads as 1 here and as 2 in awk's %.0f.
 function anum(s) {
+	// The store's own fields are canonical integers: int() takes them
+	// directly, and only anything else pays for the regex.
+	let n = int(s);
+	if (n == n && type(s) == 'string' && '' + n == s)
+		return n;
 	let m = match('' + (s ?? ''), /^[ \t]*([-+]?[0-9]+)/);
 	if (!m)
 		return 0;
-	let n = int(m[1]);
+	n = int(m[1]);
 	return (n == n) ? n : 0;
 }
 
@@ -121,6 +134,20 @@ function fields(l) {
 // A file's lines, '' for each empty one, without the final empty one.
 function lines_of(p) {
 	return lib.file_lines(p);
+}
+
+// Lines of a store file that is about to be rewritten: [] when it does not
+// exist, null when it exists and cannot be read (EIO on a share, mode 000).
+// readfile() is null for both, and reading an unreadable period as empty
+// would let the next write replace it with one interval's worth.
+function store_lines(p) {
+	let text = lib.readfile(p);
+	if (text == null)
+		return (stat(lib.path(p)) == null) ? [] : null;
+	let l = split(text, '\n');
+	if (l[-1] == '')
+		pop(l);
+	return l;
 }
 
 // ── configuration ───────────────────────────────────────────────────────────
@@ -139,6 +166,9 @@ function enabled() {
 // here as well as in the rpcd setter: a value that reached the config by
 // another route must not be honoured either. The roots are the package's own
 // state directory and the usual mount points (a network share, a USB disk).
+// A period id: 2026-11, 2026-11-11 or 2026-W46 (luci.trafficctl's period_id).
+const PERIOD_RE = /^[0-9]{4}-([0-9]{2}|[0-9]{2}-[0-9]{2}|W[0-9]{2})$/;
+
 const DIR_ROOTS = [ '/etc/trafficctl/', '/mnt/', '/media/', '/srv/', '/tmp/' ];
 
 function valid_dir(d) {
@@ -464,8 +494,10 @@ function reading(v) {
 // Rows of a device period file: { order, rows } with the first line of a key
 // deciding its place and the last its values.
 function load_rows(file) {
-	let order = [], rows = {};
-	for (let l in lines_of(file)) {
+	let order = [], rows = {}, ls = store_lines(file);
+	if (ls == null)
+		return null;
+	for (let l in ls) {
 		if (substr(l, 0, 1) == '#')
 			continue;
 		let f = split(l, '\t');
@@ -634,8 +666,10 @@ function totals_sample(src) {
 // LAN ingress.
 
 function load_if_rows(file) {
-	let order = [], rows = {};
-	for (let l in lines_of(file)) {
+	let order = [], rows = {}, ls = store_lines(file);
+	if (ls == null)
+		return null;
+	for (let l in ls) {
 		if (substr(l, 0, 1) == '#')
 			continue;
 		let f = split(l, '\t');
@@ -680,16 +714,24 @@ function if_sample(src) {
 // counter restarted (#111). The durable file is written by if_flush alone;
 // the accumulator is seeded from it when absent (every boot, a period roll),
 // which is what makes the eventual copy-over safe rather than double-counting.
-function if_accumulate(src) {
+function if_accumulate(src, p) {
 	if (!ifaces_enabled())
 		return true;
-	let p = period_id(), acc = IFACC + '.' + p;
+	p ??= period_id();
+	let acc = IFACC + '.' + p;
 	let sample = if_sample(src);
 	if (sample == null)
 		return true;
 	let now = time(), ifb = lib.uci_get('trafficctl', 'main', 'shape_ifb') ?? '';
 	let cur = load_cursor(IFCURSOR, 3);
-	let st = load_if_rows(lib.is_file(acc) ? acc : if_file(store_dir(), p));
+	let seed = lib.is_file(acc) ? acc : if_file(store_dir(), p);
+	let st = load_if_rows(seed);
+	if (st == null) {
+		// Neither the cursor nor the accumulator moves: the growth is
+		// folded in once the file reads again.
+		err_set('cannot read ' + seed);
+		return false;
+	}
 	let next = {};
 	for (let e in sample) {
 		let d = e?.dev;
@@ -731,13 +773,17 @@ function if_accumulate(src) {
 
 // Publish the accumulator to the durable file, after picking up the final
 // interval, so nothing is stranded in tmpfs at flush time.
-function if_flush(dir, src) {
+// p is the device flush's period, so a flush that crosses midnight writes
+// both series to the same one.
+function if_flush(dir, src, p) {
 	if (!ifaces_enabled())
 		return true;
-	if (!if_accumulate(src))
+	if (!if_accumulate(src, p))
 		return false;
-	let text = lib.readfile(IFACC + '.' + period_id());
-	return (text == null) || lib.write_atomic(if_file(dir, period_id()), text);
+	let acc = IFACC + '.' + p, text = lib.readfile(acc);
+	if (text == null)
+		return !lib.is_file(acc);
+	return lib.write_atomic(if_file(dir, p), text);
 }
 
 // ── commands ────────────────────────────────────────────────────────────────
@@ -761,7 +807,14 @@ function flush_locked(dir, p, file, now, src) {
 		err_set('totals produced nothing');
 		return { out: { ok: false, reason: 'no sample' }, rc: 1 };
 	}
-	let st = load_rows(file), cur = load_cursor(CURSOR, 5);
+	let st = load_rows(file);
+	if (st == null) {
+		// Nothing written and the cursor kept: this interval's growth is
+		// folded in by the first flush that can read the period again.
+		err_set('cannot read ' + file);
+		return { out: { ok: false, reason: 'read failed', file }, rc: 1 };
+	}
+	let cur = load_cursor(CURSOR, 5);
 	let next = fold(st, aggregate(sample, lookups()), cur, now);
 	let text = rows_text(st);
 	if (!lib.write_atomic(file, text)) {
@@ -776,7 +829,8 @@ function flush_locked(dir, p, file, now, src) {
 	err_clear();
 	// After the device file is safely in place. Losing one interval of the
 	// additive interface series is not a failed flush.
-	if (!if_flush(dir, src))
+	// if_accumulate() has said why when it could not read the seed.
+	if (!if_flush(dir, src, p) && !lib.is_file(ERRFILE))
 		err_set('interface totals could not be written');
 	return { out: { ok: true, period: p, devices: rows_count(text), at: now }, rc: 0 };
 }
@@ -818,8 +872,14 @@ function flush() {
 	let reply = child_reply(r);
 	if (reply != null)
 		return { out: reply + '\n', rc: (r.rc == 0) ? 0 : 1 };
-	err_set(sprintf('flush did not finish within %d s', GUARD_SECS));
-	return { out: { ok: false, reason: 'timed out' }, rc: 1 };
+	// timeout(1) exits 124 after its TERM; system() reports its own kill,
+	// or any signal, as the negative signal number.
+	if (r.rc == 124 || r.rc < 0) {
+		err_set(sprintf('flush did not finish within %d s', have_timeout ? GUARD_SECS : GUARD_MS / 1000));
+		return { out: { ok: false, reason: 'timed out' }, rc: 1 };
+	}
+	err_set(sprintf('flush exited with status %d and no reply', r.rc));
+	return { out: { ok: false, reason: 'failed', status: r.rc }, rc: 1 };
 }
 
 function sample(src) {
@@ -847,11 +907,11 @@ function read(p_from, p_to) {
 			let f = split(l, '\t');
 			if (length(f) < 10)
 				continue;
-			let k = f[0], r = rows[k];
+			let k = f[0], r = rows[k], first = anum(f[8]), last = anum(f[9]);
 			if (!r) {
 				push(order, k);
 				r = rows[k] = { mac: '', ip: '', name: null, rx: 0, tx: 0, tc: 0, ud: 0,
-					first: anum(f[8]), last: 0, deg: false, periods: [] };
+					first, last: 0, deg: false, periods: [] };
 			}
 			if (f[1] != '-')
 				r.mac = f[1];
@@ -862,10 +922,10 @@ function read(p_from, p_to) {
 			r.tx += anum(f[5]);
 			r.tc += anum(f[6]);
 			r.ud += anum(f[7]);
-			if (anum(f[8]) < r.first)
-				r.first = anum(f[8]);
-			if (anum(f[9]) > r.last)
-				r.last = anum(f[9]);
+			if (first < r.first)
+				r.first = first;
+			if (last > r.last)
+				r.last = last;
 			if (f[10] == 'true')
 				r.deg = true;
 			if (index(r.periods, e.p) < 0)
@@ -948,7 +1008,9 @@ function prune() {
 		if (stat(lib.path(dir + '/' + e))?.type != 'file')
 			continue;
 		let p = substr(e, 0, -4);
-		if (p != cur)
+		// A period id, as rpcd validates it: an export.tsv someone saved
+		// next to the store is not ours to delete.
+		if (p != cur && match(p, PERIOD_RE))
 			push(ps, p);
 	}
 	ps = sort(ps);

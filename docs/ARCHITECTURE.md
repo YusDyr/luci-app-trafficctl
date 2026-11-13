@@ -431,7 +431,12 @@ seconds:
 - `dir` may be a network share. The keeper runs each flush as a child,
   `timeout 15 trafficctl history flush-now`, under a 20 s kill of its own
   (22.03 has no `timeout(1)`), so a stalled NFS mount costs one interval and
-  sets the error that `status` reports, never the keeper.
+  sets the error that `status` reports, and the keeper goes on. The bound
+  holds unless the kernel cannot kill the writer: `system()` waits for the
+  child after SIGKILL, and a writer in uninterruptible sleep (a hard NFS
+  mount) dies only when its I/O returns.
+- A period file that exists and cannot be read (EIO, mode 000) is never
+  rewritten: the flush fails with `read failed` and the cursor stays put.
 - Period ids are computed in the local zone with a hand-written ISO week
   (2026 has 53 weeks); `tests/test_history.sh` checks them against
   `date +%G-W%V`.

@@ -272,6 +272,31 @@ assert_contains "and puts history in the error state" '"error":"totals produced 
 sample "$(dev 192.168.0.50 640 75 0)"
 run flush >/dev/null
 
+# ── a period file that cannot be read is never overwritten ─────────────────
+# readfile() is null for a missing file and for an unreadable one alike; the
+# second must fail the flush rather than restart the period from one interval.
+# Mode 000 needs a non-root run; a directory under the period's name reads as
+# EISDIR for root too.
+unreadable() {   # unreadable <file>: make it exist and fail to read
+    if [ "$(id -u)" -ne 0 ]; then chmod 000 "$1"; else mv "$1" "$1.keep"; mkdir "$1"; fi
+}
+readable() {
+    if [ -d "$1" ]; then rmdir "$1"; mv "$1.keep" "$1"; else chmod 644 "$1"; fi
+}
+before=$(md5sum < "$FILE"); cbefore=$(md5sum < "$CURSOR"); d0=$(field mac:aa:bb:cc:dd:ee:01 5)
+unreadable "$FILE"
+sample "$(dev 192.168.0.50 700 80 0)"
+assert_eq "an unreadable period file fails the flush" \
+    "{\"ok\":false,\"reason\":\"read failed\",\"file\":\"/tmp/store/$PERIOD.tsv\"}" "$(run flush)"
+assert_contains "and says so in the error state" "\"error\":\"cannot read /tmp/store/$PERIOD.tsv\"" "$(run status)"
+assert_eq "the cursor does not advance past the growth it could not store" "$cbefore" "$(md5sum < "$CURSOR")"
+readable "$FILE"
+assert_eq "the period file is untouched" "$before" "$(md5sum < "$FILE")"
+run flush >/dev/null
+assert_eq "the next readable flush folds the growth in, once" "$((d0 + 60))" "$(field mac:aa:bb:cc:dd:ee:01 5)"
+sample "$(dev 192.168.0.50 640 75 0)"
+run flush >/dev/null
+
 # ── atomic replace leaves nothing behind ────────────────────────────────────
 assert_eq "no temp files are left in the store" "" \
     "$(find "$STORE" -name '*.tmp.*' 2>/dev/null)"
@@ -311,11 +336,16 @@ for p in 2026-01 2026-02 2026-03 2026-04 2026-05; do
 done
 mkdir -p "$STORE/old"
 printf '# trafficctl-history 1\n' > "$STORE/old/2020-01.tsv"
+printf 'ip,bytes\n' > "$STORE/export.tsv"
+printf 'x\n' > "$STORE/2020-1.tsv"
 out=$(run prune)
 assert_contains "prune reports what it kept" '"kept":3' "$out"
 assert_contains "prune reports what it dropped" '"dropped":3' "$out"
 assert_eq "prune leaves exactly keep+current period files" "4" \
-    "$(find "$STORE" -maxdepth 1 -name '*.tsv' | wc -l | tr -d ' ')"
+    "$(find "$STORE" -maxdepth 1 -name '20[0-9][0-9]-[0-9][0-9].tsv' ! -name '2020-1.tsv' | wc -l | tr -d ' ')"
+assert_eq "prune deletes only files named like a period" "export.tsv 2020-1.tsv" \
+    "$(cd "$STORE" && ls export.tsv 2020-1.tsv 2>/dev/null | sort -r | tr '\n' ' ' | sed 's/ $//')"
+rm -f "$STORE/export.tsv" "$STORE/2020-1.tsv"
 assert_eq "prune never deletes the period being written to" "1" \
     "$(find "$STORE" -name "$PERIOD.tsv" | wc -l | tr -d ' ')"
 assert_eq "prune drops the oldest first" "0" \
@@ -525,6 +555,15 @@ out=$(TCTL_ROOT="$ROOT" PATH="$BE_BIN" "$UCODE" -S -L "$UC_LIB" -- "$UC_REPO/tra
 el=$(( $(date +%s) - t0 ))
 assert_eq "without timeout(1) the flush is still bounded" '{"ok":false,"reason":"timed out"}' "$out"
 assert_eq "by system()'s own kill (took ${el} s)" "1" "$(( el >= 19 && el <= 25 ))"
+assert_contains "and the error names that limit, not timeout(1)'s" \
+    '"error":"flush did not finish within 20 s"' "$(run status)"
+# A child that dies without a reply is a failure, not a timeout.
+printf '#!/bin/sh\nexit 3\n' > "$ROOT/usr/sbin/trafficctl"
+out=$(cli flush)
+assert_eq "a child that exits without a reply is reported as failed" \
+    '{"ok":false,"reason":"failed","status":3}' "$out"
+assert_contains "with its status in the error state" \
+    '"error":"flush exited with status 3 and no reply"' "$(run status)"
 # The child's own reply and exit status are passed on as they are.
 printf '#!/bin/sh\necho %s\nexit 1\n' "'{\"ok\":false,\"reason\":\"write failed\",\"file\":\"/x\"}'" > "$ROOT/usr/sbin/trafficctl"
 out=$(cli flush); rc=$?
@@ -612,6 +651,22 @@ BEFORE=$(iffield eth1 4)
 ifsample "$(ifdev eth1 wan wan 17 1),$(ifdev br-lan lan lan 700 7000)"
 run flush >/dev/null
 assert_eq "a lost accumulator is reseeded from the durable file" "$((BEFORE + 10))" "$(iffield eth1 4)"
+# A durable file that cannot be read is not a missing one: reseeding from
+# nothing would replace the period's interface totals with one interval.
+rm -f "$ROOT"/tmp/trafficctl_history.ifacc.*
+ifbefore=$(md5sum < "$IFFILE"); icbefore=$(md5sum < "$IFCURSOR")
+unreadable "$IFFILE"
+ifsample "$(ifdev eth1 wan wan 27 1),$(ifdev br-lan lan lan 700 7000)"
+assert_contains "the device flush still succeeds" '"ok":true' "$(run flush)"
+assert_contains "the interface seed's read error is the error state" \
+    "\"error\":\"cannot read /tmp/store/$PERIOD.if.tsv\"" "$(run status)"
+assert_eq "no accumulator is seeded from the unreadable file" "" "$(ls "$ROOT"/tmp/trafficctl_history.ifacc.* 2>/dev/null)"
+assert_eq "and the interface cursor stays put" "$icbefore" "$(md5sum < "$IFCURSOR")"
+readable "$IFFILE"
+assert_eq "the interface file is untouched" "$ifbefore" "$(md5sum < "$IFFILE")"
+BEFORE=$(iffield eth1 4)
+run flush >/dev/null
+assert_eq "the next readable flush folds the growth in, once" "$((BEFORE + 10))" "$(iffield eth1 4)"
 
 # Every tick path must do it: the keeper and `sample` both, and a flush folds
 # in the final interval before publishing. Comment lines stripped: the prose
@@ -619,7 +674,10 @@ assert_eq "a lost accumulator is reseeded from the durable file" "$((BEFORE + 10
 fn() { awk -v f="$1" '$0 ~ "^function " f "\\(" { p = 1 } p { print } p && /^}$/ { exit }' "$UC" | grep -v '^[[:space:]]*//'; }
 assert_contains "the keeper advances the interface cursor every tick" "if_accumulate()" "$(fn keeper)"
 assert_contains "and so does the sample command" "if_accumulate(src)" "$(fn sample)"
-assert_contains "a flush folds in the final interval before publishing" "if_accumulate(src)" "$(fn if_flush)"
+assert_contains "a flush folds in the final interval before publishing" "if_accumulate(src, p)" "$(fn if_flush)"
+# Both series of one flush land in one period, even across midnight.
+assert_contains "the flush hands its period to the interface flush" "if_flush(dir, src, p)" "$(fn flush_locked)"
+assert_not_contains "which never computes a period of its own" "period_id()" "$(fn if_flush)"
 assert_contains "the keeper flushes through the guard, not in process" "flush()" "$(fn keeper)"
 assert_not_contains "the keeper never writes the store itself" "flush_now" "$(fn keeper)"
 assert_contains "and prunes through the guard too" "guarded([ 'history', 'prune' ])" "$(fn keeper)"
@@ -691,6 +749,53 @@ assert_eq "and stamps the flush" "1" "$(grep -cE '^[0-9]{10}$' "$ROOT/tmp/traffi
 assert_eq "and prunes past keep, oldest first" "0 1" \
     "$(test -f "$STORE/2025-05.tsv" && echo 1 || echo 0) $(test -f "$STORE/2025-06.tsv" && echo 1 || echo 0)"
 uciset trafficctl.history.keep 3
+
+# Several ticks of the real keeper, at the shortest sample_interval (10 s):
+# the second tick folds a flapped interface counter into the accumulator
+# without a flush (the interval is 300 s), and a restarted keeper picks the
+# flush clock up from the stamp and publishes what the ticks gathered.
+uciset trafficctl.history.sample_interval 10
+uciset trafficctl.history.interval 300
+ACC="$ROOT/tmp/trafficctl_history.ifacc.$PERIOD"
+keeper_start() {
+    TCTL_ROOT="$ROOT" PATH="$BE_BIN:$PATH" tctl history keeper >/dev/null 2>&1 &
+    KPID=$!
+}
+keeper_stop() { kill "$KPID" 2>/dev/null; wait "$KPID" 2>/dev/null; }
+wait_for() {   # wait_for <seconds> <command...>: poll until it succeeds
+    local n=$(( $1 * 5 )); shift
+    while [ "$n" -gt 0 ]; do "$@" && return 0; sleep 0.2; n=$((n - 1)); done
+    return 1
+}
+acc_wan() { awk -F'\t' '$1 == "wan" { print $4 }' "$ACC" 2>/dev/null; }
+rm -f "$ROOT"/tmp/trafficctl_history.* "$IFFILE"
+ubus_start "$BE_UBUS"
+keeper_start
+# The stamp is written before the interface file: wait for both.
+wait_for 10 test -s "$ROOT/tmp/trafficctl_history.stamp"
+wait_for 5 test -s "$IFFILE"
+stamp1=$(cat "$ROOT/tmp/trafficctl_history.stamp" 2>/dev/null)
+durable1=$(md5sum < "$IFFILE" 2>/dev/null)
+assert_eq "tick 1 seeds the accumulator from the live counter" "123456" "$(acc_wan)"
+# The link flaps between ticks: its counter restarts at 1000.
+sed -i 's/^  wan: 123456 /  wan: 1000 /' "$ROOT/proc/net/dev"
+wait_for 15 test "$(acc_wan)" = "124456"
+assert_eq "tick 2 adds the restarted counter as it stands (#111)" "124456" "$(acc_wan)"
+assert_eq "without a flush: the stamp is the first tick's" "$stamp1" "$(cat "$ROOT/tmp/trafficctl_history.stamp")"
+assert_eq "and the durable file is not rewritten" "$durable1" "$(md5sum < "$IFFILE")"
+keeper_stop
+# A stamp past the flush interval: the restarted keeper flushes on its first tick.
+echo $(( $(date +%s) - 400 )) > "$ROOT/tmp/trafficctl_history.stamp"
+keeper_start
+wait_for 10 test "$(awk -F'\t' '$1 == "wan" { print $4 }' "$IFFILE" 2>/dev/null)" = "124456"
+keeper_stop
+ubus_stop
+assert_eq "a restarted keeper flushes what the earlier ticks gathered" "124456" \
+    "$(awk -F'\t' '$1 == "wan" { print $4 }' "$IFFILE" 2>/dev/null)"
+assert_eq "and stamps it now, not at the old stamp" "1" \
+    "$(( $(cat "$ROOT/tmp/trafficctl_history.stamp") > $(date +%s) - 60 ))"
+uciset trafficctl.history.sample_interval 60
+uciset trafficctl.history.interval 3600
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
