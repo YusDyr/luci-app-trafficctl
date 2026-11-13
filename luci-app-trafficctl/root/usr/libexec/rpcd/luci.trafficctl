@@ -316,7 +316,7 @@ function period_id(s) {
 	return s == '' || !!match(s, /^[0-9]{4}-([0-9]{2}|[0-9]{2}-[0-9]{2}|W[0-9]{2})$/);
 }
 
-// hist_validate_dir: the store is a mkdir -p and a delete target, so only
+// history.uc valid_dir: the store is a mkdir -p and a delete target, so only
 // a directory below one of these roots, without shell metacharacters. Every
 // component is a name: '/mnt/.', '/mnt//' or '/mnt/./x' would otherwise
 // pass the prefix test and make the store a mount root.

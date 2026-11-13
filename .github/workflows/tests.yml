@@ -58,6 +58,11 @@ jobs:
       # The upload row was built but never attached to the panel (#66).
       - name: Split up/down control and split ceiling display
         run: bash tests/test_split_ui.sh
+      # PR8 history
+      # The History view's verdicts and fields against history.uc's replies.
+      - name: History view tests
+        run: bash tests/test_history_ui.sh
+      # end PR8 history
       - name: Postinst parity tests
         run: bash tests/test_postinst_parity.sh
       # trafficctl/Makefile lists its files by name; this compares the list
@@ -143,6 +148,12 @@ jobs:
       # Every rpc.declare in the views against the plugin's list.
       - name: rpcd contract tests
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_rpcd_contract.sh
+      # PR8 history
+      # The history store (history.uc): flush, cursors, the interface series,
+      # the keeper, the flush guard and the ISO week against date(1).
+      - name: History tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_history.sh
+      # end PR8 history
       - name: Equivalence tests
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/equiv.sh
 

@@ -44,12 +44,13 @@ the WiFi block button.
 ```
 trafficctl/
   Makefile                                  — OpenWrt package Makefile (package.mk, explicit INSTALL_* per file)
-  files/usr/sbin/trafficctl                 — ucode CLI: subnets, names, rdns, rdns-refresh, ifaces, bytes, totals, ratelimit-stats, shape-stats, rules, summary, device, metrics, netify (more move here)
+  files/usr/sbin/trafficctl                 — ucode CLI: subnets, names, rdns, rdns-refresh, ifaces, bytes, totals, ratelimit-stats, shape-stats, rules, summary, device, metrics, netify, history (more move here)
   files/usr/share/ucode/trafficctl/
     lib.uc                                  — Shared ucode helpers; its header is the API doc
     net.uc                                  — Subnets, interface roles, reverse DNS, byte samples, lifetime totals
     ctl.uc                                  — Read-only readers: nft -j limits/blocks, tc shapes, the Rules tab list
     report.uc                               — Read-only reports: summary, device detail, Prometheus exporter, netifyd DPI
+    history.uc                              — Durable usage history: flush, keeper, read, periods, prune, status
   files/usr/libexec/trafficctl/
     trafficctl-fw.sh                        — Shared library (nft helpers, validation, persistence)
     trafficctl-summary.sh                   — Wrapper: `trafficctl summary` (all devices, JSON array; the LuCI poll)
@@ -71,13 +72,14 @@ trafficctl/
     trafficctl-bytes.sh                     — Wrapper: `trafficctl bytes` (per-device byte counters, one sample, not a total)
     trafficctl-totals.sh                    — Wrapper: `trafficctl totals` (monotonic lifetime totals; the ONLY accumulator, UI + Prometheus share its store)
     trafficctl-rdns.sh                      — Wrapper: `trafficctl rdns`
+    trafficctl-history.sh                   — Wrapper: `trafficctl history` (usage history store; the keeper is `trafficctl history keeper`)
     trafficctl-rules.sh                     — Wrapper: `trafficctl rules` (every restriction, online or not; live + saved state; "Rules" tab)
     trafficctl-telegram.sh                  — Telegram bot daemon (long polling)
     trafficctl-telegram-test.sh             — Send test message to Telegram
   files/etc/config/trafficctl                — UCI config (conffile, installed 0600)
   files/etc/init.d/
     trafficctl-telegram                     — procd init script for the bot
-    trafficctl-history                      — history sampler
+    trafficctl-history                      — procd keeper for the history store (`trafficctl history keeper`)
     trafficctl-cut                          — procd keeper for the global cut (auto-revert + re-assert)
   files/etc/hotplug.d/
     iface/99-trafficctl-shapes              — Restore shapes+blocks+ratelimits on boot (ifup lan)
