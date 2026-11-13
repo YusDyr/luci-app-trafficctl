@@ -164,8 +164,15 @@ the router a conntrack read.
 `/srv` or `/tmp`, at least one level down, and every component a name: no
 empty, `.` or `..` component. `/mnt/.` or `/mnt//` would otherwise pass the
 prefix check and make a mount root the store, whose prune deletes inside it.
-The sampler's own check (`hist_validate_dir`) applies the same rule to the
-stored value.
+The keeper's own check (`trafficctl history validate-dir`, `history.uc`)
+applies to the stored value, which `uci` can set past the plugin: it refuses
+`..`, quoting characters and any path that names a bare root once `//` and
+`/./` fold away (`/mnt/.`, `/mnt/./`), and accepts `/mnt//x` and `/mnt/./x`,
+as v1.30.0 did. A refused value falls back to `/etc/trafficctl/history`.
+The check is on the path as written: a symlink in it is not resolved, so a
+store dir that is a symlink is written through, and prune deletes period
+files wherever it points. `prune` deletes only files named like a period
+(`2026-11.tsv`, `2026-11-11.tsv`, `2026-W46.tsv` and their `.if.tsv`).
 
 **Failures.** A setter whose commit fails (a read-only or full overlay)
 replies `{"ok":false,"msg":"could not save the trafficctl settings"}` (or

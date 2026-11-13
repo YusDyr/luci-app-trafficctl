@@ -15,6 +15,9 @@ import * as report from 'trafficctl.report';
 import * as cut from 'trafficctl.cut';
 import * as portfw from 'trafficctl.portfw';
 // ── end PR7 ──
+// PR8 history
+import * as history from 'trafficctl.history';
+// end PR8 history
 
 function out(v) {
 	print(lib.to_json(v), '\n');
@@ -153,13 +156,23 @@ const commands = {
 
 	portfw: (args) => reply(portfw.main(args)),
 	// ── end PR7 ──
+
+	// ── PR8 history ──
+	history: (args) => {
+		let r = history.main(args);
+		if (type(r.out) == 'string')
+			print(r.out);
+		else if (r.out != null)
+			out(r.out);
+		return r.rc;
+	},
+	// ── end PR8 history ──
 };
 
 // Commands the shell scripts still serve: run with our arguments, stdin,
 // stdout and exit status, so a port only moves an entry up into commands.
 const LEGACY = {
 	bytes: 'trafficctl-bytes.sh',
-	history: 'trafficctl-history.sh',
 	ratelimit: 'trafficctl-ratelimit.sh',
 	shape: 'trafficctl-shape.sh',
 	'telegram-test': 'trafficctl-telegram-test.sh',

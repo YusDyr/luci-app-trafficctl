@@ -333,6 +333,129 @@ newdevice-off | text+$NDF | router-24.10 | sh:$NEWMAC; export ACTION MACADDR IPA
 newdevice-old | text+$NDF | router-24.10 | sh:ACTION=old MACADDR=02:00:00:00:00:99 IPADDR=192.168.0.99 HOSTNAME=x; export ACTION MACADDR IPADDR HOSTNAME; $LND | ACTION=old MACADDR=02:00:00:00:00:99 IPADDR=192.168.0.99 HOSTNAME=x; export ACTION MACADDR IPADDR HOSTNAME; $NND | $ND
 "
 
+# ── PR8 history (`trafficctl history`, history.uc) ──────────────────────────
+# Both sides write the default store, /etc/trafficctl/history, which the
+# rewrite and TCTL_ROOT both put in the case's root. The new side's `flush`
+# runs `history flush-now` as a guarded child through the root's CLI, so hcli
+# puts a real one there (cli_root links the spawn logger).
+lh() { sh "$LEXEC/trafficctl-history.sh" "$@"; }
+hcli() {
+    rm -f "$W/root/usr/sbin/trafficctl"
+    printf '#!/bin/sh\nPOSIXLY_CORRECT=1 exec "%s" -S -L "%s" "%s" "$@"\n' "$UCODE" "$UC_LIB" \
+        "$UC_REPO/trafficctl/files/usr/sbin/trafficctl" > "$W/root/usr/sbin/trafficctl"
+    chmod +x "$W/root/usr/sbin/trafficctl"
+}
+nh() { hcli; tctl history "$@"; }
+hmask() {   # epochs and the root prefix, as with_files masks files
+    sed -E -e "s|$W/root||g" \
+        -e 's/(^|[^0-9])1[0-9]{9}([^0-9]|$)/\1<epoch>\2/g' \
+        -e 's/(^|[^0-9])1[0-9]{9}([^0-9]|$)/\1<epoch>\2/g'
+}
+hm() { local rc; "$@" > "$W/hm.out"; rc=$?; hmask < "$W/hm.out"; echo "rc=$rc"; }
+# Every store, cursor, accumulator, stamp and error file, one "<file>\t<line>"
+# per line, so text-sorted compares each file's line set.
+hd() {
+    local f
+    for f in "$W/root/etc/trafficctl/history/"* "$W/root/tmp/trafficctl_history."*; do
+        [ -f "$f" ] || continue
+        hmask < "$f" | sed "s|^|${f#"$W"/root/}	|"
+    done
+}
+HISTON='uci set trafficctl.history=history; uci set trafficctl.history.enabled=1; uci commit trafficctl'
+HSWOFF="$SWOFFLOAD"
+# The interface counters move between two samples: wan's restart (#111), the
+# rest grow.
+IFGROW='sed -i -E -e "s/^( *wan:) *[0-9]+/\1 12345/" -e "s/^( *br-lan:) *([0-9]+)/\1 \29/" "$W/root/proc/net/dev"'
+# Stores a 1.30.x keeper left: two months, an ISO week, a day, their
+# interface files, a duplicate key (first position, last values), a "-" MAC
+# after a real one, a 10-field row from before the degraded column, a row too
+# short to read, comments, a dot file and a subdirectory that are not periods.
+HFILES='d="$W/root/etc/trafficctl/history"; mkdir -p "$d/sub"; t=$(printf "\t"); printf "# trafficctl-history 1\nmac:02:00:00:00:00:06${t}02:00:00:00:00:06${t}192.168.0.102${t}host-26${t}100${t}200${t}50${t}60${t}1790000000${t}1790000100${t}false\nip:10.0.5.9${t}-${t}10.0.5.9${t}-${t}5${t}6${t}0${t}0${t}1790000000${t}1790000000\n# note\nshort${t}row\n" > "$d/2026-10.tsv"; printf "# trafficctl-history 1\nmac:02:00:00:00:00:06${t}-${t}192.168.0.150${t}-${t}1${t}2${t}3${t}4${t}1789999000${t}1791000000${t}true\nip:10.0.5.9${t}-${t}10.0.5.9${t}vpn peer${t}7${t}8${t}9${t}10${t}1791000000${t}1791000500${t}false\nip:10.0.5.9${t}-${t}10.0.5.10${t}-${t}70${t}80${t}0${t}0${t}1791000000${t}1791000600${t}false\n" > "$d/2026-11.tsv"; printf "# trafficctl-history 1\nip:172.30.0.5${t}-${t}172.30.0.5${t}-${t}4503599627370497${t}1${t}0${t}0${t}1791000000${t}1791000001${t}false\n" > "$d/2026-W46.tsv"; printf "# trafficctl-history 1\nip:172.30.0.5${t}-${t}172.30.0.5${t}-${t}1${t}1${t}0${t}0${t}1791000000${t}1791000001${t}false\n" > "$d/2026-11-11.tsv"; printf "# trafficctl-history-if 1\nwan${t}wan${t}-${t}1000${t}2000${t}1790000000${t}1790000100\nbr-lan${t}lan${t}lan${t}5${t}6${t}1790000000${t}1790000000\n" > "$d/2026-10.if.tsv"; printf "# trafficctl-history-if 1\nwan${t}wan${t}uplink${t}10${t}20${t}1789000000${t}1791000100\nawg3${t}vpn${t}Finland${t}1${t}2${t}1791000000${t}1791000000\n" > "$d/2026-11.if.tsv"; cp "$d/2026-10.tsv" "$d/.hidden.tsv"; cp "$d/2026-10.tsv" "$d/sub/2025-01.tsv"'
+HODD='uci set trafficctl.history.keep=abc; uci set trafficctl.history.interval=10; uci set trafficctl.history.sample_interval=99999; uci set trafficctl.history.period=bogus; uci set trafficctl.history.interfaces=0; uci set trafficctl.history.dir=/etc; uci commit trafficctl'
+HODD2='uci set trafficctl.history.keep=500; uci set trafficctl.history.interval=7200; uci set trafficctl.history.sample_interval=5; uci set trafficctl.history.period=day; uci set trafficctl.history.dir=/mnt/usb/hist/; uci commit trafficctl'
+HERR='printf "1794000000\tcannot write /mnt/x.tsv \"q\" \\\\\n" > "$W/root/tmp/trafficctl_history.err"; printf "1794000001\n" > "$W/root/tmp/trafficctl_history.stamp"'
+HERR2='printf "no tab here\n" > "$W/root/tmp/trafficctl_history.err"; printf "x\n" > "$W/root/tmp/trafficctl_history.stamp"'
+HKEEP1='uci set trafficctl.history.keep=1; uci commit trafficctl'
+# v1.30.0's prune recursed into subdirectories of the store and took any
+# *.tsv for a period (.hidden.tsv included); history.uc deletes only files
+# named like a period in the store itself (an intentional difference), so
+# the prune cases leave both out.
+HNOSUB='rm -r "$W/root/etc/trafficctl/history/sub"; rm "$W/root/etc/trafficctl/history/.hidden.tsv"'
+# v1.30.0's flush leaks its lock directory (hist_if_flush replaces the EXIT
+# trap that removed it), and the next flush steals it after 5 s; history.uc
+# releases its lock and steals only one older than 20 s. Removed between two
+# back-to-back flushes so both sides start unlocked.
+HUNLOCK='rmdir "$W/root/tmp/trafficctl_history.lock.d"'
+hz() { "$@" | sed -E 's/(^|[^0-9])1[0-9]{9}([^0-9]|$)/\10\2/g'; }   # epochs in JSON
+VDIRS='/mnt/usb /mnt/usb/ /mnt/ /mnt /media/a /srv/b/c /tmp/x /tmp/ /etc /mnt/../etc /mnt/a/.. /mnt//x /mnt/./x /mnt/x/. /tmp/a;b /mnt/a$b /mnt/a`b /mnt/a"b /mnt/a<b relative/x ./mnt/x /mntx'
+vdirs() { local d; for d in $VDIRS ""; do "$@" validate-dir "$d"; echo "[$d] rc=$?"; done; }
+# Period ids over the 2026/2027 ISO year boundary (2026 has 53 weeks), in
+# three zones: one west and one east of UTC with DST, so the local date and
+# the UTC date differ, and the instant of a DST change.
+PID_TIMES="$(seq 1798372800 21600 1799107200) 1774745999 1774746000 1792889999 1792890000 1775311199 1775311200 1790431199 1790431200 1788667199 1788667200 1775357999 1775358000"
+PID_ZONES='UTC NZST-12NZDT,M9.5.0,M4.1.0/3 CET-1CEST,M3.5.0,M10.5.0/3 <-04>4<-03>,M9.1.6/24,M4.1.6/24'
+pids() {   # pids legacy|new
+    local z k t
+    [ "$1" = legacy ] && sed '/^case "\$1" in$/,$d' "$LEXEC/trafficctl-history.sh" > "$W/hist-lib.sh"
+    for k in day week month; do
+        uci set trafficctl.history.period=$k; uci commit trafficctl
+        for z in $PID_ZONES; do
+            for t in $PID_TIMES; do
+                if [ "$1" = legacy ]; then
+                    printf '%s %s %s %s\n' "$k" "$z" "$t" "$(TZ=$z sh -c '. "$1"; hist_period_id "$2"' _ "$W/hist-lib.sh" "$t")"
+                else
+                    printf '%s %s %s %s\n' "$k" "$z" "$t" "$(TZ=$z tcall trafficctl.history period_id "$t")"
+                fi
+            done
+        done
+    done
+}
+HIST_CASES="
+history-flush | text-sorted | router-24.10 | sh:hm lh flush; hd | hm nh flush; hd | $HISTON
+history-flush-names | text-sorted | router-24.10 | sh:hm lh flush; hd | hm nh flush; hd | $HISTON; $NAMES
+history-flush-grow | text-sorted | router-24.10 | sh:lh flush >/dev/null; $HUNLOCK; $GROW; $IFGROW; hm lh flush; hd | nh flush >/dev/null; $GROW; $IFGROW; hm nh flush; hd | $HISTON
+history-flush-upgrade | text-sorted | router-24.10 | sh:lh flush >/dev/null; $HUNLOCK; $GROW; hm lh flush; hd | lh flush >/dev/null; $HUNLOCK; $GROW; hm nh flush; hd | $HISTON
+history-flush-downgrade | text-sorted | router-24.10 | sh:lh flush >/dev/null; $GROW; hm lh flush; hd | nh flush >/dev/null; $GROW; hm lh flush; hd | $HISTON
+history-flush-onto-legacy | text-sorted | router-24.10 | sh:hm lh flush; hd | hm nh flush; hd | $HISTON; $HFILES
+history-flush-sw | text-sorted | router-24.10 | sh:hm lh flush; hd | hm nh flush; hd | $HISTON; $HSWOFF
+history-flush-noifaces | text-sorted | router-24.10 | sh:hm lh flush; hd | hm nh flush; hd | $HISTON; uci set trafficctl.history.interfaces=0; uci commit trafficctl
+history-flush-off | text-sorted | router-24.10 | sh:hm lh flush; hd | hm nh flush; hd
+history-flush-locked | text-sorted+tmp/logger.log | router-24.10 | sh:hm lh flush; hd | hm nh flush; hd | $HISTON; mkdir \"\$W/root/tmp/trafficctl_history.lock.d\"; touch -d @1700000000 \"\$W/root/tmp/trafficctl_history.lock.d\"
+history-sample | text-sorted | router-24.10 | sh:hm lh sample; hd | hm nh sample; hd | $HISTON
+history-sample-flap | text-sorted | router-24.10 | sh:lh sample >/dev/null; $IFGROW; hm lh sample; hd | nh sample >/dev/null; $IFGROW; hm nh sample; hd | $HISTON
+history-sample-onto-legacy | text-sorted | router-24.10 | sh:hm lh sample; hd | hm nh sample; hd | $HISTON; $HFILES
+history-sample-off | text | router-24.10 | sh:hm lh sample; hd | hm nh sample; hd
+history-read | json | router-24.10 | sh:lh read 2026-10 2026-11 | tctl history read 2026-10 2026-11 | $HISTON; $HFILES
+history-read-one | json | router-24.10 | sh:lh read 2026-11 | tctl history read 2026-11 | $HISTON; $HFILES
+history-read-weeks | json | router-24.10 | sh:lh read 2026-W01 2026-W99 | tctl history read 2026-W01 2026-W99 | $HISTON; $HFILES
+history-read-all | json | router-24.10 | sh:lh read 0 9 | tctl history read 0 9 | $HISTON; $HFILES
+history-read-none | json | router-24.10 | sh:lh read 2027-01 | tctl history read 2027-01 | $HISTON; $HFILES
+history-read-current | json-set:key | router-24.10 | sh:lh flush >/dev/null; hz lh read | nh flush >/dev/null; hz tctl history read | $HISTON
+history-read-empty | json | router-24.10 | sh:lh read | tctl history read | $HISTON
+history-read-ifaces | json | router-24.10 | sh:lh read-ifaces 2026-10 2026-11 | tctl history read-ifaces 2026-10 2026-11 | $HISTON; $HFILES
+history-read-ifaces-none | json | router-24.10 | sh:lh read-ifaces 2025-01 | tctl history read-ifaces 2025-01 | $HISTON; $HFILES
+history-read-ifaces-current | json | router-24.10 | sh:lh flush >/dev/null; hz lh read-ifaces | nh flush >/dev/null; hz tctl history read-ifaces | $HISTON
+history-periods | json | router-24.10 | sh:lh periods | tctl history periods | $HISTON; $HFILES
+history-periods-none | json | router-24.10 | sh:lh periods | tctl history periods | $HISTON
+history-prune | text-sorted | router-24.10 | sh:hm lh prune; hd | hm tctl history prune; hd | $HISTON; $HFILES; $HNOSUB; $HKEEP1
+history-prune-keep | text-sorted | router-24.10 | sh:hm lh prune; hd | hm tctl history prune; hd | $HISTON; $HFILES
+history-prune-current | text-sorted | router-24.10 | sh:lh flush >/dev/null; hm lh prune; hd | nh flush >/dev/null; hm tctl history prune; hd | $HISTON; $HFILES; $HNOSUB; $HKEEP1
+history-status | json | router-24.10 | sh:hm lh status | hm tctl history status | $HISTON
+history-status-flushed | json | router-24.10 | sh:lh flush >/dev/null; hm lh status | nh flush >/dev/null; hm tctl history status | $HISTON
+history-status-off | json | router-24.10 | sh:hm lh status | hm tctl history status
+history-status-sw | json | router-24.10 | sh:hm lh status | hm tctl history status | $HISTON; $HSWOFF
+history-status-none | json | router-24.10 | sh:hm lh status | hm tctl history status | $HISTON; $NOOFFLOAD
+history-status-odd | json | router-24.10 | sh:hm lh status | hm tctl history status | $HISTON; $HODD
+history-status-odd2 | json | router-24.10 | sh:hm lh status | hm tctl history status | $HISTON; $HODD2
+history-status-error | json | router-24.10 | sh:hm lh status | hm tctl history status | $HISTON; $HERR
+history-status-error2 | json | router-24.10 | sh:hm lh status | hm tctl history status | $HISTON; $HERR2
+history-validate-dir | text | router-24.10 | sh:vdirs lh | vdirs tctl history
+history-usage | text | router-24.10 | sh:lh bogus; echo rc=\$?; lh; echo rc=\$? | tctl history bogus; echo rc=\$?; tctl history; echo rc=\$?
+history-period-ids | text | router-24.10 | sh:pids legacy | pids new | $HISTON
+"
+CASES="$CASES$HIST_CASES"
+# ── end PR8 history ──────────────────────────────────────────────────────────
+
 command -v jq >/dev/null || { echo "FAIL: jq is required" >&2; exit 1; }
 
 # ── legacy backend, and the current fw.sh ───────────────────────────────────

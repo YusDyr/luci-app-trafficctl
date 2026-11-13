@@ -71,8 +71,8 @@ function fmtAgo(ts) {
 	return Math.round(d / 86400) + ' ' + _('days ago');
 }
 
-// The two verdicts trafficctl-history.sh can report, and what each one means
-// for a number on this page. Keyed on exactly the strings hist_accuracy emits;
+// The two verdicts `trafficctl history` can report, and what each one means
+// for a number on this page. Keyed on exactly the strings accuracy() emits;
 // an unknown value must fall through to a warning rather than to silence,
 // because the dangerous direction is presenting an unverified number as a
 // measurement.
