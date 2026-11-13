@@ -3,13 +3,18 @@
 
 Usage: rpcd_contract.py <list.json> <file.js>...
 
-Per declare on object luci.trafficctl:
-  FAIL  the method is not in the plugin's list (the call fails at runtime)
-  WARN  a param the method does not declare (rpcd drops it before the
-        plugin sees it), or a call site whose literal argument has another
-        type than the declared one (a heuristic: only literals and a few
-        obvious conversions are typed, everything else is unknown)
-Prints one line per finding and exits 1 only on a FAIL.
+Per declare on object luci.trafficctl, each a FAIL, because rpcd-mod-ucode
+validates every call against the declared policy and refuses the whole call
+with INVALID_ARGUMENT (the method never runs):
+  - the method is not in the plugin's list (METHOD_NOT_FOUND)
+  - a param the method does not declare
+  - a call site whose literal argument has another type than the declared one
+    (a heuristic: only literals and a few obvious conversions are typed,
+    everything else is unknown)
+  - a call site that can pass null or NaN (JSON null, a blobmsg UNSPEC that no
+    policy type takes): a literal null/NaN, or a ternary with a null branch.
+    Pass undefined to leave a param out.
+Prints one line per finding and exits 1 on any.
 """
 import json
 import re
@@ -55,7 +60,7 @@ def call_args(src, name):
         while i < len(src) and depth:
             depth += {'(': 1, ')': -1}.get(src[i], 0)
             i += 1
-        yield src[m.start():i], split_args(src[m.end():i - 1])
+        yield m.start(), split_args(src[m.end():i - 1])
 
 
 def literal_type(a):
@@ -68,9 +73,15 @@ def literal_type(a):
     return None
 
 
+def may_be_null(a):
+    if a in ('null', 'NaN'):
+        return True
+    return bool(re.search(r'\?\s*null\s*:|:\s*null\s*$|\?\s*NaN\s*:|:\s*NaN\s*$', a))
+
+
 def main():
     sigs = json.load(open(sys.argv[1]))
-    fails = warns = declares = 0
+    fails = declares = 0
     for path in sys.argv[2:]:
         src = open(path).read()
         for m in DECLARE.finditer(src):
@@ -89,16 +100,21 @@ def main():
             sig = sigs[method]
             for p in params:
                 if p not in sig:
-                    warns += 1
-                    print('WARN: %s sends %s.%s, which the plugin does not declare' % (where, method, p))
-            for text, args in call_args(src, var):
+                    fails += 1
+                    print('FAIL: %s sends %s.%s, which the plugin does not declare' % (where, method, p))
+            for pos, args in call_args(src, var):
+                line = src.count('\n', 0, pos) + 1
                 for p, a in zip(params, args):
+                    if may_be_null(a):
+                        fails += 1
+                        print('FAIL: %s:%d %s can pass null for %s (rpcd refuses the call; pass undefined)'
+                              % (path, line, method, p))
+                        continue
                     t = literal_type(a)
-                    if t and p in sig and t != sig[p] and not (a == 'null' or a == 'undefined'):
-                        warns += 1
-                        line = src.count('\n', 0, src.find(text)) + 1
-                        print('WARN: %s:%d %s passes %s as %s, declared %s' % (path, line, method, p, t, sig[p]))
-    print('%d declares checked, %d failed, %d warnings' % (declares, fails, warns))
+                    if t and p in sig and t != sig[p] and a != 'undefined':
+                        fails += 1
+                        print('FAIL: %s:%d %s passes %s as %s, declared %s' % (path, line, method, p, t, sig[p]))
+    print('%d declares checked, %d failed' % (declares, fails))
     return 1 if fails or not declares else 0
 
 

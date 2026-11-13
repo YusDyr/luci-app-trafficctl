@@ -130,6 +130,14 @@ function mkStatus() {
 	};
 }
 
+// rpcd refuses a whole call whose int param is NaN (sent as JSON null), so a
+// field that does not parse goes out as a value the backend rejects with its
+// own message (`invalid scan_interval`).
+function intOr(v, dflt) {
+	var n = parseInt(v, 10);
+	return isNaN(n) ? dflt : n;
+}
+
 function reply(st, p) {
 	return p.then(function(res) {
 		st.set(!!(res && res.ok), (res && res.msg) || (res && res.ok ? _('Saved') : _('error')));
@@ -310,7 +318,7 @@ function generalCard(cfg) {
 	var save = E('button', { 'class': 'tg-btn tg-btn--primary' }, _('Save'));
 	save.addEventListener('click', function() {
 		st.set(null, _('Saving…'));
-		reply(st, callNotifySet('', en.input.checked, undefined, scan.value(), parseInt(interval.value, 10)));
+		reply(st, callNotifySet('', en.input.checked, undefined, scan.value(), intOr(interval.value, -1)));
 	});
 	body.appendChild(E('div', { 'class': 'tg-row' }, [save]));
 	return mkCard(_('General'), body);

@@ -160,7 +160,8 @@ jobs:
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_telegram_bot.sh
       - name: rpcd plugin tests
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_rpcd.sh
-      # Every rpc.declare in the views against the plugin's list.
+      # Every rpc.declare in the views against the plugin's list: methods,
+      # params and value types, since rpcd refuses a call outside the policy.
       - name: rpcd contract tests
         run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_rpcd_contract.sh
       # ── PR7: cut, portfw ──

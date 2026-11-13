@@ -213,7 +213,7 @@ return view.extend({
 	// Put a saved rule back into the kernel now, with the values it was saved
 	// with, through the same call that created it.
 	reapply: function(r, btn) {
-		var up = (r.rate_kbit_up && r.rate_kbit_up !== r.rate_kbit) ? r.rate_kbit_up : null;
+		var up = (r.rate_kbit_up && r.rate_kbit_up !== r.rate_kbit) ? r.rate_kbit_up : undefined;
 		switch (r.type) {
 		case 'block': return this.act(callBlock(r.target, ''), btn);
 		case 'ratelimit': return this.act(callRatelimit(r.target, r.rate_kbit, '', r.mode, up), btn);
@@ -227,7 +227,7 @@ return view.extend({
 			ui.addNotification(null, E('p', _('Enter a download rate above zero.')), 'error');
 			return;
 		}
-		var sendUp = (ku && ku !== kd) ? ku : null;
+		var sendUp = (ku && ku !== kd) ? ku : undefined;
 		if (r.type === 'ratelimit') {
 			return this.act(callRatelimit(r.target, kd, '', mode || r.mode, sendUp), btn);
 		}

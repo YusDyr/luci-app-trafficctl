@@ -28,7 +28,7 @@ FAIL=0
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$REPO/trafficctl/files/usr/libexec/trafficctl"
-RPCD="$REPO/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
+RPCD="$REPO/luci-app-trafficctl/root/usr/share/rpcd/ucode/luci.trafficctl.uc"
 
 # The limiter and the shaper are `trafficctl ratelimit` and `trafficctl shape`,
 # their restore `trafficctl restore` (ucode, tests/lib/shape_env.sh, with a

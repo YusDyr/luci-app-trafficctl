@@ -412,7 +412,7 @@ return view.extend({
 						logStatus.style.color = 'var(--tc-muted)';
 						callLoggingSet(
 							container.querySelector('#tm-log-enabled').checked,
-							null, null,
+							undefined, undefined,
 							container.querySelector('#tm-log-syslog').checked,
 							container.querySelector('#tm-log-blocks').checked,
 							container.querySelector('#tm-log-ratelimits').checked,
