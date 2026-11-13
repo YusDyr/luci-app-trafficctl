@@ -12,7 +12,7 @@ PKG_ARCH="all"
 BE_NAME="trafficctl"
 TG_NAME="trafficctl-telegram"
 # The bot's files under trafficctl/files (Package/trafficctl-telegram/install).
-TG_FILES="usr/share/ucode/trafficctl/telegram.uc usr/libexec/trafficctl/trafficctl-telegram.sh usr/libexec/trafficctl/trafficctl-telegram.uc etc/init.d/trafficctl-telegram"
+TG_FILES="usr/share/ucode/trafficctl/telegram.uc usr/libexec/trafficctl/trafficctl-telegram.uc etc/init.d/trafficctl-telegram"
 TCTL_ROOT="$(dirname "$0")"
 SRC="$TCTL_ROOT/${PKG_NAME}"
 BACKEND_SRC="$TCTL_ROOT/${BE_NAME}"
@@ -65,7 +65,7 @@ assemble_ipk() { # <package name> <arch> <stage dir with data/ and control/>
 }
 
 # ── trafficctl: the backend ────────────────────────────────────────────────
-# Helper scripts, init scripts, hotplug hooks, the config and the metrics CGI.
+# The CLI and its modules, init scripts, hotplug hooks, the config and the metrics CGI.
 BE_STAGE="$WORKDIR/backend"
 BE_DATA="$BE_STAGE/data"
 mkdir -p "$BE_DATA"
@@ -73,7 +73,7 @@ mkdir -p "$BE_DATA"
 cp -a "$BACKEND_SRC/files/"* "$BE_DATA/"
 
 # Ensure scripts are executable
-chmod +x "$BE_DATA/usr/libexec/trafficctl/trafficctl-"*.sh "$BE_DATA/usr/sbin/trafficctl"
+chmod +x "$BE_DATA/usr/sbin/trafficctl"
 chmod +x "$BE_DATA/www/cgi-bin/trafficctl-metrics"
 [ -d "$BE_DATA/etc/init.d" ] && chmod +x "$BE_DATA/etc/init.d/"*
 [ -d "$BE_DATA/etc/hotplug.d" ] && find "$BE_DATA/etc/hotplug.d" -type f -exec chmod +x {} +

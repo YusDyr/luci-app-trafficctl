@@ -52,7 +52,6 @@ ALL="$ALL$LISTED
 "
 [ "$pkg" = trafficctl-telegram ] && assert_eq "trafficctl-telegram installs the bot and nothing else" \
     "etc/init.d/trafficctl-telegram
-usr/libexec/trafficctl/trafficctl-telegram.sh
 usr/libexec/trafficctl/trafficctl-telegram.uc
 usr/share/ucode/trafficctl/telegram.uc" "$(printf '%s\n' "$LISTED" | awk '{print $2}' | LC_ALL=C sort)"
 
@@ -80,6 +79,24 @@ done
 
 assert_eq "every file under trafficctl/files is installed by one package, and nothing else" \
     "$TREE" "$(printf '%s' "$ALL" | awk 'NF {print $2}' | LC_ALL=C sort)"
+# 2.0.0 is ucode end to end: the shell scripts of 1.30.x in /usr/libexec are
+# gone, and init.d, hotplug.d, uci-defaults and the CGI are the only shell.
+assert_eq "no shell scripts under usr/libexec/trafficctl" "" \
+    "$(printf '%s\n' "$TREE" | grep -E '^usr/libexec/trafficctl/.*\.sh$')"
+assert_eq "the backend's layout: the CLI, its modules, the bot entry and the hooks" \
+    "etc/config/trafficctl
+etc/hotplug.d/dhcp/99-trafficctl-newdevice
+etc/hotplug.d/iface/99-trafficctl-shapes
+etc/init.d/trafficctl-cut
+etc/init.d/trafficctl-history
+etc/init.d/trafficctl-notify
+etc/init.d/trafficctl-telegram
+etc/uci-defaults/80_trafficctl-notify
+lib/upgrade/keep.d/trafficctl
+usr/libexec/trafficctl/trafficctl-telegram.uc
+usr/sbin/trafficctl
+www/cgi-bin/trafficctl-metrics" \
+    "$(printf '%s\n' "$TREE" | grep -v '^usr/share/ucode/trafficctl/[a-z]*\.uc$')"
 for b in build-ipk.sh build-apk.sh; do
     assert_eq "$b moves the files of trafficctl-telegram to it" \
         "$(mk_define Package/trafficctl-telegram/install | awk '$1 ~ /INSTALL_(BIN|DATA)/ {sub(/^\.\/files\//, "", $2); print $2}' | LC_ALL=C sort)" \

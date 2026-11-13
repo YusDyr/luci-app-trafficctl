@@ -12,7 +12,7 @@ PKG_NAME="luci-app-trafficctl"
 BE_NAME="trafficctl"
 TG_NAME="trafficctl-telegram"
 # The bot's files under trafficctl/files (Package/trafficctl-telegram/install).
-TG_FILES="usr/share/ucode/trafficctl/telegram.uc usr/libexec/trafficctl/trafficctl-telegram.sh usr/libexec/trafficctl/trafficctl-telegram.uc etc/init.d/trafficctl-telegram"
+TG_FILES="usr/share/ucode/trafficctl/telegram.uc usr/libexec/trafficctl/trafficctl-telegram.uc etc/init.d/trafficctl-telegram"
 PKG_VERSION="${1:-1.0.0}"
 PKG_RELEASE="${2:-1}"
 
@@ -99,7 +99,7 @@ BE_DATA="$WORKDIR/backend-data"
 mkdir -p "$BE_DATA"
 cp -a "$BACKEND_SRC/files/"* "$BE_DATA/"
 
-chmod +x "$BE_DATA/usr/libexec/trafficctl/trafficctl-"*.sh "$BE_DATA/usr/sbin/trafficctl"
+chmod +x "$BE_DATA/usr/sbin/trafficctl"
 chmod +x "$BE_DATA/www/cgi-bin/trafficctl-metrics"
 [ -d "$BE_DATA/etc/init.d" ] && chmod +x "$BE_DATA/etc/init.d/"*
 [ -d "$BE_DATA/etc/hotplug.d" ] && find "$BE_DATA/etc/hotplug.d" -type f -exec chmod +x {} +
