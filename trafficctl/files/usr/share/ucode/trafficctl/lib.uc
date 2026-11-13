@@ -37,8 +37,9 @@
 //   qv(argv)                      q() of each element, joined by spaces
 //   run(cmd, ms)                  stdout as a string, stderr dropped, no stdin;
 //                                 with ms, cmd is one program, killed after ms
-//   run_rc(cmd, ms)               run() with a timeout: { out, rc }, rc the
-//                                 exit status, -9 when it was killed
+//   run_rc(cmd, ms, err)          run() with a timeout: { out, rc }, rc the
+//                                 exit status, -9 when it was killed; with
+//                                 err, stderr is in out too (ms may be null)
 //   lines(cmd, ms)                run() split into lines
 //   sh(cmd, ms)                   exit status, all output dropped
 //   pipe(cmd, input)              run() with input on cmd's stdin, so a
@@ -233,8 +234,9 @@ function run(cmd, ms) {
 }
 
 // run() with a timeout and the exit status: the rpcd plugin has to answer
-// before rpcd kills it, and has to tell a timeout from an empty reply.
-function run_rc(cmd, ms) {
+// before rpcd kills it, and has to tell a timeout from an empty reply. err:
+// the limiter reports nft's reason for each rule it could not add.
+function run_rc(cmd, ms, err) {
 	// Created here and exclusively, as in pipe().
 	let tmp = path('/tmp/.trafficctl_run.' + pid());
 	unlink(tmp);
@@ -242,7 +244,7 @@ function run_rc(cmd, ms) {
 	if (!f)
 		return { out: '', rc: -1 };
 	f.close();
-	let rc = system('exec >' + q(tmp) + ' 2>/dev/null </dev/null; exec ' + cmd, ms);
+	let rc = system('exec >' + q(tmp) + (err ? ' 2>&1' : ' 2>/dev/null') + ' </dev/null; exec ' + cmd, ms);
 	let out = fs_readfile(tmp);
 	unlink(tmp);
 	return { out: out ?? '', rc };
