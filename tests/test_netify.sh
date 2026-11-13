@@ -230,7 +230,7 @@ main_config
 # ── usage ───────────────────────────────────────────────────────────────────
 TCTL_ROOT="$ROOT" tctl netify bogus > "$TMPDIR/out" 2>/dev/null
 rc=$?
-assert_contains "usage: unknown subcommand" '"msg":"usage: trafficctl-netify.sh status|collect [secs]|list|raw [secs]"' "$(cat "$TMPDIR/out")"
+assert_contains "usage: unknown subcommand" '"msg":"usage: trafficctl netify status|collect [secs]|list|raw [secs]"' "$(cat "$TMPDIR/out")"
 [ "$rc" = 1 ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); echo "FAIL: usage exits 1 (got $rc)"; }
 
 # ── Results ──────────────────────────────────────────────────────────────────

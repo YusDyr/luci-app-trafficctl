@@ -1089,6 +1089,9 @@ while IFS='|' read -r name mode fixture legacy new setup; do
         *) (export PATH="$W/bin:$PATH"; eval "sh \"\$LEXEC\"/$legacy") ;;
     esac > "$W/legacy.out" 2> "$W/legacy.err"
     [ -z "$files" ] || with_files "$W/legacy.out" "$files"
+    # A usage line names the command, not the deleted script (a declared
+    # difference): "usage: trafficctl-shape.sh" is "usage: trafficctl shape".
+    sed -i -E 's/usage: trafficctl-([a-z-]+)\.sh/usage: trafficctl \1/g' "$W/legacy.out"
 
     fresh_root "$fixture" "$setup"
     cli_root
@@ -1387,6 +1390,9 @@ while IFS='|' read -r name mode scripts method input setup; do
     sed -i "s|'/tmp/trafficctl/|'$W/root/tmp/trafficctl/|" "$W/root/etc/config/trafficctl"
     rpcd_side legacy "$scripts" "$method" "$input" > "$W/legacy.out" 2> "$W/legacy.err"
     normalise "$W/legacy.out" "$files"
+    # A usage line names the command, not the deleted script (a declared
+    # difference): "usage: trafficctl-shape.sh" is "usage: trafficctl shape".
+    sed -i -E 's/usage: trafficctl-([a-z-]+)\.sh/usage: trafficctl \1/g' "$W/legacy.out"
 
     fresh_root router-24.10 "$setup"
     rpcd_side new "$scripts" "$method" "$input" > "$W/new.out" 2> "$W/new.err"

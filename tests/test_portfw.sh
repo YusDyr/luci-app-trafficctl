@@ -357,7 +357,7 @@ printf '[]' > "$RULES"
 
 # ── validation ───────────────────────────────────────────────────────────────
 
-USAGE_PAUSE='{"ok":false,"msg":"usage: trafficctl-portfw.sh pause|resume <forward|input> <tcp|udp|tcpudp> <ip|-> <port>"}'
+USAGE_PAUSE='{"ok":false,"msg":"usage: trafficctl portfw pause|resume <forward|input> <tcp|udp|tcpudp> <ip|-> <port>"}'
 reset_net
 OUT=$(run_portfw pause forward tcp 192.168.0.10 99999)
 assert_eq "invalid port rejected" "$USAGE_PAUSE" "$OUT"
@@ -374,9 +374,9 @@ assert_eq "invalid scope rejected" "$USAGE_PAUSE" "$OUT"
 assert_eq "rejected arguments touch nothing" "" "$(calls)"
 OUT=$(run_portfw limit forward tcp 192.168.0.10)
 assert_eq "limit usage" \
-    '{"ok":false,"msg":"usage: trafficctl-portfw.sh limit <forward|input> <tcp|udp|tcpudp> <ip|-> <port> <rate_kbit>"}' "$OUT"
+    '{"ok":false,"msg":"usage: trafficctl portfw limit <forward|input> <tcp|udp|tcpudp> <ip|-> <port> <rate_kbit>"}' "$OUT"
 OUT=$(run_portfw bogus)
-assert_eq "unknown subcommand" '{"ok":false,"msg":"usage: trafficctl-portfw.sh <list|pause|resume|limit> ..."}' "$OUT"
+assert_eq "unknown subcommand" '{"ok":false,"msg":"usage: trafficctl portfw <list|pause|resume|limit> ..."}' "$OUT"
 run_portfw bogus >/dev/null
 assert_eq "unknown subcommand exits 1" 1 "$?"
 

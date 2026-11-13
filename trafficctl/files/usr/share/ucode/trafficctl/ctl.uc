@@ -809,7 +809,7 @@ function reply(o, rc) {
 
 function block(ip, label) {
 	if (ip == null || ip == '')
-		return reply({ ok: false, msg: 'usage: trafficctl-block.sh <ip> [label]' });
+		return reply({ ok: false, msg: 'usage: trafficctl block <ip> [label]' });
 	if (!lib.valid_ip(ip))
 		return reply({ ok: false, msg: 'invalid IP address' });
 	label = (label == null || label == '') ? 'block_' + ip : label;
@@ -855,7 +855,7 @@ function block(ip, label) {
 
 function unblock(ip, label) {
 	if (ip == null || ip == '')
-		return reply({ ok: false, msg: 'usage: trafficctl-unblock.sh <ip> [label]' });
+		return reply({ ok: false, msg: 'usage: trafficctl unblock <ip> [label]' });
 	if (!lib.valid_ip(ip))
 		return reply({ ok: false, msg: 'invalid IP address' });
 	label = (label == null || label == '') ? 'block_' + ip : label;
@@ -978,8 +978,8 @@ function wifi_mac(ip) {
 }
 
 const MACFILTER_USAGE = {
-	add: 'usage: trafficctl-macfilter-add.sh <ip>',
-	remove: 'usage: trafficctl-macfilter-remove.sh <ip|mac>',
+	add: 'usage: trafficctl macfilter-add <ip>',
+	remove: 'usage: trafficctl macfilter-remove <ip|mac>',
 };
 
 function macfilter(op, arg) {

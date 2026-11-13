@@ -365,7 +365,7 @@ assert_contains "macfilter-remove: a MAC followed by a second line is rejected" 
 
 OUT=$(PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" tctl rules bogus 2>/dev/null; echo "rc=$?")
 assert_eq "an unknown subcommand is refused, as by the shell script" \
-    "$(printf '%s\n%s' '{"ok":false,"msg":"usage: trafficctl-rules.sh [list]"}' 'rc=1')" "$OUT"
+    "$(printf '%s\n%s' '{"ok":false,"msg":"usage: trafficctl rules [list]"}' 'rc=1')" "$OUT"
 assert_eq "no subcommand is list" "$(list)" "$(PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" tctl rules 2>/dev/null)"
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"

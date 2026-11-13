@@ -43,7 +43,7 @@ function replied(r) {
 
 const NAMES_USAGE = 'usage: trafficctl names list|set <ip> <name>|remove <ip>';
 // The script's own wording: the rpcd plugin and the view show it as it is.
-const RULES_USAGE = 'usage: trafficctl-rules.sh [list]';
+const RULES_USAGE = 'usage: trafficctl rules [list]';
 
 const commands = {
 	subnets: () => {

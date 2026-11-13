@@ -22,9 +22,9 @@ import * as ctl from 'trafficctl.ctl';
 const CHAINS = [ 'pfw_forward', 'pfw_input' ];
 const RATE_MAX_KBIT = 100000000;
 
-const USAGE = 'usage: trafficctl-portfw.sh <list|pause|resume|limit> ...';
-const USAGE_PAUSE = 'usage: trafficctl-portfw.sh pause|resume <forward|input> <tcp|udp|tcpudp> <ip|-> <port>';
-const USAGE_LIMIT = 'usage: trafficctl-portfw.sh limit <forward|input> <tcp|udp|tcpudp> <ip|-> <port> <rate_kbit>';
+const USAGE = 'usage: trafficctl portfw <list|pause|resume|limit> ...';
+const USAGE_PAUSE = 'usage: trafficctl portfw pause|resume <forward|input> <tcp|udp|tcpudp> <ip|-> <port>';
+const USAGE_LIMIT = 'usage: trafficctl portfw limit <forward|input> <tcp|udp|tcpudp> <ip|-> <port> <rate_kbit>';
 
 function str(v) {
 	return (v == null) ? '' : '' + v;

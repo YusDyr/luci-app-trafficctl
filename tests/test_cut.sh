@@ -165,7 +165,7 @@ reset_state
 OUT=$(run_cut)
 assert_contains "no subcommand is rejected" '"ok":false' "$OUT"
 assert_contains "no subcommand: the usage keeps the script's wording" \
-    'usage: trafficctl-cut.sh engage <seconds|0> [persist] | release | status | restore' "$OUT"
+    'usage: trafficctl cut engage <seconds|0> [persist] | release | status | restore' "$OUT"
 
 OUT=$(run_cut engage abc)
 assert_contains "engage: a non-numeric duration is rejected" '"ok":false' "$OUT"
