@@ -40,12 +40,12 @@ graph TD
         end
 
         subgraph "Action Scripts — /usr/libexec/trafficctl/"
-            BLK["trafficctl-block.sh"]
-            UBK["trafficctl-unblock.sh"]
+            BLK["trafficctl-block.sh = trafficctl block<br/>(ucode)"]
+            UBK["trafficctl-unblock.sh = trafficctl unblock<br/>(ucode)"]
             RL["trafficctl-ratelimit.sh"]
             SH["trafficctl-shape.sh"]
-            MFA["trafficctl-macfilter-add.sh"]
-            MFR["trafficctl-macfilter-remove.sh"]
+            MFA["trafficctl-macfilter-add.sh = trafficctl macfilter-add<br/>(ucode)"]
+            MFR["trafficctl-macfilter-remove.sh = trafficctl macfilter-remove<br/>(ucode)"]
             CUT["trafficctl-cut.sh = trafficctl cut<br/>(global cut, procd keeper, ucode)"]
             PFW["trafficctl-portfw.sh = trafficctl portfw<br/>(port-forward pause/limit, ucode)"]
         end
@@ -190,17 +190,21 @@ The file `trafficctl-fw.sh` is sourced by all scripts and provides firewall func
 |----------|----------------|
 | `tctl_ratelimit_add` | `netdev tm_ratelimit`: `ip daddr ... limit rate over ... drop` on every LAN device's egress chain `dl_<dev>` (WAN ingress chain `dl` on kernels without egress), `ip saddr ...` on every bridge port's ingress chain `ul_<port>`; in `each` mode one meter per chain (`tctl_rl_meter_name`). A device that refuses its rule is logged and reported (`partial`); the rules on the other devices stay |
 | `tctl_ratelimit_remove` | `tctl_rl_delete_rules`: rules by exact comment and handle across all chains, then the meter sets those rules named (nftables 1.1 keeps them) |
-| `tctl_block_add` | `nft add rule inet fw4 forward ip saddr ... drop` |
-| `tctl_block_remove` | Delete rules by handle from `inet fw4 forward` |
-| `tctl_is_blocked` | grep nft forward chain |
 | `tctl_get_wan_device` | `uci get network.wan.device` (fallback to `.ifname`) |
 | `tctl_get_lan_device` | `uci get network.lan.device` (fallback to `.ifname`) |
 | `tctl_validate_ip` | regex + octet range check, no leading zeros |
 | `tctl_get_wifi_interfaces` | `uci show wireless` parsing |
 
+The block itself is ucode since the CLI took over `block`/`unblock`:
+`ctl.block_add` inserts `ip saddr <ip> counter drop comment "tctl_block_<slug>"`
+and, with a MAC, `meta nfproto ipv6 ether saddr <mac> counter drop comment
+"tctl_block_<slug>_mac"` into `inet fw4 forward`, the same text v1.30.0
+wrote, so either version removes the other's blocks; `ctl.block_remove`
+deletes by handle after reading the chain with `nft -j`.
+
 ### Reading the rules back (ucode)
 
-The writers above stay shell. Everything that reads their rules back for a
+The limiter and shaper writers above stay shell. Everything that reads their rules back for a
 report (`trafficctl ratelimit-stats`, `shape-stats`, `rules`) is in
 `trafficctl/files/usr/share/ucode/trafficctl/ctl.uc`:
 
@@ -396,7 +400,9 @@ This returns paths like `wireless.default_radio0`, `wireless.default_radio1`, et
 
 This approach disconnects only the target client. All other WiFi clients remain connected.
 
-`hostapd_cli` comes from `hostapd-utils`, which the `trafficctl` backend does not depend on (it can only be selected with a hostapd/wpad variant, so the dependency would block wired-only builds). Without it step 4 falls back to `ubus call hostapd.<iface> del_client` with a one-hour `ban_time`, reported as `"enforcement":"ban"`. With no wifi-iface at all the scripts answer `"no wifi interfaces found"` and touch nothing. `tctl_wifi_filter_support` reports `none` / `temporary` / `full` as `wifi_filter` in `trafficctl-device.sh`, and the view hides or annotates the Block WiFi button from it.
+`hostapd_cli` comes from `hostapd-utils`, which the `trafficctl` backend does not depend on (it can only be selected with a hostapd/wpad variant, so the dependency would block wired-only builds). Without it step 4 falls back to `ubus call hostapd.<iface> del_client` with a one-hour `ban_time`, reported as `"enforcement":"ban"`. With no wifi-iface at all the scripts answer `"no wifi interfaces found"` and touch nothing. `trafficctl device` reports `none` / `temporary` / `full` as `wifi_filter`, and the view hides or annotates the Block WiFi button from it.
+
+The WiFi deny is `trafficctl macfilter-add` / `macfilter-remove` (`ctl.macfilter`). Every `hostapd_cli` call runs under a 3 s timeout: a hostapd that stopped answering its control socket used to hang the rpcd call until rpcd killed it, with the maclist written and nothing reported. A call that times out counts as no `hostapd_cli` for that AP, so it falls back to the ubus ban. With several APs the reply carries the weakest outcome (`none` < `ban` < `acl`): a block applied on one radio and missed on the other leaves the device a radio to join.
 
 ---
 
@@ -410,6 +416,12 @@ This approach disconnects only the target client. All other WiFi clients remain 
 | WiFi MAC filtering | Always | `uci commit wireless` | Committed to `/etc/config/wireless` |
 
 The hotplug script triggers on `ACTION=ifup` and `INTERFACE=lan`, with a readiness loop (waits up to 10s for tc to be available on the bridge device). When `persist_rules` is enabled, blocks and ratelimits are saved/removed from `/etc/trafficctl/rules.json` alongside shape operations.
+
+The saved blocks come back through `trafficctl restore` (`ctl.restore`). At boot `ifup lan` can come before fw4 has loaded its ruleset, so it waits up to 10 s for `inet fw4`; a block already in the chain (lan going up again without a fw4 reload) is not inserted twice, and a record whose address does not validate is logged and skipped while the rest are restored. The limiter and port-forward records are still restored by the hook's shell loop.
+
+`rules.json` has a shell writer (the limiter, `tctl_persist_*`) and a ucode one (the block, `lib.persist_save`/`persist_remove`). Both take the mkdir lock `/tmp/trafficctl_rules.lock.d`, wait 5 s for it and then take it over from a holder that was killed, and write byte-identical records, so either may run while the other is mid-write.
+
+The DHCP hook (`dhcp/99-trafficctl-newdevice`) runs `trafficctl newdevice` with dnsmasq's `ACTION`, `MACADDR`, `IPADDR` and `HOSTNAME`: the Telegram new-device queue, then the default limit through the seen-MAC ledger `/etc/trafficctl/seen_macs` (seeded on the first run, which applies nothing; a MAC is marked before the limit is applied). A device that already has a limit, live or saved, is left alone.
 
 ---
 

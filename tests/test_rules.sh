@@ -14,8 +14,9 @@
 # scratch root both read: the CLI through TCTL_ROOT, the scripts through
 # rewritten paths. The list is read from the `nft -j` output of OpenWrt 22.03
 # (nft 1.0.2) and 25.12 (1.1.6) in turn. The second half runs
-# the existing removal scripts the tab calls against an OFFLINE device, since
-# "listed but cannot be removed" would be the same bug one step later.
+# the removals the tab calls (`trafficctl unblock`/`macfilter-remove`, the
+# limiter script) against an OFFLINE device, since "listed but cannot be
+# removed" would be the same bug one step later.
 
 PASS=0
 FAIL=0
@@ -71,8 +72,6 @@ patch_script() {
         "$1" > "$2"
 }
 patch_script "$BIN/trafficctl-ratelimit.sh"        "$TMPDIR/ratelimit.sh"
-patch_script "$BIN/trafficctl-unblock.sh"          "$TMPDIR/unblock.sh"
-patch_script "$BIN/trafficctl-macfilter-remove.sh" "$TMPDIR/macfilter-remove.sh"
 chmod +x "$TMPDIR"/*.sh
 
 # ── fakes ──────────────────────────────────────────────────────────────────
@@ -155,6 +154,8 @@ chmod +x "$MOCKBIN"/*
 
 run() { PATH="$MOCKBIN:$PATH" sh "$@" 2>/dev/null; }
 list() { PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" tctl rules list 2>/dev/null; }
+# The removals the tab calls that are CLI commands themselves.
+uc_run() { PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" tctl "$@" 2>/dev/null; }
 
 setcfg() {   # setcfg <persist_rules> <macfilter>
     echo "$1" > "$STATE/persist"
@@ -342,7 +343,7 @@ CTX=""
 
 # ── removing what the tab lists, for an offline device ─────────────────────
 # Saved-only block: nothing in the kernel to delete, the record must still go.
-OUT=$(run "$TMPDIR/unblock.sh" 192.168.1.90)
+OUT=$(uc_run unblock 192.168.1.90)
 assert_contains "unblock of a saved-only block reports ok" '"ok":true' "$OUT"
 OUT=$(list)
 assert_eq "unblock: the saved-only block is gone from the list" "<none>" "$(rec "$OUT" block 192.168.1.90 target)"
@@ -366,15 +367,15 @@ assert_contains "edit: the new download ceiling is saved" '"ip":"192.168.1.66","
 
 # WiFi deny of a MAC with no lease and no neighbour entry: removable by MAC.
 : > "$STATE/uci.log"
-OUT=$(run "$TMPDIR/macfilter-remove.sh" AA:AA:AA:AA:AA:99)
+OUT=$(uc_run macfilter-remove AA:AA:AA:AA:AA:99)
 assert_contains "macfilter-remove by MAC: the maclist entry is deleted" \
     "del_list wireless.default_radio0.maclist=aa:aa:aa:aa:aa:99" "$(cat "$STATE/uci.log")"
 assert_contains "macfilter-remove by MAC: names the MAC" "aa:aa:aa:aa:aa:99" "$OUT"
-OUT=$(run "$TMPDIR/macfilter-remove.sh" 192.168.1.99)
+OUT=$(uc_run macfilter-remove 192.168.1.99)
 assert_contains "macfilter-remove by IP with no lease still fails as before" "cannot find MAC" "$OUT"
-OUT=$(run "$TMPDIR/macfilter-remove.sh" 'aa:bb;reboot')
+OUT=$(uc_run macfilter-remove 'aa:bb;reboot')
 assert_contains "macfilter-remove: a malformed MAC is rejected" '"ok":false' "$OUT"
-OUT=$(run "$TMPDIR/macfilter-remove.sh" "$(printf 'aa:aa:aa:aa:aa:99\nx')")
+OUT=$(uc_run macfilter-remove "$(printf 'aa:aa:aa:aa:aa:99\nx')")
 assert_contains "macfilter-remove: a MAC followed by a second line is rejected" '"ok":false' "$OUT"
 
 OUT=$(PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" tctl rules bogus 2>/dev/null; echo "rc=$?")

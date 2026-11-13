@@ -3,7 +3,8 @@
 
 // trafficctl.ctl: what restricts each device, read back from where it lives
 // (nft, tc, the radios) and from where it is saved (rules.json, shapes.json,
-// the uci maclist). Nothing here changes state.
+// the uci maclist), and the commands that place and lift a block, a WiFi
+// deny and a new device's default limit.
 //
 //   import * as ctl from 'trafficctl.ctl';
 //
@@ -34,6 +35,25 @@
 //   shape_stats()            trafficctl shape-stats
 // Everything together
 //   rules_list()             trafficctl rules list
+// Writers. The commands return { reply, rc }: the reply object the CLI
+// prints, the exit status of the script they replace.
+//   block_comment(ip)        tctl_block_<ip with . and / as _>; its v6 half
+//                            adds _mac
+//   is_blocked(ip, rules)    a drop on ip saddr, or the v6 half's comment
+//   block_add(ip, comment)   both halves: { ok (the v4 rule), ipv6, mac }
+//   block_remove(comment)    every rule with that comment or its _mac
+//   block_remove_legacy(ip)  v4 drops on ip with any other tctl_block_ comment
+//   block(ip, label), unblock(ip, label)
+//                            trafficctl block / unblock
+//   macfilter(op, arg)       trafficctl macfilter-add / macfilter-remove
+//                            (op 'add' or 'remove'): the uci maclist, then
+//                            every running AP, the result one enforcement
+//                            word (acl, ban, none, no-radio)
+//   has_limit(ip)            a limit or shape, live or saved
+//   newdevice(env)           trafficctl newdevice: the DHCP hook's ACTION,
+//                            MACADDR, IPADDR and HOSTNAME
+//   restore()                trafficctl restore: the saved blocks, once fw4
+//                            is up; { ok, restored, failed }
 
 import * as lib from 'trafficctl.lib';
 import * as net from 'trafficctl.net';
@@ -178,7 +198,7 @@ function rl_rate_kbit(rules, ip, fld) {
 // (tctl_block_comment), or, when it was written before v1.13.2, tctl_block_
 // and the caller's label (tctl_block_block_<ip> from LuCI, tctl_block_tg from
 // Telegram). The prefix is all the two forms share, and unblock removes both
-// (tctl_block_remove_legacy). The v6 half matches on the MAC and carries no
+// (block_remove_legacy). The v6 half matches on the MAC and carries no
 // address; it exists since v1.18.2, so its comment is always the current one,
 // and that exact comment is the way back to an address.
 function live_blocks(rules) {
@@ -525,10 +545,15 @@ function hostapd_ifaces() {
 	return out;
 }
 
+// The tool installed AND this AP's control socket answering: only a PONG
+// shows the ACL commands reach anything. Timed, as every hostapd_cli call
+// here: a hung socket must not hold the caller past its own deadline.
+const CLI_MS = 3000;
+
 let has_cli;
 function cli_alive(iface) {
 	has_cli ??= (lib.sh('command -v hostapd_cli') == 0);
-	return has_cli && index(lib.run('hostapd_cli -i ' + lib.q(iface) + ' ping'), 'PONG') >= 0;
+	return has_cli && index(lib.run('hostapd_cli -i ' + lib.q(iface) + ' ping', CLI_MS), 'PONG') >= 0;
 }
 
 // What keeps a denied MAC off the air, read back from each running AP: its
@@ -562,7 +587,7 @@ function wifi_denies() {
 		let worst = 3;
 		for (let ifc in ifaces) {
 			let st = 'none';
-			if (cli_alive(ifc) && index(lc(lib.run('hostapd_cli -i ' + lib.q(ifc) + ' deny_acl SHOW')), mac) >= 0)
+			if (cli_alive(ifc) && index(lc(lib.run('hostapd_cli -i ' + lib.q(ifc) + ' deny_acl SHOW', CLI_MS)), mac) >= 0)
 				st = 'acl';
 			else {
 				let b = lib.ubus_call('hostapd.' + ifc, 'list_bans');
@@ -705,6 +730,462 @@ function rules_list() {
 	return { fw: 'nft', persist_rules: persist, wifi_allow_ifaces: w.allow, rules };
 }
 
+// ── blocks: writers (tctl_block_*, trafficctl-block.sh, -unblock.sh) ────────
+
+const FW4 = [ 'chain', 'inet', 'fw4', 'forward' ];
+const CT_MS = 5000;
+
+function slug(t) {
+	return replace('' + t, /[.\/]/g, '_');
+}
+
+// From the target, never the caller's label: the label once made LuCI's and
+// the bot's comment for the same device differ, and neither could remove the
+// other's rule.
+function block_comment(ip) {
+	return 'tctl_block_' + slug(ip);
+}
+
+// Any drop on the address counts, so a block from before v1.13.2 (the
+// caller's label in its comment) still reads as blocked; the v6 half names
+// no address, only its comment.
+function is_blocked(ip, rules) {
+	rules ??= nft_rules(FW4);
+	let mc = block_comment(ip) + '_mac';
+	for (let r in rules)
+		if ((r.verdict == 'drop' && (r.saddr == ip || r.saddr == ip + '/32')) || r.comment == mc)
+			return true;
+	return false;
+}
+
+// Inserted, not added: fw4 accepts established and offloaded flows near the
+// top of the chain, and a rule below that never fires. "meta nfproto ipv6"
+// keeps the MAC rule off IPv4, so no v4 outcome depends on a MAC lookup.
+function block_add(ip, comment) {
+	let ok = lib.sh('nft insert rule inet fw4 forward ' +
+		lib.q('ip saddr ' + ip + ' counter drop comment "' + comment + '"')) == 0;
+	let mac = net.target_mac(ip), ipv6 = false;
+	if (mac != null)
+		ipv6 = lib.sh('nft insert rule inet fw4 forward ' +
+			lib.q('meta nfproto ipv6 ether saddr ' + mac + ' counter drop comment "' + comment + '_mac"')) == 0;
+	return { ok, ipv6, mac };
+}
+
+function delete_handles(hs) {
+	// The shell's loop: the status of the last delete, 0 with nothing to do.
+	let rc = 0;
+	for (let h in hs)
+		rc = lib.sh('nft delete rule inet fw4 forward handle ' + lib.q(h));
+	return rc == 0;
+}
+
+// The whole comment: a substring match on 192.168.1.1 deletes the rule of
+// 192.168.1.10.
+function block_remove(comment) {
+	let hs = [];
+	for (let r in nft_rules(FW4))
+		if (type(r.handle) == 'int' && (r.comment == comment || r.comment == comment + '_mac'))
+			push(hs, r.handle);
+	return delete_handles(hs);
+}
+
+// Blocks from before v1.13.2 carry whatever label the caller gave, so no
+// comment finds them; what every version wrote is a drop on exactly this
+// address with a comment starting tctl_block_. Their v6 half came later and
+// always has the current comment. The rule with the current comment is left
+// to block_remove, so the two halves go in the order the shell deleted them.
+function block_remove_legacy(ip) {
+	let hs = [], cur = block_comment(ip);
+	for (let r in nft_rules(FW4))
+		if (type(r.handle) == 'int' && r.verdict == 'drop' && substr(r.comment, 0, 11) == 'tctl_block_' &&
+		    r.comment != cur && (r.saddr == ip || r.saddr == ip + '/32'))
+			push(hs, r.handle);
+	return delete_handles(hs);
+}
+
+function reply(o, rc) {
+	return { reply: o, rc: rc ?? (o.ok ? 0 : 1) };
+}
+
+function block(ip, label) {
+	if (ip == null || ip == '')
+		return reply({ ok: false, msg: 'usage: trafficctl-block.sh <ip> [label]' });
+	if (!lib.valid_ip(ip))
+		return reply({ ok: false, msg: 'invalid IP address' });
+	label = (label == null || label == '') ? 'block_' + ip : label;
+
+	let m = match(lib.run('ip -4 addr show dev ' + lib.q(net.lan_device())), /inet ([0-9.]+)/);
+	if (m && m[1] == ip)
+		return reply({ ok: false, msg: 'cannot block the router itself' });
+
+	let comment = block_comment(ip), src = getenv('TCTL_SRC');
+	if (is_blocked(ip))
+		return reply({ ok: true, msg: ip + ' is already blocked' });
+
+	let b = block_add(ip, comment);
+	if (!b.ok)
+		return reply({ ok: false, msg: 'failed to block ' + ip });
+
+	lib.sh('conntrack -D -s ' + lib.q(ip), CT_MS);
+	lib.sh('conntrack -D -d ' + lib.q(ip), CT_MS);
+	// The v4 flush leaves every IPv6 flow running, and an offloaded one is
+	// never checked against the new rule.
+	if (b.mac != null)
+		net.flush_v6(b.mac);
+	// The same one layer further out, for flows the NSS firmware carries.
+	lib.nss_defunct();
+
+	let persist = lib.persist_enabled();
+	if (persist)
+		lib.persist_save('block', ip, label);
+	lib.log('block', ip, label, getenv('TCTL_VIA'), src);
+
+	// Which families are covered, said rather than left to be found out.
+	let note = '';
+	if (!b.ipv6)
+		note = net.ip_is_nexthop(ip)
+			? ' — IPv4 only: ' + ip + ' is a routed next hop, and a MAC-keyed IPv6 rule would also block everything behind it'
+			: ' — IPv4 only: no MAC known for ' + ip + ' (no DHCP lease, no neighbour entry), so IPv6 is not covered';
+	note += lib.nss_note() + lib.persist_note();
+	let self = (src != null && src != '' && src == ip) ? ' (your device — LuCI access preserved)' : '';
+	return reply({ ok: true, ipv6: b.ipv6, nss: lib.nss_status(), persist,
+		msg: 'internet blocked for ' + ip + self + note });
+}
+
+function unblock(ip, label) {
+	if (ip == null || ip == '')
+		return reply({ ok: false, msg: 'usage: trafficctl-unblock.sh <ip> [label]' });
+	if (!lib.valid_ip(ip))
+		return reply({ ok: false, msg: 'invalid IP address' });
+	label = (label == null || label == '') ? 'block_' + ip : label;
+
+	// A rule from before v1.13.2 carries the caller's label, so a block
+	// placed from LuCI could not be removed from Telegram; the Rules tab
+	// sends no label at all. Found by address: the shell also deleted every
+	// rule with the comment tctl_block_<label>, so unblocking one device
+	// with the label tg lifted every other device's Telegram block.
+	block_remove_legacy(ip);
+	if (!block_remove(block_comment(ip)))
+		return reply({ ok: false, msg: 'failed to unblock ' + ip });
+
+	if (lib.persist_enabled())
+		lib.persist_remove('block', ip);
+	lib.log('unblock', ip, label, getenv('TCTL_VIA'), getenv('TCTL_SRC'));
+	return reply({ ok: true, msg: 'internet unblocked for ' + ip });
+}
+
+// ── WiFi: the uci maclist and the running hostapd ACL ───────────────────────
+//
+// The maclist is the durable half of a WiFi block, hostapd's running ACL the
+// half that decides whether the device is on the air now. Each runtime step
+// is read back, and the outcome is one word:
+//   acl       the running ACL was changed and read back
+//   ban       no usable hostapd_cli; hostapd's ubus deauthed and banned the
+//             client, which expires by itself (WIFI_BAN_MS)
+//   none      nothing could be applied or verified
+//   no-radio  ubus answered and no AP runs; the maclist applies when one starts
+// Only acl and no-radio mean the operator's intent is in force.
+
+// hostapd's ubus object has no ACL method, so a timed ban is the strongest
+// measure it offers; an hour, and always called temporary.
+const WIFI_BAN_MS = 3600000;
+function hostapd_cli(iface, args) {
+	return lib.run('hostapd_cli -i ' + lib.q(iface) + ' ' + lib.qv(args), CLI_MS);
+}
+
+// Not the radios: the configured wifi-iface sections, in uci's order.
+function wifi_sections() {
+	let out = [];
+	lib.uci_foreach('wireless', 'wifi-iface', (s) => {
+		push(out, s);
+	});
+	return out;
+}
+
+function acl_blocks(iface, mac, mode) {
+	if (mode == 'allow')
+		return index(lc(hostapd_cli(iface, [ 'accept_acl', 'SHOW' ])), mac) < 0;
+	return index(lc(hostapd_cli(iface, [ 'deny_acl', 'SHOW' ])), mac) >= 0;
+}
+
+function ubus_banned(iface, mac) {
+	let b = lib.ubus_call('hostapd.' + iface, 'list_bans');
+	return b != null && index(lc(lib.to_json(b)), mac) >= 0;
+}
+
+// The call's own status is ignored: it fails for a client that is not
+// associated while the ban still lands, and list_bans is the answer.
+function ubus_ban(iface, mac) {
+	lib.ubus_call('hostapd.' + iface, 'del_client', { addr: mac, reason: 1, deauth: true, ban_time: WIFI_BAN_MS });
+	return ubus_banned(iface, mac);
+}
+
+function block_iface(iface, mac, mode) {
+	if (cli_alive(iface)) {
+		hostapd_cli(iface, (mode == 'allow') ? [ 'accept_acl', 'DEL_MAC', mac ] : [ 'deny_acl', 'ADD_MAC', mac ]);
+		hostapd_cli(iface, [ 'deauthenticate', mac ]);
+		if (acl_blocks(iface, mac, mode))
+			return 'acl';
+	}
+	return ubus_ban(iface, mac) ? 'ban' : 'none';
+}
+
+function unblock_iface(iface, mac, mode) {
+	if (cli_alive(iface)) {
+		hostapd_cli(iface, (mode == 'allow') ? [ 'accept_acl', 'ADD_MAC', mac ] : [ 'deny_acl', 'DEL_MAC', mac ]);
+		// The ACL lets the MAC in again, but a ban from an earlier block
+		// without hostapd_cli still keeps it out, and ubus cannot lift one.
+		if (!acl_blocks(iface, mac, mode))
+			return ubus_banned(iface, mac) ? 'ban' : 'acl';
+	}
+	return ubus_banned(iface, mac) ? 'ban' : 'none';
+}
+
+// Enforced from the runtime state on every call, so pressing Block again
+// applies a block that only ever reached the config.
+function hostapd_apply(op, mac, mode) {
+	let ifaces = hostapd_ifaces();
+	if (ifaces == null)
+		return 'none';
+	if (!length(ifaces))
+		return 'no-radio';
+	let rank = { acl: 3, ban: 2 }, worst = 3;
+	for (let ifc in ifaces) {
+		let st = (op == 'block') ? block_iface(ifc, mac, mode) : unblock_iface(ifc, mac, mode);
+		let r = rank[st] ?? 1;
+		if (r < worst)
+			worst = r;
+	}
+	return (worst == 3) ? 'acl' : (worst == 2) ? 'ban' : 'none';
+}
+
+// The MAC as the scripts found it: the first lease for ip, else the first
+// MAC-shaped word of its neighbour entry. Validated, which they did not.
+function wifi_mac(ip) {
+	let mac = null;
+	if (lib.is_file(LEASES))
+		for (let l in lib.file_lines(LEASES))
+			if (lib.field(l, 2) == ip) {
+				mac = lib.field(l, 1);
+				break;
+			}
+	if (mac == null || mac == '') {
+		let m = match(lib.run('ip neigh show ' + lib.q(ip)), /[0-9a-fA-F:]{17}/);
+		mac = m ? m[0] : null;
+	}
+	return lib.norm_mac(mac);
+}
+
+const MACFILTER_USAGE = {
+	add: 'usage: trafficctl-macfilter-add.sh <ip>',
+	remove: 'usage: trafficctl-macfilter-remove.sh <ip|mac>',
+};
+
+function macfilter(op, arg) {
+	if (arg == null || arg == '')
+		return reply({ ok: false, msg: MACFILTER_USAGE[op] });
+	let ip = arg, mac = null;
+	// A MAC too: the deny list is keyed on it, and a device long gone has no
+	// lease or neighbour entry left to find it by (#128).
+	if (op == 'remove' && lib.norm_mac(arg) != null) {
+		mac = lib.norm_mac(arg);
+		ip = null;
+		for (let l in lib.file_lines(LEASES))
+			if (lc(lib.field(l, 1)) == mac) {
+				ip = lib.field(l, 2);
+				break;
+			}
+		if (ip == null || ip == '')
+			ip = mac;
+	}
+	else if (!lib.valid_ip(arg))
+		return reply({ ok: false, msg: 'invalid IP address' });
+	mac ??= wifi_mac(ip);
+	if (mac == null)
+		return reply({ ok: false, msg: 'cannot find MAC for ' + ip });
+
+	let secs = wifi_sections();
+	if (!length(secs))
+		return reply({ ok: false, msg: 'no wifi interfaces found' });
+
+	// The policy the administrator chose: forcing "deny" once turned a
+	// curated allow-list into a block-list.
+	let changed = false, mode = 'deny';
+	for (let s in secs) {
+		let name = s['.name'], allow = (s.macfilter == 'allow');
+		if (allow)
+			mode = 'allow';
+		let list = (type(s.maclist) == 'array') ? join(' ', s.maclist) : '' + (s.maclist ?? '');
+		let listed = index(lc(list), mac) >= 0;
+		if (!allow && op == 'add' && (s.macfilter == null || s.macfilter == '')) {
+			lib.uci_cli([ 'set', 'wireless.' + name + '.macfilter=deny' ]);
+			changed = true;
+		}
+		// Blocking takes the MAC off an allow-list or puts it on a deny-list
+		// (made one if unset); unblocking does the opposite.
+		if (allow ? (listed == (op == 'add')) : (listed != (op == 'add'))) {
+			lib.uci_cli([ (allow == (op == 'add')) ? 'del_list' : 'add_list',
+				'wireless.' + name + '.maclist=' + mac ]);
+			changed = true;
+		}
+	}
+	if (changed)
+		lib.uci_cli([ 'commit', 'wireless' ]);
+
+	// Always, not only when uci changed: a maclist that names the MAC while
+	// the radio never got it made pressing Block again a no-op.
+	let enf = hostapd_apply((op == 'add') ? 'block' : 'unblock', mac, mode);
+	let min = WIFI_BAN_MS / 60000, ok = (enf == 'acl' || enf == 'no-radio'), msg;
+	// The uci entry stays even when the radio refused it: it is the durable
+	// record and applies at the next wifi start. What goes is the claim of
+	// success. A wifi reload would apply it now and drop every client.
+	if (op == 'add')
+		msg = (enf == 'acl') ? sprintf('MAC %s blocked on wifi for %s', mac, ip)
+			: (enf == 'no-radio') ? sprintf('MAC %s added to the wifi deny list for %s; no radio is running, it applies when wifi starts', mac, ip)
+			: (enf == 'ban') ? sprintf('MAC %s is NOT permanently blocked: hostapd_cli is missing, so the block is temporary (%d min). Install hostapd-utils, or restart wifi (drops all clients)', mac, min)
+			: sprintf('MAC %s saved to the wifi deny list but NOT applied to the radio, so the device stays online. Install hostapd-utils, or restart wifi (drops all clients)', mac);
+	else
+		msg = (enf == 'acl') ? sprintf('MAC %s removed from wifi filter for %s', mac, ip)
+			: (enf == 'no-radio') ? sprintf('MAC %s removed from the wifi filter for %s; no radio is running', mac, ip)
+			: (enf == 'ban') ? sprintf('MAC %s removed from the wifi filter, but hostapd still bans it for up to %d min. Restart wifi (drops all clients) to clear it now', mac, min)
+			: sprintf('MAC %s removed from the wifi filter, but the radio ACL could not be read back: it may still be blocked. Install hostapd-utils, or restart wifi', mac);
+	lib.log((op == 'add') ? 'wifi_block' : 'wifi_unblock', ip, 'MAC=' + mac + ' enforce=' + enf,
+		getenv('TCTL_VIA'), getenv('TCTL_SRC'));
+	// Exit 0 either way, as the scripts did: the reply says how far it got.
+	return reply({ ok, enforcement: enf, msg }, 0);
+}
+
+// ── new devices (the DHCP hotplug hook) ─────────────────────────────────────
+
+const KNOWN = '/etc/trafficctl/telegram_known.json';
+const NOTIFY = '/tmp/trafficctl_tg_newdev';
+
+// A limit somebody set deliberately, live or saved: after a reboot the
+// restore hook runs only on ifup lan, and a default limit applied before
+// that would overwrite the operator's choice.
+function has_limit(ip) {
+	if (ip == null || ip == '')
+		return false;
+	for (let s in ratelimit_stats())
+		if (s.ip == ip)
+			return true;
+	for (let s in shape_stats())
+		if (s.ip == ip)
+			return true;
+	let key = '"ip":"' + ip + '"';
+	return index(lib.readfile(RULES) ?? '', key) >= 0 || index(lib.readfile(SHAPES) ?? '', key) >= 0;
+}
+
+function logger(msg) {
+	lib.sh('logger -t trafficctl ' + lib.q(msg));
+}
+
+// Two consumers of "this MAC is new", independent of each other: the bot's
+// notification keys off its own telegram_known.json, the default limit off
+// the seen-MAC ledger, because a limit must not be applied twice or by
+// mistake.
+function newdevice(env) {
+	let mac = env.MACADDR ?? '', ip = env.IPADDR ?? '';
+	if (env.ACTION != 'add' || mac == '')
+		return 0;
+
+	if (lib.uci_get('trafficctl', 'telegram', 'enabled') == '1' &&
+	    index(lib.readfile(KNOWN) ?? '', '"' + mac + '"') < 0) {
+		lib.mkdir_p('/tmp');
+		lib.append(NOTIFY, sprintf('%s\t%s\t%s\n', mac, (ip != '') ? ip : '?',
+			(env.HOSTNAME != null && env.HOSTNAME != '') ? env.HOSTNAME : 'unknown'));
+	}
+
+	if (lib.uci_get('trafficctl', 'newdevice', 'enabled') != '1')
+		return 0;
+	let kbit = lib.uci_get('trafficctl', 'newdevice', 'limit_kbit');
+	if (!lib.valid_int(kbit, 1))
+		return 0;
+
+	// Without a ledger "new" has no answer, and the wrong one limits every
+	// device as its lease renews. The seed reads leases and neighbours, thin
+	// early in boot, so the first pass records the baseline and applies
+	// nothing.
+	if (!lib.seen_ready()) {
+		lib.seen_seed();
+		lib.seen_mark(mac);
+		logger(sprintf('newdevice: seeded the seen-MAC ledger (%d devices); no limit applied on this pass', lib.seen_count()));
+		return 0;
+	}
+	if (lib.seen_known(mac))
+		return 0;
+	// Before acting: a failed apply must not leave the device unmarked, or
+	// every renewal retries and races an operator setting a limit by hand.
+	lib.seen_mark(mac);
+
+	if (ip == '') {
+		logger(sprintf('newdevice: %s is new but has no address yet; no limit applied', mac));
+		return 0;
+	}
+	if (has_limit(ip)) {
+		logger(sprintf('newdevice: %s (%s) already has a limit; left alone', ip, mac));
+		return 0;
+	}
+
+	let shaper = (lib.uci_get('trafficctl', 'newdevice', 'limit_mode') == 'shaper');
+	let argv = shaper
+		? [ lib.path('/usr/libexec/trafficctl/trafficctl-shape.sh'), 'add', ip, kbit, 'shape_' + ip ]
+		: [ lib.path('/usr/libexec/trafficctl/trafficctl-ratelimit.sh'), ip, kbit, 'rl_ratelimit_' + slug(ip) ];
+	if (lib.sh('TCTL_VIA=newdevice TCTL_SRC=hotplug ' + lib.qv(argv)) == 0) {
+		// The limiter logs its own entry with the via/src above; the shaper
+		// logs nothing.
+		if (shaper)
+			lib.log('shape_set', ip, kbit + 'kbit default for new device ' + mac, 'newdevice', 'hotplug');
+	}
+	else
+		logger(sprintf('newdevice: failed to apply %skbit to %s (%s)', kbit, ip, mac));
+	return 0;
+}
+
+// ── restore after boot (the block half of the iface hotplug hook) ───────────
+
+// At boot ifup lan can come before fw4 has loaded its ruleset.
+const FW4_TRIES = 20;
+const FW4_WAIT_MS = 500;
+
+// The saved blocks, only while persist_rules is on (the shell hook's gate).
+function restore() {
+	let res = { ok: true, restored: 0, failed: 0 };
+	if (!lib.persist_enabled())
+		return res;
+	let d;
+	try {
+		d = json(lib.readfile(RULES) ?? '');
+	}
+	catch (e) {
+		return res;
+	}
+	let ips = [];
+	for (let r in (type(d) == 'array') ? d : [])
+		if (type(r) == 'object' && r.type == 'block' && type(r.ip) == 'string' && r.ip != '')
+			push(ips, r.ip);
+	if (!length(ips))
+		return res;
+	for (let i = 0; i < FW4_TRIES && lib.sh('nft list table inet fw4') != 0; i++)
+		sleep(FW4_WAIT_MS);
+	let rules = nft_rules(FW4);
+	for (let ip in ips) {
+		// Checked before the rule string is built: the file is only as
+		// trustworthy as whoever last wrote /etc. A block already in the
+		// chain (lan going up again without a fw4 reload) is not doubled.
+		if (lib.valid_ip(ip) && (is_blocked(ip, rules) || block_add(ip, block_comment(ip)).ok))
+			res.restored++;
+		else {
+			res.failed++;
+			logger('Failed to restore block for ' + ip);
+		}
+	}
+	res.ok = (res.failed == 0);
+	return res;
+}
+
 // 2022-12 needs a ';' after `export function f() {}`; one list avoids it.
 export { nft_rules, rate_kbit, rl_rules, rl_rate_kbit, live_blocks, ratelimit_stats,
-	shape_records, shape_classmap, ifb_dev, tc_class_rates, shape_stats, rules_list };
+	shape_records, shape_classmap, ifb_dev, tc_class_rates, shape_stats, rules_list,
+	block_comment, is_blocked, block_add, block_remove, block_remove_legacy, block, unblock,
+	macfilter, has_limit, newdevice, restore };

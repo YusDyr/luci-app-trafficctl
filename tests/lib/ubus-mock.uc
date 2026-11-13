@@ -6,6 +6,13 @@
 //   <dir>/<object>@<method>.json  reply for that call (missing file: no object),
 //                                 read again on every call
 //   [log]                         one line per call: object method args-json
+//
+// hostapd's ban list has state, as the WiFi deny's fallback needs it: a
+// del_client call bans its addr, and that object's list_bans lists the bans
+// after the clients its file names. Keys starting with _ in a del_client file
+// steer the call instead of being replied: "_rc": <status> fails it (the ban
+// still lands, as hostapd does for a client not associated), "_ban": false
+// lands no ban.
 
 let fs = require('fs');
 let ubus = require('ubus');
@@ -51,6 +58,16 @@ for (let path in fs.glob(dir + '/*@*.json')) {
 	objects[m[1]][m[2]] = json(fs.readfile(path));
 }
 
+let bans = {};
+
+function strip(o) {
+	let r = {};
+	for (let k in o)
+		if (substr(k, 0, 1) != '_')
+			r[k] = o[k];
+	return r;
+}
+
 let published = [];
 for (let obj in objects) {
 	let methods = {};
@@ -66,6 +83,14 @@ for (let obj in objects) {
 				// procd filters "service list" by name itself.
 				if (o == 'service' && me == 'list' && req.args.name)
 					return exists(reply, req.args.name) ? { [req.args.name]: reply[req.args.name] } : {};
+				if (me == 'del_client') {
+					bans[o] ??= [];
+					if (reply?._ban !== false && type(req.args.addr) == 'string')
+						push(bans[o], req.args.addr);
+					return (type(reply?._rc) == 'int') ? reply._rc : strip(reply);
+				}
+				if (me == 'list_bans')
+					return { clients: [ ...(reply?.clients ?? []), ...(bans[o] ?? []) ] };
 				return reply;
 			}
 		};

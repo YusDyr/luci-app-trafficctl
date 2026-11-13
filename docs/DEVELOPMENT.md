@@ -88,16 +88,17 @@ luci-app-trafficctl/                     # repository
 │       │   ├── config/trafficctl        # UCI config (the conffile)
 │       │   ├── init.d/                  # trafficctl-telegram, trafficctl-history, trafficctl-cut
 │       │   └── hotplug.d/
-│       │       ├── iface/99-trafficctl-shapes      # Restore tc rules on boot
-│       │       └── dhcp/99-trafficctl-newdevice    # New-device detection
+│       │       ├── iface/99-trafficctl-shapes      # Restore on boot (blocks via `trafficctl restore`)
+│       │       └── dhcp/99-trafficctl-newdevice    # New-device detection: `trafficctl newdevice`
 │       ├── lib/upgrade/keep.d/trafficctl          # /etc/trafficctl/ kept across sysupgrade
 │       ├── usr/sbin/trafficctl          # The CLI (ucode): subnets, names, rdns, rdns-refresh, ifaces, bytes, totals,
 │       │                                #   ratelimit-stats, shape-stats, rules, summary, device, metrics, netify,
+│       │                                #   block, unblock, macfilter-add, macfilter-remove, newdevice, restore,
 │       │                                #   cut, portfw
 │       ├── usr/share/ucode/trafficctl/
 │       │   ├── lib.uc                   # Shared helpers: uci/ubus, commands, JSON, validation, files, log
 │       │   ├── net.uc                   # Subnets, interface roles, reverse DNS, byte samples, totals
-│       │   ├── ctl.uc                   # Read-only nft/tc readers: limits, blocks, shapes, the Rules tab
+│       │   ├── ctl.uc                   # nft/tc readers, the block, the WiFi deny, newdevice, restore
 │       │   ├── report.uc                # Summary, device detail, Prometheus exporter, netifyd DPI
 │       │   ├── cut.uc                   # Global internet cut: nft -f ruleset, state, keeper loop
 │       │   └── portfw.uc                # Port-forward list, pause, limit (inet tctl_pfw)
@@ -108,14 +109,14 @@ luci-app-trafficctl/                     # repository
 │       │   ├── trafficctl-bytes.sh      # Wrapper: `trafficctl bytes` (byte counters for speed)
 │       │   ├── trafficctl-totals.sh     # Wrapper: `trafficctl totals` (lifetime totals, UI + exporter)
 │       │   ├── trafficctl-ifaces.sh     # Wrapper for `trafficctl ifaces`
-│       │   ├── trafficctl-block.sh      # Internet block
-│       │   ├── trafficctl-unblock.sh    # Internet unblock
+│       │   ├── trafficctl-block.sh      # Wrapper: `trafficctl block`
+│       │   ├── trafficctl-unblock.sh    # Wrapper: `trafficctl unblock`
 │       │   ├── trafficctl-shape.sh      # tc/HTB shaping
 │       │   ├── trafficctl-shape-stats.sh      # Wrapper: `trafficctl shape-stats`
 │       │   ├── trafficctl-ratelimit.sh  # nft policer
 │       │   ├── trafficctl-ratelimit-stats.sh  # Wrapper: `trafficctl ratelimit-stats`
-│       │   ├── trafficctl-macfilter-add.sh
-│       │   ├── trafficctl-macfilter-remove.sh
+│       │   ├── trafficctl-macfilter-add.sh     # Wrapper: `trafficctl macfilter-add`
+│       │   ├── trafficctl-macfilter-remove.sh  # Wrapper: `trafficctl macfilter-remove`
 │       │   ├── trafficctl-rdns.sh       # Wrapper for `trafficctl rdns`
 │       │   ├── trafficctl-rules.sh      # Wrapper: `trafficctl rules` (every restriction, online or not; "Rules" tab)
 │       │   ├── trafficctl-cut.sh        # Wrapper: `trafficctl cut` (global cut; the keeper is `trafficctl cut keeper`)
@@ -236,8 +237,7 @@ bash tests/test_meter_per_chain.sh    # Each-mode meters per chain, per-port suc
 bash tests/test_netify.sh             # Netify (DPI) integration
 bash tests/test_openwrt_compat.sh     # BusyBox ash compatibility / no bashisms
 bash tests/test_security.sh           # Input validation and injection resistance
-bash tests/test_block.sh              # Internet block/unblock
-bash tests/test_macfilter.sh          # WiFi MAC deny/allow
+bash tests/test_nss.sh                # Qualcomm NSS reporting
 bash tests/test_metrics_cgi.sh        # Metrics CGI gate and token check
 bash tests/test_regressions.sh        # Regressions for previously fixed bugs
 bash tests/test_telegram.sh           # Telegram bot units
@@ -262,6 +262,11 @@ bash tests/test_byte_overflow.sh      # Counters past 2^31 and 2^53
 bash tests/test_rpcd.sh               # rpcd plugin: every method, dispatch, uci commits, 0600
 bash tests/test_readers.sh            # nft -j readers of both nft versions: block comments, 1.1 meters
 bash tests/test_rules.sh              # Rules tab backend: restrictions of offline devices
+bash tests/test_block.sh              # Internet block/unblock, legacy labels, NSS
+bash tests/test_ipv6_block.sh         # The block's IPv6 half: MAC lookup, next hops
+bash tests/test_macfilter.sh          # WiFi MAC deny/allow, hostapd_cli timeouts, several APs
+bash tests/test_newdevice.sh          # DHCP hook: seen-MAC ledger, default limit, bot queue
+bash tests/test_persistence.sh        # rules.json bytes, the shared lock, restore after boot
 bash tests/test_rl_lookup.sh          # Rate limit read-back: units, prefixes, ratelimit-stats
 bash tests/test_shape_lookup.sh       # Shape classid lookup, shape-stats
 bash tests/test_subnet_limits.sh      # Subnet limits: stats, persisted mode, the restore hook

@@ -57,10 +57,13 @@ else
     cat "$out/new/fw4-after-unblock.nft"; fail=1
 fi
 
-expect=$(printf '192.168.0.60 limited\n192.168.0.80 limited\n192.168.0.8 free')
-if [ "$(cat "$out/new/has_limit.txt")" = "$expect" ]; then
-    echo "ok: tctl_has_limit through the shims"
+# Blocks across the upgrade and the DHCP hook (live-readers.sh, interop.txt):
+# every check ran, every one ok.
+want=13
+got=$(grep -c '^ok ' "$out/new/interop.txt" 2>/dev/null)
+if [ "${got:-0}" = "$want" ] && ! grep -q '^FAIL' "$out/new/interop.txt"; then
+    echo "ok: v1.30.0/ucode block interop, restore, newdevice ($got checks)"
 else
-    echo "FAIL: tctl_has_limit through the shims:"; cat "$out/new/has_limit.txt"; fail=1
+    echo "FAIL: interop checks ($got of $want ok):"; cat "$out/new/interop.txt"; fail=1
 fi
 exit "$fail"
