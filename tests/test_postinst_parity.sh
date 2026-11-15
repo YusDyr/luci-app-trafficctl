@@ -239,27 +239,39 @@ else
     echo "NOTE: no POSIX shell found to syntax-check the Makefile scripts with."
 fi
 
-# The firewall include that restores inet fw4 blocks after a reload must be
-# registered by every postinst and removed by every prerm / pre-deinstall.
-INCLUDE_SET="firewall.trafficctl_restore=include"
-INCLUDE_PATH="path=/usr/libexec/trafficctl/trafficctl-fw-restore.sh"
-INCLUDE_COMPAT="fw4_compatible=1"
-INCLUDE_DEL="delete firewall.trafficctl_restore"
-assert_contains "trafficctl Makefile postinst registers the restore include" "$INCLUDE_SET" "$BE_MK_POSTINST"
-assert_contains "trafficctl Makefile postinst points the include at the restore script" "$INCLUDE_PATH" "$BE_MK_POSTINST"
-assert_contains "trafficctl Makefile postinst marks the include fw4-compatible" "$INCLUDE_COMPAT" "$BE_MK_POSTINST"
-assert_contains "trafficctl Makefile postinst is idempotent (deletes the include first)" "$INCLUDE_DEL" "$BE_MK_POSTINST"
-assert_contains "trafficctl build-ipk.sh postinst registers the restore include" "$INCLUDE_SET" "$BE_IPK_POSTINST"
-assert_contains "trafficctl build-ipk.sh postinst points the include at the restore script" "$INCLUDE_PATH" "$BE_IPK_POSTINST"
-assert_contains "trafficctl build-ipk.sh postinst marks the include fw4-compatible" "$INCLUDE_COMPAT" "$BE_IPK_POSTINST"
-assert_contains "trafficctl build-ipk.sh postinst is idempotent (deletes the include first)" "$INCLUDE_DEL" "$BE_IPK_POSTINST"
-assert_contains "trafficctl build-apk.sh post-install registers the restore include" "$INCLUDE_SET" "$BE_APK_POSTINST"
-assert_contains "trafficctl build-apk.sh post-install points the include at the restore script" "$INCLUDE_PATH" "$BE_APK_POSTINST"
-assert_contains "trafficctl build-apk.sh post-install marks the include fw4-compatible" "$INCLUDE_COMPAT" "$BE_APK_POSTINST"
-assert_contains "trafficctl build-apk.sh post-install is idempotent (deletes the include first)" "$INCLUDE_DEL" "$BE_APK_POSTINST"
+# The firewall include that restores inet fw4 blocks after a reload is
+# registered by a uci-defaults snippet, not by the postinst: a postinst only
+# runs on a live install, so an ImageBuilder image never got the include, and
+# `uci commit firewall` there would also commit whatever else was staged.
+# The SDK's default_postinst runs a package's uci-defaults on a live install;
+# the local builders have no default_postinst, so their postinst runs it.
+UCI_DEFAULTS="$REPO_ROOT/trafficctl/files/etc/uci-defaults/trafficctl-fw-restore"
+assert_eq "the uci-defaults snippet ships in the package tree" yes \
+    "$([ -f "$UCI_DEFAULTS" ] && echo yes || echo no)"
+assert_contains "trafficctl Makefile installs the uci-defaults snippet" \
+    './files/etc/uci-defaults/trafficctl-fw-restore $(1)/etc/uci-defaults/' "$(cat "$BE_MAKEFILE")"
+UD_RUN='. ./trafficctl-fw-restore'
+UD_RM='rm -f /etc/uci-defaults/trafficctl-fw-restore'
+assert_contains "trafficctl build-ipk.sh postinst runs the uci-defaults snippet" "$UD_RUN" "$BE_IPK_POSTINST"
+assert_contains "trafficctl build-ipk.sh postinst deletes it afterwards" "$UD_RM" "$BE_IPK_POSTINST"
+assert_contains "trafficctl build-apk.sh post-install runs the uci-defaults snippet" "$UD_RUN" "$BE_APK_POSTINST"
+assert_contains "trafficctl build-apk.sh post-install deletes it afterwards" "$UD_RM" "$BE_APK_POSTINST"
+assert_not_contains "trafficctl Makefile postinst leaves the snippet to default_postinst" "$UD_RUN" "$BE_MK_POSTINST"
+for s in "$BE_MK_POSTINST" "$BE_IPK_POSTINST" "$BE_APK_POSTINST"; do
+    assert_not_contains "no postinst commits the firewall config itself" "commit firewall" "$s"
+    assert_not_contains "no postinst writes the include section itself" "set firewall.trafficctl_restore" "$s"
+done
+INCLUDE_DEL="uci -q delete firewall.trafficctl_restore && uci -q commit firewall"
+INCLUDE_OURS='= /usr/libexec/trafficctl/trafficctl-fw-restore.sh ]'
 assert_contains "trafficctl Makefile prerm removes the restore include" "$INCLUDE_DEL" "$BE_MK_PRERM"
 assert_contains "trafficctl build-ipk.sh prerm removes the restore include" "$INCLUDE_DEL" "$BE_IPK_PRERM"
 assert_contains "trafficctl build-apk.sh pre-deinstall removes the restore include" "$INCLUDE_DEL" "$BE_APK_PREDEL"
+assert_contains "trafficctl Makefile prerm only removes its own include" "$INCLUDE_OURS" "$BE_MK_PRERM"
+assert_contains "trafficctl build-ipk.sh prerm only removes its own include" "$INCLUDE_OURS" "$BE_IPK_PRERM"
+assert_contains "trafficctl build-apk.sh pre-deinstall only removes its own include" "$INCLUDE_OURS" "$BE_APK_PREDEL"
+assert_contains "trafficctl Makefile prerm checks for other staged firewall edits" 'uci -q changes firewall' "$BE_MK_PRERM"
+assert_contains "trafficctl build-ipk.sh prerm checks for other staged firewall edits" 'uci -q changes firewall' "$BE_IPK_PRERM"
+assert_contains "trafficctl build-apk.sh pre-deinstall checks for other staged firewall edits" 'uci -q changes firewall' "$BE_APK_PREDEL"
 
 # ── Behaviour ─────────────────────────────────────────────────────────────
 # Run every copy of the trafficctl postinst against fake init scripts and a
@@ -296,15 +308,18 @@ echo "\$*" >> "$FAKE/uci.calls"
 case "\$*" in
     "-q get trafficctl.telegram.enabled") cat "$FAKE/telegram.flag" ;;
     "-q get trafficctl.history.enabled") cat "$FAKE/history.flag" ;;
-    -q\ delete\ firewall.trafficctl_restore|-q\ set\ firewall.trafficctl_restore*|-q\ commit\ firewall)
-        exit 0 ;;
     *) exit 1 ;;
 esac
 FAKEUCI
     chmod +x "$FAKE/bin/uci"
     # A boot link for the cut keeper, as releases up to 1.30.1 left behind.
     : > "$FAKE/rc.d/S95trafficctl-cut"
+    # A stand-in for the uci-defaults snippet that records each run.
+    mkdir -p "$FAKE/etc/uci-defaults"
+    printf 'echo ran >> "%s/ud.runs"\n' "$FAKE" > "$FAKE/etc/uci-defaults/trafficctl-fw-restore"
+    : > "$FAKE/ud.runs"
     sed -e "s|/etc/init.d/|$FAKE/etc/init.d/|g" -e "s|/etc/config/|$FAKE/etc/config/|g" \
+        -e "s|/etc/uci-defaults|$FAKE/etc/uci-defaults|g" \
         -e "s|/etc/rc.d/|$FAKE/rc.d/|g" "$1" > "$FAKE/postinst"
     # shellcheck disable=SC2086 # SHELL_CMD may be "busybox ash"
     IPKG_INSTROOT="${5:-}" PATH="$FAKE/bin:$PATH" ${SHELL_CMD:-sh} "$FAKE/postinst" >/dev/null 2>&1
@@ -323,12 +338,16 @@ for f in "$TMP/trafficctl.postinst" "$TMP/ipk.postinst" "$TMP/apk.postinst"; do
     assert_eq "$n, telegram.enabled=1: the bot is started" 1 "$(calls 'trafficctl-telegram start')"
     assert_eq "$n, history.enabled=1: the sampler is enabled in rc.d" yes "$(in_rcd trafficctl-history)"
     assert_eq "$n, history.enabled=1: the sampler is restarted" 1 "$(calls 'trafficctl-history restart')"
-    assert_eq "$n: the firewall include is registered" 1 \
-        "$(grep -c -x -- '-q set firewall.trafficctl_restore=include' "$FAKE/uci.calls")"
-    assert_eq "$n: the include path is the restore script" 1 \
-        "$(grep -c -x -- '-q set firewall.trafficctl_restore.path=/usr/libexec/trafficctl/trafficctl-fw-restore.sh' "$FAKE/uci.calls")"
-    assert_eq "$n: the include is marked fw4-compatible" 1 \
-        "$(grep -c -x -- '-q set firewall.trafficctl_restore.fw4_compatible=1' "$FAKE/uci.calls")"
+    assert_eq "$n: the postinst does not touch the firewall config" 0 \
+        "$(grep -c firewall "$FAKE/uci.calls")"
+    if [ "$n" = trafficctl.postinst ]; then
+        # default_postinst runs it for the SDK package, not this script.
+        assert_eq "$n: leaves the uci-defaults snippet to default_postinst" 0 "$(grep -c . "$FAKE/ud.runs")"
+    else
+        assert_eq "$n: runs the uci-defaults snippet once" 1 "$(grep -c . "$FAKE/ud.runs")"
+        assert_eq "$n: deletes the snippet after it succeeded" no \
+            "$([ -e "$FAKE/etc/uci-defaults/trafficctl-fw-restore" ] && echo yes || echo no)"
+    fi
 
     run_postinst "$f" 0 0 0
     assert_eq "$n, telegram.enabled=0: the bot is not enabled in rc.d" no "$(in_rcd trafficctl-telegram)"
@@ -346,8 +365,101 @@ for f in "$TMP/trafficctl.postinst" "$TMP/ipk.postinst" "$TMP/apk.postinst"; do
     mkdir -p "$TMP/img/etc/config"
     run_postinst "$f" 1 1 0 "$TMP/img"
     assert_eq "$n, IPKG_INSTROOT set: no init script is called" 0 "$(grep -c . "$FAKE/calls")"
-    assert_eq "$n, IPKG_INSTROOT set: the firewall include is not registered" 0 \
-        "$(grep -c firewall.trafficctl_restore "$FAKE/uci.calls")"
+    assert_eq "$n, IPKG_INSTROOT set: the uci-defaults snippet is not run" 0 "$(grep -c . "$FAKE/ud.runs")"
+    assert_eq "$n, IPKG_INSTROOT set: it is kept for first boot" yes \
+        "$([ -e "$FAKE/etc/uci-defaults/trafficctl-fw-restore" ] && echo yes || echo no)"
+done
+
+# ── The uci-defaults snippet ──────────────────────────────────────────────
+# A fake uci backed by a key=value file: get/set/delete/commit/changes.
+UFAKE="$TMP/ufake"
+fake_uci() { # writes $UFAKE/bin/uci
+    rm -rf "$UFAKE"; mkdir -p "$UFAKE/bin" "$UFAKE/etc/config"
+    : > "$UFAKE/state"; : > "$UFAKE/staged"; : > "$UFAKE/calls"
+    : > "$UFAKE/etc/config/firewall"
+    cat > "$UFAKE/bin/uci" <<FAKEUCI
+#!/bin/sh
+S="$UFAKE/state"
+while [ "\$1" = "-q" ]; do shift; done
+echo "\$*" >> "$UFAKE/calls"
+case "\$1" in
+    get) v=\$(grep -m1 "^\$2=" "\$S" | cut -d= -f2-); [ -n "\$v" ] && echo "\$v" ;;
+    set) k=\${2%%=*}; grep -v "^\$k=" "\$S" > "\$S.n"; echo "\$2" >> "\$S.n"; mv "\$S.n" "\$S" ;;
+    delete) grep -v -e "^\$2=" -e "^\$2\\\\." "\$S" > "\$S.n"; mv "\$S.n" "\$S" ;;
+    changes) cat "$UFAKE/staged" ;;
+    commit) : ;;
+    *) exit 1 ;;
+esac
+exit 0
+FAKEUCI
+    chmod +x "$UFAKE/bin/uci"
+    sed -e "s|/etc/config/|$UFAKE/etc/config/|g" "$UCI_DEFAULTS" > "$UFAKE/ud"
+}
+run_ud() { # the way default_postinst and /etc/init.d/boot run it: sourced in a subshell
+    # shellcheck disable=SC2086 # SHELL_CMD may be "busybox ash"
+    PATH="$UFAKE/bin:$PATH" ${SHELL_CMD:-sh} -c ". '$UFAKE/ud'"
+}
+state() { sort "$UFAKE/state" | tr '\n' ' ' | sed 's/ $//'; }
+WANT="firewall.trafficctl_restore.fw4_compatible=1 firewall.trafficctl_restore.path=/usr/libexec/trafficctl/trafficctl-fw-restore.sh firewall.trafficctl_restore.type=script firewall.trafficctl_restore=include"
+
+fake_uci
+run_ud; rc=$?
+assert_eq "uci-defaults, fresh install: exits 0 so it is deleted" 0 "$rc"
+assert_eq "uci-defaults, fresh install: registers the include" "$WANT" "$(state)"
+assert_eq "uci-defaults, fresh install: commits the firewall config" 1 "$(grep -c -x 'commit firewall' "$UFAKE/calls")"
+
+: > "$UFAKE/calls"
+run_ud; rc=$?
+assert_eq "uci-defaults, already registered: exits 0" 0 "$rc"
+assert_eq "uci-defaults, already registered: changes nothing" "$WANT" "$(state)"
+assert_eq "uci-defaults, already registered: no set, delete or commit" 0 \
+    "$(grep -c -E '^(set|delete|commit)' "$UFAKE/calls")"
+
+# Left disabled by hand: kept disabled.
+echo "firewall.trafficctl_restore.enabled=0" >> "$UFAKE/state"
+run_ud
+assert_eq "uci-defaults: an include disabled by hand stays disabled" 0 \
+    "$(grep -m1 '^firewall.trafficctl_restore.enabled=' "$UFAKE/state" | cut -d= -f2)"
+
+# A hand-made section of the same name pointing elsewhere (the workaround
+# from before this fix) is repointed, with no stale options left behind.
+fake_uci
+printf '%s\n' firewall.trafficctl_restore=include firewall.trafficctl_restore.type=script \
+    firewall.trafficctl_restore.path=/etc/trafficctl/fw4-restore-blocks.sh \
+    firewall.trafficctl_restore.fw4_compatible=1 firewall.trafficctl_restore.reload=1 > "$UFAKE/state"
+run_ud; rc=$?
+assert_eq "uci-defaults, other path: exits 0" 0 "$rc"
+assert_eq "uci-defaults, other path: repointed at the restore script" "$WANT" "$(state)"
+
+# No firewall config (a build without firewall4): nothing to do.
+fake_uci
+rm -f "$UFAKE/etc/config/firewall"
+run_ud; rc=$?
+assert_eq "uci-defaults, no firewall config: exits 0" 0 "$rc"
+assert_eq "uci-defaults, no firewall config: calls no uci" 0 "$(grep -c . "$UFAKE/calls")"
+
+# ── prerm removes only its own include, and never commits other edits ─────
+printf '%s\n' "$BE_IPK_PRERM" > "$TMP/ipk.prerm"
+printf '%s\n' "$BE_APK_PREDEL" > "$TMP/apk.predel"
+for f in "$TMP/trafficctl.prerm" "$TMP/ipk.prerm" "$TMP/apk.predel"; do
+    n=$(basename "$f")
+    run_prerm() { # shellcheck disable=SC2086
+        PATH="$UFAKE/bin:$PATH" ${SHELL_CMD:-sh} "$f" >/dev/null 2>&1
+    }
+    fake_uci; printf '%s\n' $WANT > "$UFAKE/state"
+    run_prerm
+    assert_eq "$n: removes its include when nothing else is staged" "" "$(state)"
+    assert_eq "$n: and commits that" 1 "$(grep -c -x 'commit firewall' "$UFAKE/calls")"
+
+    fake_uci; printf '%s\n' $WANT > "$UFAKE/state"
+    echo "firewall.wan.input='ACCEPT'" > "$UFAKE/staged"
+    run_prerm
+    assert_eq "$n, other firewall edits staged: commits nothing" 0 "$(grep -c '^commit' "$UFAKE/calls")"
+    assert_eq "$n, other firewall edits staged: leaves the section (fw4 skips a missing path)" "$WANT" "$(state)"
+
+    fake_uci; echo "firewall.trafficctl_restore.path=/etc/somewhere-else.sh" > "$UFAKE/state"
+    run_prerm
+    assert_eq "$n: leaves a section that is not ours" 0 "$(grep -c -E '^(delete|commit)' "$UFAKE/calls")"
 done
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"

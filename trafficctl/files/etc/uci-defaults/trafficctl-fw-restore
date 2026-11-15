@@ -1,0 +1,31 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+# shellcheck shell=dash
+# Register the firewall include that puts trafficctl blocks back after a
+# firewall reload (see /usr/libexec/trafficctl/trafficctl-fw-restore.sh).
+#
+# Runs once: on the first boot of an image built with this package, and on a
+# live install or upgrade (the SDK's default_postinst runs a package's
+# uci-defaults and deletes the file when it exits 0; build-ipk.sh and
+# build-apk.sh do the same). Idempotent: if the section already points at the
+# restore script it is left exactly as it is, including an `enabled 0` the
+# operator set by hand, and nothing is committed.
+
+[ -f /etc/config/firewall ] || exit 0
+
+TCTL_INC=firewall.trafficctl_restore
+TCTL_INC_PATH=/usr/libexec/trafficctl/trafficctl-fw-restore.sh
+
+if [ "$(uci -q get "$TCTL_INC")" = "include" ] && \
+   [ "$(uci -q get "$TCTL_INC.path")" = "$TCTL_INC_PATH" ]; then
+    exit 0
+fi
+
+# Missing, or left by hand pointing elsewhere: (re)create it.
+uci -q delete "$TCTL_INC"
+uci -q set "$TCTL_INC=include"
+uci -q set "$TCTL_INC.type=script"
+uci -q set "$TCTL_INC.path=$TCTL_INC_PATH"
+uci -q set "$TCTL_INC.fw4_compatible=1"
+uci -q commit firewall
+exit 0

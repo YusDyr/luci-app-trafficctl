@@ -67,7 +67,11 @@ if [ -f "$RULES_FILE" ] && tctl_persist_enabled; then
 
         case "$type" in
             block)
-                tctl_block_add "$ip" "$(tctl_block_comment "$ip")" 2>/dev/null || \
+                # The firewall include (trafficctl-fw-restore.sh) also restores
+                # blocks, and at boot fw4 runs it before lan comes up; without
+                # the check every blocked device got two identical drop rules.
+                tctl_is_blocked "$ip" || \
+                    tctl_block_add "$ip" "$(tctl_block_comment "$ip")" 2>/dev/null || \
                     logger -t trafficctl "Failed to restore block for $ip"
                 ;;
             ratelimit)

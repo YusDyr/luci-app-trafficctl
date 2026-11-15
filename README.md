@@ -660,6 +660,7 @@ The frontend talks to a thin rpcd dispatcher over ubus. The Telegram bot provide
 | `trafficctl/files/etc/init.d/trafficctl-telegram` | procd init script for the bot |
 | `trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes` | Boot persistence for tc + block + ratelimit rules |
 | `trafficctl/files/usr/libexec/trafficctl/trafficctl-fw-restore.sh` | Restore inet fw4 blocks after a firewall reload |
+| `trafficctl/files/etc/uci-defaults/trafficctl-fw-restore` | Registers the firewall include for the restore script (live install and first boot) |
 | `trafficctl/files/etc/hotplug.d/dhcp/99-trafficctl-newdevice` | Instant new-device detection via DHCP events |
 | `trafficctl/files/www/cgi-bin/trafficctl-metrics` | Prometheus scrape endpoint (CGI) |
 | `Makefile` | OpenWrt package build |

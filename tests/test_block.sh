@@ -148,27 +148,6 @@ assert_contains "block: already-blocked address reports ok without erroring" \
     '"ok":true' "$OUT"
 assert_contains "block: already-blocked message says so" "already blocked" "$OUT"
 
-# ── self-block (TCTL_SRC == target) gets a distinct message ────────────────
-
-: > "$BLOCKED_STATE"
-OUT=$(PATH="$MOCKBIN:$PATH" TCTL_SRC=192.168.1.77 sh "$BLOCK_SH" 192.168.1.77 2>&1)
-assert_contains "block: self-block preserves LuCI access message" "LuCI access preserved" "$OUT"
-
-# ── unblock removes only the target's rule ──────────────────────────────────
-
-: > "$BLOCKED_STATE"
-printf '192.168.1.10\n192.168.1.1\n' > "$BLOCKED_STATE"
-OUT=$(run_unblock 192.168.1.1)
-assert_contains "unblock: reports ok" '"ok":true' "$OUT"
-REMAINING=$(cat "$BLOCKED_STATE")
-assert_contains "unblock: leaves 192.168.1.10 blocked" "192.168.1.10" "$REMAINING"
-EXACT_MATCH=$(awk '$0 == "192.168.1.1"' "$BLOCKED_STATE")
-assert_eq "unblock: 192.168.1.1 no longer present as its own exact entry" "" "$EXACT_MATCH"
-
-OUT=$(run_unblock 'bad;ip')
-assert_contains "unblock: invalid ip rejected" '"ok":false' "$OUT"
-
-
 # ── fw4-reload restore hook ────────────────────────────────────────────────
 # Blocks live in inet fw4 forward, so a firewall reload drops them while
 # rules.json and the UI still say blocked. The include script must put only
@@ -284,6 +263,36 @@ assert_not_contains "restore: a missing rules.json inserts no rules" "insert rul
 : > "$RULES"
 PATH="$MOCKBIN:$PATH" sh "$RESTORE" >/dev/null 2>&1
 assert_not_contains "restore: an empty rules.json inserts no rules" "insert rule" "$(cat "$NFT_LOG")"
+
+# Put the shared mocks back for the tests below: uci answers nothing
+# (persist off), jsonfilter is not needed, and the nft state starts empty.
+cat > "$MOCKBIN/uci" <<'MOCK'
+#!/bin/sh
+exit 1
+MOCK
+chmod +x "$MOCKBIN/uci"
+rm -f "$MOCKBIN/jsonfilter"
+: > "$BLOCKED_STATE"
+
+# ── self-block (TCTL_SRC == target) gets a distinct message ────────────────
+
+: > "$BLOCKED_STATE"
+OUT=$(PATH="$MOCKBIN:$PATH" TCTL_SRC=192.168.1.77 sh "$BLOCK_SH" 192.168.1.77 2>&1)
+assert_contains "block: self-block preserves LuCI access message" "LuCI access preserved" "$OUT"
+
+# ── unblock removes only the target's rule ──────────────────────────────────
+
+: > "$BLOCKED_STATE"
+printf '192.168.1.10\n192.168.1.1\n' > "$BLOCKED_STATE"
+OUT=$(run_unblock 192.168.1.1)
+assert_contains "unblock: reports ok" '"ok":true' "$OUT"
+REMAINING=$(cat "$BLOCKED_STATE")
+assert_contains "unblock: leaves 192.168.1.10 blocked" "192.168.1.10" "$REMAINING"
+EXACT_MATCH=$(awk '$0 == "192.168.1.1"' "$BLOCKED_STATE")
+assert_eq "unblock: 192.168.1.1 no longer present as its own exact entry" "" "$EXACT_MATCH"
+
+OUT=$(run_unblock 'bad;ip')
+assert_contains "unblock: invalid ip rejected" '"ok":false' "$OUT"
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

@@ -139,23 +139,13 @@ if [ -z "${IPKG_INSTROOT}" ]; then
             /etc/init.d/trafficctl-history restart 2>/dev/null || true
         fi
     fi
-    # tctl_block_add inserts drop rules into inet fw4 forward (or iptables
-    # FORWARD). fw4 reload rebuilds that table from /etc/config/firewall,
-    # so every trafficctl block disappears while rules.json and the UI
-    # still say the device is blocked. The lan-ifup hotplug hook restores
-    # them after a reboot, but not after a mid-session reload
-    # (https-dns-proxy restart, a LuCI firewall edit, ...). This include
-    # runs the restore after every firewall reload. Rate limits and
-    # port-forward pauses live in their own tables (netdev tm_ratelimit,
-    # inet tctl_pfw) and survive a fw4 reload, so they are not replayed.
-    # delete+set so an upgrade is idempotent.
-    if command -v uci >/dev/null 2>&1 && [ -f /etc/config/firewall ]; then
-        uci -q delete firewall.trafficctl_restore
-        uci -q set firewall.trafficctl_restore=include
-        uci -q set firewall.trafficctl_restore.type=script
-        uci -q set firewall.trafficctl_restore.path=/usr/libexec/trafficctl/trafficctl-fw-restore.sh
-        uci -q set firewall.trafficctl_restore.fw4_compatible=1
-        uci -q commit firewall
+    # What the SDK's default_postinst does for the feed package: run the
+    # uci-defaults snippet that registers the firewall include restoring
+    # blocks after a fw4 reload, and delete it once it succeeds. In an
+    # image (IPKG_INSTROOT set) it stays and runs on first boot.
+    if [ -f /etc/uci-defaults/trafficctl-fw-restore ]; then
+        ( cd /etc/uci-defaults && . ./trafficctl-fw-restore ) && \
+            rm -f /etc/uci-defaults/trafficctl-fw-restore
     fi
 fi
 exit 0
@@ -186,10 +176,15 @@ if [ -z "${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-cut ]; then
     /etc/init.d/trafficctl-cut stop 2>/dev/null || true
     /etc/init.d/trafficctl-cut disable 2>/dev/null || true
 fi
-# Drop the firewall include so a leftover path does not fail a later fw4 reload.
-if [ -z "${IPKG_INSTROOT}" ] && command -v uci >/dev/null 2>&1; then
-    uci -q delete firewall.trafficctl_restore
-    uci -q commit firewall
+# Drop the firewall include we registered. Only when it is still ours and
+# nothing else is staged for the firewall config, so the commit cannot
+# take someone's uncommitted CLI edits with it. Left in place otherwise:
+# fw4 skips an include whose path is gone ("specifies unreachable path,
+# ignoring section"), so a leftover section never breaks a reload.
+if [ -z "${IPKG_INSTROOT}" ] && command -v uci >/dev/null 2>&1 && \
+   [ "$(uci -q get firewall.trafficctl_restore.path)" = /usr/libexec/trafficctl/trafficctl-fw-restore.sh ] && \
+   [ -z "$(uci -q changes firewall)" ]; then
+    uci -q delete firewall.trafficctl_restore && uci -q commit firewall
 fi
 exit 0
 SCRIPT
