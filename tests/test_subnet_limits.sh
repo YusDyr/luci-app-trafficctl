@@ -444,6 +444,31 @@ assert_terminated "restore: a record with no ip must not spin the loop"
 assert_contains "restore: a record after a malformed one is still restored" \
     "192.168.1.77" "$RESTORED"
 
+# A block already in the chain is not inserted again. At boot fw4 runs the
+# firewall include (trafficctl-fw-restore.sh) before lan comes up, so by the
+# time this hook runs the block is usually there already; without the
+# tctl_is_blocked check every blocked device ended up with two drop rules.
+cat > "$MOCKBIN/nft" <<MOCK
+#!/bin/sh
+echo "\$*" >> "$NFT_LOG"
+case "\$*" in
+    "list tables") echo "table inet fw4" ;;
+    "list table netdev tm_ratelimit") cat "$TMP/nft_table.txt" 2>/dev/null ;;
+    "list chain inet fw4 forward") cat "$TMP/fw4_forward.txt" 2>/dev/null ;;
+esac
+exit 0
+MOCK
+chmod +x "$MOCKBIN/nft"
+printf '\t\tip saddr 192.168.1.80 counter packets 0 bytes 0 drop comment "tctl_block_192_168_1_80"\n' \
+    > "$TMP/fw4_forward.txt"
+RESTORED=$(restore '[{"type":"block","ip":"192.168.1.80","param":""},{"type":"block","ip":"192.168.1.81","param":""}]')
+assert_terminated "restore: the loop ended on its own"
+assert_not_contains "restore: a block already in the chain is not inserted again" \
+    "saddr 192.168.1.80" "$(printf '%s\n' "$RESTORED" | grep '^insert')"
+assert_contains "restore: a block missing from the chain is still inserted" \
+    "saddr 192.168.1.81" "$(printf '%s\n' "$RESTORED" | grep '^insert')"
+rm -f "$TMP/fw4_forward.txt"
+
 
 
 # ════════════════════════════════════════════════════════════════════════════

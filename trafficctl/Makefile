@@ -81,6 +81,7 @@ define Package/trafficctl/install
 	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-cut.sh $(1)/usr/libexec/trafficctl/
 	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-device.sh $(1)/usr/libexec/trafficctl/
 	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-fw.sh $(1)/usr/libexec/trafficctl/
+	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-fw-restore.sh $(1)/usr/libexec/trafficctl/
 	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-history.sh $(1)/usr/libexec/trafficctl/
 	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-ifaces.sh $(1)/usr/libexec/trafficctl/
 	$(INSTALL_BIN) ./files/usr/libexec/trafficctl/trafficctl-macfilter-add.sh $(1)/usr/libexec/trafficctl/
@@ -108,6 +109,8 @@ define Package/trafficctl/install
 	$(INSTALL_BIN) ./files/etc/init.d/trafficctl-cut $(1)/etc/init.d/
 	$(INSTALL_BIN) ./files/etc/init.d/trafficctl-history $(1)/etc/init.d/
 	$(INSTALL_BIN) ./files/etc/init.d/trafficctl-telegram $(1)/etc/init.d/
+	$(INSTALL_DIR) $(1)/etc/uci-defaults
+	$(INSTALL_DATA) ./files/etc/uci-defaults/trafficctl-fw-restore $(1)/etc/uci-defaults/
 	$(INSTALL_DIR) $(1)/etc/hotplug.d/dhcp
 	$(INSTALL_DATA) ./files/etc/hotplug.d/dhcp/99-trafficctl-newdevice $(1)/etc/hotplug.d/dhcp/
 	$(INSTALL_DIR) $(1)/etc/hotplug.d/iface
@@ -169,6 +172,10 @@ if [ -z "$${IPKG_INSTROOT}" ]; then
 			/etc/init.d/trafficctl-history restart 2>/dev/null || true
 		fi
 	fi
+	# The firewall include that restores blocks after a fw4 reload is
+	# registered by /etc/uci-defaults/trafficctl-fw-restore. The SDK's
+	# default_postinst runs that (and deletes it) as part of this same
+	# install or upgrade; in an ImageBuilder image it runs on first boot.
 fi
 exit 0
 endef
@@ -180,6 +187,16 @@ define Package/trafficctl/prerm
 #!/bin/sh
 if [ -z "$${IPKG_INSTROOT}" ] && [ -x /usr/libexec/trafficctl/trafficctl-cut.sh ]; then
 	/usr/libexec/trafficctl/trafficctl-cut.sh release >/dev/null 2>&1 || true
+fi
+# Drop the firewall include we registered. Only when it is still ours and
+# nothing else is staged for the firewall config, so the commit cannot
+# take someone's uncommitted CLI edits with it. Left in place otherwise:
+# fw4 skips an include whose path is gone ("specifies unreachable path,
+# ignoring section"), so a leftover section never breaks a reload.
+if [ -z "$${IPKG_INSTROOT}" ] && command -v uci >/dev/null 2>&1 && \
+   [ "$$(uci -q get firewall.trafficctl_restore.path)" = /usr/libexec/trafficctl/trafficctl-fw-restore.sh ] && \
+   [ -z "$$(uci -q changes firewall)" ]; then
+	uci -q delete firewall.trafficctl_restore && uci -q commit firewall
 fi
 exit 0
 endef
