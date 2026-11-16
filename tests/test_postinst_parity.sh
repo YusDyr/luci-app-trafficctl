@@ -130,6 +130,8 @@ assert_nonempty "build-apk.sh writes a trafficctl-telegram pre-deinstall" "$TG_A
 # luci-app-trafficctl 1.30.x depends on any trafficctl, and its rpcd plugin
 # sources trafficctl-fw.sh, gone in 2.0.0: every builder's postinst says so.
 old_luci_hint() { # <name> <script>
+    assert_contains "$1 checks for the 2.0.0 ucode rpcd plugin" \
+        "[ ! -e /usr/share/rpcd/ucode/luci.trafficctl.uc ]" "$2"
     assert_contains "$1 detects a 1.30.x rpcd plugin" \
         "grep -q 'trafficctl-fw.sh' /usr/libexec/rpcd/luci.trafficctl" "$2"
     assert_contains "$1 tells to upgrade luci-app-trafficctl" \
@@ -141,22 +143,47 @@ old_luci_hint "build-apk.sh trafficctl post-install" "$BE_APK_POSTINST"
 
 # ── luci-app-trafficctl ─────────────────────────────────────────────────────
 
-# 1. rpcd restart. Without it the plugin is installed but unregistered, and the
+# 1. rpcd reload. Without it the plugin is installed but unregistered, and the
 #    whole app is dead until a reboot. The plugin is in luci-app-trafficctl.
-RPCD="/etc/init.d/rpcd restart"
-assert_contains "luci-app Makefile postinst restarts rpcd" "$RPCD" "$FE_MK_POSTINST"
-assert_contains "luci-app build-ipk.sh postinst restarts rpcd" "$RPCD" "$FE_IPK_POSTINST"
-assert_contains "luci-app build-apk.sh post-install restarts rpcd" "$RPCD" "$FE_APK_POSTINST"
+#    A reload, not a restart: rpcd re-executes itself and keeps its sessions,
+#    so the LuCI user who runs the upgrade is not logged out.
+RPCD="/etc/init.d/rpcd reload"
+assert_contains "luci-app Makefile postinst reloads rpcd" "$RPCD" "$FE_MK_POSTINST"
+assert_contains "luci-app build-ipk.sh postinst reloads rpcd" "$RPCD" "$FE_IPK_POSTINST"
+assert_contains "luci-app build-apk.sh post-install reloads rpcd" "$RPCD" "$FE_APK_POSTINST"
 
-# 2. The restart must be skipped for an offline install into an image root:
+# 2. The reload must be skipped for an offline install into an image root:
 #    there is no running rpcd there, and calling its init script reaches for
 #    the build host's.
-assert_contains "luci-app Makefile guards the restart on IPKG_INSTROOT" \
+assert_contains "luci-app Makefile guards the reload on IPKG_INSTROOT" \
     'if [ -z "$${IPKG_INSTROOT}" ]; then' "$FE_MK_POSTINST"
-assert_contains "luci-app build-ipk.sh guards the restart on IPKG_INSTROOT" \
+assert_contains "luci-app build-ipk.sh guards the reload on IPKG_INSTROOT" \
     'if [ -z "${IPKG_INSTROOT}" ]; then' "$FE_IPK_POSTINST"
-assert_contains "luci-app build-apk.sh guards the restart on IPKG_INSTROOT" \
+assert_contains "luci-app build-apk.sh guards the reload on IPKG_INSTROOT" \
     'if [ -z "${IPKG_INSTROOT}" ]; then' "$FE_APK_POSTINST"
+
+# 3. The exec plugin of releases up to 1.30.x goes, and before the reload:
+#    a copy left there registers the same ubus object as the ucode plugin.
+OLDPLUGIN='/usr/libexec/rpcd/luci.trafficctl"'
+assert_contains "luci-app Makefile postinst removes the exec plugin" "rm -f \"\$\${IPKG_INSTROOT}$OLDPLUGIN" "$FE_MK_POSTINST"
+assert_contains "luci-app build-ipk.sh postinst removes the exec plugin" "rm -f \"\${IPKG_INSTROOT}$OLDPLUGIN" "$FE_IPK_POSTINST"
+assert_contains "luci-app build-apk.sh post-install removes the exec plugin" "rm -f \"\${IPKG_INSTROOT}$OLDPLUGIN" "$FE_APK_POSTINST"
+for s in "$FE_MK_POSTINST" "$FE_IPK_POSTINST" "$FE_APK_POSTINST"; do
+    assert_eq "the exec plugin goes before the rpcd reload" "yes" \
+        "$(printf '%s' "$s" | awk -v a="$OLDPLUGIN" -v b="$RPCD" \
+            'index($0, a) && !ra { ra = NR } index($0, b) && !rb { rb = NR } END { print (ra && rb && ra < rb) ? "yes" : "no" }')"
+done
+
+# 4. trafficctl reloads rpcd when the ucode plugin is there: rpcd loads the
+#    plugin and the trafficctl modules it imports once, so a backend upgrade
+#    alone would leave the old modules running.
+RPCD_IF='if [ -f /usr/share/rpcd/ucode/luci.trafficctl.uc ]; then'
+assert_contains "trafficctl Makefile postinst reloads rpcd for the plugin" "$RPCD_IF" "$BE_MK_POSTINST"
+assert_contains "trafficctl build-ipk.sh postinst reloads rpcd for the plugin" "$RPCD_IF" "$BE_IPK_POSTINST"
+assert_contains "trafficctl build-apk.sh post-install reloads rpcd for the plugin" "$RPCD_IF" "$BE_APK_POSTINST"
+for s in "$BE_MK_POSTINST" "$BE_IPK_POSTINST" "$BE_APK_POSTINST"; do
+    assert_contains "trafficctl postinst: the rpcd reload" "$RPCD" "$s"
+done
 
 # The web interface no longer owns the config or the services.
 for s in 'chmod 0600' 'trafficctl-telegram' 'trafficctl-history' 'trafficctl-cut'; do
@@ -403,9 +430,13 @@ FAKEUBUS
     # OLD_LUCI=1: the rpcd plugin of luci-app-trafficctl 1.30.x is installed.
     mkdir -p "$FAKE/rpcd"
     [ "${OLD_LUCI:-0}" = 1 ] && echo '. /usr/libexec/trafficctl/trafficctl-fw.sh' > "$FAKE/rpcd/luci.trafficctl"
+    # NEW_LUCI=1: the 2.0.0 ucode plugin is installed.
+    mkdir -p "$FAKE/rpcd-ucode"
+    [ "${NEW_LUCI:-0}" = 1 ] && : > "$FAKE/rpcd-ucode/luci.trafficctl.uc"
     sed -e "s|/etc/init.d/|$FAKE/etc/init.d/|g" -e "s|/etc/config/|$FAKE/etc/config/|g" \
         -e "s|/etc/rc.d/|$FAKE/rc.d/|g" -e "s|/var/run/trafficctl/|$FAKE/run/|g" -e "s|/usr/sbin/trafficctl|$FAKE/bin/trafficctl|g" \
-        -e "s|/usr/libexec/rpcd/|$FAKE/rpcd/|g" "$1" > "$FAKE/postinst"
+        -e "s|/usr/libexec/rpcd/|$FAKE/rpcd/|g" -e "s|/usr/share/rpcd/ucode/|$FAKE/rpcd-ucode/|g" \
+        "$1" > "$FAKE/postinst"
     # shellcheck disable=SC2086 # SHELL_CMD may be "busybox ash"
     IPKG_INSTROOT="${5:-}" PATH="$FAKE/bin:$PATH" ${SHELL_CMD:-sh} "$FAKE/postinst" >"$FAKE/out" 2>&1
     echo "$?" > "$FAKE/rc"
@@ -437,6 +468,11 @@ for f in "$TMP/trafficctl.postinst" "$TMP/ipk.postinst" "$TMP/apk.postinst"; do
     assert_eq "$n, a 1.30.x web interface left: the hint goes to the log too" 1 \
         "$(grep -c '^logger -t trafficctl .*upgrade luci-app-trafficctl too' "$FAKE/calls")"
     assert_eq "$n, a 1.30.x web interface left: the postinst succeeds" 0 "$(cat "$FAKE/rc")"
+    # A stray copy of the old exec plugin next to the 2.0.0 ucode one is not
+    # an old web interface (its postinst removes the copy).
+    OLD_LUCI=1 NEW_LUCI=1 run_postinst "$f" 1 1 0
+    assert_eq "$n, the 2.0.0 ucode plugin installed: no upgrade hint" 0 \
+        "$(grep -c 'upgrade luci-app-trafficctl too' "$FAKE/out")"
 
     NO_BOT=1 run_postinst "$f" 1 1 0
     assert_eq "$n, the bot not installed: a running one is stopped" 1 \

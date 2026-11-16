@@ -112,7 +112,7 @@ for f in \
   /etc/init.d/trafficctl-history \
   /usr/libexec/trafficctl/trafficctl-telegram.uc \
   /usr/share/ucode/trafficctl/telegram.uc \
-  /usr/libexec/rpcd/luci.trafficctl \
+  /usr/share/rpcd/ucode/luci.trafficctl.uc \
   /www/luci-static/resources/view/trafficctl/status.js \
   /www/luci-static/resources/view/trafficctl/status.css \
   /usr/share/luci/menu.d/luci-app-trafficctl.json \
@@ -164,7 +164,6 @@ done
 for s in \
   /usr/sbin/trafficctl \
   /usr/libexec/trafficctl/trafficctl-telegram.uc \
-  /usr/libexec/rpcd/luci.trafficctl \
   /www/cgi-bin/trafficctl-metrics \
   /etc/init.d/trafficctl-cut \
   /etc/init.d/trafficctl-history \
@@ -215,47 +214,47 @@ if /usr/sbin/trafficctl history validate-dir /etc; then
     echo "CLI FAILED: validate-dir accepted /etc"; exit 1
 fi
 
-# The rpcd plugin is ucode too: its signature table, a read that needs only
-# uci, and the version, read from this package manager's database (never
-# "dev" once installed, never by running opkg).
-RPCD=/usr/libexec/rpcd/luci.trafficctl
-case "$($RPCD list 2>&1)" in *'"version":{}'*) ;; *) echo "RPCD FAILED: list printed: $($RPCD list 2>&1)"; exit 1 ;; esac
-out=$(echo '{}' | $RPCD call config_get 2>&1)
-case "$out" in '{"enabled":'*) ;; *) echo "RPCD FAILED: config_get printed: $out"; exit 1 ;; esac
-out=$(echo '{}' | $RPCD call version 2>&1)
-case "$out" in '{"version":"dev"}'|'{"version":""}'|*error*) echo "RPCD FAILED: version printed: $out"; exit 1 ;;
-    '{"version":"'*) echo "rpcd plugin: $out" ;;
-    *) echo "RPCD FAILED: version printed: $out"; exit 1 ;; esac
-
-# The same plugin behind this release's own rpcd. rpcd writes a call's
-# arguments to the plugin's stdin and closes it; the plugin reads to the end,
-# so a call with arguments returning at all (well inside rpcd's 30 s exec
-# timeout) is what proves the close.
-if [ -x /sbin/rpcd ] && [ -x /sbin/ubusd ]; then
-    mkdir -p /var/run
-    /sbin/ubusd & UBUSD_PID=$!
+# The rpcd plugin runs inside this release's own rpcd (rpcd-mod-ucode, a
+# dependency): its signature, a read that needs only uci, the version read
+# from this package manager's database (never "dev" once installed, never by
+# running opkg), a call with arguments, and rpcd's policy refusing a value of
+# the wrong type. The exec plugin of releases up to 1.30.x is not there.
+[ ! -e /usr/libexec/rpcd/luci.trafficctl ] || {
+    echo "RPCD FAILED: the exec plugin of 1.30.x is still installed"; exit 1; }
+[ -f /usr/lib/rpcd/ucode.so ] || { echo "RPCD FAILED: rpcd-mod-ucode is not installed"; exit 1; }
+mkdir -p /var/run
+/sbin/ubusd & UBUSD_PID=$!
+sleep 1
+/sbin/rpcd & RPCD_PID=$!
+i=0
+until ubus list luci.trafficctl >/dev/null 2>&1; do
+    i=$((i + 1))
+    [ "$i" -lt 20 ] || { echo "RPCD FAILED: rpcd never registered luci.trafficctl"; exit 1; }
     sleep 1
-    /sbin/rpcd & RPCD_PID=$!
-    i=0
-    until ubus list luci.trafficctl >/dev/null 2>&1; do
-        i=$((i + 1))
-        [ "$i" -lt 20 ] || { echo "RPCD FAILED: rpcd never registered luci.trafficctl"; exit 1; }
-        sleep 1
-    done
-    t0=$(date +%s)
-    out=$(ubus -t 10 call luci.trafficctl name_set '{"ip":"192.168.77.5","name":"ci-probe"}' 2>&1) || {
-        echo "RPCD FAILED: name_set through rpcd: $out"; exit 1; }
-    case "$out" in *'"ok": true'*) ;; *) echo "RPCD FAILED: name_set through rpcd printed: $out"; exit 1 ;; esac
-    out=$(ubus -t 10 call luci.trafficctl names_list 2>&1)
-    case "$out" in *ci-probe*) ;; *) echo "RPCD FAILED: names_list through rpcd printed: $out"; exit 1 ;; esac
-    out=$(ubus -t 10 call luci.trafficctl name_clear '{"ip":"192.168.77.5"}' 2>&1) || {
-        echo "RPCD FAILED: name_clear through rpcd: $out"; exit 1; }
-    echo "rpcd: calls with arguments returned in $(( $(date +%s) - t0 )) s"
-    kill "$RPCD_PID" "$UBUSD_PID" 2>/dev/null || true
-    wait "$RPCD_PID" "$UBUSD_PID" 2>/dev/null || true
-else
-    echo "rpcd: not in this image, skipped the call through rpcd"
+done
+case "$(ubus -v list luci.trafficctl 2>&1)" in *'"version":{}'*) ;;
+    *) echo "RPCD FAILED: list printed: $(ubus -v list luci.trafficctl 2>&1)"; exit 1 ;; esac
+out=$(ubus -t 30 call luci.trafficctl config_get 2>&1)
+case "$out" in *'"enabled":'*) ;; *) echo "RPCD FAILED: config_get printed: $out"; exit 1 ;; esac
+out=$(ubus -t 30 call luci.trafficctl version 2>&1)
+case "$out" in *'"version": "dev"'*|*'"version": ""'*) echo "RPCD FAILED: version printed: $out"; exit 1 ;;
+    *'"version": "'*) echo "rpcd plugin: $out" ;;
+    *) echo "RPCD FAILED: version printed: $out"; exit 1 ;; esac
+t0=$(date +%s)
+out=$(ubus -t 30 call luci.trafficctl name_set '{"ip":"192.168.77.5","name":"ci-probe"}' 2>&1) || {
+    echo "RPCD FAILED: name_set through rpcd: $out"; exit 1; }
+case "$out" in *'"ok": true'*) ;; *) echo "RPCD FAILED: name_set through rpcd printed: $out"; exit 1 ;; esac
+out=$(ubus -t 30 call luci.trafficctl names_list 2>&1)
+case "$out" in *ci-probe*) ;; *) echo "RPCD FAILED: names_list through rpcd printed: $out"; exit 1 ;; esac
+out=$(ubus -t 30 call luci.trafficctl name_clear '{"ip":"192.168.77.5"}' 2>&1) || {
+    echo "RPCD FAILED: name_clear through rpcd: $out"; exit 1; }
+echo "rpcd: calls with arguments returned in $(( $(date +%s) - t0 )) s"
+if out=$(ubus -t 30 call luci.trafficctl config_set '{"poll_interval":"3"}' 2>&1); then
+    echo "RPCD FAILED: rpcd took a string for an int: $out"; exit 1
 fi
+case "$out" in *'Invalid argument'*) ;; *) echo "RPCD FAILED: a string for an int gave: $out"; exit 1 ;; esac
+kill "$RPCD_PID" "$UBUSD_PID" 2>/dev/null || true
+wait "$RPCD_PID" "$UBUSD_PID" 2>/dev/null || true
 
 # Each file belongs to the package that is meant to ship it: the backend to
 # trafficctl, the view and its rpcd plugin to luci-app-trafficctl.
@@ -286,7 +285,7 @@ for f in \
   [ "$o" = trafficctl-telegram ] || { echo "WRONG OWNER: $f is owned by '$o', expected trafficctl-telegram"; exit 1; }
 done
 for f in \
-  /usr/libexec/rpcd/luci.trafficctl \
+  /usr/share/rpcd/ucode/luci.trafficctl.uc \
   /www/luci-static/resources/view/trafficctl/status.js \
   /usr/share/rpcd/acl.d/luci-app-trafficctl.json; do
   o=$(owner_of "$f")
@@ -330,7 +329,7 @@ esac
 for f in \
   /usr/sbin/trafficctl \
   /usr/share/ucode/trafficctl/lib.uc \
-  /usr/libexec/rpcd/luci.trafficctl \
+  /usr/share/rpcd/ucode/luci.trafficctl.uc \
   /www/luci-static/resources/view/trafficctl/status.js \
   /www/luci-static/resources/view/trafficctl/status.css \
   /etc/init.d/trafficctl-telegram \

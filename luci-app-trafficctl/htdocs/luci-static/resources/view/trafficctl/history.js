@@ -564,7 +564,7 @@ return view.extend({
 		enableBtn.addEventListener('click', function() {
 			enableBtn.disabled = true;
 			var want = !self.st.enabled;
-			callHistoryConfigSet(want, null, null, null, null, null).then(function(res) {
+			callHistoryConfigSet(want).then(function(res) {
 				enableBtn.disabled = false;
 				if (res && res.ok === false) {
 					ui.addNotification(null, E('p', res.msg || _('Operation failed')), 'error');

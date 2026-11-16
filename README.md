@@ -167,7 +167,7 @@ I hope it turns out as useful for you as it has been for me.
 - **Rules tab** -- Every block, speed limit (subnets included), shape and WiFi block in one list, including those on devices that are offline and so missing from the device table. Shows the target, the hostname, whether each rule is in effect now and whether it survives a reboot, with Edit, Remove and Apply.
 - **Port Forwards tab** -- Inbound traffic control for DNAT port forwards and router-local open ports: live connection/client/byte stats per forward, instant pause/resume (drop rule, no firewall reload) and inbound rate limiting.
 - **Live Speed Polling** -- Optional polling with configurable interval (Off/1/2/5/10/30s) and averaging window (5s-5min); shows sparkline per device with spike filtering. Both can be stored as router-wide defaults via UCI (`poll_interval`, `avg_window`) for browsers that have not chosen their own.
-- **Reverse DNS** -- Optional hostname resolution for external destination IPs with in-memory cache (no repeated lookups).
+- **Reverse DNS** -- Optional hostname resolution for external destination IPs with in-memory cache (no repeated lookups). At most 16 new lookups per device poll, so it also works behind resolvers that rate-limit the router, such as AdGuard Home on port 53 with dnsmasq moved to another port.
 - **Searchable Device Picker** -- Command palette (search by name, IP, or MAC) with recent devices quick-access bar stored in localStorage.
 - **Telegram Bot** -- Optional bot for remote control: device list, block/unblock, rate limit, shape traffic. Runs on the router via long polling, no external server needed. Package `trafficctl-telegram`.
 - **Notifications** -- New device, known device back online, limit applied, block applied and internet cut, sent to Telegram, ntfy, a webhook or email (msmtp), each sender with its own events (Status > Traffic Control > Notifications). Every event is also a ubus event (`ubus listen trafficctl.notify`) and runs the scripts in `/etc/hotplug.d/trafficctl/`, for your own automation. See [docs/API.md](docs/API.md#notifications).
@@ -196,6 +196,8 @@ I hope it turns out as useful for you as it has been for me.
 | `kmod-nft-netdev` | Rate limiter (fw4) | Installed as a dependency; firewall4 does not pull it in |
 | `luci-base` | Web interface | Always required |
 | `rpcd` | Backend RPC | Always required |
+| `rpcd-mod-ucode` | Runs the rpcd plugin | Always required |
+| `rpcd-mod-file` | The plugin runs the CLI through `file.exec` | Always required (luci-base pulls it in) |
 | `tc-full` + `kmod-sched-core` + `kmod-sched-htb` | Traffic shaping | For HTB/fq_codel queues |
 | `kmod-ifb` | Upload shaping | Without it the shaper applies to download only, and reports that |
 | `iw-full` | Interface detection | WiFi band identification |
@@ -486,7 +488,7 @@ filesystem, then restart rpcd:
 scp -r trafficctl/files/* root@router:/
 scp -r luci-app-trafficctl/root/* root@router:/
 scp -r luci-app-trafficctl/htdocs/luci-static root@router:/www/
-ssh root@router 'chmod +x /usr/sbin/trafficctl /usr/libexec/trafficctl/trafficctl-telegram.uc /usr/libexec/rpcd/luci.trafficctl && /etc/init.d/rpcd restart'
+ssh root@router 'chmod +x /usr/sbin/trafficctl /usr/libexec/trafficctl/trafficctl-telegram.uc && /etc/init.d/rpcd restart'
 ```
 
 ### Required packages
@@ -496,7 +498,7 @@ ssh root@router 'chmod +x /usr/sbin/trafficctl /usr/libexec/trafficctl/trafficct
 
 ```sh
 # Core (always required)
-apk add conntrack luci-base rpcd
+apk add conntrack luci-base rpcd rpcd-mod-ucode
 
 # For traffic shaping
 apk add tc-full kmod-sched-core kmod-sched-htb
@@ -526,7 +528,7 @@ apk add trafficctl-telegram
 
 ```sh
 # Core (always required)
-opkg install conntrack luci-base rpcd
+opkg install conntrack luci-base rpcd rpcd-mod-ucode
 
 # For traffic shaping
 opkg install tc-full kmod-sched-core kmod-sched-htb
@@ -609,6 +611,12 @@ A script in `/etc/hotplug.d/trafficctl/` gets every event, with `ACTION` set to 
 - Optionally duplicates to syslog (`logger -t trafficctl`) for remote log collection.
 - Per-category toggles: blocks, ratelimits, shapes, telegram, config changes.
 
+### Reverse DNS
+
+- The rDNS toggle in the device view resolves the connection table's public destinations through rpcd's `network.rrdns`, which asks the first `nameserver` in `/etc/resolv.conf` on port 53, the same resolver `nslookup` uses on the router. Nothing needs configuring when AdGuard Home owns port 53 and dnsmasq has moved: AdGuard Home resolves public PTR queries through its own upstreams.
+- A device poll sends at most 16 new lookups. AdGuard Home's default `ratelimit: 20` (queries per second per client, and the router is one client) drops the rest of a larger burst without an answer; up to v1.30.7 that left a device with more than 20 destinations without any names. Names arrive over a few polls instead, and a destination without a PTR record is asked again after a minute.
+- Device names for clients without a DHCP lease here (routed, downstream) come from `trafficctl.main.rdns_server`: a space-separated list of resolvers tried before the system resolver. An entry can carry a port, e.g. `uci set trafficctl.main.rdns_server='127.0.0.1:54'` to ask dnsmasq on port 54 directly for its lease names.
+
 ### WiFi MAC Filtering
 
 When a device is WiFi-blocked:
@@ -669,7 +677,7 @@ The frontend talks to a thin rpcd dispatcher over ubus. The Telegram bot provide
 |------|------|
 | `luci-app-trafficctl/htdocs/.../view/trafficctl/status.js` | Frontend — single ES5 file, no deps |
 | `luci-app-trafficctl/htdocs/.../view/trafficctl/status.css` | Frontend styles |
-| `luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl` | rpcd backend — JSON-RPC dispatch |
+| `luci-app-trafficctl/root/usr/share/rpcd/ucode/luci.trafficctl.uc` | rpcd plugin (rpcd-mod-ucode) — JSON-RPC dispatch |
 | `luci-app-trafficctl/root/usr/share/rpcd/acl.d/` | ACL permissions |
 | `trafficctl/Makefile` | Backend package (`trafficctl`), installs everything under `trafficctl/files/` |
 | `trafficctl/files/usr/sbin/trafficctl` | The backend's CLI (ucode): every monitoring and control command, JSON on stdout |

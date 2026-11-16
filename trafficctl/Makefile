@@ -166,6 +166,15 @@ endef
 # The config itself is kept, so the copy is clutter. It is removed only while
 # the real file is there, and nothing else is touched.
 #
+# rpcd: luci-app-trafficctl's plugin runs inside rpcd (rpcd-mod-ucode), which
+# loads it and the trafficctl modules it imports once, when rpcd starts. An
+# upgrade of this package alone reaches the plugin only when rpcd starts over.
+# `/etc/init.d/rpcd reload` (SIGHUP) does that: rpcd re-executes itself,
+# loads its plugins anew and keeps its sessions, as rpcd-mod-ucode's own
+# postinst does. A restart would log every LuCI user out. The upgrade itself
+# is safe either way: LuCI's software page runs opkg/apk through cgi-io
+# (/cgi-bin/cgi-exec) under uhttpd, not as a child of rpcd.
+#
 # Guarded on IPKG_INSTROOT: when it is set the package is being unpacked into
 # an image being built, where there are no running services to talk to.
 define Package/trafficctl/postinst
@@ -183,9 +192,11 @@ if [ -z "$${IPKG_INSTROOT}" ]; then
 		/etc/init.d/trafficctl-cut restart 2>/dev/null || true
 	fi
 	# A luci-app-trafficctl up to 1.30.x depends on any trafficctl, so this
-	# package can be upgraded on its own; that web interface's rpcd plugin
-	# sources trafficctl-fw.sh, which 2.0.0 removed, and every page fails.
-	if grep -q 'trafficctl-fw.sh' /usr/libexec/rpcd/luci.trafficctl 2>/dev/null; then
+	# package can be upgraded on its own. That web interface has no ucode
+	# plugin in /usr/share/rpcd/ucode, and its exec plugin sources
+	# trafficctl-fw.sh, which 2.0.0 removed, so every page fails.
+	if [ ! -e /usr/share/rpcd/ucode/luci.trafficctl.uc ] &&
+	   grep -q 'trafficctl-fw.sh' /usr/libexec/rpcd/luci.trafficctl 2>/dev/null; then
 		_m="The installed luci-app-trafficctl predates trafficctl 2.0.0 and does not work with it: upgrade luci-app-trafficctl too (opkg upgrade luci-app-trafficctl, or apk upgrade luci-app-trafficctl) unless this run already does"
 		echo "$$_m"
 		logger -t trafficctl "$$_m" 2>/dev/null || true
@@ -220,6 +231,9 @@ if [ -z "$${IPKG_INSTROOT}" ]; then
 		if /etc/init.d/trafficctl-history enabled; then
 			/etc/init.d/trafficctl-history restart 2>/dev/null || true
 		fi
+	fi
+	if [ -f /usr/share/rpcd/ucode/luci.trafficctl.uc ]; then
+		/etc/init.d/rpcd reload 2>/dev/null || true
 	fi
 fi
 exit 0

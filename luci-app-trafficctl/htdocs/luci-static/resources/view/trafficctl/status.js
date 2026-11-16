@@ -112,6 +112,11 @@ var callMacfilterRemove = rpc.declare({
 	params: ['ip']
 });
 
+// rpcd takes an int argument as a signed 32-bit number and refuses the whole
+// call (Invalid argument) for anything larger. A rate typed beyond that is
+// sent as this, so the backend answers with its own range message.
+var RPC_INT_MAX = 2147483647;
+
 var callRatelimit = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'ratelimit',
@@ -1027,6 +1032,64 @@ function buildOverviewPanel(ifaces, ifHistory, speedMap, nameByIp, showOther, on
 
 var PRIVATE_RE = /^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/;
 
+// ── Reverse DNS for the connection table (#165) ─────────────────────────────
+//
+// network.rrdns replies once every query has an answer or its timeout has run
+// out. AdGuard Home in front of dnsmasq (AGH on :53, dnsmasq moved to :54)
+// rate-limits each client to 20 queries a second by default and drops the
+// excess without an answer, and the router itself is one such client. The
+// view used to send every unresolved destination in one batch and throw the
+// reply away if the next device poll (3 s) had started meanwhile, so a device
+// with more than 20 destinations waited out the 5 s timeout on every tick and
+// never showed a name, and each tick sent the same batch again. Now a tick
+// sends at most RDNS_BATCH new lookups, nothing goes out twice while it is in
+// flight, and a reply is kept whenever it arrives. A destination with no
+// answer is retried after RDNS_RETRY_MS rather than shown as "—" for good.
+var RDNS_BATCH = 16;
+var RDNS_TIMEOUT = 5000;
+var RDNS_RETRY_MS = 60000;
+
+function rdnsState() {
+	return { names: {}, misses: {}, pending: {} };
+}
+
+// The destinations of dsts that need a lookup now, at most RDNS_BATCH.
+function rdnsPick(st, dsts, now) {
+	var out = [];
+	for (var i = 0; i < dsts.length && out.length < RDNS_BATCH; i++) {
+		var d = dsts[i];
+		if (st.names[d] !== undefined || st.pending[d]) continue;
+		if (st.misses[d] !== undefined && now - st.misses[d] < RDNS_RETRY_MS) continue;
+		out.push(d);
+	}
+	return out;
+}
+
+// What a host cell shows: the name, null for "no name", undefined while the
+// lookup has not finished.
+function rdnsShown(st, d) {
+	if (st.names[d] !== undefined) return st.names[d];
+	if (st.misses[d] !== undefined && !st.pending[d]) return null;
+	return undefined;
+}
+
+// lookup(addrs) is a promise of { addr: host }; paint(addr, host or null) is
+// called for every address once its answer, or the lack of one, is known.
+function rdnsResolve(st, addrs, lookup, paint, clock) {
+	addrs.forEach(function(d) { st.pending[d] = true; });
+	function done(replies) {
+		var now = clock();
+		addrs.forEach(function(d) {
+			var host = (replies && typeof(replies[d]) === 'string' && replies[d]) || null;
+			delete st.pending[d];
+			if (host) { st.names[d] = host; delete st.misses[d]; }
+			else st.misses[d] = now;
+			paint(d, host);
+		});
+	}
+	return Promise.resolve(addrs.length ? lookup(addrs) : {}).then(done, function() { done(null); });
+}
+
 // ── Rate-limit targets that are not a single device ─────────────────────────
 //
 // A limit can be placed on a block of addresses ("10.0.20.0/24") or on the
@@ -1824,13 +1887,12 @@ return view.extend({
 	_deviceTimer:  null,
 	_pollMode:     null,
 	_onPopState:   null,
-	_rdnsCache:    {},
+	_rdns:         rdnsState(),
 	_sortCol:    'bytes',
 	_sortDir:    'desc',
 	_sumCol:     'name',
 	_sumDir:     'asc',
 	_hiddenCols: {},
-	_queryGen:   0,
 
 	load: function() {
 		// config_get rides along with the leases so the router-wide Poll and
@@ -2088,7 +2150,7 @@ return view.extend({
 			defaultsSaveBtn.disabled = true;
 			defaultsSaveStatus.textContent = _('Saving…');
 			defaultsSaveStatus.style.color = 'var(--tc-muted)';
-			callConfigSet(null, null, null, null, poll, win).then(function(res) {
+			callConfigSet(undefined, undefined, undefined, undefined, poll, win).then(function(res) {
 				var ok = res && res.ok;
 				defaultsSaveStatus.textContent = ok ? '✓' : ('✗ ' + ((res && res.msg) || ''));
 				defaultsSaveStatus.style.color = ok ? 'var(--tc-ok)' : 'var(--tc-err)';
@@ -2158,31 +2220,23 @@ return view.extend({
 		var statsDiv  = E('div', { 'style': 'margin:8px 0', 'class': opts.showStats === false ? 'tc-hidden' : '' });
 		var connsDiv  = E('div', { 'class': opts.showConns === false ? 'tc-hidden' : '' });
 
-		function _rdnsBatch(addrs, gen) {
+		function paintHost(dst, host) {
+			Array.prototype.forEach.call(
+				connsDiv.querySelectorAll('[data-dst="'+dst+'"]'),
+				function(cell) {
+					if (host) { cell.textContent = host; cell.style.color = ''; }
+					else { cell.innerHTML = '<span class="tc-c-faint">—</span>'; }
+				}
+			);
+		}
+
+		// No generation check: a name is a name whichever poll asked for it,
+		// and the cells are looked up in the table on screen when it lands.
+		function _rdnsBatch(addrs) {
 			if (!addrs.length) return;
-			callNetworkRrdnsLookup(addrs, 5000, addrs.length).then(function(replies) {
-				if (gen !== self._queryGen) return;
-				addrs.forEach(function(dst) {
-					var host = (replies && replies[dst]) || null;
-					self._rdnsCache[dst] = host;
-					Array.prototype.forEach.call(
-						connsDiv.querySelectorAll('[data-dst="'+dst+'"]'),
-						function(cell) {
-							if (host) { cell.textContent = host; cell.style.color = ''; }
-							else { cell.innerHTML = '<span class="tc-c-faint">—</span>'; }
-						}
-					);
-				});
-			}).catch(function() {
-				if (gen !== self._queryGen) return;
-				addrs.forEach(function(dst) {
-					self._rdnsCache[dst] = null;
-					Array.prototype.forEach.call(
-						connsDiv.querySelectorAll('[data-dst="'+dst+'"]'),
-						function(cell) { cell.innerHTML = '<span class="tc-c-faint">—</span>'; }
-					);
-				});
-			});
+			rdnsResolve(self._rdns, addrs, function(a) {
+				return callNetworkRrdnsLookup(a, RDNS_TIMEOUT, a.length);
+			}, paintHost, Date.now);
 		}
 
 		// Speed graph popup on spark cell hover
@@ -2695,8 +2749,7 @@ return view.extend({
 			if (_rateSelected !== 'custom') return _rateSelected;
 			var n = parseFloat(customInput.value);
 			if (!n || n <= 0) return '0';
-			if (_customUnit === 'mbit') return String(Math.round(n * 1000));
-			return String(Math.round(n));
+			return String(Math.min(Math.round(_customUnit === 'mbit' ? n * 1000 : n), RPC_INT_MAX));
 		}
 
 		// Empty string means symmetric — never 0, which the backend would have
@@ -2705,7 +2758,7 @@ return view.extend({
 			if (upRow.classList.contains('tc-hidden')) return '';
 			var n = parseFloat(upInput.value);
 			if (!n || n <= 0) return '';
-			return String(_upUnit === 'mbit' ? Math.round(n * 1000) : Math.round(n));
+			return String(Math.min(Math.round(_upUnit === 'mbit' ? n * 1000 : n), RPC_INT_MAX));
 		}
 
 		// How the pending action is described. Naming one figure when the
@@ -2732,7 +2785,7 @@ return view.extend({
 			if (all && kbit !== '0') {
 				setStatus(statusDiv, 'loading',
 					_('Limiting') + ' ' + ip + ' → ' + rateLabel(kbit, kbitUp) + ' (' + scope + ')…');
-				callRatelimit(ip, parseInt(kbit), name, scope, kbitUp ? parseInt(kbitUp) : null).then(function(res) {
+				callRatelimit(ip, parseInt(kbit), name, scope, kbitUp ? parseInt(kbitUp) : undefined).then(function(res) {
 					setStatus(statusDiv, (res && res.ok) ? 'action' : 'error', (res && res.msg) || '?');
 					runQuery();
 				}).catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); });
@@ -2760,7 +2813,7 @@ return view.extend({
 			} else if (mode === 'shaper') {
 				setStatus(statusDiv, 'loading', _('Shaping') + ' → ' + rateLabel(kbit, kbitUp) + '…');
 				callRatelimit(ip, 0, name)
-					.then(function() { return callShapeAdd(ip, parseInt(kbit), name, kbitUp ? parseInt(kbitUp) : null); })
+					.then(function() { return callShapeAdd(ip, parseInt(kbit), name, kbitUp ? parseInt(kbitUp) : undefined); })
 					.then(function(res) {
 						setStatus(statusDiv, (res && res.ok) ? 'action' : 'error', (res && res.msg) || '?');
 						runQuery();
@@ -2769,7 +2822,7 @@ return view.extend({
 			} else {
 				setStatus(statusDiv, 'loading', _('Limiting') + ' → ' + rateLabel(kbit, kbitUp) + '…');
 				callShapeRemove(ip, name)
-					.then(function() { return callRatelimit(ip, parseInt(kbit), name, '', kbitUp ? parseInt(kbitUp) : null); })
+					.then(function() { return callRatelimit(ip, parseInt(kbit), name, '', kbitUp ? parseInt(kbitUp) : undefined); })
 					.then(function(res) {
 						setStatus(statusDiv, (res && res.ok) ? 'action' : 'error', (res && res.msg) || '?');
 						runQuery();
@@ -3136,9 +3189,6 @@ return view.extend({
 		function runSingle(ip) {
 			var o = loadOpts();
 			var proto = (o.proto && o.proto !== 'all') ? o.proto : '';
-			self._queryGen++;
-			var gen = self._queryGen;
-
 			pollStart();
 
 			callDevice(ip, proto).then(function(data) {
@@ -3275,25 +3325,16 @@ return view.extend({
 							data.connections.length + ' ' + _('connections') + '. ' + _('Click header to sort.')));
 
 						if (o.rdns) {
-							var seen = {}, uncached = [];
+							var seen = {}, dsts = [];
 							data.connections.forEach(function(c) {
 								var dst = c.dst || '';
 								if (!dst || seen[dst] || PRIVATE_RE.test(dst)) return;
 								seen[dst] = true;
-								if (self._rdnsCache[dst] !== undefined) {
-									var cached = self._rdnsCache[dst];
-									Array.prototype.forEach.call(
-										connsDiv.querySelectorAll('[data-dst="'+dst+'"]'),
-										function(cell) {
-											if (cached) { cell.textContent = cached; cell.style.color = ''; }
-											else { cell.innerHTML = '<span class="tc-c-faint">—</span>'; }
-										}
-									);
-								} else {
-									uncached.push(dst);
-								}
+								dsts.push(dst);
+								var shown = rdnsShown(self._rdns, dst);
+								if (shown !== undefined) paintHost(dst, shown);
 							});
-							_rdnsBatch(uncached, gen);
+							_rdnsBatch(rdnsPick(self._rdns, dsts, Date.now()));
 						}
 					}
 				}

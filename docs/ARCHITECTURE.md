@@ -25,7 +25,7 @@ graph TD
     subgraph "Router (Server)"
         subgraph "rpcd + uhttpd"
             ACL["luci-app-trafficctl.json<br/>(ACL definitions)"]
-            RPC["/usr/libexec/rpcd/luci.trafficctl<br/>(JSON-RPC dispatch)"]
+            RPC["/usr/share/rpcd/ucode/luci.trafficctl.uc<br/>(JSON-RPC dispatch in rpcd)"]
         end
 
         subgraph "Queries — /usr/sbin/trafficctl (ucode)"
@@ -144,7 +144,7 @@ sequenceDiagram
 
     opt rDNS resolution (if enabled)
         B->>R: network.rrdns.lookup(addrs[], timeout, limit)
-        Note over R: rpcd-mod-rrdns resolves all IPs in one batch
+        Note over R: at most 16 new addresses per poll; a reply is kept even if a newer poll has started
         R-->>B: {ip1: "host1", ip2: "host2", ...}
     end
 ```

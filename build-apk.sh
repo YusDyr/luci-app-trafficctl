@@ -135,9 +135,11 @@ if [ -z "${IPKG_INSTROOT}" ]; then
         /etc/init.d/trafficctl-cut restart 2>/dev/null || true
     fi
     # A luci-app-trafficctl up to 1.30.x depends on any trafficctl, so this
-    # package can be upgraded on its own; that web interface's rpcd plugin
-    # sources trafficctl-fw.sh, which 2.0.0 removed, and every page fails.
-    if grep -q 'trafficctl-fw.sh' /usr/libexec/rpcd/luci.trafficctl 2>/dev/null; then
+    # package can be upgraded on its own. That web interface has no ucode
+    # plugin in /usr/share/rpcd/ucode, and its exec plugin sources
+    # trafficctl-fw.sh, which 2.0.0 removed, so every page fails.
+    if [ ! -e /usr/share/rpcd/ucode/luci.trafficctl.uc ] &&
+       grep -q 'trafficctl-fw.sh' /usr/libexec/rpcd/luci.trafficctl 2>/dev/null; then
         _m="The installed luci-app-trafficctl predates trafficctl 2.0.0 and does not work with it: upgrade luci-app-trafficctl too (opkg upgrade luci-app-trafficctl, or apk upgrade luci-app-trafficctl) unless this run already does"
         echo "$_m"
         logger -t trafficctl "$_m" 2>/dev/null || true
@@ -171,6 +173,11 @@ if [ -z "${IPKG_INSTROOT}" ]; then
         if /etc/init.d/trafficctl-history enabled; then
             /etc/init.d/trafficctl-history restart 2>/dev/null || true
         fi
+    fi
+    # The LuCI plugin runs inside rpcd, which loads the modules once; a
+    # reload (SIGHUP) re-executes rpcd and keeps its sessions.
+    if [ -f /usr/share/rpcd/ucode/luci.trafficctl.uc ]; then
+        /etc/init.d/rpcd reload 2>/dev/null || true
     fi
 fi
 exit 0
@@ -270,7 +277,6 @@ mkdir -p "$DATA/www/luci-static/resources/view/trafficctl"
 # Copy every view/asset so new files (portfw.js, ...) can't be missed
 cp "$SRC/htdocs/luci-static/resources/view/trafficctl/"* "$DATA/www/luci-static/resources/view/trafficctl/"
 
-chmod +x "$DATA/usr/libexec/rpcd/luci.trafficctl"
 
 SCRIPTS="$WORKDIR/scripts"
 mkdir -p "$SCRIPTS"
@@ -279,10 +285,11 @@ mkdir -p "$SCRIPTS"
 # luci-app-trafficctl/Makefile, after an install and after an upgrade.
 cat > "$SCRIPTS/post-install" <<'SCRIPT'
 #!/bin/sh
+rm -f "${IPKG_INSTROOT}/usr/libexec/rpcd/luci.trafficctl"
 if [ -z "${IPKG_INSTROOT}" ]; then
     rm -f /tmp/luci-indexcache.*
     rm -rf /tmp/luci-modulecache
-    /etc/init.d/rpcd restart 2>/dev/null || true
+    /etc/init.d/rpcd reload 2>/dev/null || true
 fi
 exit 0
 SCRIPT
@@ -292,7 +299,7 @@ chmod +x "$SCRIPTS"/*
 # The backend is pinned to the same version, as in build-ipk.sh.
 APK_FILE=$(build_apk "$PKG_NAME" luci \
     "Per-device traffic monitoring, rate limiting (nftables), traffic shaping (tc/HTB), internet blocking, WiFi MAC filtering, and Telegram bot control." \
-    "${BE_NAME}=${PKG_VERSION}-r${PKG_RELEASE} ${TG_NAME}=${PKG_VERSION}-r${PKG_RELEASE} $BE_DEPENDS $FE_EXTRA_DEPENDS luci-base rpcd" "$DATA" "$SCRIPTS")
+    "${BE_NAME}=${PKG_VERSION}-r${PKG_RELEASE} ${TG_NAME}=${PKG_VERSION}-r${PKG_RELEASE} $BE_DEPENDS $FE_EXTRA_DEPENDS luci-base rpcd rpcd-mod-ucode rpcd-mod-file" "$DATA" "$SCRIPTS")
 
 # --- Translations, one package per language ---
 #

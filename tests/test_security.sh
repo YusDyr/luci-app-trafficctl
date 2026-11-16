@@ -62,7 +62,7 @@ assert_contains() {
 # lib.uc's run()/lines()/sh() are the only callers of popen() and system(),
 # and every value in their command goes through q(): tests/lib/uc_cmd_lint.py.
 UC_DIR="$BIN/../../share/ucode/trafficctl"
-UC_FILES="$UC_DIR/*.uc $BIN/*.uc $BIN/../../sbin/trafficctl $(dirname "$0")/../luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
+UC_FILES="$UC_DIR/*.uc $BIN/*.uc $BIN/../../sbin/trafficctl $(dirname "$0")/../luci-app-trafficctl/root/usr/share/rpcd/ucode/luci.trafficctl.uc"
 LINT="$(dirname "$0")/lib/uc_cmd_lint.py"
 # shellcheck disable=SC2086 # a glob on purpose
 assert_eq "ucode: commands quoted, popen/system only in lib.uc" "" \

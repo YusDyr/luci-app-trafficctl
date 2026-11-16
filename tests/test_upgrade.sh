@@ -249,7 +249,7 @@ echo "OK: services switched on in uci are enabled in rc.d"
 for f in /usr/sbin/trafficctl \
          /usr/share/ucode/trafficctl/ctl.uc \
          /usr/libexec/trafficctl/trafficctl-telegram.uc \
-         /usr/libexec/rpcd/luci.trafficctl \
+         /usr/share/rpcd/ucode/luci.trafficctl.uc \
          /www/cgi-bin/trafficctl-metrics \
          /www/luci-static/resources/view/trafficctl/status.js; do
     [ -f "$f" ] || { echo "FAIL: $f missing after upgrade"; exit 1; }
@@ -329,6 +329,14 @@ if [ "$OLD_RULES" = 1 ]; then
         echo "OK: trafficctl shape remove removed the old release's shape"
     fi
 fi
+# Every old release ships the rpcd plugin as an exec plugin. A copy left
+# there registers the same ubus object as the ucode plugin, and rpcd keeps
+# whichever registers first.
+if [ -e /usr/libexec/rpcd/luci.trafficctl ]; then
+    echo "FAIL: the exec plugin /usr/libexec/rpcd/luci.trafficctl is left behind"
+    exit 1
+fi
+echo "OK: the exec rpcd plugin removed by the upgrade"
 if [ -e /lib/upgrade/keep.d/luci-app-trafficctl ]; then
     echo "FAIL: the old keep.d entry /lib/upgrade/keep.d/luci-app-trafficctl is left behind"
     exit 1
@@ -371,7 +379,7 @@ if [ "$FMT" = ipk ] && grep -qE '(trafficctl-telegram(\.sh|\.uc)?|/telegram\.uc)
     echo "FAIL: trafficctl still lists the bot's files"
     exit 1
 fi
-o=$(owner_of /usr/libexec/rpcd/luci.trafficctl)
+o=$(owner_of /usr/share/rpcd/ucode/luci.trafficctl.uc)
 [ "$o" = luci-app-trafficctl ] || { echo "FAIL: the rpcd plugin is owned by '$o', expected luci-app-trafficctl"; exit 1; }
 echo "OK: backend files owned by trafficctl, the rpcd plugin by luci-app-trafficctl"
 

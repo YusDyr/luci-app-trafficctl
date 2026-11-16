@@ -2,29 +2,50 @@
 // SPDX-License-Identifier: Apache-2.0
 'use strict';
 
-// rpcd exec plugin for luci-app-trafficctl: the ubus object luci.trafficctl.
-//   luci.trafficctl list            the method signatures
-//   luci.trafficctl call <method>   arguments as JSON on stdin, reply on stdout
+// rpcd-mod-ucode plugin for luci-app-trafficctl: the ubus object
+// luci.trafficctl. rpcd loads this file once, at its start, and calls the
+// methods inside its own process; `/etc/init.d/rpcd reload` picks up a new
+// version and keeps the sessions (the trafficctl and luci-app-trafficctl
+// postinsts do).
 //
 // The settings (uci), their validation, the activity log and the device names
-// are handled here. Everything else is a /usr/sbin/trafficctl command, so a
-// method keeps working unchanged while its command moves from shell to ucode.
-// Replies keep the shell plugin's JSON; rpcd needs an object, so arrays come
-// wrapped as {"result": ...}.
+// are handled here, in process. Everything that reads conntrack, nft or tc,
+// talks to hostapd or the network, or waits, is a /usr/sbin/trafficctl
+// command run through rpcd's own file.exec as a deferred ubus call, so rpcd
+// keeps serving other callers meanwhile. Replies keep the v1.30.0 shell
+// plugin's JSON; rpcd needs an object, so arrays come wrapped as
+// {"result": ...}.
+//
+// Nothing here may call an object rpcd itself serves (session, file, uci,
+// luci, rrdns) synchronously: rpcd would wait on itself. Those go through
+// chain() below. procd's (service) and netifd's are fine. Nor may anything
+// in process run lib.run/sh/run_rc with a timeout: system() with one blocks
+// SIGCHLD and waits for it, which takes the signal rpcd's own children
+// (file.exec) report their exit with.
 
-import { stdin } from 'fs';
+import { connect } from 'ubus';
 import * as lib from 'trafficctl.lib';
 import * as notify from 'trafficctl.notify';
 
 const CLI = '/usr/sbin/trafficctl';
 
-// rpcd kills an exec plugin after 120 s (measured on 22.03); a command still
-// running after this gets an error reply instead.
-// TCTL_CLI_TIMEOUT_MS is for the tests: rpcd starts plugins with its own env.
-const CLI_TIMEOUT_MS = lib.valid_int(getenv('TCTL_CLI_TIMEOUT_MS') ?? '', 1, 110000) ?? 60000;
+// A command still running after this gets an error reply; rpcd's file.exec
+// kills it at rpcd's own exec timeout (-t, 120 s by default).
+// TCTL_CLI_TIMEOUT_MS is for the tests: rpcd starts with its own env.
+const CLI_TIMEOUT_S = int((lib.valid_int(getenv('TCTL_CLI_TIMEOUT_MS') ?? '', 1000, 110000) ?? 60000) / 1000);
 
-// rpcd reads this once, at its start. Same order and types as the shell
-// plugin's table, plus persist_rules, which settings.js has always sent.
+// file.exec answers NOT_SUPPORTED, with no output, once a command prints
+// 256 KiB (RPC_FILE_MAX_SIZE); the device detail is capped below that.
+const DEVICE_MAX_BYTES = 200000;
+
+// ubus status codes (libubus); rpcd defines them as globals too.
+const ST_INVALID_ARGUMENT = 2, ST_NOT_FOUND = 4, ST_NO_DATA = 5, ST_TIMEOUT = 7,
+	ST_NOT_SUPPORTED = 8;
+
+// Same order and types as the shell plugin's table, plus persist_rules,
+// which settings.js has always sent. rpcd turns them into a strict policy:
+// an argument of another type, a null or an undeclared one is refused with
+// INVALID_ARGUMENT before a method runs.
 const SIGNATURES = {
 	summary: {},
 	device: { ip: 'str', proto: 'str' },
@@ -88,10 +109,10 @@ const SIGNATURES = {
 
 // ── arguments ───────────────────────────────────────────────────────────────
 
-// An argument as the shell plugin saw it through jsonfilter: absent and null
-// are '', booleans 'true'/'false', numbers their digits. Anything a check
-// below wants as a number must still look like one, so a double keeps its
-// point, and a string stops at a NUL as it did in C.
+// An argument as the shell plugin saw it through jsonfilter: absent is '',
+// booleans 'true'/'false', numbers their digits. rpcd has checked the types
+// already; the other cases stay for a caller that bypasses the policy (the
+// tests). A string stops at a NUL as it did in C.
 function arg(a, k) {
 	let v = a[k];
 	switch (type(v)) {
@@ -171,11 +192,18 @@ const READ_ONLY = {
 	history_config_get: true, notify_config_get: true,
 };
 
-function caller(a, method) {
-	let sid = arg(a, 'ubus_rpc_session'), data = {};
-	if (!READ_ONLY[method] && match(sid, /^[0-9a-f]{32}$/))
-		data = lib.ubus_call('session', 'get', { ubus_rpc_session: sid })?.values ?? {};
+// The methods whose reply is { result: ... }, an error included.
+const RESULT = {
+	summary: true, bytes: true, ifaces: true, ratelimit_stats: true, subnets: true,
+	shape_stats: true, rules_list: true, netify_list: true, names_list: true,
+	portfw_list: true, history_status: true, history_periods: true, history_read: true,
+	history_read_ifaces: true, history_config_get: true, history_flush: true,
+};
+
+// The session's values, or {} when there are none.
+function caller(data) {
 	let env_src = getenv('REMOTE_ADDR'), env_user = getenv('USERNAME');
+	data = (type(data) == 'object') ? data : {};
 	return {
 		via: 'luci',
 		src: (env_src != null && env_src != '') ? env_src : (type(data.peer) == 'string' ? data.peer : ''),
@@ -184,46 +212,147 @@ function caller(a, method) {
 	};
 }
 
-let who = { via: 'luci', src: '', user: 'root' };
+// ── deferred ubus calls ─────────────────────────────────────────────────────
+
+// One connection for the plugin's life, opened on the first call. The
+// deferred calls' timeout is the connection's.
+let conn = null;
+
+function bus() {
+	conn ??= connect(getenv('TCTL_UBUS_SOCKET'), CLI_TIMEOUT_S);
+	return conn;
+}
+
+// A request in flight: x.req is rpcd's request, x.who the caller.
+// What a method hands back: an object (the reply), an int (a ubus status,
+// no reply data) or the resource of a deferred call that replies later.
+function send(x, v) {
+	try {
+		if (type(v) == 'object')
+			x.req.reply(v);
+		else if (type(v) == 'int')
+			x.req.error(v);
+		else if (type(v) != 'resource')
+			x.req.error(ST_NO_DATA);
+	}
+	catch (e) {
+		// Replied already: rpcd's guard timer was first (its exec
+		// timeout, rpcd -t, is below the plugin's limit). One line in
+		// the log, since the caller only saw "Request timed out".
+		warn(sprintf('luci.trafficctl %s: the reply came after rpcd timed the call out, dropped (%s)\n',
+			x.method, e.message));
+	}
+}
+
+function internal_error(x, e) {
+	warn(sprintf('luci.trafficctl %s: %s\n', x.method, e.message));
+	let r = fail('internal error: ' + e.message);
+	return RESULT[x.method] ? { result: null, ok: false, msg: r.msg } : r;
+}
+
+// obj.method(args) as a deferred call; fn(rc, reply) makes the method's
+// reply out of its answer. Returns the deferred call, or fn's value when fn
+// ran at once: 2022-12 calls the callback before returning null when the
+// invoke fails, and an object that cannot be found never answers at all.
+// fn runs once, and never throws back into ubus: on 2022-12 an exception in
+// that synchronous callback ends rpcd's main loop.
+function chain(x, obj, method, args, fn) {
+	let st = { inside: true, fired: false, result: null };
+	let cb = (rc, reply) => {
+		if (st.fired)
+			return;
+		st.fired = true;
+		let v = null;
+		try {
+			v = fn(rc, reply);
+		}
+		catch (e) {
+			v = internal_error(x, e);
+		}
+		if (st.inside)
+			st.result = v;
+		else
+			send(x, v);
+	};
+	let d = null;
+	// A second try on a new connection: ubusd may have restarted.
+	for (let i = 0; i < 2; i++) {
+		let c = bus();
+		d = c ? c.defer(obj, method, args, cb) : null;
+		if (d != null || st.fired)
+			break;
+		conn = null;
+	}
+	if (d == null && !st.fired)
+		cb(ST_NOT_FOUND, null);
+	st.inside = false;
+	return (d != null) ? d : st.result;
+}
 
 // ── the CLI ─────────────────────────────────────────────────────────────────
 
-// The caller travels in the environment, as it did from the shell plugin;
-// stderr is dropped, stdout is the reply. env is the program system() runs,
-// so the timeout's kill reaches the CLI. Not what the CLI has started: on
-// 22.03 nothing can put it in a process group of its own (busybox has no
-// setsid, ash no job control without a tty, ucode no setpgid), so those
-// finish on their own, their output going nowhere.
-function run_cli(argv) {
-	let r = lib.run_rc('env TCTL_VIA=luci TCTL_SRC=' + lib.q(who.src) + ' TCTL_USER=' + lib.q(who.user) +
-		' ' + lib.qv([ lib.path(CLI), ...argv ]), CLI_TIMEOUT_MS);
-	if (r.rc == -9)
-		r.err = sprintf('trafficctl %s did not finish within %d s', argv[0], CLI_TIMEOUT_MS / 1000);
-	return r;
+// rpcd's file.exec runs it: no shell, stdin /dev/null, the caller in the
+// environment as it was from the shell plugin. stdout is the reply, the exit
+// status and stderr are dropped as before. Never with ubus_rpc_session:
+// without one, file.exec skips the ACL check, which the UI's session would
+// fail (it has no exec grant, and needs none).
+function run_cli(x, argv, env, fn) {
+	let e = { TCTL_VIA: 'luci', TCTL_SRC: x.who.src, TCTL_USER: x.who.user };
+	for (let k, v in env ?? {})
+		e[k] = v;
+	return chain(x, 'file', 'exec', { command: lib.path(CLI), params: argv, env: e }, (rc, r) => {
+		if (rc == ST_TIMEOUT)
+			return fn(sprintf('trafficctl %s did not finish within %d s', argv[0], CLI_TIMEOUT_S), null);
+		if (rc == ST_NOT_SUPPORTED)
+			return fn(sprintf('trafficctl %s printed more than rpcd takes (256 KiB)', argv[0]), null);
+		if (rc != 0)
+			return fn(sprintf('trafficctl %s could not be run (ubus status %d)', argv[0], rc), null);
+		return fn(null, (type(r?.stdout) == 'string') ? r.stdout : '');
+	});
 }
 
-function cli(argv) {
-	let r = run_cli(argv);
-	return r.err ? fail(r.err) : r.out;
+// What rpcd made of an exec plugin's output: its first JSON value, an object
+// as the reply, null as NO_DATA, anything else as INVALID_ARGUMENT.
+function parse_reply(out) {
+	let v = null;
+	try {
+		v = json(out);
+	}
+	catch (e) {
+		return ST_INVALID_ARGUMENT;
+	}
+	return (type(v) == 'object') ? v : (v == null) ? ST_NO_DATA : ST_INVALID_ARGUMENT;
+}
+
+function cli(x, argv, env) {
+	return run_cli(x, argv, env, (err, out) => err ? fail(err) : parse_reply(out));
 }
 
 // A command that prints an array (or any value rpcd cannot take bare).
-function wrapped(argv) {
-	let r = run_cli(argv);
-	if (r.err)
-		return { result: null, ok: false, msg: r.err };
-	let out = rtrim(r.out, '\n');
-	return '{"result":' + (length(out) ? out : 'null') + '}';
+function wrapped(x, argv) {
+	return run_cli(x, argv, null, (err, out) => {
+		if (err)
+			return { result: null, ok: false, msg: err };
+		out = trim(out);
+		if (!length(out))
+			return { result: null };
+		try {
+			return { result: json(out) };
+		}
+		catch (e) {
+			return ST_INVALID_ARGUMENT;
+		}
+	});
 }
 
-function init_script(name, action, background) {
+// Runs the init script's actions one after the other, in the background:
+// every one of them, enable and stop included, may wait on procd or on the
+// service, and a wait here would stop all of rpcd. The reply does not wait.
+function init_script(name, actions) {
 	let p = '/etc/init.d/' + name;
 	if (!lib.is_file(p))
 		return;
-	if (background)
-		lib.sh(lib.q(lib.path(p)) + ' ' + lib.q(action) + ' &');
-	else
-		lib.sh(lib.q(lib.path(p)) + ' ' + lib.q(action));
+	lib.sh('for a in ' + lib.qv(actions) + '; do ' + lib.q(lib.path(p)) + ' "$a"; done &');
 }
 
 // ── uci ─────────────────────────────────────────────────────────────────────
@@ -262,16 +391,6 @@ function fw_get(opt) {
 }
 
 // ── router state ────────────────────────────────────────────────────────────
-
-// tctl_get_offload_mode: a counter flowtable keeps conntrack accounting right.
-function offload_mode() {
-	let counter = () => index(lib.run('nft list flowtables'), 'counter') >= 0;
-	if (fw_get('flow_offloading_hw') == '1')
-		return counter() ? 'hardware-counter' : 'hardware';
-	if (fw_get('flow_offloading') == '1')
-		return counter() ? 'software-counter' : 'software';
-	return 'none';
-}
 
 function bot_running() {
 	let svc = lib.ubus_call('service', 'list', { name: 'trafficctl-telegram' })?.['trafficctl-telegram'];
@@ -380,56 +499,57 @@ function telegram_defaults() {
 		btn_shaper: true, bot_running: false };
 }
 
-function history_read(a, cmd) {
+function history_read(x, a, cmd) {
 	let hp = arg(a, 'period'), ht = arg(a, 'to');
 	if (!period_id(hp) || !period_id(ht))
 		return { result: [] };
-	return wrapped([ 'history', cmd, hp, ht ]);
+	return wrapped(x, [ 'history', cmd, hp, ht ]);
 }
 
 const methods = {
-	summary: () => wrapped([ 'summary' ]),
+	summary: (x) => wrapped(x, [ 'summary' ]),
 
-	device: (a) => {
+	device: (x, a) => {
 		let ip = arg(a, 'ip'), proto = arg(a, 'proto');
 		if (ip == '')
 			return fail('ip required');
-		return cli((proto == 'tcp' || proto == 'udp') ? [ 'device', ip, '--proto', proto ] : [ 'device', ip ]);
+		let argv = (proto == 'tcp' || proto == 'udp') ? [ 'device', ip, '--proto', proto ] : [ 'device', ip ];
+		return cli(x, [ ...argv, '--max-bytes', '' + DEVICE_MAX_BYTES ]);
 	},
 
 	// The accumulator, not the raw sampler: the lifetime totals the columns
 	// show are added there, and this poll is what keeps them advancing.
-	bytes: () => wrapped([ 'totals' ]),
+	bytes: (x) => wrapped(x, [ 'totals' ]),
 
-	ifaces: () => wrapped([ 'ifaces' ]),
+	ifaces: (x) => wrapped(x, [ 'ifaces' ]),
 
-	block: (a) => {
+	block: (x, a) => {
 		let ip = arg(a, 'ip');
-		return (ip == '') ? fail('ip required') : cli([ 'block', ip, sanitize_label(arg(a, 'label')) ]);
+		return (ip == '') ? fail('ip required') : cli(x, [ 'block', ip, sanitize_label(arg(a, 'label')) ]);
 	},
 
-	unblock: (a) => {
+	unblock: (x, a) => {
 		let ip = arg(a, 'ip');
-		return (ip == '') ? fail('ip required') : cli([ 'unblock', ip, sanitize_label(arg(a, 'label')) ]);
+		return (ip == '') ? fail('ip required') : cli(x, [ 'unblock', ip, sanitize_label(arg(a, 'label')) ]);
 	},
 
-	macfilter_add: (a) => {
+	macfilter_add: (x, a) => {
 		let ip = arg(a, 'ip');
-		return (ip == '') ? fail('ip required') : cli([ 'macfilter-add', ip ]);
+		return (ip == '') ? fail('ip required') : cli(x, [ 'macfilter-add', ip ]);
 	},
 
 	// The deny list is keyed on the MAC, and an offline device may have no
 	// lease left to find it by IP, so the MAC wins.
-	macfilter_remove: (a) => {
+	macfilter_remove: (x, a) => {
 		let ip = arg(a, 'ip'), mac = arg(a, 'mac');
 		if (ip == '' && mac == '')
 			return fail('ip or mac required');
-		return cli([ 'macfilter-remove', (mac != '') ? mac : ip ]);
+		return cli(x, [ 'macfilter-remove', (mac != '') ? mac : ip ]);
 	},
 
 	// An absent or zero upload rate means "same as download", not "no
 	// upload": a zero ceiling would police every packet.
-	ratelimit: (a) => {
+	ratelimit: (x, a) => {
 		let ip = arg(a, 'ip'), rate = arg(a, 'rate_kbit'), mode = arg(a, 'mode'), up = arg(a, 'rate_kbit_up');
 		if (mode != 'each' && mode != 'shared')
 			mode = '';
@@ -437,47 +557,47 @@ const methods = {
 			up = '';
 		if (ip == '')
 			return fail('ip required');
-		return cli([ 'ratelimit', ip, (rate != '') ? rate : '0', sanitize_label(arg(a, 'label')), mode, up ]);
+		return cli(x, [ 'ratelimit', ip, (rate != '') ? rate : '0', sanitize_label(arg(a, 'label')), mode, up ]);
 	},
 
-	ratelimit_stats: () => wrapped([ 'ratelimit-stats' ]),
+	ratelimit_stats: (x) => wrapped(x, [ 'ratelimit-stats' ]),
 
-	subnets: () => wrapped([ 'subnets' ]),
+	subnets: (x) => wrapped(x, [ 'subnets' ]),
 
-	shape_add: (a) => {
+	shape_add: (x, a) => {
 		let ip = arg(a, 'ip'), rate = arg(a, 'rate_kbit'), up = arg(a, 'rate_kbit_up');
 		if (up == '0')
 			up = '';
 		if (ip == '' || rate == '')
 			return fail('ip and rate_kbit required');
-		return cli([ 'shape', 'add', ip, rate, sanitize_label(arg(a, 'label')), up ]);
+		return cli(x, [ 'shape', 'add', ip, rate, sanitize_label(arg(a, 'label')), up ]);
 	},
 
-	shape_remove: (a) => {
+	shape_remove: (x, a) => {
 		let ip = arg(a, 'ip');
-		return (ip == '') ? fail('ip required') : cli([ 'shape', 'remove', ip ]);
+		return (ip == '') ? fail('ip required') : cli(x, [ 'shape', 'remove', ip ]);
 	},
 
-	shape_status: (a) => {
+	shape_status: (x, a) => {
 		let ip = arg(a, 'ip');
-		return (ip == '') ? fail('ip required') : cli([ 'shape', 'status', ip ]);
+		return (ip == '') ? fail('ip required') : cli(x, [ 'shape', 'status', ip ]);
 	},
 
-	shape_stats: () => wrapped([ 'shape-stats' ]),
+	shape_stats: (x) => wrapped(x, [ 'shape-stats' ]),
 
 	// Every block, limit, shape and WiFi deny, online or not.
-	rules_list: () => wrapped([ 'rules', 'list' ]),
+	rules_list: (x) => wrapped(x, [ 'rules', 'list' ]),
 
-	rdns: (a) => {
+	rdns: (x, a) => {
 		let ip = arg(a, 'ip');
-		return (ip == '') ? fail('ip required') : cli([ 'rdns', ip ]);
+		return (ip == '') ? fail('ip required') : cli(x, [ 'rdns', ip ]);
 	},
 
-	netify_status: () => cli([ 'netify', 'status' ]),
+	netify_status: (x) => cli(x, [ 'netify', 'status' ]),
 
-	netify_list: () => wrapped([ 'netify', 'list' ]),
+	netify_list: (x) => wrapped(x, [ 'netify', 'list' ]),
 
-	netify_collect: (a) => {
+	netify_collect: (x, a) => {
 		// The UI never asks for a collection; 30 s spans two of the
 		// aggregator's ~15 s reports and stays well inside the timeout.
 		let secs = arg(a, 'secs');
@@ -485,51 +605,64 @@ const methods = {
 			secs = '3';
 		else if (!digits(secs) || lib.valid_int(secs, 1, 30) == null)
 			return fail('secs must be between 1 and 30');
-		return cli([ 'netify', 'collect', secs ]);
+		return cli(x, [ 'netify', 'collect', secs ]);
 	},
 
-	names_list: () => ({ result: lib.names_list() }),
+	names_list: (x) => ({ result: lib.names_list() }),
 
 	// An empty name forgets the alias, so the UI clears it by submitting a
 	// blank field.
-	name_set: (a) => {
+	name_set: (x, a) => {
 		let ip = arg(a, 'ip'), name = arg(a, 'name');
 		if (ip == '')
 			return fail('ip required');
 		return (name == '') ? lib.names_remove(ip) : lib.names_set(ip, name);
 	},
 
-	name_clear: (a) => {
+	name_clear: (x, a) => {
 		let ip = arg(a, 'ip');
 		return (ip == '') ? fail('ip required') : lib.names_remove(ip);
 	},
 
-	portfw_list: () => wrapped([ 'portfw', 'list' ]),
+	portfw_list: (x) => wrapped(x, [ 'portfw', 'list' ]),
 
-	portfw_ctl: (a) => {
+	portfw_ctl: (x, a) => {
 		let action = arg(a, 'action'), ip = arg(a, 'ip');
 		let target = [ arg(a, 'scope'), arg(a, 'proto'), (ip != '') ? ip : '-', arg(a, 'port') ];
 		if (action == 'pause' || action == 'resume')
-			return cli([ 'portfw', action, ...target ]);
+			return cli(x, [ 'portfw', action, ...target ]);
 		if (action == 'limit') {
 			let rate = arg(a, 'rate_kbit');
-			return cli([ 'portfw', 'limit', ...target, (rate != '') ? rate : '0' ]);
+			return cli(x, [ 'portfw', 'limit', ...target, (rate != '') ? rate : '0' ]);
 		}
 		return fail('action must be pause, resume or limit');
 	},
 
-	config_get: () => ({
-		enabled: uget('main', 'enabled') == '1',
-		default_mode: uget('main', 'default_mode') || 'limiter',
-		offload_mode: offload_mode(),
-		nss: lib.nss_status(),
-		sw: fw_get('flow_offloading') == '1',
-		hw: fw_get('flow_offloading_hw') == '1',
-		poll_interval: num(uget('main', 'poll_interval'), 2),
-		avg_window: num(uget('main', 'avg_window'), 15),
-	}),
+	// A counter flowtable keeps conntrack accounting right
+	// (tctl_get_offload_mode); only nft can tell, so it is asked through
+	// file.exec, and only when offload is on.
+	config_get: (x) => {
+		let hw = fw_get('flow_offloading_hw') == '1', sw = fw_get('flow_offloading') == '1';
+		let r = {
+			enabled: uget('main', 'enabled') == '1',
+			default_mode: uget('main', 'default_mode') || 'limiter',
+			offload_mode: 'none',
+			nss: lib.nss_status(),
+			sw: sw,
+			hw: hw,
+			poll_interval: num(uget('main', 'poll_interval'), 2),
+			avg_window: num(uget('main', 'avg_window'), 15),
+		};
+		if (!hw && !sw)
+			return r;
+		let mode = hw ? 'hardware' : 'software';
+		return chain(x, 'file', 'exec', { command: lib.path('/usr/sbin/nft'), params: [ 'list', 'flowtables' ] }, (rc, out) => {
+			r.offload_mode = (rc == 0 && index(out?.stdout ?? '', 'counter') >= 0) ? mode + '-counter' : mode;
+			return r;
+		});
+	},
 
-	config_set: (a) => {
+	config_set: (x, a) => {
 		let enabled = arg(a, 'enabled'), mode = arg(a, 'default_mode'), sw = arg(a, 'sw'), hw = arg(a, 'hw');
 		let poll = arg(a, 'poll_interval'), win = arg(a, 'avg_window');
 		// 0 is "do not poll"; below a second the browser cannot keep up, and
@@ -568,12 +701,12 @@ const methods = {
 				c.set('firewall', fw, 'flow_offloading_hw', bool01(hw));
 			if ((err = save('firewall')))
 				return err;
-			init_script('firewall', 'reload', true);
+			init_script('firewall', [ 'reload' ]);
 		}
 		return OK;
 	},
 
-	telegram_config_get: () => {
+	telegram_config_get: (x) => {
 		if (lib.cursor().get('trafficctl', 'telegram') == null)
 			return telegram_defaults();
 		let t = (o) => uget('telegram', o);
@@ -598,21 +731,21 @@ const methods = {
 		};
 		// Since 1.31 the notification options belong to the notify_telegram
 		// sender (the Notifications tab); the old keys read it back.
-		let x = tg_sender();
-		if (x) {
-			let ev = notify.events_of(x.s), on_ = (x.s.enabled ?? '1') == '1';
+		let snd = tg_sender();
+		if (snd) {
+			let ev = notify.events_of(snd.s), on_ = (snd.s.enabled ?? '1') == '1';
 			r.notify_new_device = on_ && index(ev, 'new_device') >= 0;
 			r.notify_known_device = on_ && index(ev, 'known_device') >= 0;
-			r.notify_template = x.s.template ?? '';
+			r.notify_template = snd.s.template ?? '';
 		}
 		return r;
 	},
 
-	telegram_config_set: (a) => {
+	telegram_config_set: (x, a) => {
 		ensure_section('telegram');
-		let x = tg_sender();
-		if (x)
-			tg_sender_set(x, a);
+		let snd = tg_sender();
+		if (snd)
+			tg_sender_set(snd, a);
 		let v = arg(a, 'enabled');
 		if (v != '')
 			uset('telegram', 'enabled', bool01(v));
@@ -625,46 +758,43 @@ const methods = {
 			if (v != '')
 				uset('telegram', o, v);
 		}
-		if (!x)
+		if (!snd)
 			uset('telegram', 'notify_template', arg(a, 'notify_template'));
 		for (let o in [ 'notify_new_device', 'notify_known_device', 'control_enabled', 'btn_block_inet',
 		                'btn_block_wifi', 'btn_limiter', 'btn_shaper' ]) {
 			v = arg(a, o);
-			if (v != '' && (!x || substr(o, 0, 7) != 'notify_'))
+			if (v != '' && (!snd || substr(o, 0, 7) != 'notify_'))
 				uset('telegram', o, bool01(v));
 		}
 		let err = save('trafficctl');
 		if (err)
 			return err;
-		lib.log('telegram_config_change', '', '', 'luci', who.src);
+		lib.log('telegram_config_change', '', '', 'luci', x.who.src);
 		// Boot starts only what rc.d enables, so rc.d follows the flag: a
 		// reload alone left a bot switched on here gone after the next reboot.
-		init_script('trafficctl-telegram', (uget('telegram', 'enabled') == '1') ? 'enable' : 'disable');
-		init_script('trafficctl-telegram', 'reload', true);
+		init_script('trafficctl-telegram',
+			[ (uget('telegram', 'enabled') == '1') ? 'enable' : 'disable', 'reload' ]);
 		return OK;
 	},
 
-	// The token reaches the wrapping shell on stdin and the script as the
-	// exported TCTL_TG_TOKEN, never in an argument list. pipe()
-	// has no timeout; the script's one curl gives up after 10 s.
-	telegram_test: (a) => {
+	// The token reaches the command in its environment (TCTL_TG_TOKEN),
+	// never in an argument list; the CLI's one curl gives up after 10 s.
+	telegram_test: (x, a) => {
 		let token = arg(a, 'bot_token'), chat = arg(a, 'chat_id');
 		if (token == '***' || token == '')
 			token = uget('telegram', 'bot_token') ?? '';
 		if (token == '' || chat == '')
 			return fail('token and chat_id required');
-		return lib.pipe('IFS= read -r TCTL_TG_TOKEN; export TCTL_TG_TOKEN; ' +
-			'TCTL_VIA=luci TCTL_SRC=' + lib.q(who.src) + ' TCTL_USER=' + lib.q(who.user) + ' ' +
-			lib.qv([ lib.path(CLI), 'telegram-test', '-', chat, arg(a, 'message') ]), token + '\n');
+		return cli(x, [ 'telegram-test', '-', chat, arg(a, 'message') ], { TCTL_TG_TOKEN: token });
 	},
 
 	// ── notifications ──
-	notify_config_get: () => notify.config_get(),
+	notify_config_get: (x) => notify.config_get(),
 
 	// One sender (sender: a type or a section name) or, with no sender, the
 	// global options. The bot's old options move first, so the tab never
 	// edits a sender that a later migration would overwrite.
-	notify_config_set: (a) => {
+	notify_config_set: (x, a) => {
 		notify.migrate();
 		let o = {};
 		for (let k in keys(SIGNATURES.notify_config_set))
@@ -678,22 +808,22 @@ const methods = {
 		let err = save('trafficctl');
 		if (err)
 			return err;
-		lib.log('notify_config_change', r.sender ?? 'notify', '', 'luci', who.src);
-		init_script('trafficctl-notify', 'enable');
-		init_script('trafficctl-notify', 'restart', true);
+		lib.log('notify_config_change', r.sender ?? 'notify', '', 'luci', x.who.src);
+		init_script('trafficctl-notify', [ 'enable', 'restart' ]);
 		return OK;
 	},
 
-	notify_test: (a) => {
-		let r = run_cli([ 'notify', 'test', arg(a, 'sender') ]);
-		if (r.err)
-			return fail(r.err);
-		lib.log('notify_test', arg(a, 'sender'), '', 'luci', who.src);
-		return r.out;
-	},
+	notify_test: (x, a) => run_cli(x, [ 'notify', 'test', arg(a, 'sender') ], null, (err, out) => {
+		if (err)
+			return fail(err);
+		lib.reset();
+		lib.set_context(x.who);
+		lib.log('notify_test', arg(a, 'sender'), '', 'luci', x.who.src);
+		return parse_reply(out);
+	}),
 	// ── end notifications ──
 
-	logging_config_get: () => {
+	logging_config_get: (x) => {
 		let l = (o) => uget('logging', o);
 		let on = (o) => (l(o) ?? '1') != '0';
 		return {
@@ -710,7 +840,7 @@ const methods = {
 		};
 	},
 
-	logging_config_set: (a) => {
+	logging_config_set: (x, a) => {
 		let file = arg(a, 'log_file'), max = arg(a, 'max_lines'), persist = arg(a, 'persist_rules');
 		// Both an append and a rotation target, reachable from the write ACL.
 		if (file != '' && !lib.valid_log_file(file))
@@ -737,13 +867,13 @@ const methods = {
 		let err = save('trafficctl');
 		if (err)
 			return err;
-		lib.log('config_change', 'logging', '', 'luci', who.src);
+		lib.log('config_change', 'logging', '', 'luci', x.who.src);
 		return OK;
 	},
 
 	// seen_count lets the UI tell "the ledger knows my 23 devices" from "the
 	// ledger is empty and everything is about to look new".
-	newdevice_config_get: () => ({
+	newdevice_config_get: (x) => ({
 		enabled: uget('newdevice', 'enabled') == '1',
 		limit_kbit: num(uget('newdevice', 'limit_kbit'), 0),
 		limit_mode: uget('newdevice', 'limit_mode') || 'limiter',
@@ -751,7 +881,7 @@ const methods = {
 		seeded: lib.seen_ready(),
 	}),
 
-	newdevice_config_set: (a) => {
+	newdevice_config_set: (x, a) => {
 		let kbit = arg(a, 'limit_kbit'), mode = arg(a, 'limit_mode'), enabled = arg(a, 'enabled');
 		if (kbit != '' && !digits(kbit))
 			return fail('limit_kbit must be a number');
@@ -773,15 +903,15 @@ const methods = {
 		let err = save('trafficctl');
 		if (err)
 			return err;
-		lib.log('config_change', 'newdevice', '', 'luci', who.src);
+		lib.log('config_change', 'newdevice', '', 'luci', x.who.src);
 		return OK;
 	},
 
 	// A write method: it enforces the auto-revert deadline and restarts a
 	// dead keeper, so the UI never reports a lapsed cut as on.
-	cut_status: () => cli([ 'cut', 'status' ]),
+	cut_status: (x) => cli(x, [ 'cut', 'status' ]),
 
-	cut_set: (a) => {
+	cut_set: (x, a) => {
 		let active = arg(a, 'active'), duration = arg(a, 'duration');
 		if (active == 'true') {
 			if (!digits(duration))
@@ -797,14 +927,14 @@ const methods = {
 			let err = save('trafficctl');
 			if (err)
 				return err;
-			return cli([ 'cut', 'engage', duration, pflag ]);
+			return cli(x, [ 'cut', 'engage', duration, pflag ]);
 		}
 		if (active == 'false')
-			return cli([ 'cut', 'release' ]);
+			return cli(x, [ 'cut', 'release' ]);
 		return fail('active must be true or false');
 	},
 
-	activity_log: (a) => {
+	activity_log: (x, a) => {
 		let n = arg(a, 'lines');
 		n = (n == '') ? 50 : digits(n) ? (lib.valid_int(n, 0, 1000) ?? 1000) : 50;
 		let file = uget('logging', 'log_file');
@@ -812,23 +942,22 @@ const methods = {
 			file = '/tmp/trafficctl/activity.log';
 		if (!lib.is_file(file))
 			return { ok: true, lines: [] };
-		let l = lib.file_lines(file);
-		return { ok: true, lines: n ? slice(l, -n) : [] };
+		return { ok: true, lines: lib.tail_lines(file, n) };
 	},
 
-	history_status: () => wrapped([ 'history', 'status' ]),
+	history_status: (x) => wrapped(x, [ 'history', 'status' ]),
 
-	history_periods: () => wrapped([ 'history', 'periods' ]),
+	history_periods: (x) => wrapped(x, [ 'history', 'periods' ]),
 
 	// Period ids never reach a path, but they come from the network: a
 	// malformed one gets an empty answer rather than silently matching nothing.
-	history_read: (a) => history_read(a, 'read'),
+	history_read: (x, a) => history_read(x, a, 'read'),
 
-	history_read_ifaces: (a) => history_read(a, 'read-ifaces'),
+	history_read_ifaces: (x, a) => history_read(x, a, 'read-ifaces'),
 
-	history_config_get: () => wrapped([ 'history', 'status' ]),
+	history_config_get: (x) => wrapped(x, [ 'history', 'status' ]),
 
-	history_config_set: (a) => {
+	history_config_set: (x, a) => {
 		let dir = arg(a, 'dir'), period = arg(a, 'period');
 		if (dir != '' && !history_dir_ok(dir))
 			return fail('dir must be under /etc/trafficctl, /mnt, /media, /srv or /tmp');
@@ -859,62 +988,69 @@ const methods = {
 			return err;
 		// The keeper re-reads its settings every tick, but it has to be
 		// running: switching history on must not wait for a reboot.
-		if (uget('history', 'enabled') == '1') {
-			init_script('trafficctl-history', 'enable');
-			init_script('trafficctl-history', 'start');
-		}
-		else {
-			init_script('trafficctl-history', 'stop');
-		}
-		lib.log('config_change', 'history', '', 'luci', who.src);
+		init_script('trafficctl-history',
+			(uget('history', 'enabled') == '1') ? [ 'enable', 'start' ] : [ 'stop' ]);
+		lib.log('config_change', 'history', '', 'luci', x.who.src);
 		return OK;
 	},
 
 	// "Flush now": it writes to durable storage, so a write method.
-	history_flush: () => wrapped([ 'history', 'flush' ]),
+	history_flush: (x) => wrapped(x, [ 'history', 'flush' ]),
 
-	version: () => ({ version: pkg_version() }),
+	version: (x) => ({ version: pkg_version() }),
 };
 
 // ── main ────────────────────────────────────────────────────────────────────
 
-// The methods whose reply is { result: ... }, an error included.
-const RESULT = {
-	summary: true, bytes: true, ifaces: true, ratelimit_stats: true, subnets: true,
-	shape_stats: true, rules_list: true, netify_list: true, names_list: true,
-	portfw_list: true, history_status: true, history_periods: true, history_read: true,
-	history_read_ifaces: true, history_config_get: true, history_flush: true,
-};
-
-function reply(v) {
-	print((type(v) == 'string') ? v : lib.to_json(v), '\n');
-}
-
-function dispatch(method) {
-	if (!exists(methods, method))
-		return { error: 'unknown method' };
-	let a = null;
+// Runs the method for a caller now known; an exception is the method's
+// error reply, as from the exec plugin.
+function run(x, a) {
+	lib.reset();
+	lib.set_context(x.who);
 	try {
-		a = json(stdin.read('all') ?? '');
+		return methods[x.method](x, a);
 	}
 	catch (e) {
-		a = null;
-	}
-	if (type(a) != 'object')
-		a = {};
-	try {
-		who = caller(a, method);
-		lib.set_context(who);
-		return methods[method](a);
-	}
-	catch (e) {
-		warn(sprintf('luci.trafficctl %s: %s\n', method, e.message));
-		let r = fail('internal error: ' + e.message);
-		return RESULT[method] ? { result: null, ok: false, msg: r.msg } : r;
+		return internal_error(x, e);
 	}
 }
 
-if (ARGV[0] == 'list')
-	reply(SIGNATURES);
-else if (ARGV[0] == 'call')
-	reply(dispatch(ARGV[1]));
+// uhttpd adds the caller's session to every call, and rpcd hands it on in
+// the arguments. A method that logs or changes something asks the session
+// who that is, as a deferred call: rpcd serves session itself.
+function handle(method, req) {
+	let a = req.args ?? {}, sid = arg(a, 'ubus_rpc_session');
+	let x = { req: req, method: method, who: caller(null) };
+	if (READ_ONLY[method] || !match(sid, /^[0-9a-f]{32}$/))
+		return run(x, a);
+	return chain(x, 'session', 'get', { ubus_rpc_session: sid }, (rc, r) => {
+		x.who = caller((rc == 0) ? r?.values : null);
+		return run(x, a);
+	});
+}
+
+// The value rpcd takes from call(): an object is the reply, a deferred call
+// replies later, and a status is sent here.
+function call_method(method, req) {
+	let v = handle(method, req);
+	if (type(v) == 'int') {
+		send({ req: req, method: method }, v);
+		return null;
+	}
+	return v;
+}
+
+const TYPE_HINT = { str: '', int: 0, bool: false };
+
+function signature() {
+	let sig = {};
+	for (let name, args in SIGNATURES) {
+		let hints = {};
+		for (let k, t in args)
+			hints[k] = TYPE_HINT[t];
+		sig[name] = { args: hints, call: ((m) => (req) => call_method(m, req))(name) };
+	}
+	return sig;
+}
+
+return { 'luci.trafficctl': signature() };
