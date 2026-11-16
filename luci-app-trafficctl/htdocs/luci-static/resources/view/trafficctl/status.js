@@ -112,6 +112,11 @@ var callMacfilterRemove = rpc.declare({
 	params: ['ip']
 });
 
+// rpcd takes an int argument as a signed 32-bit number and refuses the whole
+// call (Invalid argument) for anything larger. A rate typed beyond that is
+// sent as this, so the backend answers with its own range message.
+var RPC_INT_MAX = 2147483647;
+
 var callRatelimit = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'ratelimit',
@@ -2145,7 +2150,7 @@ return view.extend({
 			defaultsSaveBtn.disabled = true;
 			defaultsSaveStatus.textContent = _('Saving…');
 			defaultsSaveStatus.style.color = 'var(--tc-muted)';
-			callConfigSet(null, null, null, null, poll, win).then(function(res) {
+			callConfigSet(undefined, undefined, undefined, undefined, poll, win).then(function(res) {
 				var ok = res && res.ok;
 				defaultsSaveStatus.textContent = ok ? '✓' : ('✗ ' + ((res && res.msg) || ''));
 				defaultsSaveStatus.style.color = ok ? 'var(--tc-ok)' : 'var(--tc-err)';
@@ -2744,8 +2749,7 @@ return view.extend({
 			if (_rateSelected !== 'custom') return _rateSelected;
 			var n = parseFloat(customInput.value);
 			if (!n || n <= 0) return '0';
-			if (_customUnit === 'mbit') return String(Math.round(n * 1000));
-			return String(Math.round(n));
+			return String(Math.min(Math.round(_customUnit === 'mbit' ? n * 1000 : n), RPC_INT_MAX));
 		}
 
 		// Empty string means symmetric — never 0, which the backend would have
@@ -2754,7 +2758,7 @@ return view.extend({
 			if (upRow.classList.contains('tc-hidden')) return '';
 			var n = parseFloat(upInput.value);
 			if (!n || n <= 0) return '';
-			return String(_upUnit === 'mbit' ? Math.round(n * 1000) : Math.round(n));
+			return String(Math.min(Math.round(_upUnit === 'mbit' ? n * 1000 : n), RPC_INT_MAX));
 		}
 
 		// How the pending action is described. Naming one figure when the
@@ -2781,7 +2785,7 @@ return view.extend({
 			if (all && kbit !== '0') {
 				setStatus(statusDiv, 'loading',
 					_('Limiting') + ' ' + ip + ' → ' + rateLabel(kbit, kbitUp) + ' (' + scope + ')…');
-				callRatelimit(ip, parseInt(kbit), name, scope, kbitUp ? parseInt(kbitUp) : null).then(function(res) {
+				callRatelimit(ip, parseInt(kbit), name, scope, kbitUp ? parseInt(kbitUp) : undefined).then(function(res) {
 					setStatus(statusDiv, (res && res.ok) ? 'action' : 'error', (res && res.msg) || '?');
 					runQuery();
 				}).catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); });
@@ -2809,7 +2813,7 @@ return view.extend({
 			} else if (mode === 'shaper') {
 				setStatus(statusDiv, 'loading', _('Shaping') + ' → ' + rateLabel(kbit, kbitUp) + '…');
 				callRatelimit(ip, 0, name)
-					.then(function() { return callShapeAdd(ip, parseInt(kbit), name, kbitUp ? parseInt(kbitUp) : null); })
+					.then(function() { return callShapeAdd(ip, parseInt(kbit), name, kbitUp ? parseInt(kbitUp) : undefined); })
 					.then(function(res) {
 						setStatus(statusDiv, (res && res.ok) ? 'action' : 'error', (res && res.msg) || '?');
 						runQuery();
@@ -2818,7 +2822,7 @@ return view.extend({
 			} else {
 				setStatus(statusDiv, 'loading', _('Limiting') + ' → ' + rateLabel(kbit, kbitUp) + '…');
 				callShapeRemove(ip, name)
-					.then(function() { return callRatelimit(ip, parseInt(kbit), name, '', kbitUp ? parseInt(kbitUp) : null); })
+					.then(function() { return callRatelimit(ip, parseInt(kbit), name, '', kbitUp ? parseInt(kbitUp) : undefined); })
 					.then(function(res) {
 						setStatus(statusDiv, (res && res.ok) ? 'action' : 'error', (res && res.msg) || '?');
 						runQuery();

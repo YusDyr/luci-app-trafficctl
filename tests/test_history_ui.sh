@@ -18,7 +18,7 @@ FAIL=0
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 JS="$REPO_ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/history.js"
 UC="$REPO_ROOT/trafficctl/files/usr/share/ucode/trafficctl/history.uc"
-RPCD="$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
+RPCD="$REPO_ROOT/luci-app-trafficctl/root/usr/share/rpcd/ucode/luci.trafficctl.uc"
 ACL="$REPO_ROOT/luci-app-trafficctl/root/usr/share/rpcd/acl.d/luci-app-trafficctl.json"
 MENU="$REPO_ROOT/luci-app-trafficctl/root/usr/share/luci/menu.d/luci-app-trafficctl.json"
 

@@ -50,7 +50,7 @@ export NLOG="$UC_TMP/log"
 export TCTL_NOTIFY_SYNC=1
 # No ubusd unless a case starts one.
 export TCTL_UBUS_SOCKET="$UC_TMP/no-ubus.sock"
-PLUGIN="$UC_REPO/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
+PLUGIN="$UC_REPO/luci-app-trafficctl/root/usr/share/rpcd/ucode/luci.trafficctl.uc"
 KNOWN="$TCTL_ROOT/etc/trafficctl/telegram_known.json"
 ONLINE="$TCTL_ROOT/tmp/trafficctl_tg_online"
 LEASES="$TCTL_ROOT/tmp/dhcp.leases"
@@ -159,8 +159,10 @@ body() {   # body <n> <key>
     cfgval "$1" data-raw 2>/dev/null | python3 -c 'import json,sys; v=json.load(sys.stdin).get(sys.argv[1]); print(json.dumps(v, ensure_ascii=False) if not isinstance(v, str) else v)' "$2" 2>/dev/null
 }
 
+# The plugin as rpcd-mod-ucode runs it (tests/lib/rpcd.uc), on a ubusd of
+# its own: the settings section starts one.
 rpc() {   # rpc <method> [json]
-    printf '%s' "${2:-}" | "$UCODE" -S -L "$UC_LIB" "$PLUGIN" call "$1" 2>&1
+    printf '%s' "${2:-}" | rpcd_uc "$PLUGIN" call "$1" 2>&1
 }
 
 uciget() { uci -c "$TCTL_ROOT/etc/config" -q get "trafficctl.$1"; }
@@ -563,6 +565,9 @@ assert_eq "wanted: interval 0 is off" 1 "$?"
 
 # ── settings: the rpcd methods ───────────────────────────────────────────────
 
+unset TCTL_UBUS_SOCKET
+ubusd_start
+
 reset "config notify 'notify'
 $BOT
 config notify_telegram 'notify_telegram'
@@ -616,6 +621,11 @@ assert_eq "notify_test: through the sender" '{"ok":true,"msg":"test message sent
 assert_contains "notify_test: the test text" "notifications work on OpenWrt" "$(body 1 text)"
 OUT=$(rpc notify_test '{"sender":"nope"}')
 assert_eq "notify_test: an unknown sender" '{"ok":false,"msg":"no such sender: nope"}' "$OUT"
+# rpcd's policy: a scan_interval that is not a number never reaches the method.
+assert_eq "config_set: a string interval is refused by rpcd" "Command failed: Invalid argument" \
+    "$(rpc notify_config_set '{"scan_interval":"x"}')"
+ubus_stop
+export TCTL_UBUS_SOCKET="$UC_TMP/no-ubus.sock"
 
 # ── telegram-test ────────────────────────────────────────────────────────────
 

@@ -196,6 +196,8 @@ I hope it turns out as useful for you as it has been for me.
 | `kmod-nft-netdev` | Rate limiter (fw4) | Installed as a dependency; firewall4 does not pull it in |
 | `luci-base` | Web interface | Always required |
 | `rpcd` | Backend RPC | Always required |
+| `rpcd-mod-ucode` | Runs the rpcd plugin | Always required |
+| `rpcd-mod-file` | The plugin runs the CLI through `file.exec` | Always required (luci-base pulls it in) |
 | `tc-full` + `kmod-sched-core` + `kmod-sched-htb` | Traffic shaping | For HTB/fq_codel queues |
 | `kmod-ifb` | Upload shaping | Without it the shaper applies to download only, and reports that |
 | `iw-full` | Interface detection | WiFi band identification |
@@ -486,7 +488,7 @@ filesystem, then restart rpcd:
 scp -r trafficctl/files/* root@router:/
 scp -r luci-app-trafficctl/root/* root@router:/
 scp -r luci-app-trafficctl/htdocs/luci-static root@router:/www/
-ssh root@router 'chmod +x /usr/libexec/trafficctl/trafficctl-*.sh /usr/libexec/rpcd/luci.trafficctl && /etc/init.d/rpcd restart'
+ssh root@router 'chmod +x /usr/sbin/trafficctl /usr/libexec/trafficctl/trafficctl-*.sh && /etc/init.d/rpcd restart'
 ```
 
 ### Required packages
@@ -496,7 +498,7 @@ ssh root@router 'chmod +x /usr/libexec/trafficctl/trafficctl-*.sh /usr/libexec/r
 
 ```sh
 # Core (always required)
-apk add conntrack luci-base rpcd
+apk add conntrack luci-base rpcd rpcd-mod-ucode
 
 # For traffic shaping
 apk add tc-full kmod-sched-core kmod-sched-htb
@@ -526,7 +528,7 @@ apk add trafficctl-telegram
 
 ```sh
 # Core (always required)
-opkg install conntrack luci-base rpcd
+opkg install conntrack luci-base rpcd rpcd-mod-ucode
 
 # For traffic shaping
 opkg install tc-full kmod-sched-core kmod-sched-htb
@@ -675,7 +677,7 @@ The frontend talks to a thin rpcd dispatcher over ubus. The Telegram bot provide
 |------|------|
 | `luci-app-trafficctl/htdocs/.../view/trafficctl/status.js` | Frontend — single ES5 file, no deps |
 | `luci-app-trafficctl/htdocs/.../view/trafficctl/status.css` | Frontend styles |
-| `luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl` | rpcd backend — JSON-RPC dispatch |
+| `luci-app-trafficctl/root/usr/share/rpcd/ucode/luci.trafficctl.uc` | rpcd plugin (rpcd-mod-ucode) — JSON-RPC dispatch |
 | `luci-app-trafficctl/root/usr/share/rpcd/acl.d/` | ACL permissions |
 | `trafficctl/Makefile` | Backend package (`trafficctl`), installs everything under `trafficctl/files/` |
 | `trafficctl/files/usr/libexec/trafficctl/trafficctl-*.sh` | Backend scripts (monitoring + control) |

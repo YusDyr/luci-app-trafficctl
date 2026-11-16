@@ -27,9 +27,10 @@ scp trafficctl/files/usr/share/ucode/trafficctl/*.uc root@192.168.0.1:/usr/share
 scp trafficctl/files/usr/sbin/trafficctl root@192.168.0.1:/usr/sbin/
 ssh root@192.168.0.1 'chmod +x /usr/sbin/trafficctl'
 
-# Deploy the rpcd plugin
-scp luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl root@192.168.0.1:/usr/libexec/rpcd/
-ssh root@192.168.0.1 'chmod +x /usr/libexec/rpcd/luci.trafficctl && /etc/init.d/rpcd restart'
+# Deploy the rpcd plugin (rpcd-mod-ucode loads it, and the modules it imports,
+# once when rpcd starts: restart rpcd after changing either)
+scp luci-app-trafficctl/root/usr/share/rpcd/ucode/luci.trafficctl.uc root@192.168.0.1:/usr/share/rpcd/ucode/
+ssh root@192.168.0.1 '/etc/init.d/rpcd restart'
 
 # Deploy frontend
 scp luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js \
@@ -134,11 +135,11 @@ luci-app-trafficctl/                     # repository
 │   │   ├── rules.js                     # "Rules" tab
 │   │   ├── portfw.js                    # "Port Forwards" tab
 │   │   └── status.css                   # Frontend styles
-│   ├── root/usr/
-│   │   ├── libexec/rpcd/luci.trafficctl # rpcd plugin (ucode): settings in process, the rest via the CLI
-│   │   └── share/
-│   │       ├── luci/menu.d/luci-app-trafficctl.json
-│   │       └── rpcd/acl.d/luci-app-trafficctl.json
+│   ├── root/usr/share/
+│   │   ├── luci/menu.d/luci-app-trafficctl.json
+│   │   └── rpcd/
+│   │       ├── acl.d/luci-app-trafficctl.json
+│   │       └── ucode/luci.trafficctl.uc # rpcd plugin (rpcd-mod-ucode): settings in process, the rest via the CLI
 │   └── po/                              # i18n: templates/trafficctl.pot, <lang>/trafficctl.po
 ├── build-ipk.sh, build-apk.sh           # Standalone builders, emit both packages
 ├── docs/                                # Documentation
@@ -261,7 +262,7 @@ bash tests/test_ifaces.sh             # Per-interface counters and roles
 bash tests/test_totals.sh             # Byte samples and the lifetime accumulator
 bash tests/test_metrics.sh            # Prometheus exporter (runs the accumulator)
 bash tests/test_byte_overflow.sh      # Counters past 2^31 and 2^53
-bash tests/test_rpcd.sh               # rpcd plugin: every method, dispatch, uci commits, 0600
+bash tests/test_rpcd.sh               # rpcd plugin as rpcd runs it (tests/lib/rpcd.uc): every method, policy, file.exec, uci commits, 0600
 bash tests/test_readers.sh            # nft -j readers of both nft versions: block comments, 1.1 meters
 bash tests/test_rules.sh              # Rules tab backend: restrictions of offline devices
 bash tests/test_block.sh              # Internet block/unblock, legacy labels, NSS
@@ -274,7 +275,7 @@ bash tests/test_shape_lookup.sh       # Shape classid lookup, shape-stats
 bash tests/test_shape.sh              # Shaper: filters of other shapes kept, classids, SQM, no IFB, shapes.json, restore
 bash tests/test_shape_filters.sh      # Several shapes keep their filters (stateful tc, tests/lib/tc-htb.sh)
 bash tests/test_subnet_limits.sh      # Subnet limits: stats, persisted mode, the restore hook
-bash tests/test_rpcd_contract.sh      # every rpc.declare in the views against the plugin's list
+bash tests/test_rpcd_contract.sh      # every rpc.declare in the views against the plugin's list: methods, params, types, no null
 bash tests/test_telegram_bot.sh       # Telegram bot: commands, callbacks, cache, validation
 bash tests/test_portfw.sh             # Port-forward control, port ranges, exact comments
 bash tests/test_cut.sh                # Global cut: refusals, rule order, keeper, persistence
@@ -331,7 +332,7 @@ their own — everything else is reached through `workflow_call`:
 | `tests.yml` | called by `ci.yml` | Unit, mock, E2E, security, and build tests |
 | `shellcheck.yml` | called by `ci.yml` | ShellCheck (`-S warning`) on every script with a shell shebang |
 | `eslint.yml` | called by `ci.yml` | ESLint on the frontend — `ecmaVersion: 5` plus `no-restricted-syntax`, so ES6 syntax fails the build |
-| `compat.yml` | PR, called by `auto-release.yml` | OpenWrt rootfs compatibility (52 version/arch combos); installs the built package and tests upgrades; job `live-ratelimit` runs `tools/ci/live-ratelimit.sh` (the ucode limiter on real nft, a bridge with two dummy ports, a private ubusd) on 22.03.7 and 25.12.4, job `live-shape` runs `tools/ci/live-shape.sh` (the ucode shaper on real tc/HTB/u32/mirred and an IFB, the same bridge) on both |
+| `compat.yml` | PR, called by `auto-release.yml` | OpenWrt rootfs compatibility (52 version/arch combos); installs the built package and tests upgrades; job `live-ratelimit` runs `tools/ci/live-ratelimit.sh` (the ucode limiter on real nft, a bridge with two dummy ports, a private ubusd) on 22.03.7 and 25.12.4, job `live-shape` runs `tools/ci/live-shape.sh` (the ucode shaper on real tc/HTB/u32/mirred and an IFB, the same bridge) on both, job `live-rpcd` runs `tools/ci/live-rpcd.sh` (the rpcd plugin inside the release's own rpcd and rpcd-mod-ucode: every method, a session, the type policy, a hung CLI, uhttpd's /ubus) on 22.03.7, 24.10.6 and 25.12.4 |
 | `auto-release.yml` | push to main | Waits for `ci.yml` **and** `compat.yml`, then bumps the version, tags, builds and publishes; job `pages` then rebuilds the signed opkg/apk feed on GitHub Pages with `tools/build-feed.sh` |
 
 The nesting is why the leaf workflows carry no `push`/`pull_request` triggers.
@@ -383,11 +384,11 @@ a red PR can still be merged, and the release will then publish it.
 
 **"Permission denied" from LuCI:**
 - Check ACL file exists at `/usr/share/rpcd/acl.d/luci-app-trafficctl.json`
-- Ensure rpcd backend is executable: `chmod +x /usr/libexec/rpcd/luci.trafficctl`
-- Restart rpcd: `/etc/init.d/rpcd restart`
+- Check rpcd-mod-ucode is installed (`/usr/lib/rpcd/ucode.so`) and the plugin is at `/usr/share/rpcd/ucode/luci.trafficctl.uc`
+- Restart rpcd: `/etc/init.d/rpcd restart`; a plugin that does not load is reported in `logread -e rpcd`
 
 **Script works via SSH but not from LuCI:**
-- rpcd backend needs `list` and method handlers. Check `/usr/libexec/rpcd/luci.trafficctl`.
+- rpcd refuses a call whose argument types differ from the plugin's declaration (`Invalid argument`): compare with `ubus -v list luci.trafficctl`. `tests/test_rpcd_contract.sh` checks the views' calls.
 
 **tc commands fail:**
 - Verify `tc-full` (not minimal `tc`): `opkg install tc-full kmod-sched-htb`

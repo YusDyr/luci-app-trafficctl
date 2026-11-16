@@ -95,9 +95,9 @@ assert_eq "luci-app-trafficctl has no conffiles any more" "0" \
 
 FE_ROOT=$(cd "$REPO_ROOT/luci-app-trafficctl/root" && find . -type f | sed 's|^\./||' | LC_ALL=C sort)
 assert_eq "luci-app-trafficctl/root holds only the rpcd plugin, the menu and the ACL" \
-    "usr/libexec/rpcd/luci.trafficctl
-usr/share/luci/menu.d/luci-app-trafficctl.json
-usr/share/rpcd/acl.d/luci-app-trafficctl.json" "$FE_ROOT"
+    "usr/share/luci/menu.d/luci-app-trafficctl.json
+usr/share/rpcd/acl.d/luci-app-trafficctl.json
+usr/share/rpcd/ucode/luci.trafficctl.uc" "$FE_ROOT"
 
 # ── Package relationships ────────────────────────────────────────────────────
 

@@ -167,6 +167,11 @@ if [ -z "${IPKG_INSTROOT}" ]; then
             /etc/init.d/trafficctl-history restart 2>/dev/null || true
         fi
     fi
+    # The LuCI plugin runs inside rpcd, which loads the modules once; a
+    # reload (SIGHUP) re-executes rpcd and keeps its sessions.
+    if [ -f /usr/share/rpcd/ucode/luci.trafficctl.uc ]; then
+        /etc/init.d/rpcd reload 2>/dev/null || true
+    fi
 fi
 exit 0
 EOF
@@ -269,7 +274,6 @@ mkdir -p "$DATA/www/luci-static/resources/view/trafficctl"
 # Copy every view/asset so new files (portfw.js, ...) can't be missed
 cp "$SRC/htdocs/luci-static/resources/view/trafficctl/"* "$DATA/www/luci-static/resources/view/trafficctl/"
 
-chmod +x "$DATA/usr/libexec/rpcd/luci.trafficctl"
 
 CTRL="$STAGE/control"
 mkdir -p "$CTRL"
@@ -286,7 +290,7 @@ mkdir -p "$CTRL"
 cat > "$CTRL/control" <<EOF
 Package: $PKG_NAME
 Version: ${PKG_VERSION}-${PKG_RELEASE}
-Depends: $BE_NAME (= ${PKG_VERSION}-${PKG_RELEASE}), $TG_NAME (= ${PKG_VERSION}-${PKG_RELEASE}), $BE_DEPENDS, $FE_EXTRA_DEPENDS, luci-base, rpcd
+Depends: $BE_NAME (= ${PKG_VERSION}-${PKG_RELEASE}), $TG_NAME (= ${PKG_VERSION}-${PKG_RELEASE}), $BE_DEPENDS, $FE_EXTRA_DEPENDS, luci-base, rpcd, rpcd-mod-ucode, rpcd-mod-file
 Source: https://github.com/YusDyr/luci-app-trafficctl
 License: Apache-2.0
 Section: luci
@@ -300,13 +304,14 @@ EOF
 # luci-app-trafficctl/Makefile, which explains each one.
 cat > "$CTRL/postinst" <<'EOF'
 #!/bin/sh
+rm -f "${IPKG_INSTROOT}/usr/libexec/rpcd/luci.trafficctl"
 if [ -z "${IPKG_INSTROOT}" ]; then
     if [ -f /etc/config/trafficctl ]; then
         rm -f /etc/config/trafficctl-opkg.backup
     fi
     rm -f /tmp/luci-indexcache.*
     rm -rf /tmp/luci-modulecache
-    /etc/init.d/rpcd restart 2>/dev/null || true
+    /etc/init.d/rpcd reload 2>/dev/null || true
 fi
 exit 0
 EOF

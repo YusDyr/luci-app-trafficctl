@@ -65,6 +65,8 @@
 // Files
 //   readfile(p)                   contents, or null
 //   file_lines(p)                 lines without the final empty one, [] if none
+//   tail_lines(p, n)              the last n of file_lines(p), reading the file
+//                                 backwards in chunks: only its tail in memory
 //   each_line(p, fn)              fn(line) for every line, read in chunks so a
 //                                 large file (conntrack) is never held whole;
 //                                 false when p cannot be opened
@@ -254,9 +256,10 @@ function run(cmd, ms) {
 	return out ?? '';
 }
 
-// run() with a timeout and the exit status: the rpcd plugin has to answer
-// before rpcd kills it, and has to tell a timeout from an empty reply. err:
-// the limiter reports nft's reason for each rule it could not add.
+// run() with a timeout and the exit status, to tell a timeout from an empty
+// reply. err: the limiter reports nft's reason for each rule it could not
+// add. Not inside rpcd: a timed system() blocks SIGCHLD, which rpcd's own
+// children need (the rpcd plugin runs slow commands through file.exec).
 function run_rc(cmd, ms, err) {
 	// Created here and exclusively, as in pipe().
 	let tmp = path('/tmp/.trafficctl_run.' + pid());
@@ -508,6 +511,32 @@ function each_line(p, fn) {
 	if (rest != '')
 		fn(rest);
 	return true;
+}
+
+// Chunks are read from the end until they hold more than n line ends: the
+// line before the n-th from the end then ends inside them, so the first,
+// partial, piece is never among the last n.
+function tail_lines(p, n) {
+	if (n <= 0)
+		return [];
+	let f = open(path(p));
+	if (!f)
+		return [];
+	let buf = '', ends = 0, pos = f.seek(0, 2) ? f.tell() : 0;
+	while (pos > 0 && ends <= n) {
+		let k = (pos > CHUNK) ? CHUNK : pos;
+		pos -= k;
+		if (!f.seek(pos, 0))
+			break;
+		let c = f.read(k) ?? '';
+		ends += length(split(c, '\n')) - 1;
+		buf = c + buf;
+	}
+	f.close();
+	let l = split(buf, '\n');
+	if (l[-1] == '')
+		pop(l);
+	return slice(l, -n);
 }
 
 function is_file(p) {
@@ -1058,7 +1087,7 @@ function nss_defunct() {
 // 2022-12 needs a ';' after `export function f() {}`; one list avoids it.
 export { path, pid, reset, plain, cursor, uci_get, uci_words, uci_foreach, commit,
 	ubus_call, q, run, lines, sh, to_json, valid_ip, valid_int, norm_mac, ip2int,
-	int2ip, cidr_spec, valid_target, readfile, file_lines, each_line, is_file, mkdir_p,
+	int2ip, cidr_spec, valid_target, readfile, file_lines, tail_lines, each_line, is_file, mkdir_p,
 	write_atomic, create_once, remove, lock, unlock, field, valid_log_file, log, sanitize_name,
 	names_list, names_map, names_set, names_remove, seen_ready, seen_count,
 	seen_known, seen_mark, seen_seed };

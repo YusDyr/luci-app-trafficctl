@@ -139,7 +139,7 @@ if [ -f "$BE_IPK" ] && [ -f "$TG_IPK" ] && [ -f "$IPK" ]; then
         "tg etc/init.d/trafficctl-telegram" \
         "be etc/config/trafficctl" \
         "be www/cgi-bin/trafficctl-metrics" \
-        "fe usr/libexec/rpcd/luci.trafficctl" \
+        "fe usr/share/rpcd/ucode/luci.trafficctl.uc" \
         "fe www/luci-static/resources/view/trafficctl/status.js" \
         "fe usr/share/luci/menu.d/luci-app-trafficctl.json" \
         "fe usr/share/rpcd/acl.d/luci-app-trafficctl.json"; do
@@ -179,7 +179,8 @@ fi
 for script in "$REPO_ROOT"/trafficctl/files/usr/libexec/trafficctl/trafficctl-*.sh; do
     assert_ok "executable: $(basename "$script")" test -x "$script"
 done
-assert_ok "executable: rpcd" test -x "$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
+# rpcd-mod-ucode loads the plugin as a script: it needs no execute bit.
+assert_ok "rpcd plugin present" test -f "$REPO_ROOT/luci-app-trafficctl/root/usr/share/rpcd/ucode/luci.trafficctl.uc"
 assert_ok "executable: init.d" test -x "$REPO_ROOT/trafficctl/files/etc/init.d/trafficctl-telegram"
 
 # ── JSON validity ──────────────────────────────────────────────────────────

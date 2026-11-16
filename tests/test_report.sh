@@ -198,5 +198,44 @@ assert_contains "spawn: a capped reverse-DNS refresh" \
     "rdns-refresh 192.168.1.8 192.168.1.9 192.168.1.14 192.168.1.50 192.168.1.60 192.168.1.100 192.168.1.101 192.168.1.140" \
     "$SPAWNED"
 
+# ── device --max-bytes: the connection list under rpcd's 256 KiB ───────────
+# The rpcd plugin runs `device` through rpcd's file.exec, which refuses
+# 256 KiB of output or more; the plugin asks for at most 200000 bytes. Over
+# the budget the largest connections (by bytes) stay, in their own order,
+# and connections_omitted counts the rest.
+for i in $(seq 1 300); do
+    printf 'ipv4     2 tcp      6 100 ESTABLISHED src=192.168.1.60 dst=198.51.100.%d sport=%d dport=443 packets=1 bytes=%d src=198.51.100.%d dst=192.168.1.60 sport=443 dport=%d packets=1 bytes=%d [ASSURED] mark=0 use=2\n' \
+        $((i % 250 + 1)) $((41000 + i)) $(( (i * 7919) % 1000 + 1)) $((i % 250 + 1)) $((41000 + i)) $(( (i * 7919) % 1000 + 1)) >> "$BE_CT"
+done
+FULL=$(be_run device 192.168.1.60)
+NALL=$(printf '%s' "$FULL" | jq '.connections | length')
+assert_eq "device: no cap, every connection" "301" "$NALL"
+assert_eq "device: no cap, no connections_omitted" "false" "$(printf '%s' "$FULL" | jq 'has("connections_omitted")')"
+CAP=$(be_run device 192.168.1.60 --max-bytes 8000)
+assert_eq "device --max-bytes: the reply fits" "yes" "$([ "${#CAP}" -le 8000 ] && echo yes || echo no)"
+KEPT=$(printf '%s' "$CAP" | jq '.connections | length')
+assert_eq "device --max-bytes: kept + omitted = all" "$NALL" \
+    "$(printf '%s' "$CAP" | jq '(.connections | length) + .connections_omitted')"
+assert_eq "device --max-bytes: some kept" "yes" "$([ "$KEPT" -gt 10 ] && [ "$KEPT" -lt "$NALL" ] && echo yes || echo no)"
+# The largest ones: every kept connection carries at least as many bytes as
+# every dropped one.
+assert_eq "device --max-bytes: the largest connections stay" "true" \
+    "$(jq -n --argjson f "$FULL" --argjson c "$CAP" '
+        ($c.connections | map(.bytes) | min) as $lo
+        | [$f.connections[] | select(. as $x | $c.connections | index([$x]) | not) | .bytes] | max <= $lo')"
+assert_eq "device --max-bytes: in their own order" "true" \
+    "$(jq -n --argjson f "$FULL" --argjson c "$CAP" '[$f.connections[] | select(. as $x | $c.connections | index([$x]))] == $c.connections')"
+assert_eq "device --max-bytes: the rest of the reply unchanged" "true" \
+    "$(jq -n --argjson f "$FULL" --argjson c "$CAP" '($f | del(.connections, .timestamp)) == ($c | del(.connections, .connections_omitted, .timestamp))')"
+assert_eq "device --max-bytes: a reply that fits is untouched" "$(printf '%s' "$FULL" | jq -c 'del(.timestamp)')" \
+    "$(be_run device 192.168.1.60 --max-bytes 1000000 | jq -c 'del(.timestamp)')"
+for bad in abc 1023 -5 ''; do
+    ubus_start "$BE_UBUS"
+    TCTL_ROOT="$BE_ROOT" PATH="$BE_BIN:$PATH" tctl device 192.168.1.60 --max-bytes "$bad" > /dev/null 2>&1
+    rc=$?
+    ubus_stop
+    assert_eq "device --max-bytes '$bad': refused" "1" "$rc"
+done
+
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
