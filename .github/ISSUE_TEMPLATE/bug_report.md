@@ -22,12 +22,12 @@ labels: bug
 
 ## Diagnostics
 
-Run the affected script by hand over SSH and paste its output — every script
+Run the affected command by hand over SSH and paste its output — every command
 prints JSON, and the message usually names the missing piece (a kernel module, a
 device that could not be resolved). For example:
 
 ```sh
-/usr/libexec/trafficctl/trafficctl-shape.sh status 192.168.1.50
+/usr/sbin/trafficctl shape status 192.168.1.50
 /usr/sbin/trafficctl summary | head -c 2000
 logread | grep trafficctl | tail -30
 ```

@@ -35,7 +35,7 @@ const TICK_MS = 5000;
 const MIN_SECS = 60;
 const MAX_SECS = 604800;
 
-const USAGE = 'usage: trafficctl-cut.sh engage <seconds|0> [persist] | release | status | restore';
+const USAGE = 'usage: trafficctl cut engage <seconds|0> [persist] | release | status | restore';
 const NO_NFT = 'global cut needs nftables (fw4); nft cannot list inet tables here';
 const NO_LAN = 'no LAN interfaces found — refusing, a cut with no LAN to spare would black-hole the LAN too';
 const NO_RULE = 'failed to install the cut rule';

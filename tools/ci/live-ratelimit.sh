@@ -13,8 +13,7 @@
 # (5.16+), so download goes to dl_br_lan at LAN egress; the WAN-ingress
 # fallback that 22.03's own kernel (5.10) takes is covered by the unit tests.
 #
-# The limiter is the ucode CLI (`trafficctl ratelimit`, behind the
-# trafficctl-ratelimit.sh wrapper); it reads the interfaces from ubus, so a
+# The limiter is the ucode CLI (`trafficctl ratelimit`); it reads the interfaces from ubus, so a
 # private ubusd carries a recorded network.interface (tests/lib/ubus-mock.uc).
 #
 # Usage: live-ratelimit.sh [repository root, default /src]
@@ -81,11 +80,9 @@ i=0
 until grep -q '^ready$' "$W/mock.out"; do i=$((i + 1)); [ "$i" -gt 10 ] && die "ubus-mock did not start: $(cat "$W/mock.out")"; sleep 1; done
 uci -q get firewall.@zone[0].name | grep -qx lan || die "the image's firewall config has no lan zone first"
 
-# trafficctl-fw.sh picks nftables when any table exists; fw4 itself needs
-# netifd, and its forward chain is not what this checks.
+# fw4 itself needs netifd, and its forward chain is not what this checks.
 nft add table inet fw4 || die "cannot create inet fw4"
 
-S=/usr/libexec/trafficctl
 table() { nft -a list table netdev tm_ratelimit 2>/dev/null; }
 # Chains holding a rule whose comment is exactly $1, one per line.
 chains_of() {
@@ -110,7 +107,7 @@ check_target() {  # <target> <comment> <expected upload rate in bytes/s>
 for spec in "10.0.20.0/24 2000 500" "192.168.0.70 2000 2000"; do
     set -- $spec
     say "ratelimit $1 $2 each up $3"
-    out=$(sh $S/trafficctl-ratelimit.sh "$1" "$2" "" each "$3")
+    out=$(/usr/sbin/trafficctl ratelimit "$1" "$2" "" each "$3")
     echo "$out"
     case "$out" in
         *'both directions, each'*) ok "$1: reported in both directions" ;;
@@ -125,7 +122,7 @@ done
 say "nft list table netdev tm_ratelimit"
 table
 
-stats=$(sh $S/trafficctl-ratelimit-stats.sh)
+stats=$(/usr/sbin/trafficctl ratelimit-stats)
 echo "$stats"
 case "$stats" in
     *'"ip":"10.0.20.0/24","mode":"each"'*) ok "stats: the subnet limit reads as each" ;;
@@ -134,13 +131,13 @@ esac
 
 # A new rate replaces the limit; the meters of the first one are gone.
 say "ratelimit 10.0.20.0/24 4000 each up 1000"
-out=$(sh $S/trafficctl-ratelimit.sh 10.0.20.0/24 4000 "" each 1000)
+out=$(/usr/sbin/trafficctl ratelimit 10.0.20.0/24 4000 "" each 1000)
 echo "$out"
 check_target 10.0.20.0/24 rl_ratelimit_10_0_20_0_24 125000
 
 # ── removal ──────────────────────────────────────────────────────────────────
 for t in 10.0.20.0/24 192.168.0.70; do
-    sh $S/trafficctl-ratelimit.sh "$t" 0 >/dev/null
+    /usr/sbin/trafficctl ratelimit "$t" 0 >/dev/null
 done
 left=$(table | grep -c 'comment "rl_ratelimit_')
 [ "$left" = 0 ] && ok "removed: no rule left" || bad "removed: $left rules left"
@@ -162,7 +159,7 @@ nft add rule netdev tm_ratelimit ul_lan1 'ip saddr 10.0.40.0/24 meter tctl_u_10_
 nft add rule netdev tm_ratelimit ul_lan2 'ip saddr 10.0.40.0/24 meter tctl_u_10_0_40_0_24 { ip saddr limit rate over 62500 bytes/second } counter drop comment "rl_ratelimit_10_0_40_0_24_ul"' \
     && say "second port took the shared meter name" \
     || say "second port refused the shared meter name (expected on nftables 1.0)"
-sh $S/trafficctl-ratelimit.sh 10.0.40.0/24 0 >/dev/null
+/usr/sbin/trafficctl ratelimit 10.0.40.0/24 0 >/dev/null
 if table | grep -q 'rl_ratelimit_10_0_40_0_24\|set tctl_u_10_0_40_0_24'; then
     bad "legacy limit: not fully removed"; table
 else
@@ -181,7 +178,7 @@ for h in 192.168.0.80 192.168.0.81; do
     nft add rule netdev tm_ratelimit ul_lan1 "ip saddr $h limit rate over 62500 bytes/second counter drop comment \"rl_ratelimit_tg_ul\"" \
         || die "cannot write the legacy upload rule"
 done
-out=$(sh $S/trafficctl-ratelimit.sh 192.168.0.80 0 tg)
+out=$(/usr/sbin/trafficctl ratelimit 192.168.0.80 0 tg)
 echo "$out"
 case "$out" in
     *'"ok":true'*) ok "legacy label: removal reported ok" ;;
@@ -203,8 +200,8 @@ n=$(table | grep -c 'ip [sd]addr 192\.168\.0\.81 .*"rl_ratelimit_tg\(_ul\)\{0,1\
 # the bot's legacy label limits are live again, and the restore leaves them.
 say "restore: persisted limits after a reboot, then again over them"
 uci set trafficctl.main.persist_rules=1 && uci commit trafficctl
-sh $S/trafficctl-ratelimit.sh 10.0.20.0/24 2000 "" each 500 >/dev/null
-sh $S/trafficctl-ratelimit.sh 192.168.0.70 2000 >/dev/null
+/usr/sbin/trafficctl ratelimit 10.0.20.0/24 2000 "" each 500 >/dev/null
+/usr/sbin/trafficctl ratelimit 192.168.0.70 2000 >/dev/null
 sed -i 's/\]$/,{"type":"ratelimit","ip":"10.0.30.0\/024","param":"1000","mode":"each"}]/' /etc/trafficctl/rules.json
 cat /etc/trafficctl/rules.json; echo
 nft delete table netdev tm_ratelimit
@@ -227,7 +224,7 @@ for pass in boot ifup; do
 done
 n=$(table | grep -c 'rl_ratelimit_tg')
 [ "$n" = 2 ] && ok "restore: the legacy label rules of 192.168.0.81 untouched" || bad "restore: $n of 2 legacy label rules left"
-sh $S/trafficctl-ratelimit.sh 10.0.30.0/024 0 >/dev/null
+/usr/sbin/trafficctl ratelimit 10.0.30.0/024 0 >/dev/null
 if table | grep -q 'rl_ratelimit_10_0_30_0'; then
     bad "restore: the padded record's limit not removed as typed"; table
 else

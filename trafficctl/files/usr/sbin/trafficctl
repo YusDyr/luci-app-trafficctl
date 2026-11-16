@@ -4,8 +4,7 @@
 
 // trafficctl <command> [args]: the backend's single entry point, for users,
 // init scripts, hotplug, the metrics CGI and the rpcd plugin. Commands print
-// JSON on stdout. Ported commands run here; the rest are still the shell
-// scripts in /usr/libexec/trafficctl.
+// JSON on stdout.
 
 import * as lib from 'trafficctl.lib';
 import * as net from 'trafficctl.net';
@@ -14,13 +13,9 @@ import * as limit from 'trafficctl.limit';
 import * as shape from 'trafficctl.shape';
 import * as report from 'trafficctl.report';
 import * as notify from 'trafficctl.notify';
-// ── PR7: cut, portfw ──
 import * as cut from 'trafficctl.cut';
 import * as portfw from 'trafficctl.portfw';
-// ── end PR7 ──
-// PR8 history
 import * as history from 'trafficctl.history';
-// end PR8 history
 
 function out(v) {
 	print(lib.to_json(v), '\n');
@@ -33,7 +28,6 @@ function result(r) {
 
 const NOTIFY_USAGE = 'usage: trafficctl notify emit <event> [key=value...]|dispatch <event> [key=value...]|' +
 	'scan|watch|wanted|dhcp <mac> [ip] [name]|migrate|test <sender>';
-// ── PR7: cut, portfw ──
 // { reply, rc } of a command that may print nothing (cut restore, tick,
 // keeper) or exit non-zero after a reply (cut tick's 2).
 function reply(r) {
@@ -41,7 +35,6 @@ function reply(r) {
 		out(r.reply);
 	return r.rc;
 }
-// ── end PR7 ──
 // A command that keeps its script's exit status: { reply, rc }.
 function replied(r) {
 	out(r.reply);
@@ -50,7 +43,7 @@ function replied(r) {
 
 const NAMES_USAGE = 'usage: trafficctl names list|set <ip> <name>|remove <ip>';
 // The script's own wording: the rpcd plugin and the view show it as it is.
-const RULES_USAGE = 'usage: trafficctl-rules.sh [list]';
+const RULES_USAGE = 'usage: trafficctl rules [list]';
 
 const commands = {
 	subnets: () => {
@@ -149,13 +142,19 @@ const commands = {
 	shape: (args) => replied(shape.main(args)),
 
 	// The iface hotplug hook on ifup lan: the saved blocks, the saved limits,
-	// then the shapes. Counted together; each failure is in syslog. Each part
-	// on its own: an error in the blocks must not leave every limit and shape
-	// off until the next ifup. Nothing here is announced: it puts back what
-	// was there.
+	// the shapes and the paused or limited ports, then a global cut kept
+	// across the reboot. Counted together; each failure is in syslog. Each
+	// part on its own: an error in the blocks must not leave every limit and
+	// shape off until the next ifup. Nothing here is announced: it puts back
+	// what was there.
 	restore: () => {
+		// The LAN device can still be coming up (up to 10 seconds).
+		let dev = net.lan_device();
+		for (let i = 0; i < 20 && lib.sh('tc qdisc show dev ' + lib.q(dev)) != 0; i++)
+			sleep(500);
 		let r = { ok: true, restored: 0, failed: 0 };
-		for (let half in [ [ 'blocks', ctl.restore ], [ 'limits', limit.restore ], [ 'shapes', shape.restore ] ]) {
+		for (let half in [ [ 'blocks', ctl.restore ], [ 'limits', limit.restore ], [ 'shapes', shape.restore ],
+		                   [ 'ports', portfw.restore ] ]) {
 			try {
 				let h = half[1]();
 				r.restored += h.restored;
@@ -164,6 +163,23 @@ const commands = {
 			catch (e) {
 				r.failed++;
 				lib.logger(sprintf('restore: %s failed: %s', half[0], e.message));
+			}
+		}
+		// The cut's own opt-in, not persist_rules: only a cut engaged with
+		// "keep after reboot" leaves this file, and a persistent internet
+		// kill must not follow from the flag that keeps rate limits. The cut
+		// is not a record: only its failure counts.
+		if (lib.is_file('/etc/trafficctl/cut.state')) {
+			let rc;
+			try {
+				rc = cut.main([ 'restore' ]).rc;
+			}
+			catch (e) {
+				rc = 1;
+			}
+			if (rc != 0) {
+				r.failed++;
+				lib.logger('Failed to restore the global internet cut');
 			}
 		}
 		r.ok = (r.failed == 0);
@@ -179,7 +195,6 @@ const commands = {
 		return r.rc;
 	},
 
-	// ── notifications (trafficctl.notify) ──
 	notify: (args) => {
 		let sub = shift(args);
 		switch (sub) {
@@ -217,7 +232,6 @@ const commands = {
 		out(notify.telegram_test(args));
 		return 0;
 	},
-	// ── end notifications ──
 
 	// The bot is its own process in package trafficctl-telegram (see the
 	// file): run it in the foreground, as the init script does.
@@ -228,13 +242,10 @@ const commands = {
 		return lib.passthru([ lib.path(bot), ...args ]);
 	},
 
-	// ── PR7: cut, portfw ──
 	cut: (args) => reply(cut.main(args)),
 
 	portfw: (args) => reply(portfw.main(args)),
-	// ── end PR7 ──
 
-	// ── PR8 history ──
 	history: (args) => {
 		let r = history.main(args);
 		if (type(r.out) == 'string')
@@ -243,14 +254,6 @@ const commands = {
 			out(r.out);
 		return r.rc;
 	},
-	// ── end PR8 history ──
-};
-
-// Commands the shell scripts still serve: run with our arguments, stdin,
-// stdout and exit status, so a port only moves an entry up into commands.
-const LEGACY = {
-	bytes: 'trafficctl-bytes.sh',
-	totals: 'trafficctl-totals.sh',
 };
 
 // What a caller expecting this command's shape can still parse.
@@ -265,10 +268,8 @@ function fallback(cmd, args, msg) {
 }
 
 let cmd = shift(ARGV);
-if (!exists(commands, cmd) && exists(LEGACY, cmd))
-	exit(lib.passthru([ lib.path('/usr/libexec/trafficctl/' + LEGACY[cmd]), ...ARGV ]));
 if (!exists(commands, cmd)) {
-	out({ ok: false, msg: 'usage: trafficctl <' + join('|', sort(uniq([ ...keys(commands), ...keys(LEGACY) ]))) + '> [args]' });
+	out({ ok: false, msg: 'usage: trafficctl <' + join('|', sort(keys(commands))) + '> [args]' });
 	exit(2);
 }
 let rc;

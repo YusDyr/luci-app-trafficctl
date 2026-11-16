@@ -137,31 +137,30 @@ cat > /tmp/dhcp.leases <<'EOF'
 EOF
 
 # ── the writers ──────────────────────────────────────────────────────────────
-S=/usr/libexec/trafficctl
 run() { say "$*"; "$@"; echo; }
-run sh $S/trafficctl-block.sh 192.168.0.50
-run sh $S/trafficctl-block.sh 192.168.0.5
-run sh $S/trafficctl-ratelimit.sh 192.168.0.60 5000 "" shared 1000
-run sh $S/trafficctl-ratelimit.sh 192.168.0.6 5000
-run sh $S/trafficctl-ratelimit.sh 192.168.0.7 8192
+run /usr/sbin/trafficctl block 192.168.0.50
+run /usr/sbin/trafficctl block 192.168.0.5
+run /usr/sbin/trafficctl ratelimit 192.168.0.60 5000 "" shared 1000
+run /usr/sbin/trafficctl ratelimit 192.168.0.6 5000
+run /usr/sbin/trafficctl ratelimit 192.168.0.7 8192
 # Each mode, on both ports. Up to 1.30.4 the writer gave a target's upload
 # meter the same name in every ul_<port> chain, and nftables 1.0.2 refused
 # the second one ("Resource busy"): ul_lan2 had no IPv4 upload rule for these
 # two targets while the writer reported ok. Every chain has its own meter
 # now (tctl_m_<slug>_<chain>), so both ports must hold the rule.
-run sh $S/trafficctl-ratelimit.sh 192.168.0.70 2000 "" each
-run sh $S/trafficctl-ratelimit.sh 10.0.20.0/24 2000 "" each 500
+run /usr/sbin/trafficctl ratelimit 192.168.0.70 2000 "" each
+run /usr/sbin/trafficctl ratelimit 10.0.20.0/24 2000 "" each 500
 for p in lan1 lan2; do
     for c in rl_ratelimit_192_168_0_70_ul rl_ratelimit_10_0_20_0_24_ul; do
         nft list chain netdev tm_ratelimit "ul_$p" | grep -qF "comment \"$c\"" \
             || die "each mode: no $c rule on ul_$p"
     done
 done
-run sh $S/trafficctl-shape.sh add 192.168.0.81 3000
-run sh $S/trafficctl-shape.sh add 192.168.0.80 8000 x 2000
+run /usr/sbin/trafficctl shape add 192.168.0.81 3000
+run /usr/sbin/trafficctl shape add 192.168.0.80 8000 x 2000
 # A saved-only block and limit: in rules.json, not in the kernel.
-run sh $S/trafficctl-block.sh 192.168.0.90
-run sh $S/trafficctl-unblock.sh 192.168.0.90 >/dev/null
+run /usr/sbin/trafficctl block 192.168.0.90
+run /usr/sbin/trafficctl unblock 192.168.0.90 >/dev/null
 sed -i 's/^\[/[{"type":"block","ip":"192.168.0.90","param":"block_192.168.0.90"},{"type":"ratelimit","ip":"192.168.0.66","param":"2000"},/' \
     /etc/trafficctl/rules.json
 # Blocks as releases before v1.13.2 wrote them: the comment carried the
@@ -175,8 +174,8 @@ if [ "$MODE" = bench ]; then
     n="${LIVE_EXTRA:-60}" i=0
     while [ "$i" -lt "$n" ]; do
         h=$((100 + i))
-        sh $S/trafficctl-ratelimit.sh "192.168.0.$h" $((1000 + i * 100)) "" shared 500 >/dev/null
-        [ $((i % 3)) = 0 ] && sh $S/trafficctl-shape.sh add "192.168.0.$h" $((2000 + i * 10)) >/dev/null
+        /usr/sbin/trafficctl ratelimit "192.168.0.$h" $((1000 + i * 100)) "" shared 500 >/dev/null
+        [ $((i % 3)) = 0 ] && /usr/sbin/trafficctl shape add "192.168.0.$h" $((2000 + i * 10)) >/dev/null
         i=$((i + 1))
     done
     say "rules: $(nft -a list table netdev tm_ratelimit | grep -c comment), classes: $(tc class show dev br-lan | grep -c htb)"
@@ -208,7 +207,7 @@ fi
 
 # ── unblock of the legacy blocks, as the Rules tab sends it (no label) ───────
 for ip in 192.168.0.51 192.168.0.52; do
-    sh $S/trafficctl-unblock.sh "$ip" "" >/dev/null
+    /usr/sbin/trafficctl unblock "$ip" "" >/dev/null
 done
 /usr/sbin/trafficctl rules > "$OUT/new/rules-after-unblock.json"
 nft list chain inet fw4 forward > "$OUT/new/fw4-after-unblock.nft"
@@ -243,9 +242,9 @@ check v130-sees-new-block 'sh "$L/trafficctl-block.sh" 192.168.0.54 | grep -q "a
 # doubles none already there.
 sh "$L/trafficctl-block.sh" 192.168.0.55 >/dev/null 2>&1
 # v1.30.0's own save fails on BusyBox awk ("bad regex '},{'", fixed in
-# v1.30.x), so the record is written by the shell writer the limiter still
-# uses: the same bytes v1.30.x saves.
-sh -c '. /usr/libexec/trafficctl/trafficctl-fw.sh; tctl_persist_save block 192.168.0.55 block_192.168.0.55'
+# v1.30.x), so the record is written by lib.persist_save: the same bytes
+# v1.30.x saves (checked next).
+ucode -e "import * as lib from 'trafficctl.lib'; lib.persist_save('block', '192.168.0.55', 'block_192.168.0.55');"
 check shell-saved-the-block 'grep -qF "{\"type\":\"block\",\"ip\":\"192.168.0.55\",\"param\":\"block_192.168.0.55\"}" /etc/trafficctl/rules.json'
 for h in $(nft -a list chain inet fw4 forward | grep -E '"tctl_block_192_168_0_55(_mac)?"' | sed 's/.*# handle //'); do
     nft delete rule inet fw4 forward handle "$h"

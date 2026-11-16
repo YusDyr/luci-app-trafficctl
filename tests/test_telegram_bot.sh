@@ -319,7 +319,7 @@ assert_eq "actions: each verb's command" \
         'macfilter-remove 192.168.1.11' 'ratelimit 192.168.1.11 0 tg' 'unblock 192.168.1.11 tg')" \
     "$(sed 's/ via=.*//' "$NLOG/cli")"
 
-# ── the CLI, the shim, the init script ──────────────────────────────────────
+# ── the CLI and the init script ───────────────────────────────────────────
 reset
 OUT=$(tctl telegram); RC=$?
 assert_eq "trafficctl telegram without the package" '{"ok":false,"msg":"trafficctl-telegram is not installed"}' "$OUT"
@@ -330,8 +330,6 @@ chmod +x "$TCTL_ROOT/usr/libexec/trafficctl/trafficctl-telegram.uc"
 OUT=$(tctl telegram x y); RC=$?
 assert_eq "trafficctl telegram runs the bot" "bot x y" "$OUT"
 assert_eq "trafficctl telegram: the bot's exit status" 3 "$RC"
-assert_eq "shim: the CLI command" 'exec /usr/sbin/trafficctl telegram "$@"' \
-    "$(sed -n 2p "$FILES/usr/libexec/trafficctl/trafficctl-telegram.sh")"
 assert_contains "init script runs the bot itself" "procd_set_param command /usr/libexec/trafficctl/trafficctl-telegram.uc" \
     "$(cat "$FILES/etc/init.d/trafficctl-telegram")"
 assert_eq "entry: executable" yes "$([ -x "$ENTRY" ] && echo yes)"

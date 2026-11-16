@@ -493,7 +493,7 @@ msgstr ""
 msgid "Give upload its own ceiling instead of matching download"
 msgstr ""
 
-msgid "Global internet cut needs nftables (fw4). This router is running iptables."
+msgid "Global internet cut needs nftables (fw4), and nft cannot list its tables on this router."
 msgstr ""
 
 msgid "Grant access to LuCI Traffic Control"

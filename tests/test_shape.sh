@@ -239,9 +239,9 @@ rmdir "$SHAPES"
 # ════════════════════════════════════════════════════════════════════════════
 
 st_reset
-assert_eq "no action: usage" '{"ok":false,"msg":"usage: trafficctl-shape.sh <add|remove|status> <ip> [rate_kbit] [label]"}' "$(st_run)"
-assert_eq "add without a rate" '{"ok":false,"msg":"usage: trafficctl-shape.sh add <ip> <rate_kbit> [label]"}' "$(st_run add 192.168.1.5)"
-assert_eq "remove without an address" '{"ok":false,"msg":"usage: trafficctl-shape.sh remove <ip>"}' "$(st_run remove)"
+assert_eq "no action: usage" '{"ok":false,"msg":"usage: trafficctl shape <add|remove|status> <ip> [rate_kbit] [label]"}' "$(st_run)"
+assert_eq "add without a rate" '{"ok":false,"msg":"usage: trafficctl shape add <ip> <rate_kbit> [label]"}' "$(st_run add 192.168.1.5)"
+assert_eq "remove without an address" '{"ok":false,"msg":"usage: trafficctl shape remove <ip>"}' "$(st_run remove)"
 assert_eq "an invalid address" '{"ok":false,"msg":"invalid IP address"}' "$(st_run add '192.168.1.5;reboot' 5000)"
 assert_eq "a subnet is not a shaper target" '{"ok":false,"msg":"invalid IP address"}' "$(st_run add 192.168.1.0/24 5000)"
 assert_eq "rate 0 is refused, not a total block" \

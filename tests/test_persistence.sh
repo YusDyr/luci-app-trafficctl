@@ -18,8 +18,8 @@
 # the default has been turned off.
 
 #
-# Also pinned here: rules.json itself. The ucode block and the shell limiter
-# write the same file, so their bytes and their lock must agree.
+# Also pinned here: rules.json itself. 1.30.x reads it after a downgrade and
+# writes it while an upgrade runs, so its bytes and its lock stay v1.30's.
 
 PASS=0
 FAIL=0
@@ -29,7 +29,6 @@ FAIL=0
 # shellcheck source=tests/lib/fw4_env.sh
 . "$UC_TESTLIB/fw4_env.sh"
 REPO_ROOT="$UC_REPO"
-BIN="$REPO_ROOT/trafficctl/files/usr/libexec/trafficctl"
 CONF="$REPO_ROOT/trafficctl/files/etc/config/trafficctl"
 HOOK="$REPO_ROOT/trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes"
 TMPDIR="$FW_T/q"
@@ -104,48 +103,24 @@ assert_contains "block, persistence on: says persist:true" '"persist":true' "$OU
 assert_not_contains "block, persistence on: no qualifier" "NOT PERSISTENT" "$OUT"
 
 # ── rules.json: the bytes v1.30 wrote ─────────────────────────────────────
-# The shell writers (limits, port forwards) still edit the same file as text,
-# and a v1.30 package reads it back after a downgrade: compact, the legacy
+# A v1.30 package reads the file back after a downgrade: compact, the legacy
 # key order, param a string, mode and param_up only when set.
 assert_eq "block record: the v1.30 bytes" \
     '[{"type":"block","ip":"192.168.1.50","param":"block_192.168.1.50"}]' "$(cat "$RULES")"
 
-FW="$FW_T/fw.sh"
-sed -e "s|TCTL_RULES_FILE=\"/etc/trafficctl/rules.json\"|TCTL_RULES_FILE=\"$RULES\"|" \
-    -e "s|TCTL_RULES_LOCK=\"/tmp/trafficctl_rules.lock.d\"|TCTL_RULES_LOCK=\"$ROOT/tmp/trafficctl_rules.lock.d\"|" \
-    "$BIN/trafficctl-fw.sh" > "$FW"
-assert_eq "harness: the shell writer's paths were redirected" "2" \
-    "$(grep -c "$ROOT" "$FW")"
-shw() { PATH="$MOCKBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; $1" 2>/dev/null; }
 ucw() { PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" tcall trafficctl.lib "$@" >/dev/null 2>&1; }
 
-# The same edits through each writer give the same file, byte for byte.
-seq_shell() {
-    rm -f "$RULES"
-    shw 'tctl_persist_save block 192.168.1.5 lab'
-    shw 'tctl_persist_save ratelimit 192.168.20.0/24 20000 each'
-    shw 'tctl_persist_save ratelimit 192.168.1.50 5000 "" 1000'
-    shw 'tctl_persist_save block 192.168.1.50 ""'
-    shw 'tctl_persist_save block 192.168.1.5 relabel'
-    shw 'tctl_persist_remove block 192.168.1.50'
-    cat "$RULES"
-}
-seq_ucode() {
-    rm -f "$RULES"
-    ucw persist_save '"block"' '"192.168.1.5"' '"lab"'
-    ucw persist_save '"ratelimit"' '"192.168.20.0/24"' '"20000"' '"each"'
-    ucw persist_save '"ratelimit"' '"192.168.1.50"' '"5000"' '""' '"1000"'
-    ucw persist_save '"block"' '"192.168.1.50"' '""'
-    ucw persist_save '"block"' '"192.168.1.5"' '"relabel"'
-    ucw persist_remove '"block"' '"192.168.1.50"'
-    cat "$RULES"
-}
-SH_BYTES=$(seq_shell)
-UC_BYTES=$(seq_ucode)
-assert_eq "writers: the ucode writer's file equals the shell writer's" "$SH_BYTES" "$UC_BYTES"
-assert_eq "writers: and is what v1.30 wrote" \
+# The same edits v1.30's tctl_persist_save/_remove made give its bytes.
+rm -f "$RULES"
+ucw persist_save '"block"' '"192.168.1.5"' '"lab"'
+ucw persist_save '"ratelimit"' '"192.168.20.0/24"' '"20000"' '"each"'
+ucw persist_save '"ratelimit"' '"192.168.1.50"' '"5000"' '""' '"1000"'
+ucw persist_save '"block"' '"192.168.1.50"' '""'
+ucw persist_save '"block"' '"192.168.1.5"' '"relabel"'
+ucw persist_remove '"block"' '"192.168.1.50"'
+assert_eq "writer: the file v1.30 wrote" \
     '[{"type":"ratelimit","ip":"192.168.20.0/24","param":"20000","mode":"each"},{"type":"ratelimit","ip":"192.168.1.50","param":"5000","param_up":"1000"},{"type":"block","ip":"192.168.1.5","param":"relabel"}]' \
-    "$UC_BYTES"
+    "$(cat "$RULES")"
 # Removing a record by type and address: the same address under another type
 # stays, and so does an address the target is a prefix of.
 rm -f "$RULES"
@@ -162,6 +137,27 @@ assert_eq "save: a zero-length file starts over" '[{"type":"block","ip":"192.168
 : > "$RULES"
 ucw persist_remove '"block"' '"192.168.1.7"'
 assert_eq "remove: a zero-length file is left alone" "" "$(cat "$RULES")"
+# Removing the last record leaves an empty array, not an empty file: a
+# v1.30 reader and the restore path both take [] as "nothing to restore".
+rm -f "$RULES"
+ucw persist_save '"block"' '"192.168.1.9"' '""'
+ucw persist_remove '"block"' '"192.168.1.9"'
+assert_eq "remove: the last record leaves []" "[]" "$(cat "$RULES")"
+# A failed write keeps the populated file: the new content goes to a
+# temporary file renamed over it only when complete. A zero file-size limit
+# (SIGXFSZ ignored, so the write just fails) works as root too, where a
+# read-only directory would not.
+rm -f "$RULES"
+ucw persist_save '"block"' '"192.168.1.10"' '""'
+BEFORE=$(cat "$RULES")
+ucnowrite() { ( trap '' XFSZ; ulimit -f 0; TCTL_ROOT="$ROOT" tcall trafficctl.lib "$@" 2>&1 ); }
+assert_eq "save: the write fails" "false" "$(ucnowrite persist_save '"block"' '"192.168.1.11"' '""')"
+assert_eq "save: a failed write keeps the populated file" "$BEFORE" "$(cat "$RULES")"
+assert_eq "remove: the write fails" "false" "$(ucnowrite persist_remove '"block"' '"192.168.1.10"')"
+assert_eq "remove: a failed write keeps the populated file" "$BEFORE" "$(cat "$RULES")"
+LEFT=
+for f in "$RULES".tmp.*; do [ -e "$f" ] && LEFT="$LEFT $f"; done
+assert_eq "a failed write leaves no temporary file" "" "$LEFT"
 # The shell interpolated the label as it came; one with a quote made the file
 # unparseable for every reader. Escaped now (a declared difference).
 rm -f "$RULES"
@@ -173,21 +169,22 @@ assert_eq "save: a quote in the label is escaped, the file stays JSON" "kid\"s t
 # Each writer reads the file, edits the text and renames a new file over it.
 # Two at once read the same file and the later rename drops the earlier
 # record: a rate limit set from the bot while LuCI blocks a device would not
-# come back after a reboot. The shell's mkdir lock is the one both take.
+# come back after a reboot. The writer takes v1.30's mkdir lock, so a
+# 1.30.x writer still running during an upgrade waits for it and it for that.
 LOCK="$ROOT/tmp/trafficctl_rules.lock.d"
 rm -f "$RULES"
 mkdir "$LOCK"
 ( ucw persist_save '"block"' '"192.168.1.9"' '""' ) &
 upid=$!
 sleep 1
-assert_eq "lock: the ucode writer waits while the shell holds the lock" "no" \
+assert_eq "lock: the writer waits while somebody else holds the lock" "no" \
     "$([ -e "$RULES" ] && echo yes || echo no)"
 rmdir "$LOCK"
 wait "$upid"
 assert_eq "lock: and writes once it is released" '[{"type":"block","ip":"192.168.1.9","param":""}]' "$(cat "$RULES")"
 assert_eq "lock: released after the write" "no" "$([ -d "$LOCK" ] && echo yes || echo no)"
 
-# A lock left by a killed writer is taken over, as the shell does.
+# A lock left by a killed writer is taken over, as v1.30's shell did.
 mkdir "$LOCK"
 touch -d '1 minute ago' "$LOCK" 2>/dev/null || touch -t "$(date -d '1 minute ago' +%Y%m%d%H%M.%S 2>/dev/null || date +%Y%m%d%H%M.%S)" "$LOCK"
 t0=$(date +%s)
@@ -197,42 +194,13 @@ assert_contains "lock: a stale lock does not stop persistence" '"192.168.1.10"' 
 assert_eq "lock: nor holds it up for long" "yes" "$([ $((t1 - t0)) -lt 10 ] && echo yes || echo no)"
 rmdir "$LOCK" 2>/dev/null
 
-# Writers at once: every record lands. Each kind alone first, so a lost
-# record says whose lock let it through.
-#
-# The shell lock is mkdir(2), which BusyBox's mkdir calls directly. The
-# uutils mkdir of ubuntu-26.04 runners does not: two of them racing for one
-# directory can both succeed, and twelve shell writers lost records there
-# while the ucode writers never did. The shell writers get a mkdir that is
-# the system call, as on the router.
+# Writers at once: every record lands.
 WLOG="$ROOT/tmp/writers.log"
-LOCKBIN="$FW_T/lockbin"
-mkdir -p "$LOCKBIN"
-cat > "$LOCKBIN/mkdir" <<'EOF'
-#!/usr/bin/env python3
-import os, sys
-args = sys.argv[1:]
-parents = '-p' in args
-rc = 0
-for d in (a for a in args if a != '-p'):
-    try:
-        os.makedirs(d, exist_ok=True) if parents else os.mkdir(d)
-    except OSError as e:
-        print('mkdir: %s: %s' % (d, e.strerror), file=sys.stderr)
-        rc = 1
-sys.exit(rc)
-EOF
-chmod +x "$LOCKBIN/mkdir"
-writers() {   # writers <shell writers> <ucode writers> <name>
+writers() {   # writers <count> <name>
     local i pids="" n f
-    rm -f "$RULES" "$ROOT"/tmp/sh.*.err "$ROOT"/tmp/uc.*.err
+    rm -f "$RULES" "$ROOT"/tmp/uc.*.err
     : > "$WLOG"
     for i in $(seq 1 "$1"); do
-        ( PATH="$LOCKBIN:$MOCKBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; tctl_persist_save ratelimit 10.1.0.$i 100" \
-            >/dev/null 2>"$ROOT/tmp/sh.$i.err"; echo "sh $i rc=$?" >> "$WLOG" ) &
-        pids="$pids $!"
-    done
-    for i in $(seq 1 "$2"); do
         ( PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" tcall trafficctl.lib persist_save '"block"' "\"10.2.0.$i\"" '""' \
             >/dev/null 2>"$ROOT/tmp/uc.$i.err"; echo "uc $i rc=$?" >> "$WLOG" ) &
         pids="$pids $!"
@@ -240,20 +208,18 @@ writers() {   # writers <shell writers> <ucode writers> <name>
     # shellcheck disable=SC2086
     wait $pids
     n=$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$RULES" 2>&1)
-    assert_eq "lock: $3, every record" "$(($1 + $2))" "$n"
-    if [ "$n" != "$(($1 + $2))" ]; then
+    assert_eq "lock: $2, every record" "$1" "$n"
+    if [ "$n" != "$1" ]; then
         # A lost record is a timing fault: say which writer and what it saw.
         cat "$RULES"; echo
         sort "$WLOG"
-        for f in "$ROOT"/tmp/sh.*.err "$ROOT"/tmp/uc.*.err; do
+        for f in "$ROOT"/tmp/uc.*.err; do
             [ -s "$f" ] && { echo "--- $f"; cat "$f"; }
         done
         ls -la "$ROOT/tmp" "$(dirname "$RULES")"
     fi
 }
-writers 12 0 "twelve shell writers at once"
-writers 0 12 "twelve ucode writers at once"
-writers 6 6 "six of each at once"
+writers 12 "twelve writers at once"
 
 # ── the restore path ──────────────────────────────────────────────────────
 # Shapes are restored unconditionally and blocks are restored behind the flag.
@@ -261,34 +227,21 @@ writers 6 6 "six of each at once"
 # the shape of the original bug, so both halves are pinned: if the shape
 # restore ever grows a persist guard, shapes stop coming back for anyone who
 # turned the flag off, and that is a regression in the other direction. The
-# shapes half is `trafficctl restore` now, run with persist_rules off in
-# tests/test_shape.sh; the port-forward half is still the hook's.
-
-rules_block=$(awk '/^# Restore port-forward controls/ { f = 1 } f { print } f && /^fi$/ { exit }' "$HOOK")
-case "$rules_block" in
-    *tctl_persist_enabled*) PASS=$((PASS + 1)) ;;
-    *)
-        FAIL=$((FAIL + 1))
-        printf "FAIL: the port-forward restore no longer checks persist_rules\n"
-        ;;
-esac
-# Blocks and rate limits come back through the CLI, which checks the flag
-# itself (below, and tests/test_meter_per_chain.sh); a second copy of either
-# in the hook would apply each saved limit twice.
-assert_contains "the hook restores blocks and limits through the CLI" "/usr/sbin/trafficctl restore" "$(cat "$HOOK")"
-assert_not_contains "the hook has no ratelimit restore of its own" "ratelimit)" "$rules_block"
+# shapes half is `trafficctl restore`, run with persist_rules off in
+# tests/test_shape.sh; blocks, limits and port controls are behind the flag.
+# The hook is the CLI's restore and nothing else: a second copy of any half
+# would apply each saved rule twice.
+assert_contains "the hook restores through the CLI" "/usr/sbin/trafficctl restore" "$(cat "$HOOK")"
+assert_eq "the hook restores nothing of its own" "" "$(grep -E 'nft|tc |rules\.json|persist' "$HOOK" | grep -v '^#')"
 
 # The blocks, from a file the v1.30 shell writer produced.
 fw_flush
-rm -f "$RULES"
-shw 'tctl_persist_save block 192.168.1.60 ""'
-shw 'tctl_persist_save pfw_pause forward/tcp/192.168.1.61/8080 ""'
-shw 'tctl_persist_save block 192.168.1.62 tg'
+printf '%s' '[{"type":"block","ip":"192.168.1.60","param":""},{"type":"pfw_pause","ip":"forward/tcp/192.168.1.61/8080","param":""},{"type":"block","ip":"192.168.1.62","param":"tg"}]' > "$RULES"
 fw_cfg 0
 assert_eq "restore, persistence off: nothing restored" '{"ok":true,"restored":0,"failed":0}' "$(fw_run restore)"
 assert_eq "restore, persistence off: the chain is untouched" "" "$(fw_rules)"
 fw_cfg 1
-assert_eq "restore: both blocks back" '{"ok":true,"restored":2,"failed":0}' "$(fw_run restore)"
+assert_eq "restore: both blocks back, and the port pause" '{"ok":true,"restored":3,"failed":0}' "$(fw_run restore)"
 assert_eq "restore: with the comment from the address, as the block writes it" \
     'ip saddr 192.168.1.62 counter drop comment "tctl_block_192_168_1_62"
 ip saddr 192.168.1.60 counter drop comment "tctl_block_192_168_1_60"' "$(fw_rules)"

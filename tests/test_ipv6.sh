@@ -19,10 +19,8 @@
 PASS=0
 FAIL=0
 
-BIN="$(cd "$(dirname "$0")/.." && pwd)/trafficctl/files/usr/libexec/trafficctl"
-
-# The limiter is `trafficctl ratelimit` (ucode, run with TCTL_ROOT=$ROOT); the
-# MAC helpers it shares with the shell readers are still fw.sh's.
+# The limiter is `trafficctl ratelimit` (ucode, run with TCTL_ROOT=$ROOT), its
+# MAC helpers net.lookup_mac, target_mac and ip_is_nexthop.
 # shellcheck source=tests/lib/ucode.sh
 . "$(dirname "$0")/lib/ucode.sh"
 TMPDIR="$UC_TMP/ipv6"
@@ -75,20 +73,8 @@ export CT_LOG="$TMPDIR/conntrack.log"
 : > "$FW4_STATE"; : > "$RL_DUMP"; : > "$NFT_LOG"; : > "$CT_LOG"
 echo 0 > "$FW4_HANDLE"
 
-# fw.sh names /tmp/dhcp.leases by absolute path, as it must on the router. The
-# tests rewrite that line into the scratch directory rather than have the
-# shipped script carry a test-only override (test_newdevice.sh's approach, and
-# it asserts that no production path survives the rewrite).
-FW="$TMPDIR/fw.sh"
-sed -e "s|TCTL_LEASES_FILE=\"/tmp/dhcp.leases\"|TCTL_LEASES_FILE=\"$LEASES\"|" \
-    "$BIN/trafficctl-fw.sh" > "$FW"
-assert_contains "harness: the lease path was redirected into the scratch dir" \
-    "$LEASES" "$(cat "$FW")"
-assert_eq "harness: no production lease path survived the rewrite" "" \
-    "$(grep -n '/tmp/dhcp.leases' "$FW")"
-
-# The scratch root of the ucode limiter: the same LAN as the shell mocks
-# below, br-lan bridging lan1, eth1 the WAN.
+# The scratch root of the ucode limiter: the same LAN as the mocks below,
+# br-lan bridging lan1, eth1 the WAN.
 mkdir -p "$ROOT/etc/config" "$ROOT/etc/trafficctl" "$ROOT/tmp" "$TMPDIR/ubus"
 ln -s "$LEASES" "$ROOT/tmp/dhcp.leases"
 printf "config trafficctl 'main'\n\toption persist_rules '0'\n\nconfig logging 'logging'\n\toption enabled '0'\n" \
@@ -205,13 +191,13 @@ MOCK
 chmod +x "$MOCKBIN"/*
 
 # br-lan is a bridge with one port: ingress hooks land on the PORT, egress on
-# the bridge itself (see tctl_ingress_devices).
+# the bridge itself (see limit.ingress_devices).
 mkdir -p "$TMPDIR/sys/class/net/br-lan/brif/lan1" "$TMPDIR/sys/class/net/eth1" \
          "$TMPDIR/sys/class/net/lan1"
 export TCTL_SYSFS_NET="$TMPDIR/sys/class/net"
 ln -s "$TMPDIR/sys" "$ROOT/sys"
 
-fw() { PATH="$MOCKBIN:$PATH" sh -c ". $FW >/dev/null 2>&1; $1" 2>&1; }
+net() { PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" tcall trafficctl.net "$1" "\"$2\"" 2>&1; }
 run_ratelimit() { : > "$NFT_LOG"; PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" tctl ratelimit "$@" 2>&1; }
 
 # The fixture LAN:
@@ -238,46 +224,46 @@ printf 'default via 10.1.1.1 dev eth1\n' >> "$ROUTES"
 # ── MAC resolution ───────────────────────────────────────────────────────────
 
 assert_eq "mac: resolved from the DHCP lease, lowercased" \
-    "aa:bb:cc:dd:ee:50" "$(fw 'tctl_lookup_mac 192.168.1.50')"
+    "aa:bb:cc:dd:ee:50" "$(net lookup_mac 192.168.1.50)"
 
 assert_eq "mac: falls back to the neighbour table with no lease" \
-    "aa:bb:cc:dd:ee:90" "$(fw 'tctl_lookup_mac 192.168.1.90')"
+    "aa:bb:cc:dd:ee:90" "$(net lookup_mac 192.168.1.90)"
 
 # A routed/downstream client has neither. Silently doing nothing there is the
 # failure this issue is about, so the lookup must FAIL rather than return junk.
 assert_eq "mac: unknown device yields nothing and fails" \
-    "NOMAC" "$(fw 'tctl_lookup_mac 192.168.1.70 || echo NOMAC')"
+    "" "$(net lookup_mac 192.168.1.70)"
 
 # The MAC is interpolated into an nft rule string, so it is validated as six
 # hex pairs rather than merely trimmed.
 printf 'x aa:bb:cc;nft flush ruleset;:ee 192.168.1.66 evil *\n' >> "$LEASES"
 assert_eq "mac: a malformed lease field is refused, not interpolated" \
-    "NOMAC" "$(fw 'tctl_lookup_mac 192.168.1.66 || echo NOMAC')"
+    "" "$(net lookup_mac 192.168.1.66)"
 
 # ── which targets may be keyed on a MAC ──────────────────────────────────────
 
 assert_eq "target: a plain host qualifies" \
-    "aa:bb:cc:dd:ee:50" "$(fw 'tctl_target_mac 192.168.1.50')"
+    "aa:bb:cc:dd:ee:50" "$(net target_mac 192.168.1.50)"
 assert_eq "target: /32 is the same single host" \
-    "aa:bb:cc:dd:ee:50" "$(fw 'tctl_target_mac 192.168.1.50/32')"
+    "aa:bb:cc:dd:ee:50" "$(net target_mac 192.168.1.50/32)"
 assert_eq "target: a CIDR block has no single MAC" \
-    "NONE" "$(fw 'tctl_target_mac 192.168.1.0/24 || echo NONE')"
+    "" "$(net target_mac 192.168.1.0/24)"
 assert_eq "target: \"all\" has no single MAC" \
-    "NONE" "$(fw 'tctl_target_mac 0.0.0.0/0 || echo NONE')"
+    "" "$(net target_mac 0.0.0.0/0)"
 
 # The big over-block hazard: a next hop's MAC is the source address of every
 # packet it FORWARDS, so keying a rule on it takes out the whole subnet behind
 # it. Excluded, and the caller is made to say why.
 assert_eq "target: a routed next hop is excluded" \
-    "NONE" "$(fw 'tctl_target_mac 192.168.1.80 || echo NONE')"
+    "" "$(net target_mac 192.168.1.80)"
 assert_eq "nexthop: recognised from the routing table" \
-    "YES" "$(fw 'tctl_ip_is_nexthop 192.168.1.80 && echo YES || echo NO')"
+    "true" "$(net ip_is_nexthop 192.168.1.80)"
 assert_eq "nexthop: an ordinary client is not one" \
-    "NO" "$(fw 'tctl_ip_is_nexthop 192.168.1.50 && echo YES || echo NO')"
+    "false" "$(net ip_is_nexthop 192.168.1.50)"
 # "via" as a device name or in another position must not count.
 printf '172.16.0.0/16 dev via scope link\n' >> "$ROUTES"
 assert_eq "nexthop: \"via\" as a device name is not a next hop" \
-    "NO" "$(fw 'tctl_ip_is_nexthop via && echo YES || echo NO')"
+    "false" "$(net ip_is_nexthop via)"
 
 # The block's half (the MAC rule, the v6 conntrack flush, removal of both
 # halves) is `trafficctl block` since the ucode port: tests/test_ipv6_block.sh.

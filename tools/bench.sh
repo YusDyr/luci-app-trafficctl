@@ -10,11 +10,12 @@
 #   ssh root@192.168.0.1 sh -s -- 2000 8000 16000 < tools/bench.sh
 #
 # BENCH_RUNS (default 5) timed runs per cell. BENCH_LEGACY (default
-# /usr/libexec/trafficctl) is where the shell scripts are read from: once a
-# script is a wrapper for /usr/sbin/trafficctl it is no legacy baseline, so
+# /usr/libexec/trafficctl, where releases up to 1.30.x install them) is where
+# the shell scripts are read from. 2.0.0 ships none, so on a router running it
 # point this at an unpacked older release (v1.30.0's usr/libexec/trafficctl).
-# A cell is skipped when its side does not have the command: a wrapper on the
-# legacy side, a command `trafficctl` does not know yet on the ucode side.
+# A cell is skipped when its side does not have the command: no script (or
+# a wrapper) on the legacy side, a command `trafficctl` does not know on the
+# ucode side.
 #
 # Everything either side writes goes under /tmp/tctl-bench: the legacy copy has
 # its paths rewritten, the ucode side gets TCTL_ROOT. Live rules, /etc and the
@@ -32,6 +33,7 @@ mkdir -p "$B/legacy" "$B/root/proc/net" "$B/root/tmp" "$B/root/etc/trafficctl" "
 trap 'rm -rf "$B"' EXIT INT TERM
 
 for f in "$LEGACY"/*.sh; do
+    [ -f "$f" ] || continue
     sed -e "s|/usr/libexec/trafficctl/|$B/legacy/|g" \
         -e "s|/proc/net/nf_conntrack|$B/root/proc/net/nf_conntrack|g" \
         -e "s|/etc/trafficctl/|$B/root/etc/trafficctl/|g" \

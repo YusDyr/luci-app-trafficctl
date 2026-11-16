@@ -28,12 +28,14 @@ reaching a user.
 node --check luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js
 npm install && npm run lint
 
-# Shell: syntax and static analysis
-for f in trafficctl/files/usr/libexec/trafficctl/trafficctl-*.sh; do sh -n "$f" || echo "FAIL $f"; done
-shellcheck trafficctl/files/usr/libexec/trafficctl/trafficctl-*.sh
+# Shell (hooks, init scripts, the CGI): syntax and static analysis
+F=trafficctl/files
+for f in $F/etc/hotplug.d/*/* $F/etc/init.d/* $F/etc/uci-defaults/* $F/www/cgi-bin/*; do sh -n "$f" || echo "FAIL $f"; done
+shellcheck -s sh $F/etc/hotplug.d/*/* $F/www/cgi-bin/*
 
-# Tests — see docs/DEVELOPMENT.md for the full list and what each covers
-bash tests/test_fw.sh
+# Tests — see docs/DEVELOPMENT.md for the full list and what each covers.
+# The ucode ones need an interpreter: tools/ci/build-ucode.sh 2022-12-02
+export UCODE_PREFIX=~/.cache/trafficctl-ucode/2022-12-02
 bash tests/test_direction.sh
 bash tests/test_security.sh
 ```
@@ -44,15 +46,16 @@ that installs the built package inside real OpenWrt rootfs containers from
 
 ## Writing tests
 
-A test must exercise the real script. The suite historically contained tests
+A test must exercise the real code. The suite historically contained tests
 that redefined a local copy of the function they were checking, which meant
 deleting the production validation entirely left them green — so a test that
 does not fail when you break the code it names is worse than no test.
 
 The pattern to copy is `tests/test_direction.sh`: put a fake `nft`/`tc`/`ip`/
-`uci`/`curl` on `PATH`, redirect the script's `. /usr/libexec/trafficctl/trafficctl-fw.sh`
-line and its state-file paths into a temp dir with `sed`, run the real script,
-then assert on the arguments the fakes recorded.
+`curl` on `PATH`, point `TCTL_ROOT` at a scratch root (uci config, state files,
+sysfs), run the real CLI through `tctl` from `tests/lib/ucode.sh`, then assert
+on the arguments the fakes recorded. One module function at a time goes
+through `tcall`.
 
 Verify your test by breaking the production code on purpose, watching the test
 go red, and restoring the file.
@@ -61,11 +64,12 @@ go red, and restoring the file.
 
 These run as root with parameters that came from a browser, so:
 
-- Validate at the boundary and re-validate in the script (`tctl_validate_ip`,
-  `tctl_validate_target`, `valid_port`, `proto_tokens`). Never interpolate an
-  unvalidated value into an `nft`/`tc` command line.
+- Validate at the boundary and re-validate in the backend (`lib.valid_ip`,
+  `lib.valid_target`, `portfw.valid_port`, `limit.valid_rate`). Never interpolate an
+  unvalidated value into an `nft`/`tc` command line, and quote every value with
+  `lib.q()` (`tests/lib/uc_cmd_lint.py` checks it).
 - Identify rules by the target, not by a caller-supplied label
-  (`tctl_block_comment`, `tctl_ratelimit_comment`), and match the **full**
+  (`ctl.block_comment`, `limit.comment`), and match the **full**
   comment on removal — an unanchored match on `192.168.1.1` also hits
   `192.168.1.10`.
 - A control that cannot be applied must report that. Reporting success for a

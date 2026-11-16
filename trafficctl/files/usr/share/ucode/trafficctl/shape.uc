@@ -375,7 +375,7 @@ function arg(a) {
 	return (a == null) ? '' : '' + a;
 }
 
-const USAGE = 'usage: trafficctl-shape.sh <add|remove|status> <ip> [rate_kbit] [label]';
+const USAGE = 'usage: trafficctl shape <add|remove|status> <ip> [rate_kbit] [label]';
 
 // args: <add|remove|status> <ip> [rate_kbit] [label] [rate_up]. The label is
 // taken and unused; an empty rate_up is the download rate, never zero (a
@@ -388,8 +388,8 @@ function main(args, quiet) {
 	if (action != 'add' && action != 'remove' && action != 'status')
 		return fail(USAGE);
 	if (ip == '' || (action == 'add' && rate == ''))
-		return fail((action == 'add') ? 'usage: trafficctl-shape.sh add <ip> <rate_kbit> [label]'
-			: sprintf('usage: trafficctl-shape.sh %s <ip>', action));
+		return fail((action == 'add') ? 'usage: trafficctl shape add <ip> <rate_kbit> [label]'
+			: sprintf('usage: trafficctl shape %s <ip>', action));
 	if (!lib.valid_ip(ip))
 		return fail('invalid IP address');
 	if (action == 'remove')

@@ -44,33 +44,10 @@ assert_contains() {
     fi
 }
 
-# ── IP validation (real tctl_validate_ip from trafficctl-fw.sh) ────────────
-
-uci() { echo ""; }
-nft() { return 1; }
-command() { return 1; }
-export -f uci nft command
-
-. "$BIN/trafficctl-fw.sh"
-
-# Command injection attempts via IP
-assert_eq "injection: semicolon" 1 "$(tctl_validate_ip '192.168.1.1; rm -rf /' && echo 0 || echo 1)"
-assert_eq "injection: pipe" 1 "$(tctl_validate_ip '192.168.1.1|cat /etc/passwd' && echo 0 || echo 1)"
-assert_eq "injection: backtick" 1 "$(tctl_validate_ip '$(whoami).168.1.1' && echo 0 || echo 1)"
-assert_eq "injection: newline" 1 "$(tctl_validate_ip "192.168.1.1
-rm -rf /" && echo 0 || echo 1)"
-assert_eq "injection: ampersand" 1 "$(tctl_validate_ip '192.168.1.1&& cat /etc/shadow' && echo 0 || echo 1)"
-assert_eq "injection: redirect" 1 "$(tctl_validate_ip '192.168.1.1>/tmp/hacked' && echo 0 || echo 1)"
-
-# Leading zeros: $(( )) reads 010 as octal, so 010.0.0.0 was 8.0.0.0.
-for ip in 010.0.5.0 1.02.3.4 1.2.3.00; do
-    assert_eq "leading zero in '$ip' refused" 1 "$(tctl_validate_ip "$ip" && echo 0 || echo 1)"
-done
-assert_eq "0.0.0.0 is still an address" 0 "$(tctl_validate_ip 0.0.0.0 && echo 0 || echo 1)"
-assert_eq "target: a leading-zero prefix refused" 1 "$(tctl_validate_target 10.0.0.0/08 >/dev/null && echo 0 || echo 1)"
-assert_eq "target: /0 allowed" "10.0.0.0/0" "$(tctl_validate_target 10.0.0.0/0)"
-assert_eq "cidr_spec: a leading-zero prefix refused" 1 "$(tctl_cidr_spec 10.0.0.0/08 >/dev/null && echo 0 || echo 1)"
-assert_eq "cidr_spec: a leading-zero octet refused" 1 "$(tctl_cidr_spec 010.0.0.0/8 >/dev/null && echo 0 || echo 1)"
+# ── IP validation ───────────────────────────────────────────────────────────
+# lib.valid_ip, valid_target and cidr_spec, with the injection and
+# leading-zero cases this file ran against v1.30's tctl_validate_ip:
+# tests/test_ucode_lib.sh.
 
 # ── MAC / name sanitization ─────────────────────────────────────────────────
 # The known-device ledger, the one place a MAC/name pair from a DHCP client is

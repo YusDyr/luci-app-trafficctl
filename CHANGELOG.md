@@ -4,6 +4,33 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## Upgrading to 2.0.0
+
+2.0.0 replaces the shell backend with one ucode CLI, `/usr/sbin/trafficctl`.
+The scripts in `/usr/libexec/trafficctl/` (`trafficctl-block.sh`,
+`trafficctl-ratelimit.sh`, `trafficctl-summary.sh`, `trafficctl-fw.sh` and the
+rest) are gone.
+
+- A cron line or a script that called `/usr/libexec/trafficctl/trafficctl-<command>.sh`
+  must call `/usr/sbin/trafficctl <command>` instead. The arguments and the
+  JSON on stdout are the same: `trafficctl-ratelimit.sh 192.168.1.50 2000`
+  becomes `trafficctl ratelimit 192.168.1.50 2000`. Nothing can source
+  `trafficctl-fw.sh` any more.
+- Upgrade `trafficctl`, `trafficctl-telegram` and `luci-app-trafficctl`
+  together: the 2.0.0 web interface and bot need the 2.0.0 backend, and
+  depend on it by version. A 1.30.x web interface does not work with the
+  2.0.0 backend; upgrading `trafficctl` alone under it prints and logs
+  "upgrade luci-app-trafficctl too".
+- Error messages name the command: `usage: trafficctl shape add <ip> ...`
+  instead of `usage: trafficctl-shape.sh add <ip> ...`.
+- The `ifup lan` hook now runs `trafficctl restore` alone, which also puts back
+  the saved port-forward controls and a cut kept across a reboot (v1.30.x's
+  hook did those two itself).
+- The saved state (`/etc/trafficctl/rules.json`, `shapes.json`, `names`,
+  `cut.state`) keeps its format, so a downgrade to 1.30.x still reads it.
+
+---
+
 ## [1.30.7] - 2026-11-13
 
 ### Bug Fixes
