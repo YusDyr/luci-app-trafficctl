@@ -732,7 +732,9 @@ for n in 1 2 999 1000; do
     assert_eq "activity_log: a 9000-line log, lines $n" "$(tail -n "$n" "$R/tmp/trafficctl/activity.log" | jq -Rsc 'split("\n") | if .[-1] == "" then .[:-1] else . end')" \
         "$(run_call activity_log "{\"lines\":$n}" | jq -c .lines)"
 done
-head -c 65536 "$R/tmp/trafficctl/activity.log" > "$R/tmp/a.log"; mv "$R/tmp/a.log" "$R/tmp/trafficctl/activity.log"
+# 1524 lines of 43 bytes and 4 bytes with no newline: 65536 bytes.
+awk 'BEGIN { for (i = 1; i <= 1524; i++) printf "%06d %s\n", i, "an activity log line of some length"; printf "last" }' > "$R/tmp/trafficctl/activity.log"
+assert_eq "activity_log: the one-chunk log is one chunk" "65536" "$(wc -c < "$R/tmp/trafficctl/activity.log" | tr -d ' ')"
 assert_eq "activity_log: a log of exactly one chunk" "$(tail -n 1000 "$R/tmp/trafficctl/activity.log" | jq -Rsc 'split("\n") | if .[-1] == "" then .[:-1] else . end')" \
     "$(run_call activity_log '{"lines":1000}' | jq -c .lines)"
 # A configured path outside the allowed roots is never read.
