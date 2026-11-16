@@ -735,7 +735,9 @@ done
 # 1524 lines of 43 bytes and 4 bytes with no newline: 65536 bytes.
 awk 'BEGIN { for (i = 1; i <= 1524; i++) printf "%06d %s\n", i, "an activity log line of some length"; printf "last" }' > "$R/tmp/trafficctl/activity.log"
 assert_eq "activity_log: the one-chunk log is one chunk" "65536" "$(wc -c < "$R/tmp/trafficctl/activity.log" | tr -d ' ')"
-assert_eq "activity_log: a log of exactly one chunk" "$(tail -n 1000 "$R/tmp/trafficctl/activity.log" | jq -Rsc 'split("\n") | if .[-1] == "" then .[:-1] else . end')" \
+# The last 1000: lines 526 to 1524 and the unterminated one.
+assert_eq "activity_log: a log of exactly one chunk" \
+    "$(awk 'BEGIN { printf "["; for (i = 526; i <= 1524; i++) printf "\"%06d %s\",", i, "an activity log line of some length"; printf "\"last\"]" }')" \
     "$(run_call activity_log '{"lines":1000}' | jq -c .lines)"
 # A configured path outside the allowed roots is never read.
 mkdir -p "$R/etc"; echo "root:secret" > "$R/etc/shadow"
