@@ -24,6 +24,9 @@ jobs:
         run: bash tests/test_fw.sh
       - name: Security tests
         run: bash tests/test_security.sh
+      # Destination names behind AdGuard Home's per-client rate limit (#165).
+      - name: Device view reverse DNS scheduling
+        run: bash tests/test_rdns_ui.sh
       # Slices the CIDR helpers out of status.js and runs them under node —
       # the only frontend logic with a wrong answer an operator cannot see.
       - name: Subnet target warning (frontend slices)
