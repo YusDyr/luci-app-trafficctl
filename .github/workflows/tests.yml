@@ -22,6 +22,10 @@ jobs:
       # Destination names behind AdGuard Home's per-client rate limit (#165).
       - name: Device view reverse DNS scheduling
         run: bash tests/test_rdns_ui.sh
+      # Private destinations named from aliases and DHCP leases, and the
+      # hint while rDNS is off (#172).
+      - name: Device view names for private destinations
+        run: bash tests/test_dst_names_ui.sh
       # Slices the CIDR helpers out of status.js and runs them under node —
       # the only frontend logic with a wrong answer an operator cannot see.
       - name: Subnet target warning (frontend slices)

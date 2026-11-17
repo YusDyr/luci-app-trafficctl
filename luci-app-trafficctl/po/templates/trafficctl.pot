@@ -538,6 +538,9 @@ msgstr ""
 msgid "Hostname / Dst IP"
 msgstr ""
 
+msgid "Hostnames of public destinations are not looked up."
+msgstr ""
+
 msgid "How often live data is polled: speeds, graphs, drop/backlog counters, and the connection table in device view"
 msgstr ""
 
@@ -673,6 +676,9 @@ msgstr ""
 msgid "Logging & Persistence"
 msgstr ""
 
+msgid "Look up hostnames of public destinations by reverse DNS"
+msgstr ""
+
 msgid "Lower bound, not a measurement. Flow offloading is active without counter support, so the kernel counters this history is built from stop moving while traffic keeps flowing. The real figures are higher by an unknown amount — use these only as a floor."
 msgstr ""
 
@@ -692,6 +698,9 @@ msgid "Method"
 msgstr ""
 
 msgid "Name"
+msgstr ""
+
+msgid "Name from this router: device alias or DHCP lease"
 msgstr ""
 
 msgid "New Device Defaults"
@@ -1298,6 +1307,9 @@ msgid "Traffic shaping (tc/HTB) — bypassed for offloaded flows"
 msgstr ""
 
 msgid "Traffic shaping and blocking are not affected."
+msgstr ""
+
+msgid "Turn on rDNS"
 msgstr ""
 
 msgid "UDP bytes transferred, accumulated on the router. Not measurable while flow offload is active"
