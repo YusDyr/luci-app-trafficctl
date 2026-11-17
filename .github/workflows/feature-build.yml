@@ -77,8 +77,11 @@ jobs:
       - name: Patch Makefile version
         run: |
           SHA="${GITHUB_SHA:0:7}"
+          # apk refuses 0.0.0-<sha> ("package version is invalid"): a dash
+          # starts the -r<release> part. ~<hex> is apk's commit-hash suffix,
+          # the form OpenWrt's own git snapshots use.
           for mk in luci-app-trafficctl/Makefile trafficctl/Makefile; do
-            sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=0.0.0-${SHA}/" "$mk"
+            sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=0.0.0~${SHA}/" "$mk"
             sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=0/"            "$mk"
           done
 
