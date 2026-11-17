@@ -31,6 +31,21 @@ rest) are gone.
 
 ---
 
+## [2.1.1] - 2026-11-17
+
+### Bug Fixes
+- block, persistence and state-file lock minors from the ucode port review ([#178](https://github.com/YusDyr/luci-app-trafficctl/issues/178)) ([db4c096](https://github.com/YusDyr/luci-app-trafficctl/commit/db4c0968008857190bbbd54e7f3b33642ab53192))
+  - block: the IPv6 (MAC) rule goes in only after the IPv4 one, so a refused
+  block leaves no half rule that reads as "already blocked"
+  - is_blocked: only a drop with a tctl_block_ comment on the exact address,
+  or the v6 rule by its whole comment, as unblock tells them; a foreign drop
+  on the address no longer makes block a no-op
+  - restore: a rules.json or shapes.json that is no JSON array restores
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v2.1.0...v2.1.1
+
+---
+
 ## [2.1.0] - 2026-11-17
 
 ### Features
