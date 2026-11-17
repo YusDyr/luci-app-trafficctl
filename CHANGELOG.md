@@ -28,6 +28,16 @@ rest) are gone.
   hook did those two itself).
 - The saved state (`/etc/trafficctl/rules.json`, `shapes.json`, `names`,
   `cut.state`) keeps its format, so a downgrade to 1.30.x still reads it.
+- Run `opkg update` before the install: 2.x depends on `kmod-nft-netdev`,
+  and opkg finds a dependency only in fresh package lists. Without them it
+  reports `cannot find dependency`, may still upgrade `trafficctl`, and leaves
+  `luci-app-trafficctl` on 1.30.x; run the same install again after the update.
+- Run `/usr/sbin/trafficctl restore` once after the upgrade (a reboot does the
+  same). Each shape added under 1.30.x removed the traffic filters of the
+  others, so only the last one was in force; the restore puts every saved
+  shape back.
+- No rpcd or bot restart is needed: the packages reload rpcd and restart the
+  bot themselves.
 
 ---
 
