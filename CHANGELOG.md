@@ -41,6 +41,21 @@ rest) are gone.
 
 ---
 
+## [2.1.2] - 2026-11-17
+
+### Bug Fixes
+- put saved shapes back in force on upgrade, fix the upgrade guide ([#181](https://github.com/YusDyr/luci-app-trafficctl/issues/181)) ([cc4b660](https://github.com/YusDyr/luci-app-trafficctl/commit/cc4b6604adec16a03e9bcf49238c934337d985df))
+  - opkg update / apk update before the install: with the lists empty after
+  a reboot, opkg could not find kmod-nft-netdev, upgraded trafficctl anyway
+  and left luci-app-trafficctl on 1.30.0
+  - recovery when the install reports "cannot find dependency"
+  - drop the rpcd and bot restarts: the postinsts reload rpcd and restart
+  the bot
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v2.1.1...v2.1.2
+
+---
+
 ## [2.1.1] - 2026-11-17
 
 ### Bug Fixes
