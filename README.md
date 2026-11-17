@@ -416,16 +416,18 @@ cd /tmp && wget -O trafficctl.apk https://github.com/YusDyr/luci-app-trafficctl/
 2. In LuCI: **System → Software → Upload Package...**
 3. Upload `trafficctl.ipk` first, then `trafficctl-telegram.ipk`, then `luci-app-trafficctl.ipk`
 
+Run `opkg update` first (or **Update lists...** in LuCI): opkg keeps its package lists in RAM, so after a reboot it cannot find a dependency the router does not have yet.
+
 **Option B — SSH** (requires HTTPS support — `libustream-wolfssl` or `libustream-openssl`). The three files in one command, `trafficctl` first:
 
 ```sh
-opkg install https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-telegram.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk
+opkg update && opkg install https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-telegram.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk
 ```
 
 **Option C — SSH from your machine:**
 
 ```sh
-ssh root@router 'opkg install https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-telegram.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk'
+ssh root@router 'opkg update && opkg install https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-telegram.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk'
 ```
 
 ### Uninstalling
