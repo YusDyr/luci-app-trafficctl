@@ -69,6 +69,8 @@ jobs:
   build-apk:
     name: Build APK
     runs-on: ubuntu-latest
+    env:
+      SDK_ARCH: x86_64-25.12.4
     steps:
       - uses: actions/checkout@v6
         with:
@@ -85,10 +87,41 @@ jobs:
             sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=0/"            "$mk"
           done
 
+      # Same SDK path as the release and compat builds: the cache carries the
+      # SDK's downloads, feeds and built dependencies (tools/sdk-cache.sh),
+      # and tools/sdk-build.sh skips gh-action-sdk's setup.sh re-download of
+      # the SDK, which stalled this job for over an hour on 2026-11-17.
+      - name: Compute the OpenWrt SDK cache key
+        id: sdk_cache_key
+        run: |
+          IMAGE="ghcr.io/openwrt/sdk:$SDK_ARCH"
+          for i in 1 2 3; do
+            docker pull -q "$IMAGE" && break
+            [ "$i" = 3 ] && exit 1
+            sleep 15
+          done
+          read -r key prefix < <(tools/sdk-cache.sh key "$IMAGE" tools/sdk-entrypoint.sh)
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+          echo "SDK cache key: $key"
+
+      - name: Restore the OpenWrt SDK cache
+        id: sdk_cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/sdk-cache
+          key: ${{ steps.sdk_cache_key.outputs.key }}
+          restore-keys: ${{ steps.sdk_cache_key.outputs.prefix }}
+
       - name: Build .apk via OpenWrt SDK
-        uses: openwrt/gh-action-sdk@main
+        # A stalled SDK download fails the job here instead of holding it for
+        # GitHub's 6 h default.
+        timeout-minutes: 60
+        run: tools/sdk-build.sh
         env:
-          ARCH: x86_64-25.12.4
+          ARCH: ${{ env.SDK_ARCH }}
+          SDK_CACHE: ${{ runner.temp }}/sdk-cache
+          SDK_CACHE_SAVE: ${{ steps.sdk_cache.outputs.cache-hit == 'true' && '0' || '1' }}
           FEEDNAME: trafficctl
           PACKAGES: trafficctl luci-app-trafficctl
           V: sc
