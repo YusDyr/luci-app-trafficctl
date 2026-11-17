@@ -560,10 +560,12 @@ assert_contains "restore: and its rule is there" 'ip daddr 192.168.1.98' "$(cat 
 # ── rules.json is JSON-edited ─────────────────────────────────────────────
 # v1.30's shell writers split the file with awk, and BusyBox awk wiped it
 # (main's fix: the /\},\{/ split and the empty-output guard). lib.persist_save
-# and persist_remove split the text on "},{" the same way (lib.uc
-# rules_others), in ucode, so no awk is involved, and write through a
-# temporary file renamed over rules.json. A zero-length file, the last record
-# removed and a failed write are pinned in tests/test_persistence.sh.
+# and persist_remove split the text into records with a scan that knows JSON
+# strings (lib.uc array_objects; the "},{" split only for a file that is no
+# array), in ucode, so no awk is involved, and write through a temporary file
+# renamed over rules.json. A zero-length file, the last record removed, a
+# failed write and a label holding "},{" are pinned in
+# tests/test_persistence.sh.
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -55,6 +55,9 @@ const LEASES = '/tmp/dhcp.leases';
 const CONNTRACK = '/proc/net/nf_conntrack';
 const KNOWN = '/etc/trafficctl/telegram_known.json';
 const KNOWN_LOCK = '/tmp/.trafficctl_known.lock';
+// 10 s, then a holder older than 30 s is taken over.
+const KNOWN_LOCK_TRIES = 100;
+const KNOWN_LOCK_STALE = 30;
 const ONLINE = '/tmp/trafficctl_tg_online';
 const TAG = 'trafficctl-notify';
 
@@ -304,12 +307,9 @@ function add_known(mac, name, ip) {
 	name = replace(name, /[^a-zA-Z0-9 _.-]/g, '');
 	ip = replace(ip, /[^0-9.]/g, '');
 	let e = sprintf('{"mac":"%s","name":"%s","ip":"%s","first_seen":%d}', mac, name, ip, now());
-	if (!lib.lock(KNOWN_LOCK, 100, 30, true)) {
-		logger('Known-device ledger busy, ' + mac + ' not recorded');
-		return false;
-	}
-	let ok = false;
-	if (!is_known(mac)) {
+	let ok = lib.with_lock(KNOWN_LOCK, KNOWN_LOCK_TRIES, KNOWN_LOCK_STALE, () => {
+		if (is_known(mac))
+			return false;
 		let t = lib.readfile(KNOWN), data;
 		if (empty_ledger(t))
 			data = '[' + e + ']';
@@ -320,9 +320,12 @@ function add_known(mac, name, ip) {
 			data = join('\n', map(l, (x) => replace(x, /\]$/, () => ',' + e + ']'))) + '\n';
 		}
 		lib.mkdir_p('/etc/trafficctl');
-		ok = !!lib.write_atomic(KNOWN, data);
+		return !!lib.write_atomic(KNOWN, data);
+	}, true);
+	if (ok == null) {
+		logger('Known-device ledger busy, ' + mac + ' not recorded');
+		return false;
 	}
-	lib.unlock(KNOWN_LOCK);
 	return ok;
 }
 
@@ -341,8 +344,15 @@ function load_known() {
 	if (!empty_ledger(t))
 		return false;
 	lib.mkdir_p('/etc/trafficctl');
+	// Under the lock add_known takes, and asked again there: the DHCP hook
+	// may have recorded a device since the read above, and '[]' renamed over
+	// it would drop that entry and announce the device a second time.
 	if (t == null || trim(t) == '')
-		lib.write_atomic(KNOWN, '[]\n');
+		lib.with_lock(KNOWN_LOCK, KNOWN_LOCK_TRIES, KNOWN_LOCK_STALE, () => {
+			let cur = lib.readfile(KNOWN);
+			if (cur == null || trim(cur) == '')
+				lib.write_atomic(KNOWN, '[]\n');
+		}, true);
 	seed();
 	return true;
 }

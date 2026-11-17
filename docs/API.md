@@ -113,7 +113,7 @@ method because it returns the contents of the configured log file.
 | `rules_list` | `trafficctl rules list` (ucode) | (none) | read |
 | `netify_status` | `trafficctl netify status` (ucode) | (none) | read |
 | `netify_list` | `trafficctl netify list` (ucode) | (none) | read |
-| `config_get` | (in plugin) | (none) — returns `enabled`, `default_mode`, `offload_mode`, `sw`, `hw`, `poll_interval`, `avg_window` | read |
+| `config_get` | (in plugin) | (none) — returns `enabled`, `default_mode`, `offload_mode`, `nss`, `sw`, `hw`, `poll_interval`, `avg_window`. `nss` is the Qualcomm ECM state from its debugfs knobs: `absent`, `stopped`, `active` (a missing knob counts as active), or `unknown` when a knob is there but cannot be read (debugfs under kernel lockdown); the Settings warning shows only for `active` | read |
 | `telegram_config_get` | (in plugin) | (none) — `bot_token` is masked as `***`; `bot_running` comes from procd (`ubus call service list`) | read |
 | `logging_config_get` | (in plugin) | (none) | read |
 | `newdevice_config_get` | (in plugin) | (none) — returns `enabled`, `limit_kbit`, `limit_mode`, plus `seeded` and `seen_count` describing the seen-MAC ledger | read |
@@ -741,6 +741,47 @@ no MAC can be keyed on — see [Address family coverage](#address-family-coverag
   (`conntrack -D -f ipv6`). Without the second pass an established v6 flow
   survives the block, and under flow offload it is never re-evaluated against
   the new rule at all.
+- The IPv6 rule goes in only after the IPv4 one: when nft refuses the IPv4
+  rule the block fails with nothing inserted, so no lone IPv6 rule makes the
+  next attempt answer "already blocked".
+
+**Already blocked** means a rule `trafficctl unblock` removes: a drop on that
+exact `ip saddr` whose comment starts with `tctl_block_`, or the IPv6 rule by
+its whole comment `tctl_block_<slug>_mac`. A drop of the operator's own on the
+address (a fw4 rule for one port, a comment-less rule) is not a block, and
+the block goes in next to it.
+
+**Persistence.** With `persist_rules` on, the block is saved to `rules.json`
+and the unblock removes the record. A save or removal that fails (the file
+cannot be read or rewritten) leaves the action `ok` — the rule is in force or
+gone — and appends a warning to `msg`, also logged to syslog:
+
+```
+… — WARNING: rules.json could not be written: this block will not be restored on the next ifup lan
+… — WARNING: rules.json could not be written: the saved block is still there and comes back on the next ifup lan
+```
+
+`trafficctl ratelimit` and `trafficctl portfw pause|resume|limit` warn the same
+way. A `rules.json` that exists but cannot be read is never rewritten from an
+empty list.
+
+Labels are saved JSON-escaped and the writer tells records apart with a scan
+that knows JSON strings, so a label holding `},{`, quotes or a newline stays
+one record and comes back whole.
+
+**Unreadable rules.json or shapes.json.** `trafficctl restore` restores nothing
+from a store that is not a JSON array, leaves the file as it is, and reports
+it once per run to syslog (`rules.json is not a JSON array, nothing restored
+from it: <path>`) and to the activity log (`action=restore_error`, category
+config). A missing or blank file is no error.
+
+**Locks.** Every writer of a state file holds that file's mkdir lock from its
+read to its rename and releases it on every path, an error included
+(`lib.with_lock`): `rules.json` (`/tmp/trafficctl_rules.lock.d`, shared with
+v1.30.x), `shapes.json` (`/tmp/trafficctl_shapes.lock.d`),
+`telegram_known.json` (`/tmp/.trafficctl_known.lock`, the empty ledger
+included), `seen_macs` (`/tmp/trafficctl_seen.lock.d`) and `names`
+(`/tmp/trafficctl_names.lock.d`).
 
 ---
 
@@ -1091,9 +1132,11 @@ pattern would not have matched is dropped on the next write, as before.
 `trafficctl restore` (the `ifup lan` hook) applies every record again and
 counts them in its `restored`/`failed`; a record it cannot apply is logged as
 `Failed to restore shape for <ip> (<rate>kbit)` (a record whose apply dies
-too, and the next record is still applied), a `shapes.json` that is not a JSON
-array is logged and restores nothing, and nothing is written to the activity
-log. The hook no longer has a shape loop of its own.
+too, and the next record is still applied), and nothing is written to the
+activity log. A `shapes.json` that is not a JSON array restores nothing and is
+left as it is; that one is logged to syslog and the activity log (see
+"Unreadable rules.json or shapes.json" under `trafficctl block`). The hook no
+longer has a shape loop of its own.
 
 **Differences from the shell shaper (v1.30.6):**
 

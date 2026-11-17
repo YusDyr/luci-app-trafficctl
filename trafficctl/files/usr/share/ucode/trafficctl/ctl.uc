@@ -522,10 +522,25 @@ function naming() {
 	return n;
 }
 
-// rules.json, pattern by pattern as the shell read it: a record is any flat
-// {...}, a field any "key":"string" in it.
+// rules.json as JSON, so a label holding braces or a quote is read whole;
+// a file that does not parse pattern by pattern, as the shell read it: a
+// record is any flat {...}, a field any "key":"string" in it.
 function persisted_rules() {
-	let s = lib.readfile(RULES) ?? '', out = [];
+	let s = lib.readfile(RULES) ?? '', out = [], d;
+	try {
+		d = json(s);
+	}
+	catch (e) {
+		d = null;
+	}
+	if (type(d) == 'array') {
+		let str = (v) => (type(v) == 'string') ? v : '';
+		for (let r in d)
+			if (type(r) == 'object')
+				push(out, { type: str(r.type), ip: str(r.ip), param: str(r.param),
+					mode: str(r.mode), param_up: str(r.param_up) });
+		return out;
+	}
 	let get = (o, k) => {
 		let m = match(o, regexp('"' + k + '":"([^"]*)"'));
 		return m ? m[1] : '';
@@ -746,14 +761,18 @@ function block_comment(ip) {
 	return 'tctl_block_' + lib.slug(ip);
 }
 
-// Any drop on the address counts, so a block from before v1.13.2 (the
-// caller's label in its comment) still reads as blocked; the v6 half names
-// no address, only its comment.
+// The rules unblock removes, told the way it tells them: a drop on exactly
+// this address whose comment starts with tctl_block_ (a block from before
+// v1.13.2 carries the caller's label after it), or the v6 half by its whole
+// comment, which names no address. Not any drop on the address: a firewall
+// rule of the operator's own (one port, say) made a block a no-op that
+// reported "already blocked", and unblock could not lift it either.
 function is_blocked(ip, rules) {
 	rules ??= nft_rules(FW4);
 	let mc = block_comment(ip) + '_mac';
 	for (let r in rules)
-		if ((r.verdict == 'drop' && (r.saddr == ip || r.saddr == ip + '/32')) || r.comment == mc)
+		if (r.verdict == 'drop' && ((substr(r.comment, 0, 11) == 'tctl_block_' &&
+		    (r.saddr == ip || r.saddr == ip + '/32')) || r.comment == mc))
 			return true;
 	return false;
 }
@@ -761,10 +780,12 @@ function is_blocked(ip, rules) {
 // Inserted, not added: fw4 accepts established and offloaded flows near the
 // top of the chain, and a rule below that never fires. "meta nfproto ipv6"
 // keeps the MAC rule off IPv4, so no v4 outcome depends on a MAC lookup.
+// The v6 half only after the v4 one: alone it is a block is_blocked counts,
+// so a failed block would read as "already blocked" from then on.
 function block_add(ip, comment) {
 	let ok = lib.sh('nft insert rule inet fw4 forward ' +
 		lib.q('ip saddr ' + ip + ' counter drop comment "' + comment + '"')) == 0;
-	let mac = net.target_mac(ip), ipv6 = false;
+	let mac = ok ? net.target_mac(ip) : null, ipv6 = false;
 	if (mac != null)
 		ipv6 = lib.sh('nft insert rule inet fw4 forward ' +
 			lib.q('meta nfproto ipv6 ether saddr ' + mac + ' counter drop comment "' + comment + '_mac"')) == 0;
@@ -836,8 +857,7 @@ function block(ip, label) {
 	lib.nss_defunct();
 
 	let persist = lib.persist_enabled();
-	if (persist)
-		lib.persist_save('block', ip, label);
+	let saved = persist ? lib.persist_save('block', ip, label) : null;
 	lib.log('block', ip, label, getenv('TCTL_VIA'), src);
 	notify.emit_action('block_applied', { ip, mac: b.mac ?? '', kind: 'internet' });
 
@@ -847,7 +867,8 @@ function block(ip, label) {
 		note = net.ip_is_nexthop(ip)
 			? ' — IPv4 only: ' + ip + ' is a routed next hop, and a MAC-keyed IPv6 rule would also block everything behind it'
 			: ' — IPv4 only: no MAC known for ' + ip + ' (no DHCP lease, no neighbour entry), so IPv6 is not covered';
-	note += lib.nss_note() + lib.persist_note();
+	note += lib.nss_note() + lib.persist_note() +
+		lib.persist_warn(saved, 'this block will not be restored on the next ifup lan');
 	let self = (src != null && src != '' && src == ip) ? ' (your device — LuCI access preserved)' : '';
 	return reply({ ok: true, ipv6: b.ipv6, nss: lib.nss_status(), persist,
 		msg: 'internet blocked for ' + ip + self + note });
@@ -869,10 +890,10 @@ function unblock(ip, label) {
 	if (!block_remove(block_comment(ip)))
 		return reply({ ok: false, msg: 'failed to unblock ' + ip });
 
-	if (lib.persist_enabled())
-		lib.persist_remove('block', ip);
+	let removed = lib.persist_enabled() ? lib.persist_remove('block', ip) : null;
 	lib.log('unblock', ip, label, getenv('TCTL_VIA'), getenv('TCTL_SRC'));
-	return reply({ ok: true, msg: 'internet unblocked for ' + ip });
+	return reply({ ok: true, msg: 'internet unblocked for ' + ip +
+		lib.persist_warn(removed, 'the saved block is still there and comes back on the next ifup lan') });
 }
 
 // ── WiFi: the uci maclist and the running hostapd ACL ───────────────────────
@@ -1152,15 +1173,11 @@ function restore() {
 	let res = { ok: true, restored: 0, failed: 0 };
 	if (!lib.persist_enabled())
 		return res;
-	let d;
-	try {
-		d = json(lib.readfile(RULES) ?? '');
-	}
-	catch (e) {
+	let d = lib.read_records(RULES);
+	if (d == null)
 		return res;
-	}
 	let ips = [];
-	for (let r in (type(d) == 'array') ? d : [])
+	for (let r in d)
 		if (type(r) == 'object' && r.type == 'block' && type(r.ip) == 'string' && r.ip != '')
 			push(ips, r.ip);
 	if (!length(ips))

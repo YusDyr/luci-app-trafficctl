@@ -94,6 +94,11 @@
 //                                 stale, anything else goes back unless a
 //                                 new lock took the path meanwhile
 //   unlock(dir)                   only a lock this process holds
+//   with_lock(dir, tries, max_age, fn, strict)
+//                                 fn() under the bare lock dir, released on
+//                                 every path, an error included; not taken,
+//                                 fn runs anyway, or with strict returns null.
+//                                 Every writer of a state file goes through it
 //   field(line, n)                awk's $(n+1)
 // Activity log
 //   log(action, target, detail, via, src)   port of tctl_log
@@ -110,9 +115,18 @@
 //   persist_remove(type, ip)      /etc/trafficctl/rules.json, compact, keys in
 //                                 the shell's order, under the mkdir lock
 //                                 the shell writers take too; false when the
-//                                 file could not be rewritten
+//                                 file could not be rewritten. Records are
+//                                 told apart by a string-aware scan, so a
+//                                 label holding "},{" stays one record
+//   persist_warn(ok, what)        the warning suffix (and syslog) for a
+//                                 save/remove that returned false, else ''
+//   read_records(p)               a JSON-array store for a restore: [] when
+//                                 missing or blank, null (reported once to
+//                                 syslog and the activity log, the file left
+//                                 alone) when it is no JSON array
 // Qualifiers every enforcing command appends to its message
-//   nss_status()                  absent, stopped or active (Qualcomm ECM)
+//   nss_status()                  absent, stopped, active or unknown (Qualcomm
+//                                 ECM; unknown: a knob that cannot be read)
 //   nss_note(), persist_note()    the suffix, '' when nothing to say
 //   nss_defunct()                 flush the flows ECM already accelerates
 // Rule names and syslog
@@ -730,6 +744,30 @@ function unlock(dir) {
 	return !!rmdir(p);
 }
 
+// The one way a state file's writers hold its lock: a bare lock (the shell
+// writers share them), taken before the read and released on every path out,
+// an error included. Not taken in time, fn still runs unless strict, and then
+// the result is null: the shell writers carried on, and a lock left by a
+// killed holder must not stop persistence for good.
+function with_lock(dir, tries, max_age, fn, strict) {
+	// Under a scratch TCTL_ROOT /tmp may not exist, and every try would fail.
+	mkdir_p(dirname(dir));
+	let held = lock(dir, tries, max_age, true), r;
+	if (!held && strict)
+		return null;
+	try {
+		r = fn();
+	}
+	catch (e) {
+		if (held)
+			unlock(dir);
+		die(e.message);
+	}
+	if (held)
+		unlock(dir);
+	return r;
+}
+
 function field(l, n) {
 	return split(ltrim(l, ' \t'), /[ \t]+/)[n] ?? '';
 }
@@ -862,6 +900,11 @@ function log(action, target, detail, via, src) {
 // ── names store ─────────────────────────────────────────────────────────────
 
 const NAMES = '/etc/trafficctl/names';
+// rpcd and the bot both rewrite the file; without it the later rename drops
+// the name the other just set.
+const NAMES_LOCK = '/tmp/trafficctl_names.lock.d';
+const NAMES_LOCK_TRIES = 20;
+const NAMES_LOCK_STALE = 5;
 
 // Nothing that could break the line format or the JSON, and short enough
 // not to bloat every poll.
@@ -899,9 +942,12 @@ function names_set(ip, name) {
 	if (name == '')
 		return { ok: false, msg: 'name is empty after sanitizing' };
 	mkdir_p(dirname(NAMES));
-	let l = names_without(ip);
-	push(l, ip + ' ' + name);
-	if (!write_atomic(NAMES, join('\n', l) + '\n'))
+	let saved = with_lock(NAMES_LOCK, NAMES_LOCK_TRIES, NAMES_LOCK_STALE, () => {
+		let l = names_without(ip);
+		push(l, ip + ' ' + name);
+		return write_atomic(NAMES, join('\n', l) + '\n');
+	});
+	if (!saved)
 		return { ok: false, msg: 'cannot write ' + NAMES };
 	log('config_change', ip, 'name=' + name, getenv('TCTL_VIA'), getenv('TCTL_SRC'));
 	return { ok: true, msg: sprintf('named %s as %s', ip, name) };
@@ -912,8 +958,11 @@ function names_remove(ip) {
 		return { ok: false, msg: 'invalid IP address' };
 	if (!is_file(NAMES))
 		return { ok: true, msg: 'no aliases stored' };
-	let l = names_without(ip);
-	if (!write_atomic(NAMES, length(l) ? join('\n', l) + '\n' : ''))
+	let saved = with_lock(NAMES_LOCK, NAMES_LOCK_TRIES, NAMES_LOCK_STALE, () => {
+		let l = names_without(ip);
+		return write_atomic(NAMES, length(l) ? join('\n', l) + '\n' : '');
+	});
+	if (!saved)
 		return { ok: false, msg: 'cannot write ' + NAMES };
 	log('config_change', ip, 'name cleared', getenv('TCTL_VIA'), getenv('TCTL_SRC'));
 	return { ok: true, msg: sprintf('name cleared for %s', ip) };
@@ -941,16 +990,27 @@ function seen_known(mac) {
 	return index(file_lines(SEEN), mac) >= 0;
 }
 
+// Both writers under it: the DHCP hook's mark and the seed rpcd runs when the
+// feature is switched on. A seed renamed over the ledger between a mark's
+// append and its trim drops that MAC, and the device is "new" again.
+const SEEN_LOCK = '/tmp/trafficctl_seen.lock.d';
+const SEEN_LOCK_TRIES = 50;
+const SEEN_LOCK_STALE = 5;
+
 function seen_mark(mac) {
 	mac = norm_mac(mac);
-	// Not seen_known() alone: it says "known" for a missing ledger.
-	if (mac == null || (is_file(SEEN) && seen_known(mac)))
+	if (mac == null)
 		return;
-	mkdir_p(dirname(SEEN));
-	append(SEEN, mac + '\n');
-	let l = file_lines(SEEN);
-	if (length(l) > SEEN_MAX)
-		write_atomic(SEEN, join('\n', slice(l, -int(SEEN_MAX * 4 / 5))) + '\n');
+	with_lock(SEEN_LOCK, SEEN_LOCK_TRIES, SEEN_LOCK_STALE, () => {
+		// Not seen_known() alone: it says "known" for a missing ledger.
+		if (is_file(SEEN) && seen_known(mac))
+			return;
+		mkdir_p(dirname(SEEN));
+		append(SEEN, mac + '\n');
+		let l = file_lines(SEEN);
+		if (length(l) > SEEN_MAX)
+			write_atomic(SEEN, join('\n', slice(l, -int(SEEN_MAX * 4 / 5))) + '\n');
+	});
 }
 
 // Baseline from the devices already on the network, so switching the
@@ -958,13 +1018,19 @@ function seen_mark(mac) {
 function seen_seed() {
 	if (is_file(SEEN))
 		return;
-	mkdir_p(dirname(SEEN));
 	let macs = map(file_lines('/tmp/dhcp.leases'), (l) => field(l, 1));
 	for (let l in lines('ip neigh show'))
 		if (index(l, 'lladdr') >= 0)
 			push(macs, field(l, 4));
 	macs = sort(uniq(filter(map(macs, norm_mac), (m) => m != null)));
-	write_atomic(SEEN, length(macs) ? join('\n', macs) + '\n' : '');
+	with_lock(SEEN_LOCK, SEEN_LOCK_TRIES, SEEN_LOCK_STALE, () => {
+		// Asked again under the lock: a ledger written meanwhile is newer
+		// than this baseline.
+		if (is_file(SEEN))
+			return;
+		mkdir_p(dirname(SEEN));
+		write_atomic(SEEN, length(macs) ? join('\n', macs) + '\n' : '');
+	});
 }
 
 // ── rules.json (tctl_persist_save / tctl_persist_remove) ────────────────────
@@ -984,10 +1050,71 @@ function persist_enabled() {
 	return uci_get('trafficctl', 'main', 'persist_rules') == '1';
 }
 
-// The records other than type+ip, split on "},{" as the shell's awk does.
+// The objects of a JSON array as their own text, found by a scan that knows
+// strings: a label holding "},{" split the shell's record in two, and the
+// halves were written back as two broken records. null when the text is not
+// an array of objects.
+function array_objects(s) {
+	let n = length(s), out = [], depth = 0, start = -1, instr = false;
+	if (ord(s, 0) != 91 || ord(s, n - 1) != 93)
+		return null;
+	for (let i = 1; i < n - 1; i++) {
+		let c = ord(s, i);
+		if (instr) {
+			// 92 '\': the next byte is escaped, a quote included.
+			if (c == 92)
+				i++;
+			else if (c == 34)
+				instr = false;
+		}
+		else if (c == 34) {
+			if (depth == 0)
+				return null;
+			instr = true;
+		}
+		else if (c == 123 || c == 91) {
+			if (depth == 0) {
+				if (c == 91)
+					return null;
+				start = i;
+			}
+			depth++;
+		}
+		else if (c == 125 || c == 93) {
+			if (--depth < 0)
+				return null;
+			if (depth == 0)
+				push(out, substr(s, start, i - start + 1));
+		}
+		else if (depth == 0 && c != 44 && c != 32 && c != 9 && c != 10 && c != 13)
+			return null;
+	}
+	return (instr || depth != 0) ? null : out;
+}
+
+// The records other than type+ip. A record that parses is judged by its
+// fields; the rest as the shell's awk did, split on "},{" and matched as
+// fixed strings.
 function rules_others(text, t, ip) {
-	let s = replace(replace(text, /\n+$/, ''), /^\[/, '');
-	s = replace(s, /\]$/, '');
+	let s = replace(text, /\n+$/, ''), objs = array_objects(s);
+	if (objs != null) {
+		let keep = [];
+		for (let o in objs) {
+			let r;
+			try {
+				r = json(o);
+			}
+			catch (e) {
+				r = null;
+			}
+			if (type(r) == 'object' ? (r.ip === '' + ip && r.type === '' + t)
+			    : (index(o, '"ip":"' + ip + '"') >= 0 && index(o, '"type":"' + t + '"') >= 0))
+				continue;
+			push(keep, o);
+		}
+		return keep;
+	}
+	s = replace(replace(s, /^\[/, ''), /\]$/, '');
 	let out = [];
 	if (s == '')
 		return out;
@@ -1004,25 +1131,18 @@ function rules_others(text, t, ip) {
 function rules_rewrite(fn) {
 	// Not getting the lock in the shell's wait means a killed holder: carry
 	// on, as the shell does.
-	let locked = lock(RULES_LOCK, RULES_LOCK_TRIES, RULES_LOCK_STALE, true), ok;
-	try {
-		ok = fn();
-	}
-	catch (e) {
-		if (locked)
-			unlock(RULES_LOCK);
-		die(e.message);
-	}
-	if (locked)
-		unlock(RULES_LOCK);
-	return ok;
+	return with_lock(RULES_LOCK, RULES_LOCK_TRIES, RULES_LOCK_STALE, fn);
 }
 
 function persist_save(t, ip, param, mode, param_up) {
 	return rules_rewrite(() => {
 		mkdir_p(dirname(RULES));
 		// A zero-length file is what a failed save used to leave: start over.
+		// One that is there and cannot be read is not rewritten from nothing:
+		// that would drop every record in it.
 		let text = readfile(RULES);
+		if (text == null && stat(path(RULES)) != null)
+			return false;
 		if (text == null || text == '')
 			text = '[]';
 		let rec = { type: '' + t, ip: '' + ip, param: '' + (param ?? '') };
@@ -1039,10 +1159,52 @@ function persist_save(t, ip, param, mode, param_up) {
 function persist_remove(t, ip) {
 	return rules_rewrite(() => {
 		let text = readfile(RULES);
-		if (text == null || text == '')
+		// Unreadable is not "nothing saved": the record may be in there.
+		if (text == null)
+			return stat(path(RULES)) == null;
+		if (text == '')
 			return true;
 		return write_atomic(RULES, '[' + join(',', rules_others(text, t, ip)) + ']');
 	});
+}
+
+// The suffix for a record that did not land (persist_save/_remove gave
+// false): the rule is in force, so the action still succeeded, but what the
+// restore will do differs from what the reply would otherwise imply. Also in
+// syslog. '' for ok, and for a save that was never attempted (null).
+function persist_warn(ok, what) {
+	if (ok !== false)
+		return '';
+	logger('rules.json could not be written: ' + what);
+	return ' — WARNING: rules.json could not be written: ' + what;
+}
+
+// Each unreadable store is reported once per run: the CLI's restore reads
+// rules.json for the blocks, the limits and the ports.
+let unreadable = {};
+
+// The records of a JSON-array store for a restore: [] for a missing or blank
+// file, null for one that is no JSON array. That one is reported to syslog
+// and the activity log, and nothing here writes to it: what is left in it is
+// the operator's to repair, and a restore that rewrote it would lose it.
+function read_records(p) {
+	let raw = readfile(p), d;
+	if (raw == null || trim(raw) == '')
+		return [];
+	try {
+		d = json(raw);
+	}
+	catch (e) {
+		d = null;
+	}
+	if (type(d) == 'array')
+		return d;
+	if (!exists(unreadable, p)) {
+		unreadable[p] = true;
+		logger(basename(p) + ' is not a JSON array, nothing restored from it: ' + p);
+		log('restore_error', p, 'not a JSON array, nothing restored from it; the file is left as it is');
+	}
+	return null;
 }
 
 function persist_note() {
@@ -1059,11 +1221,34 @@ function persist_note() {
 
 const ECM = '/sys/kernel/debug/ecm';
 
+// The knob's value, '' when it is missing, false when it is there and
+// unreadable.
+function nss_knob(f) {
+	let p = ECM + '/' + f, v = readfile(p);
+	if (v == null)
+		return (stat(path(p)) != null) ? false : '';
+	return rtrim(v, '\n');
+}
+
+// unknown: a knob that is there but cannot be read (debugfs under kernel
+// lockdown answers EPERM to root too), or anything else this reader did not
+// expect. Not "active": the Settings warning would then tell a router whose
+// state nobody can read that its limits do nothing. A missing knob is still
+// active, as above.
 function nss_status() {
-	if (stat(path(ECM))?.type != 'directory')
-		return 'absent';
-	let knob = (f) => rtrim(readfile(ECM + '/' + f) ?? '', '\n');
-	return (knob('front_end_ipv4_stop') == '1' && knob('front_end_ipv6_stop') == '1') ? 'stopped' : 'active';
+	try {
+		if (stat(path(ECM))?.type != 'directory')
+			return 'absent';
+		let st = 'active', v4 = nss_knob('front_end_ipv4_stop'), v6 = nss_knob('front_end_ipv6_stop');
+		if (v4 === false || v6 === false)
+			st = 'unknown';
+		else if (v4 == '1' && v6 == '1')
+			st = 'stopped';
+		return st;
+	}
+	catch (e) {
+		return 'unknown';
+	}
 }
 
 function nss_note() {
@@ -1098,4 +1283,4 @@ export { qv, pipe, passthru, set_context, run_rc, ubus_list, curl_config };
 export { ubus_event };
 // The block, WiFi and new-device commands.
 export { append, uci_cli, persist_enabled, persist_save, persist_remove, persist_note,
-	nss_status, nss_note, nss_defunct, slug, logger };
+	persist_warn, read_records, nss_status, nss_note, nss_defunct, slug, logger, with_lock };

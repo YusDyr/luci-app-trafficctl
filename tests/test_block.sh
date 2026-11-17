@@ -100,6 +100,24 @@ fw_flush
 OUT=$(NFT_FAIL='^insert rule inet fw4 forward ip saddr' fw_run block 192.168.1.50)
 assert_contains "block: nft refusing the rule is ok:false" '"ok":false' "$OUT"
 assert_contains "block: and says so" "failed to block 192.168.1.50" "$OUT"
+# The MAC is known, so the v6 half could go in; alone it reads as a block, and
+# every later attempt said "already blocked" with IPv4 open.
+assert_eq "block: a refused v4 rule leaves no v6 half behind" "" "$(fw_rules)"
+assert_not_contains "block: and the next attempt is not 'already blocked'" "already blocked" \
+    "$(run_block 192.168.1.50)"
+assert_contains "block: which places the v4 rule" 'ip saddr 192.168.1.50 counter drop comment "tctl_block_192_168_1_50"' "$(fw_rules)"
+
+# ── a drop that is not ours is not a block ──────────────────────────────────
+# The operator's own fw4 rule on the address (one port, a schedule) made
+# block a no-op that answered "already blocked", which unblock could not lift.
+for rule in 'ip saddr 192.168.1.50 counter drop comment "!fw4: no-smtp"' 'ip saddr 192.168.1.50 counter drop'; do
+    fw_flush
+    fw_put "$rule"
+    assert_eq "is_blocked: false for a foreign drop ($rule)" "false" "$(PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" tcall trafficctl.ctl is_blocked '"192.168.1.50"' 2>&1)"
+    OUT=$(run_block 192.168.1.50)
+    assert_not_contains "block: a foreign drop is not 'already blocked' ($rule)" "already blocked" "$OUT"
+    assert_contains "block: the block goes in next to it ($rule)" '"tctl_block_192_168_1_50"' "$(fw_rules)"
+done
 
 # ── unblock removes only the target's rule ──────────────────────────────────
 
