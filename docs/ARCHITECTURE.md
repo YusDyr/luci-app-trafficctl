@@ -134,6 +134,10 @@ sequenceDiagram
     participant DNS as trafficctl rdns
 
     B->>R: device(ip, proto)
+    opt local names older than 60 s
+        B->>R: names_list(), luci-rpc getDHCPLeases()
+        Note over B: alias, then DHCPv4/v6 lease, names private destinations (#172)
+    end
     R->>D: exec ip proto
     D->>D: conntrack grep src=ip
     D->>D: iw station dump (conn_type)
@@ -144,7 +148,7 @@ sequenceDiagram
 
     opt rDNS resolution (if enabled)
         B->>R: network.rrdns.lookup(addrs[], timeout, limit)
-        Note over R: at most 16 new addresses per poll; a reply is kept even if a newer poll has started
+        Note over R: public destinations only, at most 16 new addresses per poll; a reply is kept even if a newer poll has started
         R-->>B: {ip1: "host1", ip2: "host2", ...}
     end
 ```

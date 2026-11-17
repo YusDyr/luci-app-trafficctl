@@ -1396,3 +1396,7 @@ is JSON-escaped in the reply.
 ## rpcd ACL
 
 The ACL file at `/usr/share/rpcd/acl.d/luci-app-trafficctl.json` grants execution permissions. The rpcd plugin at `/usr/share/rpcd/ucode/luci.trafficctl.uc` (rpcd-mod-ucode) handles method dispatch and parameter validation; rpcd checks the argument types first.
+
+Outside `luci.trafficctl`, the read grant also covers `luci-rpc getDHCPLeases` (the
+DHCPv4 and DHCPv6 leases). The device view names private destinations from it and
+from `names_list`, re-read at most once a minute, never on every poll (#172).

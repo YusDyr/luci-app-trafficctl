@@ -14,7 +14,8 @@
 					"history_status", "history_read", "history_read_ifaces", "history_periods",
 					"history_config_get", "notify_config_get"
 				],
-				"file": [ "read" ]
+				"file": [ "read" ],
+				"luci-rpc": [ "getDHCPLeases" ]
 			},
 			"file": {
 				"/tmp/dhcp.leases": [ "read" ]

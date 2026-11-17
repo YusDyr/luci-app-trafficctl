@@ -211,6 +211,20 @@ var callConfigGet = rpc.declare({
 	method: 'config_get'
 });
 
+// Names for LAN destinations (#172): the manual aliases and the DHCP leases,
+// v4 and v6. Both are reads of files the router already keeps; no DNS query.
+var callNamesList = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'names_list',
+	expect: { result: [] }
+});
+
+var callDHCPLeases = rpc.declare({
+	object: 'luci-rpc',
+	method: 'getDHCPLeases',
+	expect: { '': {} }
+});
+
 var RATE_PRESETS = [
 	{v:'0',      l: _('Off')},
 	{v:'1000',   l:_('1 Mbit/s')},
@@ -1090,6 +1104,88 @@ function rdnsResolve(st, addrs, lookup, paint, clock) {
 	return Promise.resolve(addrs.length ? lookup(addrs) : {}).then(done, function() { done(null); });
 }
 
+// ── Names for private destinations (#172) ───────────────────────────────────
+//
+// A private (LAN) destination is never sent to rDNS: the upstream resolver
+// cannot know it, and a PTR query for it only leaks the LAN layout. Most such
+// hosts are known to the router anyway, by a manual alias or a DHCP lease, so
+// the host cell takes the name from there, and shows the bare address when
+// neither has one. The sources are re-read at most every LOCAL_NAMES_TTL ms,
+// not on every device poll.
+var LOCAL_NAMES_TTL = 60000;
+
+// ip -> name. aliases: names_list() rows; leases: luci-rpc getDHCPLeases;
+// leases4Raw: /tmp/dhcp.leases, the fallback when that call is not available.
+// The first source to name an address wins: alias, DHCPv4, DHCPv6.
+function localNames(aliases, leases, leases4Raw) {
+	var m = {};
+	function put(ip, name) {
+		ip = String(ip || '').split('/')[0].toLowerCase();
+		if (!ip || !name || name === '*' || m[ip] !== undefined) return;
+		m[ip] = String(name);
+	}
+	(aliases || []).forEach(function(a) { if (a) put(a.ip, a.name); });
+	var l = leases || {};
+	(l.dhcp_leases || []).forEach(function(x) { if (x) put(x.ipaddr, x.hostname); });
+	String(leases4Raw || '').split('\n').forEach(function(line) {
+		var p = line.trim().split(/\s+/);
+		if (p.length >= 4) put(p[2], p[3]);
+	});
+	(l.dhcp6_leases || []).forEach(function(x) {
+		if (!x) return;
+		put(x.ip6addr, x.hostname);
+		(x.ip6addrs || []).forEach(function(a) { put(a, x.hostname); });
+	});
+	return m;
+}
+
+function localName(m, dst) {
+	return (m && dst && m[String(dst).toLowerCase()]) || null;
+}
+
+// get(now) is a promise of the ip -> name map. fetch() is called only when the
+// map is older than LOCAL_NAMES_TTL, and never twice at once; a failed fetch
+// keeps the previous map and is not retried before the TTL either.
+function localNamesCache(fetch) {
+	var st = { map: {}, at: null, busy: null };
+	return {
+		get: function(now) {
+			if (st.busy) return st.busy;
+			if (st.at !== null && now - st.at < LOCAL_NAMES_TTL) return Promise.resolve(st.map);
+			st.busy = Promise.resolve().then(fetch).then(function(m) {
+				if (m) st.map = m;
+			}, function() {}).then(function() {
+				st.at = now;
+				st.busy = null;
+				return st.map;
+			});
+			return st.busy;
+		}
+	};
+}
+
+// What the host cell of a connection shows: { text, kind }, kind one of
+// name (the backend's), local (alias or lease), resolving (rDNS pending),
+// ip (a private destination nobody named) or none.
+function hostLabel(r, rdnsMode, local) {
+	var dst = r.dst || '';
+	if (r.host) return { text: r.host, kind: 'name' };
+	var n = localName(local, dst);
+	if (n) return { text: n, kind: 'local' };
+	if (rdnsMode && !PRIVATE_RE.test(dst)) return { text: '', kind: 'resolving' };
+	if (dst && PRIVATE_RE.test(dst)) return { text: dst, kind: 'ip' };
+	return { text: '—', kind: 'none' };
+}
+
+// The note under the connection table while rDNS is off: public destinations
+// get no hostname then, and the switch for it sits in the toolbar above.
+function rdnsHint(rdnsOn) {
+	return E('span', { 'class': 'tc-rdns-hint' + (rdnsOn ? ' tc-hidden' : '') }, [
+		' ' + _('Hostnames of public destinations are not looked up.') + ' ',
+		E('a', { 'href': '#tm-rdns', 'class': 'tc-link tc-rdns-hint-link' }, _('Turn on rDNS'))
+	]);
+}
+
 // ── Rate-limit targets that are not a single device ─────────────────────────
 //
 // A limit can be placed on a block of addresses ("10.0.20.0/24") or on the
@@ -1197,7 +1293,7 @@ function oifCell(r) {
 	return cell;
 }
 
-function buildTable(conns, sortCol, sortDir, rdnsMode, hiddenCols) {
+function buildTable(conns, sortCol, sortDir, rdnsMode, hiddenCols, local) {
 	var allCols = [
 		{ key:'proto',   label: _('Proto'),    num:false },
 		{ key:'dst',     label: _('Dst IP'),   num:false },
@@ -1233,13 +1329,15 @@ function buildTable(conns, sortCol, sortDir, rdnsMode, hiddenCols) {
 			           'class':'tc-link', 'onclick': 'event.stopPropagation()' }, dst)
 			: '';
 
+		var hl = hostLabel(r, rdnsMode, local);
 		var hostCell = E('div', { 'class': 'td', 'data-dst': dst });
-		if (r.host) {
-			hostCell.textContent = r.host;
-		} else if (rdnsMode && !PRIVATE_RE.test(dst)) {
+		if (hl.kind === 'resolving') {
 			hostCell.innerHTML = '<span class="tc-c-faint" style="font-style:italic">' + _('resolving…') + '</span>';
+		} else if (hl.kind === 'ip') {
+			hostCell.appendChild(E('span', { 'class': 'tc-c-faint tc-mono' }, hl.text));
 		} else {
-			hostCell.textContent = '—';
+			hostCell.textContent = hl.text;
+			if (hl.kind === 'local') hostCell.title = _('Name from this router: device alias or DHCP lease');
 		}
 
 		var cellMap = {
@@ -1888,6 +1986,7 @@ return view.extend({
 	_pollMode:     null,
 	_onPopState:   null,
 	_rdns:         rdnsState(),
+	_localNames:   null,
 	_sortCol:    'bytes',
 	_sortDir:    'desc',
 	_sumCol:     'name',
@@ -1929,6 +2028,15 @@ return view.extend({
 			}
 		});
 		devices.sort(function(a, b) { return a.name.localeCompare(b.name); });
+
+		// Names for the private destinations of the connection table. The
+		// lease file read above stands in for DHCPv4 if luci-rpc is denied.
+		self._localNames = localNamesCache(function() {
+			return Promise.all([
+				callNamesList().catch(function() { return []; }),
+				callDHCPLeases().catch(function() { return {}; })
+			]).then(function(r) { return localNames(r[0], r[1], leasesRaw); });
+		});
 
 		var savedIp = opts.lastIp || '__all__';
 
@@ -2084,7 +2192,11 @@ return view.extend({
 		});
 		var rdnsCheck = mkToggle('tm-rdns', _('rDNS'), opts.rdns, function() {
 			var o = loadOpts(); o.rdns = this.checked; saveOpts(o); updateUrlParams(o);
+			var on = this.checked;
+			Array.prototype.forEach.call(connsDiv.querySelectorAll('.tc-rdns-hint'),
+				function(h) { h.classList.toggle('tc-hidden', on); });
 		});
+		rdnsCheck.title = _('Look up hostnames of public destinations by reverse DNS');
 		var extStatsCheck = mkToggle('tm-extended', _('Extended'), opts.extendedStats, function() {
 			var o = loadOpts(); o.extendedStats = this.checked; saveOpts(o); updateUrlParams(o);
 			extStatsDiv.classList.toggle('tc-hidden', !this.checked);
@@ -3191,7 +3303,11 @@ return view.extend({
 			var proto = (o.proto && o.proto !== 'all') ? o.proto : '';
 			pollStart();
 
-			callDevice(ip, proto).then(function(data) {
+			Promise.all([
+				callDevice(ip, proto),
+				self._localNames.get(Date.now())
+			]).then(function(res) {
+				var data = res[0], local = res[1];
 				if (!data || data.error) {
 					pollEnd((data && data.error) || _('Unknown error'));
 					return;
@@ -3307,7 +3423,7 @@ return view.extend({
 						connsDiv.appendChild(E('p',{'style':'color:var(--tc-faint);font-size:11px;margin-top:6px'},
 							groups.length + ' ' + _('groups from') + ' ' + data.connections.length + ' ' + _('connections') + '. ' + _('Click header to sort.')));
 					} else {
-						tbl = buildTable(data.connections, self._sortCol, self._sortDir, o.rdns, self._connHiddenCols);
+						tbl = buildTable(data.connections, self._sortCol, self._sortDir, o.rdns, self._connHiddenCols, local);
 						Array.prototype.forEach.call(tbl.querySelectorAll('.th'), function(th) {
 							th.addEventListener('click', function() {
 								var col = th.getAttribute('data-col');
@@ -3321,14 +3437,23 @@ return view.extend({
 							});
 						});
 						connsDiv.appendChild(E('div',{'style':'overflow-x:auto'},[tbl]));
-						connsDiv.appendChild(E('p',{'style':'color:var(--tc-faint);font-size:11px;margin-top:6px'},
-							data.connections.length + ' ' + _('connections') + '. ' + _('Click header to sort.')));
+						var hint = rdnsHint(!!o.rdns);
+						hint.querySelector('a').addEventListener('click', function(ev) {
+							ev.preventDefault();
+							var cb = rdnsCheck.querySelector('input');
+							rdnsCheck.scrollIntoView({ block: 'center' });
+							cb.focus();
+						});
+						connsDiv.appendChild(E('p',{'style':'color:var(--tc-faint);font-size:11px;margin-top:6px'}, [
+							data.connections.length + ' ' + _('connections') + '. ' + _('Click header to sort.'),
+							hint
+						]));
 
 						if (o.rdns) {
 							var seen = {}, dsts = [];
 							data.connections.forEach(function(c) {
 								var dst = c.dst || '';
-								if (!dst || seen[dst] || PRIVATE_RE.test(dst)) return;
+								if (!dst || seen[dst] || PRIVATE_RE.test(dst) || localName(local, dst)) return;
 								seen[dst] = true;
 								dsts.push(dst);
 								var shown = rdnsShown(self._rdns, dst);
