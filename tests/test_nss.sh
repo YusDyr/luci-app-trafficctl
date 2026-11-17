@@ -98,6 +98,19 @@ assert_eq "both front ends stopped means the Linux datapath is whole" \
 assert_empty "nothing is appended once acceleration is stopped" \
     "$(run nss_note)"
 
+# ── unknown: a knob that is there and cannot be read ──────────────────────
+# debugfs under kernel lockdown answers EPERM to root too. "active" would put
+# the Settings warning on a router whose state nobody can read; the reader
+# must not fail either, since config_get runs it inside rpcd. A directory in
+# the knob's place is unreadable for root as well.
+rm -f "$ECM/front_end_ipv6_stop"
+mkdir "$ECM/front_end_ipv6_stop"
+assert_eq "an unreadable knob is unknown, not active" "unknown" "$(run nss_status)"
+assert_empty "and unknown appends nothing to a message" "$(run nss_note)"
+rmdir "$ECM/front_end_ipv6_stop"
+printf '1\n' > "$ECM/front_end_ipv6_stop"
+assert_eq "readable again: stopped" "stopped" "$(run nss_status)"
+
 # ── defunct_all ────────────────────────────────────────────────────────────
 # The NSS counterpart of the conntrack flush every rule change already does:
 # an ALREADY accelerated flow is not re-evaluated against a rule that appeared

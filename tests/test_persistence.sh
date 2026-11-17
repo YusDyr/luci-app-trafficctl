@@ -272,5 +272,96 @@ printf '[{"type":"ratelimit","ip":"192.168.1.61","param":"5000"}]' > "$RULES"
 NFT_NOFW4=always fw_run restore >/dev/null
 assert_eq "restore: no blocks saved, no wait on fw4" "" "$(grep "inet fw4" "$NFT_LOG")"
 
+# A rules.json that does not parse restores nothing, and the restore says so
+# once (syslog and the activity log) instead of returning as if nothing had
+# been saved. The file stays as it was: what is in it is the operator's.
+logcfg() {
+    printf "config trafficctl 'main'\n\toption persist_rules '1'\n\nconfig logging 'logging'\n\toption enabled '1'\n\toption log_file '/tmp/trafficctl/activity.log'\n" \
+        > "$ROOT/etc/config/trafficctl"
+}
+ALOG="$ROOT/tmp/trafficctl/activity.log"
+fw_flush
+fw_clear
+logcfg
+rm -f "$ALOG"
+BROKEN='[{"type":"block","ip":"192.168.1.60","param":""},{"type":"ratelimit","ip":"192.168.1.61","param":"50'
+printf '%s' "$BROKEN" > "$RULES"
+fw_run restore >/dev/null
+assert_eq "restore, unparseable rules.json: nothing restored" "" "$(fw_rules)"
+assert_contains "restore, unparseable rules.json: syslog says so" "rules.json is not a JSON array" "$(cat "$LOGGER_LOG")"
+assert_eq "restore, unparseable rules.json: once, not once per half" "1" \
+    "$(grep -c 'rules.json is not a JSON array' "$LOGGER_LOG")"
+assert_contains "restore, unparseable rules.json: the activity log says so" "action=restore_error" "$(cat "$ALOG" 2>/dev/null)"
+assert_eq "restore, unparseable rules.json: the file is left as it was" "$BROKEN" "$(cat "$RULES")"
+fw_cfg 1
+
+# ── a save or remove that fails reaches the reply ─────────────────────────
+# A directory in the file's place: the rename fails for root too. The rule is
+# in force, so the action is ok, and the reply says the record is not.
+fw_flush
+fw_clear
+rm -f "$RULES"
+mkdir "$RULES"
+OUT=$(fw_run block 192.168.1.70)
+assert_contains "block, rules.json unwritable: the block itself is ok" '"ok":true' "$OUT"
+assert_contains "block, rules.json unwritable: the reply warns" "WARNING: rules.json could not be written: this block will not be restored" "$OUT"
+assert_contains "block, rules.json unwritable: so does syslog" "rules.json could not be written" "$(cat "$LOGGER_LOG")"
+OUT=$(fw_run unblock 192.168.1.70)
+assert_contains "unblock, rules.json unwritable: the unblock itself is ok" '"ok":true' "$OUT"
+assert_contains "unblock, rules.json unwritable: the reply says the block comes back" "comes back on the next ifup lan" "$OUT"
+OUT=$(fw_run portfw pause forward tcp 192.168.1.61 8080)
+assert_contains "portfw pause, rules.json unwritable: the reply warns" "WARNING: rules.json could not be written" "$OUT"
+rmdir "$RULES"
+OUT=$(fw_run block 192.168.1.71)
+assert_not_contains "block, rules.json writable: no warning" "WARNING" "$OUT"
+fw_run unblock 192.168.1.71 >/dev/null
+
+# ── labels that look like JSON ────────────────────────────────────────────
+# The writer split the file on "},{" as v1.30's awk did, so a label holding
+# it cut its record in two. Saving that address again (a re-block) dropped
+# the half with the type and ip and kept the tail as a record of its own:
+# the restore found no JSON at all. Quotes and a newline ride along.
+rm -f "$RULES"
+LBL='kid "x" },{"type":"block","ip":"192.168.1.6","param":"y'$'\n''tab'
+LBLJ=$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$LBL")
+ucw persist_save '"block"' '"192.168.1.5"' "$LBLJ"
+ucw persist_save '"block"' '"192.168.1.5"' "$LBLJ"
+ucw persist_save '"block"' '"192.168.1.6"' '""'
+ucw persist_remove '"block"' '"192.168.1.6"'
+assert_eq "label round trip: one record, the label whole" "1|$LBLJ" \
+    "$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print("%d|%s" % (len(d), json.dumps(d[0]["param"])))' "$RULES" 2>&1)"
+fw_flush
+assert_eq "label round trip: the restore puts back the one block" '{"ok":true,"restored":1,"failed":0}' "$(fw_run restore)"
+assert_eq "label round trip: and no block from inside the label" \
+    'ip saddr 192.168.1.5 counter drop comment "tctl_block_192_168_1_5"' "$(fw_rules)"
+
+# ── every state-file writer holds its lock ────────────────────────────────
+# The seen-MAC ledger (the DHCP hook marks, rpcd seeds) and the names (rpcd
+# and the bot) were rewritten with no lock, so one writer's rename dropped
+# the other's change.
+SEEN="$ROOT/etc/trafficctl/seen_macs"
+SLOCK="$ROOT/tmp/trafficctl_seen.lock.d"
+printf 'aa:bb:cc:dd:ee:01\n' > "$SEEN"
+mkdir "$SLOCK"
+( ucw seen_mark '"aa:bb:cc:dd:ee:02"' ) &
+upid=$!
+sleep 1
+assert_eq "lock: seen_mark waits while the ledger is locked" "aa:bb:cc:dd:ee:01" "$(cat "$SEEN")"
+rmdir "$SLOCK"
+wait "$upid"
+assert_contains "lock: and marks once it is released" "aa:bb:cc:dd:ee:02" "$(cat "$SEEN")"
+assert_eq "lock: seen lock released" "no" "$([ -d "$SLOCK" ] && echo yes || echo no)"
+NAMESF="$ROOT/etc/trafficctl/names"
+NLOCK="$ROOT/tmp/trafficctl_names.lock.d"
+rm -f "$NAMESF"
+mkdir "$NLOCK"
+( ucw names_set '"192.168.1.5"' '"tablet"' ) &
+upid=$!
+sleep 1
+assert_eq "lock: names_set waits while the names are locked" "no" "$([ -e "$NAMESF" ] && echo yes || echo no)"
+rmdir "$NLOCK"
+wait "$upid"
+assert_eq "lock: and writes once it is released" "192.168.1.5 tablet" "$(cat "$NAMESF")"
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

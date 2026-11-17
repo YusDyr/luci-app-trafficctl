@@ -260,18 +260,7 @@ function save(ip, rate, cid, up) {
 // (a holder that is stuck), fn runs anyway, as the shell writer did.
 function locked(fn) {
 	lib.mkdir_p(dirname(SHAPES));
-	let held = lib.lock(LOCK, LOCK_TRIES, LOCK_STALE, true), r;
-	try {
-		r = fn();
-	}
-	catch (e) {
-		if (held)
-			lib.unlock(LOCK);
-		die(e.message);
-	}
-	if (held)
-		lib.unlock(LOCK);
-	return r;
+	return lib.with_lock(LOCK, LOCK_TRIES, LOCK_STALE, fn);
 }
 
 const NOT_SAVED = ' — WARNING: shapes.json could not be written';
@@ -423,21 +412,12 @@ function rec_str(v) {
 // Every record of shapes.json, whatever persist_rules says: a shape is
 // always saved, and nothing else knows which class belongs to which
 // device. Through the same validation as `trafficctl shape add`; nothing is
-// logged to the activity log or announced, as nothing was changed.
+// logged to the activity log or announced, as nothing was changed. A file
+// that is no JSON array is reported by lib.read_records and left alone.
 function restore() {
-	let res = { restored: 0, failed: 0 }, raw = lib.readfile(SHAPES), d;
-	if (raw == null || trim(raw) == '')
+	let res = { restored: 0, failed: 0 }, d = lib.read_records(SHAPES);
+	if (d == null)
 		return res;
-	try {
-		d = json(raw);
-	}
-	catch (e) {
-		d = null;
-	}
-	if (type(d) != 'array') {
-		lib.logger('shapes.json is not a JSON array, no shape restored: ' + SHAPES);
-		return res;
-	}
 	for (let r in d) {
 		if (type(r) != 'object' || r.ip == null || r.ip == '')
 			continue;

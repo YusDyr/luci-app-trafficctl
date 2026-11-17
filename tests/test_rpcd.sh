@@ -498,6 +498,13 @@ echo 0 > "$R/sys/kernel/debug/ecm/front_end_ipv4_stop"; echo 1 > "$R/sys/kernel/
 assert_contains "config_get: ECM running for one family is active" '"nss":"active"' "$(run_call config_get)"
 echo 1 > "$R/sys/kernel/debug/ecm/front_end_ipv4_stop"
 assert_contains "config_get: both families stopped is stopped" '"nss":"stopped"' "$(run_call config_get)"
+# An ECM build whose knob cannot be read (debugfs under lockdown): unknown,
+# and the rest of the reply as usual.
+rm -f "$R/sys/kernel/debug/ecm/front_end_ipv6_stop"; mkdir "$R/sys/kernel/debug/ecm/front_end_ipv6_stop"
+OUT=$(run_call config_get)
+assert_contains "config_get: an unreadable ECM knob is unknown" '"nss":"unknown"' "$OUT"
+assert_contains "config_get: and the reply is whole" '"default_mode":"limiter"' "$OUT"
+rmdir "$R/sys/kernel/debug/ecm/front_end_ipv6_stop"; echo 1 > "$R/sys/kernel/debug/ecm/front_end_ipv6_stop"
 
 # ════════════════════════════════════════════════════════════════════════════
 # telegram_config_get / set: the bot token never leaks

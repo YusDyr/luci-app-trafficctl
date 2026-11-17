@@ -454,20 +454,27 @@ function arg(a) {
 
 // The records of t in another spelling: 1.30.x saved a zero-padded mask as
 // typed, and "all" as it was given. remove() takes their rules.
+// false when one of them could not be removed, as persist_remove says.
 function unsave_others(t) {
 	if (!lib.persist_enabled())
-		return;
-	let d;
+		return null;
+	let d, ok = true;
 	try {
 		d = json(lib.readfile(RULES) ?? '');
 	}
 	catch (e) {
-		return;
+		return ok;
 	}
 	for (let r in (type(d) == 'array') ? d : [])
 		if (type(r) == 'object' && r.type == 'ratelimit' && type(r.ip) == 'string' &&
-		    r.ip != t && target(r.ip) == t)
-			lib.persist_remove('ratelimit', r.ip);
+		    r.ip != t && target(r.ip) == t && !lib.persist_remove('ratelimit', r.ip))
+			ok = false;
+	return ok;
+}
+
+// Both writes of a change: false if either failed, null if neither ran.
+function both(a, b) {
+	return (a === false || b === false) ? false : (a ?? b);
 }
 
 // args: <target> <rate_kbit> [label] [mode] [rate_up]. rate 0 removes the
@@ -502,17 +509,16 @@ function ratelimit(args) {
 		// Telegram.
 		remove_legacy(ip, 'rl_ratelimit_' + label);
 		remove(ip, cmt);
-		unsave_others(ip);
-		if (lib.persist_enabled())
-			lib.persist_remove('ratelimit', ip);
+		let removed = both(unsave_others(ip), lib.persist_enabled() ? lib.persist_remove('ratelimit', ip) : null);
 		lib.log('ratelimit_remove', ip, '', via, src);
-		return reply({ ok: true, msg: 'rate limit removed for ' + ip });
+		return reply({ ok: true, msg: 'rate limit removed for ' + ip +
+			lib.persist_warn(removed, 'the saved limit is still there and comes back on the next ifup lan') });
 	}
 
 	let rk = int(rate), uk = int(up);
 	let rates = (uk != rk) ? sprintf('%d kbit/s down, %d kbit/s up', rk, uk) : sprintf('%d kbit/s', rk);
 	remove(ip, cmt);
-	unsave_others(ip);
+	let unsaved = unsave_others(ip);
 	let r = add(ip, rk, cmt, mode, uk);
 	if (!r.netdev)
 		return fail('failed to set rate limit for ' + ip + ': cannot create the nftables netdev table (is kmod-nft-netdev installed?)');
@@ -532,8 +538,7 @@ function ratelimit(args) {
 	// The mode and the upload rate are saved with the rate, the upload rate
 	// only when it differs, so a symmetric limit keeps its old record.
 	let persist = lib.persist_enabled();
-	if (persist)
-		lib.persist_save('ratelimit', ip, '' + rk, mode, (uk != rk) ? '' + uk : '');
+	let saved = both(unsaved, persist ? lib.persist_save('ratelimit', ip, '' + rk, mode, (uk != rk) ? '' + uk : '') : null);
 	// What was applied is recorded here, once: the activity log, and the
 	// place any other announcement of the change belongs.
 	lib.log('ratelimit_set', ip, rates, via, src);
@@ -543,7 +548,8 @@ function ratelimit(args) {
 	// A flow the NSS firmware already accelerates is not checked against a
 	// rule that came after it.
 	lib.nss_defunct();
-	let note = lib.nss_note() + lib.persist_note();
+	let note = lib.nss_note() + lib.persist_note() +
+		lib.persist_warn(saved, 'this limit will not be restored as set on the next ifup lan');
 
 	// Live on some devices and not on others: ok, and said, with the
 	// devices and nft's reason.
@@ -581,15 +587,11 @@ function restore() {
 	let res = { restored: 0, failed: 0 };
 	if (!lib.persist_enabled())
 		return res;
-	let d;
-	try {
-		d = json(lib.readfile(RULES) ?? '');
-	}
-	catch (e) {
+	let d = lib.read_records(RULES);
+	if (d == null)
 		return res;
-	}
 	let live = null;
-	for (let r in (type(d) == 'array') ? d : []) {
+	for (let r in d) {
 		if (type(r) != 'object' || r.type != 'ratelimit' || type(r.ip) != 'string' || r.ip == '')
 			continue;
 		let ip = r.ip, param = rec_str(r.param), up = rec_str(r.param_up);

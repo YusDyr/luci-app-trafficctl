@@ -372,20 +372,20 @@ function pause(scope, proto, ip, port) {
 			return fail('failed to pause ' + p + ' port ' + port);
 		flush_conntrack(p, (scope == 'input') ? '-' : ip, port);
 	}
-	if (lib.persist_enabled())
-		lib.persist_save('pfw_pause', scope + '/' + proto + '/' + cmt_ip + '/' + port, '1');
+	let saved = lib.persist_enabled() ? lib.persist_save('pfw_pause', scope + '/' + proto + '/' + cmt_ip + '/' + port, '1') : null;
 	log('block', cmt_ip, port, 'pause ' + proto);
-	return ok('paused ' + proto + ' port ' + port);
+	return ok('paused ' + proto + ' port ' + port +
+		lib.persist_warn(saved, 'this pause will not be restored on the next ifup lan'));
 }
 
 function resume(scope, proto, ip, port) {
 	let cmt_ip = (scope == 'input') ? 'local' : ip;
 	for (let p in proto_tokens(proto))
 		delete_kind('pause', scope, p, cmt_ip, port);
-	if (lib.persist_enabled())
-		lib.persist_remove('pfw_pause', scope + '/' + proto + '/' + cmt_ip + '/' + port);
+	let removed = lib.persist_enabled() ? lib.persist_remove('pfw_pause', scope + '/' + proto + '/' + cmt_ip + '/' + port) : null;
 	log('unblock', cmt_ip, port, 'resume ' + proto);
-	return ok('resumed ' + proto + ' port ' + port);
+	return ok('resumed ' + proto + ' port ' + port +
+		lib.persist_warn(removed, 'the saved pause is still there and comes back on the next ifup lan'));
 }
 
 // tctl_validate_rate: no leading zero, at most 9 digits, at most 100 Gbit/s.
@@ -404,15 +404,15 @@ function limit(scope, proto, ip, port, kbit) {
 	}
 	let key = scope + '/' + proto + '/' + cmt_ip + '/' + port;
 	if (kbit == '0') {
-		if (lib.persist_enabled())
-			lib.persist_remove('pfw_limit', key);
+		let removed = lib.persist_enabled() ? lib.persist_remove('pfw_limit', key) : null;
 		log('ratelimit_remove', cmt_ip, port, '');
-		return ok('limit removed for port ' + port);
+		return ok('limit removed for port ' + port +
+			lib.persist_warn(removed, 'the saved limit is still there and comes back on the next ifup lan'));
 	}
-	if (lib.persist_enabled())
-		lib.persist_save('pfw_limit', key, kbit);
+	let saved = lib.persist_enabled() ? lib.persist_save('pfw_limit', key, kbit) : null;
 	log('ratelimit_set', cmt_ip, port, kbit + 'kbit');
-	return ok('limit ' + kbit + ' kbit/s set for port ' + port);
+	return ok('limit ' + kbit + ' kbit/s set for port ' + port +
+		lib.persist_warn(saved, 'this limit will not be restored on the next ifup lan'));
 }
 
 function main(args) {
@@ -460,17 +460,13 @@ function restore() {
 	let res = { ok: true, restored: 0, failed: 0 };
 	if (!lib.persist_enabled())
 		return res;
-	let d;
-	try {
-		d = json(lib.readfile(RULES) ?? '');
-	}
-	catch (e) {
+	let d = lib.read_records(RULES);
+	if (d == null)
 		return res;
-	}
 	// The hook read @[0], @[1], ... until a record had no type. The records
 	// are read once: each restore rewrites rules.json, which made the hook's
 	// index skip one record and apply another twice.
-	for (let r in (type(d) == 'array') ? d : []) {
+	for (let r in d) {
 		let t = (type(r) == 'object') ? field(r.type) : '';
 		if (t == '')
 			break;
