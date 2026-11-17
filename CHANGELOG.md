@@ -31,6 +31,140 @@ rest) are gone.
 
 ---
 
+## [2.0.0] - 2026-11-17
+
+### Features
+- notification events with ubus, hotplug and four senders (ucode stage 9a) ([#156](https://github.com/YusDyr/luci-app-trafficctl/issues/156)) ([6d3f395](https://github.com/YusDyr/luci-app-trafficctl/commit/6d3f3951cf241548bddf5b8f87b12873b57dfba9))
+  trafficctl.notify (notify.uc) turns new_device, known_device,
+  limit_applied, block_applied and cut_engaged into events. Each one goes
+  out on ubus as trafficctl.notify, runs /etc/hotplug.d/trafficctl/*
+  through hotplug-call (ACTION=<event>, fields upper-cased), and reaches
+  every enabled sender subscribed to it: telegram (send only), ntfy, a
+  webhook, or mail through msmtp. One uci section per sender
+
+### Bug Fixes
+- harden the ucode library from review of the first port ([406900e](https://github.com/YusDyr/luci-app-trafficctl/commit/406900e21298ffaf698840af1a0036a6ed9386f9))
+  - NUL bytes: match(), replace() and lc() stop at one, so validators
+  refuse such strings and to_json escapes around them (a quote after a
+  NUL went out unescaped).
+  - No leading zeros in addresses or prefix lengths, in lib.uc and in
+  tctl_validate_ip/target/cidr_spec: iptoarr() refuses 010, so
+  010.0.0.0/1 became 0.0.0.0/1, and the shell read it as octal.
+- wait out the steal age before giving up on the totals lock ([#151](https://github.com/YusDyr/luci-app-trafficctl/issues/151)) ([a05aebc](https://github.com/YusDyr/luci-app-trafficctl/commit/a05aebcd2397de4fa111e7836f6fc9d1c1a88235))
+  totals() waited 30 tries of 100 ms for the shell's bare lock, but takes a
+  bare lock over only once it is 3 s old. The tries end 2.9 s after the
+  first, so a lock made just before it (a 1.30.x shell writer killed while
+  holding it) read 2 s old at the last try: the write went ahead without
+  the lock and left the directory for the next caller to wait out again.
+  The shell steals at the end of its wait, so equiv.sh case
+- show destination names in the device view behind AdGuard Home ([#171](https://github.com/YusDyr/luci-app-trafficctl/issues/171)) ([6bc9310](https://github.com/YusDyr/luci-app-trafficctl/commit/6bc93101cd9cabf908ed175955aa1868cc039caa))
+  Port of the main fix (#170) to feature/ucode-refactoring. The change is
+  in the LuCI view only; the ucode backend's rdns paths (net.uc rdns and
+  rdns_refresh, report.uc dst_hosts for `device --rdns`) are not on the
+  device view's path and stay as they are, matching main.
+
+### Other
+- run pull request checks for feature branches ([bc923a0](https://github.com/YusDyr/luci-app-trafficctl/commit/bc923a0385fc5443145f30b7aaa35d94f7cb3cbc))
+  The ucode rewrite lands on feature/ucode-refactoring through stage pull
+  requests, which need the same checks as pull requests to main.
+- add ucode test infrastructure and router fixtures ([#136](https://github.com/YusDyr/luci-app-trafficctl/issues/136)) ([36240c5](https://github.com/YusDyr/luci-app-trafficctl/commit/36240c5165c4d5f9190b8c6305a4bb5a709d387f))
+- add the ucode library and CLI, port subnets, names, rdns and ifaces ([023230e](https://github.com/YusDyr/luci-app-trafficctl/commit/023230eb936b7404430369135e3c9154faa2e885))
+  /usr/sbin/trafficctl is a ucode CLI over two modules in
+  /usr/share/ucode/trafficctl: lib.uc (uci/ubus, quoted command runner,
+  JSON in the shell backend's format, validation, locks, atomic writes,
+  activity log, names and seen-MAC stores) and net.uc (subnets, interface
+  roles and counters, reverse DNS). trafficctl-subnets, -names, -rdns,
+  -rdns-refresh and -ifaces.sh now exec it.
+- run pull request checks for stacked ucode/* bases ([537af65](https://github.com/YusDyr/luci-app-trafficctl/commit/537af65fd20088f15b118f6c9cfb08ad3639299f))
+  The ucode rewrite lands as PRs stacked on each other (base ucode/pr0-ci
+  and so on); without this they ran no checks at all.
+- add the ucode library and CLI, port subnets, names, rdns and ifaces ([#138](https://github.com/YusDyr/luci-app-trafficctl/issues/138)) ([c39a22c](https://github.com/YusDyr/luci-app-trafficctl/commit/c39a22cbde11d6b995352f987d164a707cd02ade))
+- port bytes, bytes-nft and totals to ucode ([#142](https://github.com/YusDyr/luci-app-trafficctl/issues/142)) ([dd01170](https://github.com/YusDyr/luci-app-trafficctl/commit/dd01170818e0b8d72cb7b85b0457526708749c6a))
+  trafficctl bytes, bytes-nft and totals [--all] replace the three shell
+  scripts, which become wrappers. One conntrack parser (net.ct_each) serves
+  them and the later summary and device ports. The nft counter maps are read
+  with nft -j first, in both element shapes ([key, {counter}] pairs from
+  nftables 1.0.2, {elem: {val, counter}} from 1.1.6), the text listing second,
+  which now also reads several elements on one line and is used as well when
+- rewrite the rpcd plugin in ucode ([#143](https://github.com/YusDyr/luci-app-trafficctl/issues/143)) ([5f25931](https://github.com/YusDyr/luci-app-trafficctl/commit/5f259313ed180d1ca2c39cf1fe066468b0737518))
+  luci.trafficctl stays an exec plugin at the same path with the same
+  signature table. The settings getters and setters, their validation,
+  activity_log and the device names run in the plugin; every other method
+  runs /usr/sbin/trafficctl <command>, which hands the commands not yet
+  ported to their legacy scripts.
+- port ratelimit-stats, shape-stats and rules list to ucode ([#150](https://github.com/YusDyr/luci-app-trafficctl/issues/150)) ([20e3fec](https://github.com/YusDyr/luci-app-trafficctl/commit/20e3fecdb4ee72fe5038d407a96006a72926761c))
+  The limiter, block and shaper readers move to a new module,
+  trafficctl.ctl (ctl.uc), behind three CLI commands: trafficctl
+  ratelimit-stats, shape-stats and rules. The scripts of the same names
+  become two-line wrappers; the writers stay shell.
+- port summary, device, metrics and netify to ucode ([#152](https://github.com/YusDyr/luci-app-trafficctl/issues/152)) ([7481525](https://github.com/YusDyr/luci-app-trafficctl/commit/7481525cf67a7607fa4dc166602f0d0914ee0ee2))
+  trafficctl.report (report.uc) holds the four read-only reports, and
+  /usr/sbin/trafficctl gains the commands summary, device, metrics and
+  netify. trafficctl-summary.sh, -device.sh, -metrics.sh and -netify.sh
+  become wrappers that exec the CLI. The metrics CGI keeps its token gate
+  (403 with an empty metrics.token) and then execs trafficctl metrics.
+- port block, unblock, the WiFi deny and the hotplug hooks to ucode ([#158](https://github.com/YusDyr/luci-app-trafficctl/issues/158)) ([f2a9429](https://github.com/YusDyr/luci-app-trafficctl/commit/f2a942932f0a32a6382d10851ed207f5a4d62520))
+  block, unblock, macfilter-add and macfilter-remove are /usr/sbin/trafficctl
+  commands; their scripts exec the CLI. The DHCP hook runs `trafficctl
+  newdevice` and the iface hook restores saved blocks with `trafficctl
+  restore`. Rule texts, rules.json, telegram_known.json and seen_macs keep the
+  v1.30.0 bytes, so v1.30.0 and the port remove each other's blocks.
+- port the global cut and port-forward control to ucode ([#157](https://github.com/YusDyr/luci-app-trafficctl/issues/157)) ([6ba9562](https://github.com/YusDyr/luci-app-trafficctl/commit/6ba9562fafa26f10c13629dfe564eb0c2c197d31))
+  trafficctl-cut.sh and trafficctl-portfw.sh move to two new modules,
+  cut.uc and portfw.uc, behind `trafficctl cut` and `trafficctl portfw`;
+  the scripts become shims. The cut ruleset is the same text, loaded as one
+  nft -f transaction with the router-local accept first, and it is kept only
+  if nft lists that accept back as the first prerouting rule. Engage still
+  refuses with no LAN device. State files stay where v1.30 put them, so a cut
+- port the history store to ucode ([#159](https://github.com/YusDyr/luci-app-trafficctl/issues/159)) ([96b74c7](https://github.com/YusDyr/luci-app-trafficctl/commit/96b74c70fdec9f1de7ed60665e72461b9fbb4931))
+  trafficctl-history.sh moves to history.uc behind `trafficctl history`; the
+  old script is a shim and the init script runs `trafficctl history keeper`.
+  The TSV layout, its headers, the period, interface, cursor and stamp files
+  are unchanged, so either version reads what the other wrote. Writes go
+  through a temp file in the same directory and a rename. The keeper runs each
+  flush as a guarded child (timeout 15 when timeout(1) exists, a 20 s kill
+- port the per-device limiter to ucode ([#162](https://github.com/YusDyr/luci-app-trafficctl/issues/162)) ([5ec9966](https://github.com/YusDyr/luci-app-trafficctl/commit/5ec9966e7c2bbc00c23efba934a65a540cb0e91d))
+  block, unblock, macfilter-add and macfilter-remove are /usr/sbin/trafficctl
+  commands; their scripts exec the CLI. The DHCP hook runs `trafficctl
+  newdevice` and the iface hook restores saved blocks with `trafficctl
+  restore`. Rule texts, rules.json, telegram_known.json and seen_macs keep the
+  v1.30.0 bytes, so v1.30.0 and the port remove each other's blocks.
+- the Telegram bot in ucode, in its own package trafficctl-telegram ([#160](https://github.com/YusDyr/luci-app-trafficctl/issues/160)) ([1e79cad](https://github.com/YusDyr/luci-app-trafficctl/commit/1e79cadd2e662cc0c836adfd7808c7f96c25185c))
+  trafficctl.notify (notify.uc) turns new_device, known_device,
+  limit_applied, block_applied and cut_engaged into events. Each one goes
+  out on ubus as trafficctl.notify, runs /etc/hotplug.d/trafficctl/*
+  through hotplug-call (ACTION=<event>, fields upper-cased), and reaches
+  every enabled sender subscribed to it: telegram (send only), ntfy, a
+  webhook, or mail through msmtp. One uci section per sender
+- port the tc/HTB/IFB shaper to ucode ([#164](https://github.com/YusDyr/luci-app-trafficctl/issues/164)) ([707296f](https://github.com/YusDyr/luci-app-trafficctl/commit/707296f66908b08a56f56603cee91a18b98b1cf0))
+  block, unblock, macfilter-add and macfilter-remove are /usr/sbin/trafficctl
+  commands; their scripts exec the CLI. The DHCP hook runs `trafficctl
+  newdevice` and the iface hook restores saved blocks with `trafficctl
+  restore`. Rule texts, rules.json, telegram_known.json and seen_macs keep the
+  v1.30.0 bytes, so v1.30.0 and the port remove each other's blocks.
+- the rpcd plugin in ucode under /usr/share/rpcd/ucode ([#169](https://github.com/YusDyr/luci-app-trafficctl/issues/169)) ([22599bd](https://github.com/YusDyr/luci-app-trafficctl/commit/22599bd06cf2d1bb368bdb3a9784fe6ded2d8a33))
+  * wip: rpcd plugin as rpcd-mod-ucode, test harness, device cap
+- remove the shell backend and its shims (ucode stage 11) ([#168](https://github.com/YusDyr/luci-app-trafficctl/issues/168)) ([986863e](https://github.com/YusDyr/luci-app-trafficctl/commit/986863ed3f39fe038627f2b64e996cfa21099595))
+  * wip: restore moves into trafficctl restore, shell deleted
+- give feature-build APKs a version apk accepts ([#175](https://github.com/YusDyr/luci-app-trafficctl/issues/175)) ([de12b2f](https://github.com/YusDyr/luci-app-trafficctl/commit/de12b2f77ea273bb7660d485a979dfeb38da2e7a))
+  apk refused 0.0.0-<sha> ("package version is invalid"), so Build APK
+  failed on every push to the feature branch and the pre-release was
+  never published. 0.0.0~<sha> uses apk's commit-hash suffix.
+- build feature APKs through tools/sdk-build.sh with the SDK cache ([#176](https://github.com/YusDyr/luci-app-trafficctl/issues/176)) ([134200b](https://github.com/YusDyr/luci-app-trafficctl/commit/134200b685f6819fdf46ba22998e4c0e5c75d759))
+  Feature Build called openwrt/gh-action-sdk directly, whose setup.sh
+  downloads the SDK again from the mirror: on 2026-11-17 that took 32 of
+  Build APK's 55 minutes, with no timeout. Use the release and compat
+  path instead: the SDK cache, tools/sdk-build.sh and a 60 min limit.
+- base the release version on v* tags only ([#179](https://github.com/YusDyr/luci-app-trafficctl/issues/179)) ([9c7254f](https://github.com/YusDyr/luci-app-trafficctl/commit/9c7254f6e5439cecca295895039acf82e19b1387))
+  git describe picked Feature Build's floating build-feature-ucode-refactoring
+  tag, which became reachable from main with the 2.0.0 merge, parsed it as
+  0.0.0 and computed v1.0.0; the release then failed on the existing v1.0.0
+  tag before pushing anything.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.30.8...v2.0.0
+
+---
+
 ## [1.30.8] - 2026-11-13
 
 ### Bug Fixes
