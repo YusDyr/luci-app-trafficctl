@@ -16,13 +16,17 @@
 ### Option 1: Direct Deploy to Router (fastest iteration)
 
 ```sh
-# Deploy all backend scripts
-scp trafficctl/files/usr/libexec/trafficctl/trafficctl-*.sh root@192.168.0.1:/usr/libexec/trafficctl/
-ssh root@192.168.0.1 'chmod +x /usr/libexec/trafficctl/trafficctl-*.sh'
+# Deploy the backend, the ucode modules and the CLI: the rpcd plugin imports
+# lib.uc and runs /usr/sbin/trafficctl for every delegated method
+ssh root@192.168.0.1 'mkdir -p /usr/share/ucode/trafficctl'
+scp trafficctl/files/usr/share/ucode/trafficctl/*.uc root@192.168.0.1:/usr/share/ucode/trafficctl/
+scp trafficctl/files/usr/sbin/trafficctl root@192.168.0.1:/usr/sbin/
+ssh root@192.168.0.1 'chmod +x /usr/sbin/trafficctl'
 
-# Deploy rpcd backend
-scp luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl root@192.168.0.1:/usr/libexec/rpcd/
-ssh root@192.168.0.1 'chmod +x /usr/libexec/rpcd/luci.trafficctl && /etc/init.d/rpcd restart'
+# Deploy the rpcd plugin (rpcd-mod-ucode loads it, and the modules it imports,
+# once when rpcd starts: restart rpcd after changing either)
+scp luci-app-trafficctl/root/usr/share/rpcd/ucode/luci.trafficctl.uc root@192.168.0.1:/usr/share/rpcd/ucode/
+ssh root@192.168.0.1 '/etc/init.d/rpcd restart'
 
 # Deploy frontend
 scp luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js \
@@ -81,28 +85,26 @@ luci-app-trafficctl/                     # repository
 │       │   ├── config/trafficctl        # UCI config (the conffile)
 │       │   ├── init.d/                  # trafficctl-telegram, trafficctl-history, trafficctl-cut
 │       │   └── hotplug.d/
-│       │       ├── iface/99-trafficctl-shapes      # Restore tc rules on boot
-│       │       └── dhcp/99-trafficctl-newdevice    # New-device detection
+│       │       ├── iface/99-trafficctl-shapes      # Restore on boot (blocks, limits, shapes via `trafficctl restore`)
+│       │       └── dhcp/99-trafficctl-newdevice    # New-device detection: `trafficctl newdevice`
 │       ├── lib/upgrade/keep.d/trafficctl          # /etc/trafficctl/ kept across sysupgrade
+│       ├── usr/sbin/trafficctl          # The CLI (ucode): subnets, names, rdns, rdns-refresh, ifaces, bytes, totals,
+│       │                                #   ratelimit-stats, shape-stats, rules, summary, device, metrics, netify,
+│       │                                #   block, unblock, macfilter-add, macfilter-remove, newdevice, restore,
+│       │                                #   cut, portfw, history, ratelimit, shape, notify, telegram, telegram-test
+│       ├── usr/share/ucode/trafficctl/
+│       │   ├── lib.uc                   # Shared helpers: uci/ubus, commands, JSON, validation, files, log
+│       │   ├── net.uc                   # Subnets, interface roles, reverse DNS, byte samples, totals
+│       │   ├── ctl.uc                   # nft/tc readers, the block, the WiFi deny, newdevice, restore
+│       │   ├── report.uc                # Summary, device detail, Prometheus exporter, netifyd DPI
+│       │   ├── cut.uc                   # Global internet cut: nft -f ruleset, state, keeper loop
+│       │   ├── portfw.uc                # Port-forward list, pause, limit (inet tctl_pfw)
+│       │   ├── history.uc               # Usage history store: flush, keeper, read, periods, prune
+│       │   ├── limit.uc                 # Per-device limiter (netdev tm_ratelimit), its restore
+│       │   └── shape.uc                 # Shaper (tc/HTB, IFB), shapes.json, its restore
 │       ├── usr/libexec/trafficctl/
-│       │   ├── trafficctl-fw.sh         # Firewall abstraction (sourced)
-│       │   ├── trafficctl-summary.sh    # All-device summary
-│       │   ├── trafficctl-device.sh     # Per-device detail
-│       │   ├── trafficctl-bytes.sh      # Byte counters for speed (conntrack)
-│       │   ├── trafficctl-bytes-nft.sh  # nft counter init helper
-│       │   ├── trafficctl-totals.sh     # Monotonic lifetime totals (shared by UI + exporter)
-│       │   ├── trafficctl-ifaces.sh     # Per-interface counters (global overview)
-│       │   ├── trafficctl-block.sh      # Internet block
-│       │   ├── trafficctl-unblock.sh    # Internet unblock
-│       │   ├── trafficctl-shape.sh      # tc/HTB shaping
-│       │   ├── trafficctl-shape-stats.sh
-│       │   ├── trafficctl-ratelimit.sh  # nft policer
-│       │   ├── trafficctl-ratelimit-stats.sh
-│       │   ├── trafficctl-macfilter-add.sh
-│       │   ├── trafficctl-macfilter-remove.sh
-│       │   ├── trafficctl-rdns.sh       # Reverse DNS (Telegram/CLI)
-│       │   ├── trafficctl-rules.sh      # Every restriction, online or not ("Rules" tab)
-│       │   └── ...                      # the rest of the helpers
+│       │   └── trafficctl-telegram.uc   # The bot's process (package trafficctl-telegram)
+│       ├── etc/hotplug.d/, etc/init.d/  # Hooks and procd services: each runs a `trafficctl` command
 │       └── www/cgi-bin/trafficctl-metrics          # Prometheus scrape endpoint
 ├── luci-app-trafficctl/                 # package luci-app-trafficctl: the web interface
 │   ├── Makefile                         # OpenWrt package build (luci.mk), depends on trafficctl
@@ -111,11 +113,11 @@ luci-app-trafficctl/                     # repository
 │   │   ├── rules.js                     # "Rules" tab
 │   │   ├── portfw.js                    # "Port Forwards" tab
 │   │   └── status.css                   # Frontend styles
-│   ├── root/usr/
-│   │   ├── libexec/rpcd/luci.trafficctl # rpcd backend (JSON-RPC dispatch)
-│   │   └── share/
-│   │       ├── luci/menu.d/luci-app-trafficctl.json
-│   │       └── rpcd/acl.d/luci-app-trafficctl.json
+│   ├── root/usr/share/
+│   │   ├── luci/menu.d/luci-app-trafficctl.json
+│   │   └── rpcd/
+│   │       ├── acl.d/luci-app-trafficctl.json
+│   │       └── ucode/luci.trafficctl.uc # rpcd plugin (rpcd-mod-ucode): settings in process, the rest via the CLI
 │   └── po/                              # i18n: templates/trafficctl.pot, <lang>/trafficctl.po
 ├── build-ipk.sh, build-apk.sh           # Standalone builders, emit both packages
 ├── docs/                                # Documentation
@@ -129,10 +131,12 @@ luci-app-trafficctl/                     # repository
 
 ### Shell Scripts
 
+The shell left is the hotplug hooks, the init scripts, uci-defaults, the
+metrics CGI and the package scripts. The backend itself is ucode (see
+`CLAUDE.md`, "ucode Conventions").
+
 - `#!/bin/sh` — POSIX sh (BusyBox ash/dash). No bashisms.
-- Source `trafficctl-fw.sh` for firewall detection and validation helpers.
-- Validate all IP inputs via `tctl_validate_ip` before use.
-- Output only valid JSON to stdout.
+- A hook hands over to `/usr/sbin/trafficctl` rather than doing the work itself.
 - Use `2>/dev/null` on commands that may fail.
 - Quote all variable expansions.
 
@@ -179,16 +183,16 @@ function name {}         # use name() {} instead
 
 ```sh
 # Summary
-ssh root@192.168.0.1 '/usr/libexec/trafficctl/trafficctl-summary.sh' | python3 -m json.tool
+ssh root@192.168.0.1 '/usr/sbin/trafficctl summary' | python3 -m json.tool
 
 # Per-device
-ssh root@192.168.0.1 '/usr/libexec/trafficctl/trafficctl-device.sh 192.168.0.111 all' | python3 -m json.tool
+ssh root@192.168.0.1 '/usr/sbin/trafficctl device 192.168.0.111 all' | python3 -m json.tool
 
 # Shaping
-ssh root@192.168.0.1 '/usr/libexec/trafficctl/trafficctl-shape.sh add 192.168.0.100 5000 test'
-ssh root@192.168.0.1 '/usr/libexec/trafficctl/trafficctl-shape.sh status 192.168.0.100'
-ssh root@192.168.0.1 '/usr/libexec/trafficctl/trafficctl-shape-stats.sh' | python3 -m json.tool
-ssh root@192.168.0.1 '/usr/libexec/trafficctl/trafficctl-shape.sh remove 192.168.0.100'
+ssh root@192.168.0.1 '/usr/sbin/trafficctl shape add 192.168.0.100 5000 test'
+ssh root@192.168.0.1 '/usr/sbin/trafficctl shape status 192.168.0.100'
+ssh root@192.168.0.1 '/usr/sbin/trafficctl shape-stats' | python3 -m json.tool
+ssh root@192.168.0.1 '/usr/sbin/trafficctl shape remove 192.168.0.100'
 
 # Verify kernel state
 ssh root@192.168.0.1 'tc -s class show dev br-lan'
@@ -198,8 +202,8 @@ ssh root@192.168.0.1 'nft list chain inet fw4 forward'
 ### Linting
 
 ```sh
-# Shell (requires shellcheck)
-shellcheck trafficctl/files/usr/libexec/trafficctl/trafficctl-*.sh
+# Shell (requires shellcheck): the hooks and the CGI
+shellcheck -s sh trafficctl/files/etc/hotplug.d/*/* trafficctl/files/www/cgi-bin/*
 
 # JavaScript (requires node + eslint)
 npm install   # installs eslint from package.json devDependencies
@@ -212,28 +216,61 @@ Run all tests locally. These run on the host with fake `nft`/`tc`/`ip`/`uci`/
 `curl` binaries on `PATH`, so they need no router:
 
 ```sh
-bash tests/test_fw.sh                 # Firewall helper library
-bash tests/test_direction.sh          # Bidirectional limit/shape, classid allocation
-bash tests/test_shape_filters.sh      # Several shapes keep their filters (stateful tc, tests/lib/tc-htb.sh)
-bash tests/test_meter_per_chain.sh    # Each-mode meters per chain, per-port success, nft 1.0/1.1
-bash tests/test_portfw.sh             # Port-forward control, port ranges
-bash tests/test_names.sh              # Device aliases + reverse-DNS cache
-bash tests/test_netify.sh             # Netify (DPI) integration
-bash tests/test_metrics.sh            # Prometheus exporter
-bash tests/test_bytes_nft.sh          # nftables byte-counter parsing
-bash tests/test_openwrt_compat.sh     # BusyBox ash compatibility / no bashisms
-bash tests/test_security.sh           # Input validation and injection resistance
-bash tests/test_rpcd.sh               # rpcd/ubus backend — every method, dispatch, ACL
-bash tests/test_rules.sh              # Rules tab backend: restrictions of offline devices
-bash tests/test_block.sh              # Internet block/unblock
-bash tests/test_macfilter.sh          # WiFi MAC deny/allow
-bash tests/test_metrics_cgi.sh        # Metrics CGI gate and token check
+bash tests/test_security.sh           # No unquoted value in a ucode command line (uc_cmd_lint)
+bash tests/test_openwrt_compat.sh     # The shell left (hooks, init, CGI): BusyBox ash, no bashisms
 bash tests/test_regressions.sh        # Regressions for previously fixed bugs
-bash tests/test_telegram.sh           # Telegram bot units
-bash tests/test_telegram_mock.sh      # Telegram bot with mocked API responses
-bash tests/test_telegram_e2e.sh       # End-to-end bot tests
 bash tests/test_build_ipk.sh          # IPK package build verification
 ```
+
+The ucode backend's tests need ucode, uci and ubus built for the host, at the
+oldest (2022-12-02, OpenWrt 22.03) and the newest version supported;
+`tools/ci/build-ucode.sh` builds them into `~/.cache/trafficctl-ucode/<version>`:
+
+```sh
+tools/ci/build-ucode.sh 2022-12-02
+export UCODE_PREFIX=~/.cache/trafficctl-ucode/2022-12-02
+bash tests/test_ucode_lib.sh          # lib.uc helpers, subnets
+bash tests/test_names.sh              # Device aliases + reverse-DNS cache
+bash tests/test_ifaces.sh             # Per-interface counters and roles
+bash tests/test_totals.sh             # Byte samples and the lifetime accumulator
+bash tests/test_metrics.sh            # Prometheus exporter (runs the accumulator)
+bash tests/test_byte_overflow.sh      # Counters past 2^31 and 2^53
+bash tests/test_metrics_cgi.sh        # Metrics CGI gate and token check
+bash tests/test_netify.sh             # Netify (DPI) integration (needs nc)
+bash tests/test_direction.sh          # Bidirectional limit/shape, classid allocation
+bash tests/test_meter_per_chain.sh    # Each-mode meters per chain, per-port success, nft 1.0/1.1
+bash tests/test_limit_inputs.sh       # Limiter: device names, v6 set timeout, rules.json fields, 1.30.x padded masks
+bash tests/test_nss.sh                # Qualcomm NSS reporting
+bash tests/test_rpcd.sh               # rpcd plugin as rpcd runs it (tests/lib/rpcd.uc): every method, policy, file.exec, uci commits, 0600
+bash tests/test_readers.sh            # nft -j readers of both nft versions: block comments, 1.1 meters
+bash tests/test_rules.sh              # Rules tab backend: restrictions of offline devices
+bash tests/test_block.sh              # Internet block/unblock, legacy labels, NSS
+bash tests/test_ipv6_block.sh         # The block's IPv6 half: MAC lookup, next hops
+bash tests/test_macfilter.sh          # WiFi MAC deny/allow, hostapd_cli timeouts, several APs
+bash tests/test_newdevice.sh          # DHCP hook: seen-MAC ledger, default limit, bot queue
+bash tests/test_persistence.sh        # rules.json bytes, the shared lock, restore after boot
+bash tests/test_rl_lookup.sh          # Rate limit read-back: units, prefixes, ratelimit-stats
+bash tests/test_shape_lookup.sh       # Shape classid lookup, shape-stats
+bash tests/test_shape.sh              # Shaper: filters of other shapes kept, classids, SQM, no IFB, shapes.json, restore
+bash tests/test_shape_filters.sh      # Several shapes keep their filters (stateful tc, tests/lib/tc-htb.sh)
+bash tests/test_subnet_limits.sh      # Subnet limits: stats, persisted mode, the restore hook
+bash tests/test_rpcd_contract.sh      # every rpc.declare in the views against the plugin's list: methods, params, types, no null
+bash tests/test_telegram_bot.sh       # Telegram bot: commands, callbacks, cache, validation
+bash tests/test_portfw.sh             # Port-forward control, port ranges, exact comments
+bash tests/test_cut.sh                # Global cut: refusals, rule order, keeper, persistence
+bash tests/test_history.sh            # History store: flush, cursors, interface series, keeper, guard, ISO weeks
+bash tests/equiv.sh                   # ucode output == the v1.30.0 shell output (limiter, shaper: v1.30.6), rpcd methods included
+```
+
+The writers' tests meet stateful stand-ins instead of recorded output:
+`tests/lib/nft-fw4.uc` (`inet fw4 forward`), `tests/lib/nft-netdev.sh`
+(`netdev tm_ratelimit`) and `tests/lib/tc-htb.sh` (tc and `ip link` for the
+shaper: HTB classes, leaves, u32 filters, ingress and mirred, an IFB). Each
+keeps the kernel behaviour the code depends on; for tc that is a u32 delete
+by prio with no handle removing every filter of that prio, a class a filter
+still uses refusing deletion, and a root qdisc the shaper did not make.
+`tests/lib/shape_env.sh` builds a scratch router around tc-htb.sh for the
+shaper tests (`st_net`, `st_run`, `st_dump`).
 
 Four further tests only run inside the OpenWrt rootfs containers that
 `compat.yml` builds, because they install a real package — they fail on a
@@ -252,16 +289,16 @@ A test must exercise the real script rather than a local copy of the function it
 names — see the "Writing tests" section of `CONTRIBUTING.md` for why, and use
 `tests/test_direction.sh` as the template.
 
-**E2E tests** (`test_telegram_e2e.sh`) run the real bot script with mocked externals (curl, uci, iw, ip, jsonfilter) and verify:
-- Command processing (`/devices`, `/status`, `/help`)
-- Callback handling (block, unblock, limit, shape, WiFi block)
-- Authorization (unauthorized chat rejection)
-- Input validation (invalid IP in callbacks)
-- New device detection and notifications
-- Known device online notifications
-- DHCP trigger processing
-- Template tag substitution (17 tags: `{{name}}`, `{{ip}}`, `{{mac}}`, `{{link}}`, `{{date}}`, `{{time}}`, `{{datetime}}`, `{{router}}`, `{{ssid}}`, `{{signal}}`, `{{freq}}`, `{{iface}}`, `{{clients}}`, `{{uptime}}`, `{{wan_ip}}`, `{{load}}`, `{{conns}}`)
-- Notification throttling
+**Bot tests** (`test_telegram_bot.sh`, in the ucode job) run the bot (`trafficctl-telegram.uc`) against a curl mock that serves `getUpdates` from a queue and a CLI stub, and check:
+- Start, the disabled and unconfigured exits, the offset file, the retry after a refused poll
+- Command processing (`/devices`, `/status`, `/help`), HTML-escaped names, the keyboard labels, the 5 s device cache
+- Callback handling (every verb, with the caller variables), the toast cut on a character boundary
+- Input validation (addresses, rates, control characters, unknown verbs) and the token never in curl's argv
+- `trafficctl telegram`, the wrapper and the init script
+
+`tests/equiv.sh` runs the v1.30.0 shell bot and the port side by side on the same updates (the `bot-*` cases) and compares every request, what each one ran, the offset file and the log.
+
+**Notification tests** (`test_notify.sh`, in the ucode job) cover `trafficctl.notify`: the events on ubus and through hotplug-call, every sender against a curl/msmtp mock (the token never in argv), the event filter and the master switch, the device scan and its ledger (sanitised names, seeding), the new device template (17 tags: `{{name}}`, `{{ip}}`, `{{mac}}`, `{{link}}`, `{{date}}`, `{{time}}`, `{{datetime}}`, `{{router}}`, `{{ssid}}`, `{{signal}}`, `{{freq}}`, `{{iface}}`, `{{clients}}`, `{{uptime}}`, `{{wan_ip}}`, `{{load}}`, `{{conns}}`), the migration of the bot's options, the rpcd `notify_*` methods and `telegram-test`.
 
 ### CI
 
@@ -274,7 +311,7 @@ their own — everything else is reached through `workflow_call`:
 | `tests.yml` | called by `ci.yml` | Unit, mock, E2E, security, and build tests |
 | `shellcheck.yml` | called by `ci.yml` | ShellCheck (`-S warning`) on every script with a shell shebang |
 | `eslint.yml` | called by `ci.yml` | ESLint on the frontend — `ecmaVersion: 5` plus `no-restricted-syntax`, so ES6 syntax fails the build |
-| `compat.yml` | PR, called by `auto-release.yml` | OpenWrt rootfs compatibility (52 version/arch combos); installs the built package and tests upgrades; job `live-ratelimit` runs `tools/ci/live-ratelimit.sh` (real nft, a bridge with two dummy ports) on 22.03.7 and 25.12.4 |
+| `compat.yml` | PR, called by `auto-release.yml` | OpenWrt rootfs compatibility (52 version/arch combos); installs the built package and tests upgrades; job `live-ratelimit` runs `tools/ci/live-ratelimit.sh` (the ucode limiter on real nft, a bridge with two dummy ports, a private ubusd) on 22.03.7 and 25.12.4, job `live-shape` runs `tools/ci/live-shape.sh` (the ucode shaper on real tc/HTB/u32/mirred and an IFB, the same bridge) on both, job `live-rpcd` runs `tools/ci/live-rpcd.sh` (the rpcd plugin inside the release's own rpcd and rpcd-mod-ucode: every method, a session, the type policy, a hung CLI, uhttpd's /ubus) on 22.03.7, 24.10.6 and 25.12.4 |
 | `auto-release.yml` | push to main | Waits for `ci.yml` **and** `compat.yml`, then bumps the version, tags, builds and publishes; job `pages` then rebuilds the signed opkg/apk feed on GitHub Pages with `tools/build-feed.sh` |
 
 The nesting is why the leaf workflows carry no `push`/`pull_request` triggers.
@@ -326,11 +363,11 @@ a red PR can still be merged, and the release will then publish it.
 
 **"Permission denied" from LuCI:**
 - Check ACL file exists at `/usr/share/rpcd/acl.d/luci-app-trafficctl.json`
-- Ensure rpcd backend is executable: `chmod +x /usr/libexec/rpcd/luci.trafficctl`
-- Restart rpcd: `/etc/init.d/rpcd restart`
+- Check rpcd-mod-ucode is installed (`/usr/lib/rpcd/ucode.so`) and the plugin is at `/usr/share/rpcd/ucode/luci.trafficctl.uc`
+- Restart rpcd: `/etc/init.d/rpcd restart`; a plugin that does not load is reported in `logread -e rpcd`
 
 **Script works via SSH but not from LuCI:**
-- rpcd backend needs `list` and method handlers. Check `/usr/libexec/rpcd/luci.trafficctl`.
+- rpcd refuses a call whose argument types differ from the plugin's declaration (`Invalid argument`): compare with `ubus -v list luci.trafficctl`. `tests/test_rpcd_contract.sh` checks the views' calls.
 
 **tc commands fail:**
 - Verify `tc-full` (not minimal `tc`): `opkg install tc-full kmod-sched-htb`
@@ -405,6 +442,5 @@ The script auto-detects a target device from the overview table, preferring (in 
 
 1. Fork the repo, create a feature branch.
 2. Test on real hardware (or QEMU).
-3. Ensure both nft and iptables paths work if touching firewall code.
-4. Run `shellcheck` and `eslint`.
-5. Submit PR with description of what and why.
+3. Run `shellcheck` and `eslint`.
+4. Submit PR with description of what and why.

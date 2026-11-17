@@ -15,6 +15,6 @@
 ## How you verified it
 
 Say what you actually ran. If it was tested on a real router, give the OpenWrt
-version and whether the backend was fw4/nftables or iptables; if it was only
+version (fw4/nftables); if it was only
 tested against the mocked suite, say that instead — that is useful to know at
 review time rather than after a release.

@@ -1,0 +1,18 @@
+class htb 1:fffe parent 1:1 prio 0 rate 1Gbit ceil 1Gbit burst 125000b cburst 125000b 
+ Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) 
+ backlog 0b 0p requeues 0
+ lended: 0 borrowed: 0 giants: 0
+ tokens: 15625 ctokens: 15625
+
+class htb 1:1 root rate 1Gbit ceil 1Gbit burst 125000b cburst 125000b 
+ Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) 
+ backlog 0b 0p requeues 0
+ lended: 0 borrowed: 0 giants: 0
+ tokens: 15625 ctokens: 15625
+
+class htb 1:2 parent 1:1 prio 0 rate 8Mbit ceil 8Mbit burst 10000b cburst 10000b 
+ Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) 
+ backlog 0b 0p requeues 0
+ lended: 0 borrowed: 0 giants: 0
+ tokens: 156250 ctokens: 156250
+

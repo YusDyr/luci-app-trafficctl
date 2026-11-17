@@ -129,6 +129,15 @@ for pkg in trafficctl luci-app-trafficctl; do
     FOUND="$FOUND $art"
 done
 
+# The bot is a second package of trafficctl/Makefile, built with it.
+art=$(find bin/ \( -name "trafficctl-telegram_[0-9]*.ipk" -o -name "trafficctl-telegram-[0-9]*.apk" \) 2>/dev/null | head -1)
+if [ -z "$art" ]; then
+    echo "ERROR: no trafficctl-telegram package artifact found in bin/"
+    find bin/ -type f 2>/dev/null | head -20
+    exit 1
+fi
+FOUND="$FOUND $art"
+
 echo "Feed install + build succeeded:$FOUND"
 
 if [ -n "${SDK_CACHE_DIR:-}" ] && [ "${SDK_CACHE_SAVE:-1}" != 0 ]; then

@@ -9,7 +9,7 @@
 // holds, whether or not the device is online. The Devices tab is built from
 // live connections, so a device that went offline took its restrictions out
 // of sight with it while they kept applying. The list comes from
-// trafficctl-rules.sh, which reads the kernel and the saved state; edits and
+// `trafficctl rules`, which reads the kernel and the saved state; edits and
 // removals go through the same rpcd methods the Devices tab uses.
 
 (function() {
@@ -21,6 +21,11 @@
 		document.head.appendChild(lnk);
 	}
 })();
+
+// rpcd takes an int argument as a signed 32-bit number and refuses the whole
+// call (Invalid argument) for anything larger. A rate typed beyond that is
+// sent as this, so the backend answers with its own range message.
+var RPC_INT_MAX = 2147483647;
 
 var callRulesList = rpc.declare({
 	object: 'luci.trafficctl',
@@ -149,8 +154,8 @@ function mbitInput(kbit) {
 
 function toKbit(v) {
 	var n = parseFloat(v);
-	if (!isFinite(n) || n <= 0) return 0;
-	return Math.round(n * 1000);
+	if (isNaN(n) || n <= 0) return 0;
+	return Math.min(Math.round(n * 1000), RPC_INT_MAX);
 }
 
 return view.extend({
@@ -213,7 +218,7 @@ return view.extend({
 	// Put a saved rule back into the kernel now, with the values it was saved
 	// with, through the same call that created it.
 	reapply: function(r, btn) {
-		var up = (r.rate_kbit_up && r.rate_kbit_up !== r.rate_kbit) ? r.rate_kbit_up : null;
+		var up = (r.rate_kbit_up && r.rate_kbit_up !== r.rate_kbit) ? r.rate_kbit_up : undefined;
 		switch (r.type) {
 		case 'block': return this.act(callBlock(r.target, ''), btn);
 		case 'ratelimit': return this.act(callRatelimit(r.target, r.rate_kbit, '', r.mode, up), btn);
@@ -227,7 +232,7 @@ return view.extend({
 			ui.addNotification(null, E('p', _('Enter a download rate above zero.')), 'error');
 			return;
 		}
-		var sendUp = (ku && ku !== kd) ? ku : null;
+		var sendUp = (ku && ku !== kd) ? ku : undefined;
 		if (r.type === 'ratelimit') {
 			return this.act(callRatelimit(r.target, kd, '', mode || r.mode, sendUp), btn);
 		}

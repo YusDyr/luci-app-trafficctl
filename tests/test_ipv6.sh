@@ -6,10 +6,11 @@
 # over IPv6 to the same endpoint — and a "blocked" device kept full, unmetered
 # v6 access while the UI read blocked.
 #
-# What is covered here: the internet block (both families, MAC-keyed), the
+# What is covered here: the MAC lookups the limiter shares with the block, the
 # UPLOAD direction of the rate limiter (MAC-keyed) and its DOWNLOAD direction
 # (an address set the client's own upload packets feed). Byte accounting over
-# IPv6 is deliberately still open.
+# IPv6 is deliberately still open. The internet block (both families,
+# MAC-keyed) is tests/test_ipv6_block.sh.
 #
 # The nft mock keeps real state for BOTH rule forms — the address-keyed v4 rule
 # and the MAC-keyed v6 one — with stable handles, because the interesting
@@ -18,10 +19,12 @@
 PASS=0
 FAIL=0
 
-BIN="$(cd "$(dirname "$0")/.." && pwd)/trafficctl/files/usr/libexec/trafficctl"
-
-TMPDIR=$(mktemp -d)
-trap 'rm -rf "$TMPDIR"' EXIT
+# The limiter is `trafficctl ratelimit` (ucode, run with TCTL_ROOT=$ROOT), its
+# MAC helpers net.lookup_mac, target_mac and ip_is_nexthop.
+# shellcheck source=tests/lib/ucode.sh
+. "$(dirname "$0")/lib/ucode.sh"
+TMPDIR="$UC_TMP/ipv6"
+ROOT="$TMPDIR/root"
 MOCKBIN="$TMPDIR/bin"
 mkdir -p "$MOCKBIN"
 
@@ -70,24 +73,20 @@ export CT_LOG="$TMPDIR/conntrack.log"
 : > "$FW4_STATE"; : > "$RL_DUMP"; : > "$NFT_LOG"; : > "$CT_LOG"
 echo 0 > "$FW4_HANDLE"
 
-# fw.sh names /tmp/dhcp.leases by absolute path, as it must on the router. The
-# tests rewrite that line into the scratch directory rather than have the
-# shipped script carry a test-only override (test_newdevice.sh's approach, and
-# it asserts that no production path survives the rewrite).
-FW="$TMPDIR/fw.sh"
-sed -e "s|TCTL_LEASES_FILE=\"/tmp/dhcp.leases\"|TCTL_LEASES_FILE=\"$LEASES\"|" \
-    "$BIN/trafficctl-fw.sh" > "$FW"
-assert_contains "harness: the lease path was redirected into the scratch dir" \
-    "$LEASES" "$(cat "$FW")"
-assert_eq "harness: no production lease path survived the rewrite" "" \
-    "$(grep -n '/tmp/dhcp.leases' "$FW")"
-
-BLOCK_SH="$TMPDIR/block.sh"
-UNBLOCK_SH="$TMPDIR/unblock.sh"
-RATELIMIT_SH="$TMPDIR/ratelimit.sh"
-sed "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FW|" "$BIN/trafficctl-block.sh" > "$BLOCK_SH"
-sed "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FW|" "$BIN/trafficctl-unblock.sh" > "$UNBLOCK_SH"
-sed "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FW|" "$BIN/trafficctl-ratelimit.sh" > "$RATELIMIT_SH"
+# The scratch root of the ucode limiter: the same LAN as the mocks below,
+# br-lan bridging lan1, eth1 the WAN.
+mkdir -p "$ROOT/etc/config" "$ROOT/etc/trafficctl" "$ROOT/tmp" "$TMPDIR/ubus"
+ln -s "$LEASES" "$ROOT/tmp/dhcp.leases"
+printf "config trafficctl 'main'\n\toption persist_rules '0'\n\nconfig logging 'logging'\n\toption enabled '0'\n" \
+    > "$ROOT/etc/config/trafficctl"
+printf "config interface 'lan'\n\toption device 'br-lan'\n\nconfig interface 'wan'\n\toption device 'eth1'\n" \
+    > "$ROOT/etc/config/network"
+printf "config zone\n\toption name 'lan'\n\tlist network 'lan'\n\nconfig zone\n\toption name 'wan'\n\tlist network 'wan'\n\toption masq '1'\n" \
+    > "$ROOT/etc/config/firewall"
+printf '{"interface":[{"interface":"lan","up":true,"l3_device":"br-lan","ipv4-address":[{"address":"192.168.1.1","mask":24}]},{"interface":"wan","up":true,"l3_device":"eth1"}]}\n' \
+    > "$TMPDIR/ubus/network.interface@dump.json"
+printf '{"up":true,"l3_device":"eth1"}\n' > "$TMPDIR/ubus/network.interface.wan@status.json"
+ubus_start "$TMPDIR/ubus"
 
 # ── mocks ────────────────────────────────────────────────────────────────────
 
@@ -192,14 +191,14 @@ MOCK
 chmod +x "$MOCKBIN"/*
 
 # br-lan is a bridge with one port: ingress hooks land on the PORT, egress on
-# the bridge itself (see tctl_ingress_devices).
-mkdir -p "$TMPDIR/sys/class/net/br-lan/brif/lan1" "$TMPDIR/sys/class/net/eth1"
+# the bridge itself (see limit.ingress_devices).
+mkdir -p "$TMPDIR/sys/class/net/br-lan/brif/lan1" "$TMPDIR/sys/class/net/eth1" \
+         "$TMPDIR/sys/class/net/lan1"
 export TCTL_SYSFS_NET="$TMPDIR/sys/class/net"
+ln -s "$TMPDIR/sys" "$ROOT/sys"
 
-fw() { PATH="$MOCKBIN:$PATH" sh -c ". $FW >/dev/null 2>&1; $1" 2>&1; }
-run_block()     { : > "$NFT_LOG"; : > "$CT_LOG"; PATH="$MOCKBIN:$PATH" sh "$BLOCK_SH" "$@" 2>&1; }
-run_unblock()   { : > "$NFT_LOG"; PATH="$MOCKBIN:$PATH" sh "$UNBLOCK_SH" "$@" 2>&1; }
-run_ratelimit() { : > "$NFT_LOG"; PATH="$MOCKBIN:$PATH" sh "$RATELIMIT_SH" "$@" 2>&1; }
+net() { PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" tcall trafficctl.net "$1" "\"$2\"" 2>&1; }
+run_ratelimit() { : > "$NFT_LOG"; PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" tctl ratelimit "$@" 2>&1; }
 
 # The fixture LAN:
 #   .50  dual-stack laptop      — lease, ARP entry, three v6 addresses
@@ -225,210 +224,49 @@ printf 'default via 10.1.1.1 dev eth1\n' >> "$ROUTES"
 # ── MAC resolution ───────────────────────────────────────────────────────────
 
 assert_eq "mac: resolved from the DHCP lease, lowercased" \
-    "aa:bb:cc:dd:ee:50" "$(fw 'tctl_lookup_mac 192.168.1.50')"
+    "aa:bb:cc:dd:ee:50" "$(net lookup_mac 192.168.1.50)"
 
 assert_eq "mac: falls back to the neighbour table with no lease" \
-    "aa:bb:cc:dd:ee:90" "$(fw 'tctl_lookup_mac 192.168.1.90')"
+    "aa:bb:cc:dd:ee:90" "$(net lookup_mac 192.168.1.90)"
 
 # A routed/downstream client has neither. Silently doing nothing there is the
 # failure this issue is about, so the lookup must FAIL rather than return junk.
 assert_eq "mac: unknown device yields nothing and fails" \
-    "NOMAC" "$(fw 'tctl_lookup_mac 192.168.1.70 || echo NOMAC')"
+    "" "$(net lookup_mac 192.168.1.70)"
 
 # The MAC is interpolated into an nft rule string, so it is validated as six
 # hex pairs rather than merely trimmed.
 printf 'x aa:bb:cc;nft flush ruleset;:ee 192.168.1.66 evil *\n' >> "$LEASES"
 assert_eq "mac: a malformed lease field is refused, not interpolated" \
-    "NOMAC" "$(fw 'tctl_lookup_mac 192.168.1.66 || echo NOMAC')"
+    "" "$(net lookup_mac 192.168.1.66)"
 
 # ── which targets may be keyed on a MAC ──────────────────────────────────────
 
 assert_eq "target: a plain host qualifies" \
-    "aa:bb:cc:dd:ee:50" "$(fw 'tctl_target_mac 192.168.1.50')"
+    "aa:bb:cc:dd:ee:50" "$(net target_mac 192.168.1.50)"
 assert_eq "target: /32 is the same single host" \
-    "aa:bb:cc:dd:ee:50" "$(fw 'tctl_target_mac 192.168.1.50/32')"
+    "aa:bb:cc:dd:ee:50" "$(net target_mac 192.168.1.50/32)"
 assert_eq "target: a CIDR block has no single MAC" \
-    "NONE" "$(fw 'tctl_target_mac 192.168.1.0/24 || echo NONE')"
+    "" "$(net target_mac 192.168.1.0/24)"
 assert_eq "target: \"all\" has no single MAC" \
-    "NONE" "$(fw 'tctl_target_mac 0.0.0.0/0 || echo NONE')"
+    "" "$(net target_mac 0.0.0.0/0)"
 
 # The big over-block hazard: a next hop's MAC is the source address of every
 # packet it FORWARDS, so keying a rule on it takes out the whole subnet behind
 # it. Excluded, and the caller is made to say why.
 assert_eq "target: a routed next hop is excluded" \
-    "NONE" "$(fw 'tctl_target_mac 192.168.1.80 || echo NONE')"
+    "" "$(net target_mac 192.168.1.80)"
 assert_eq "nexthop: recognised from the routing table" \
-    "YES" "$(fw 'tctl_ip_is_nexthop 192.168.1.80 && echo YES || echo NO')"
+    "true" "$(net ip_is_nexthop 192.168.1.80)"
 assert_eq "nexthop: an ordinary client is not one" \
-    "NO" "$(fw 'tctl_ip_is_nexthop 192.168.1.50 && echo YES || echo NO')"
+    "false" "$(net ip_is_nexthop 192.168.1.50)"
 # "via" as a device name or in another position must not count.
 printf '172.16.0.0/16 dev via scope link\n' >> "$ROUTES"
 assert_eq "nexthop: \"via\" as a device name is not a next hop" \
-    "NO" "$(fw 'tctl_ip_is_nexthop via && echo YES || echo NO')"
+    "false" "$(net ip_is_nexthop via)"
 
-# ── block: dual-stack client ─────────────────────────────────────────────────
-
-: > "$FW4_STATE"
-OUT=$(run_block 192.168.1.50)
-NFT=$(cat "$NFT_LOG")
-assert_contains "block: reports ok" '"ok":true' "$OUT"
-assert_contains "block: reports IPv6 covered" '"ipv6":true' "$OUT"
-assert_contains "block: the IPv4 rule is unchanged" \
-    'ip saddr 192.168.1.50 counter drop comment "tctl_block_192_168_1_50"' "$NFT"
-assert_contains "block: an IPv6 rule keyed on the MAC is installed too" \
-    'ether saddr aa:bb:cc:dd:ee:50 counter drop comment "tctl_block_192_168_1_50_mac"' "$NFT"
-
-# Scoping matters: without "meta nfproto ipv6" the MAC rule would also swallow
-# IPv4, making every v4 outcome depend on a MAC lookup that can fail.
-assert_contains "block: the MAC rule is scoped to IPv6 only" \
-    'meta nfproto ipv6 ether saddr aa:bb:cc:dd:ee:50' "$NFT"
-
-# fw4's forward chain accepts established/offloaded flows near the top, so a
-# rule appended below that never fires.
-assert_not_contains "block: the MAC rule is inserted, not appended" \
-    "add rule inet fw4 forward" "$NFT"
-
-# The v4 flush alone leaves established v6 flows running — and under flow
-# offload they are never re-evaluated against the new rule, so the device
-# stays online over v6 indefinitely while the UI reads blocked.
-CT=$(cat "$CT_LOG")
-assert_contains "block: flushes IPv4 conntrack as before" "-D -s 192.168.1.50" "$CT"
-assert_contains "block: flushes the stable SLAAC address" "-D -f ipv6 -s 2001:db8::50" "$CT"
-assert_contains "block: flushes the privacy-extension temporary too" \
-    "-D -f ipv6 -s 2001:db8::dead:beef" "$CT"
-assert_contains "block: flushes the link-local address" "-D -f ipv6 -s fe80::50" "$CT"
-assert_contains "block: flushes v6 flows in both directions" "-D -f ipv6 -d 2001:db8::50" "$CT"
-assert_not_contains "block: does not flush another device's v6 flows" \
-    "2001:db8::99" "$CT"
-
-# Blocking your own device: the v6 flush stays symmetric with the v4 one that
-# has always run here. Both rules are forward-only, so LuCI (LAN-local, not
-# forwarded) keeps working either way; flushing only one family would leave the
-# operator's own device half-blocked, which is harder to reason about than
-# either extreme.
-: > "$FW4_STATE"
-OUT=$(PATH="$MOCKBIN:$PATH" TCTL_SRC=192.168.1.50 sh "$BLOCK_SH" 192.168.1.50 2>&1)
-assert_contains "block self: keeps the LuCI-access message" "LuCI access preserved" "$OUT"
-assert_contains "block self: still covers IPv6" '"ipv6":true' "$OUT"
-assert_contains "block self: flushes v6 exactly as it flushes v4" \
-    "-D -f ipv6 -s 2001:db8::50" "$(cat "$CT_LOG")"
-
-# ── block: IPv4-only client ──────────────────────────────────────────────────
-
-: > "$FW4_STATE"
-OUT=$(run_block 192.168.1.60)
-NFT=$(cat "$NFT_LOG")
-CT=$(cat "$CT_LOG")
-assert_contains "block v4-only: still gets the MAC rule (it costs nothing)" \
-    'ether saddr aa:bb:cc:dd:ee:60' "$NFT"
-assert_contains "block v4-only: reports IPv6 covered" '"ipv6":true' "$OUT"
-assert_not_contains "block v4-only: no v6 conntrack flush when it has no v6 flows" \
-    "-f ipv6" "$CT"
-
-# ── block: no MAC known ──────────────────────────────────────────────────────
-#
-# A routed/downstream client cannot be keyed on a MAC at all. Reporting plain
-# success there would recreate the exact failure of issue #67 in a new place.
-
-: > "$FW4_STATE"
-OUT=$(run_block 192.168.1.70)
-NFT=$(cat "$NFT_LOG")
-assert_contains "block no-mac: the IPv4 block still applies" \
-    'ip saddr 192.168.1.70 counter drop' "$NFT"
-assert_not_contains "block no-mac: no MAC rule is invented" "ether saddr" "$NFT"
-assert_contains "block no-mac: reports IPv6 NOT covered" '"ipv6":false' "$OUT"
-assert_contains "block no-mac: says so in words" "IPv4 only" "$OUT"
-assert_contains "block no-mac: names the reason" "no MAC known" "$OUT"
-
-# ── block: a downstream router ───────────────────────────────────────────────
-
-: > "$FW4_STATE"
-OUT=$(run_block 192.168.1.80)
-NFT=$(cat "$NFT_LOG")
-assert_contains "block nexthop: the IPv4 block still applies" \
-    'ip saddr 192.168.1.80 counter drop' "$NFT"
-assert_not_contains "block nexthop: no MAC rule — it would black-hole the subnet behind it" \
-    "ether saddr" "$NFT"
-assert_contains "block nexthop: reports IPv6 NOT covered" '"ipv6":false' "$OUT"
-assert_contains "block nexthop: explains that it is a routed next hop" \
-    "routed next hop" "$OUT"
-
-# ── unblock removes both halves, and only the target's ───────────────────────
-
-# .5 and .51 rather than .1 and .10: the comment of the first is a prefix of
-# the second's, which is the trap, and .1 is the router's own address here.
-: > "$FW4_STATE"
-echo 0 > "$FW4_HANDLE"
-printf 'x aa:bb:cc:dd:ee:05 192.168.1.5 five *\n'  >> "$LEASES"
-printf 'x aa:bb:cc:dd:ee:51 192.168.1.51 fiftyone *\n' >> "$LEASES"
-run_block 192.168.1.5  >/dev/null
-run_block 192.168.1.51 >/dev/null
-
-STATE_BEFORE=$(cat "$FW4_STATE")
-assert_eq "fixture: four rules installed (two devices × two families)" \
-    "4" "$(grep -c . <<< "$STATE_BEFORE")"
-
-OUT=$(run_unblock 192.168.1.5)
-assert_contains "unblock: reports ok" '"ok":true' "$OUT"
-REMAIN=$(cat "$FW4_STATE")
-assert_not_contains "unblock: the IPv4 rule is gone" "tctl_block_192_168_1_5	" "$REMAIN"
-assert_not_contains "unblock: the IPv6 MAC rule is gone too" \
-    "tctl_block_192_168_1_5_mac" "$REMAIN"
-# The comment is a prefix of the other device's, which is how a substring match
-# once made unblocking 192.168.1.1 delete 192.168.1.10's rule.
-assert_contains "unblock: 192.168.1.51's IPv4 rule is untouched" \
-    "tctl_block_192_168_1_51" "$REMAIN"
-assert_contains "unblock: 192.168.1.51's IPv6 MAC rule is untouched" \
-    "tctl_block_192_168_1_51_mac" "$REMAIN"
-
-# ── block-state readers ──────────────────────────────────────────────────────
-#
-# If a reader does not recognise the form that was installed, the UI reports
-# "not blocked" for a blocked device — which is the same lie as before, just
-# pointing the other way.
-
-: > "$FW4_STATE"
-printf '7\tmac\ttctl_block_192_168_1_50_mac\taa:bb:cc:dd:ee:50\n' > "$FW4_STATE"
-assert_eq "is_blocked: true when only the IPv6 MAC rule survives" \
-    "YES" "$(fw 'tctl_is_blocked 192.168.1.50 && echo YES || echo NO')"
-assert_eq "is_blocked: 192.168.1.5 is not blocked by 192.168.1.50's MAC rule" \
-    "NO" "$(fw 'tctl_is_blocked 192.168.1.5 && echo YES || echo NO')"
-
-: > "$FW4_STATE"
-printf '8\tv4\ttctl_block_192_168_1_50\t192.168.1.50\n' > "$FW4_STATE"
-assert_eq "is_blocked: still true for a v4-only rule from an older version" \
-    "YES" "$(fw 'tctl_is_blocked 192.168.1.50 && echo YES || echo NO')"
-
-# The summary table has its own copy of this logic against a prefetched dump.
-# Extract it and drive it directly rather than standing up a whole poll.
-LOOKUPS="$TMPDIR/lookups.sh"
-sed -n '/^lookup_blocked()/,/^}/p;/^lookup_block_bytes()/,/^}/p' \
-    "$BIN/trafficctl-summary.sh" > "$LOOKUPS"
-assert_contains "harness: the summary lookups were extracted" "lookup_blocked()" "$(cat "$LOOKUPS")"
-assert_contains "harness: the byte lookup was extracted too" "lookup_block_bytes()" "$(cat "$LOOKUPS")"
-
-summary_lookup() {
-    local dump="$1" call="$2"
-    PATH="$MOCKBIN:$PATH" sh -c ". $FW >/dev/null 2>&1; . $LOOKUPS; FWD_DUMP='$dump'; $call" 2>&1
-}
-
-V6_ONLY_DUMP='		meta nfproto ipv6 ether saddr aa:bb:cc:dd:ee:50 counter packets 3 bytes 300 drop comment "tctl_block_192_168_1_50_mac"'
-BOTH_DUMP="		ip saddr 192.168.1.50 counter packets 1 bytes 100 drop comment \"tctl_block_192_168_1_50\"
-$V6_ONLY_DUMP"
-
-assert_eq "summary: reports blocked when only the IPv6 rule is present" \
-    "1" "$(summary_lookup "$V6_ONLY_DUMP" 'lookup_blocked 192.168.1.50')"
-assert_eq "summary: does not attribute it to a prefix-sharing address" \
-    "0" "$(summary_lookup "$V6_ONLY_DUMP" 'lookup_blocked 192.168.1.5')"
-assert_eq "summary: unblocked device still reads 0" \
-    "0" "$(summary_lookup "" 'lookup_blocked 192.168.1.50')"
-
-# Counting only the v4 rule would make a dual-stack device's dropped bytes read
-# low for the same reason the traffic used to escape entirely.
-assert_eq "summary: block bytes sum both halves" \
-    "400" "$(summary_lookup "$BOTH_DUMP" 'lookup_block_bytes 192.168.1.50')"
-assert_eq "summary: block bytes are 0 with no rule at all" \
-    "0" "$(summary_lookup "" 'lookup_block_bytes 192.168.1.50')"
+# The block's half (the MAC rule, the v6 conntrack flush, removal of both
+# halves) is `trafficctl block` since the ucode port: tests/test_ipv6_block.sh.
 
 # ── rate limiter: upload over IPv6 ───────────────────────────────────────────
 
@@ -556,7 +394,7 @@ ${TAB}}
 EOF
 
 : > "$NFT_LOG"
-fw 'tctl_ratelimit_remove 192.168.1.5 rl_ratelimit_192_168_1_5' >/dev/null
+PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" tcall trafficctl.limit remove '"192.168.1.5"' '"rl_ratelimit_192_168_1_5"' >/dev/null
 DELS=$(grep '^delete rule netdev' "$NFT_LOG")
 assert_contains "limiter removal: deletes the IPv4 upload rule" \
     "delete rule netdev tm_ratelimit ul_lan1 handle 11" "$DELS"

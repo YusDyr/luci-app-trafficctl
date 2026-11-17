@@ -1,0 +1,6 @@
+bridge name	bridge id		STP enabled	interfaces
+br-lan		7fff.ccd8430e8905	no		phy1-ap0
+							lan4
+							lan2
+							lan3
+							phy0-ap0

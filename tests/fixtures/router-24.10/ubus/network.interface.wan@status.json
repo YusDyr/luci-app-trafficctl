@@ -1,0 +1,79 @@
+{
+	"up": true,
+	"pending": false,
+	"available": true,
+	"autostart": true,
+	"dynamic": false,
+	"uptime": 289391,
+	"l3_device": "wan",
+	"proto": "dhcp",
+	"device": "wan",
+	"metric": 0,
+	"dns_metric": 0,
+	"delegation": true,
+	"ipv4-address": [
+		{
+			"address": "10.128.28.73",
+			"mask": 24
+		}
+	],
+	"ipv6-address": [
+		
+	],
+	"ipv6-prefix": [
+		
+	],
+	"ipv6-prefix-assignment": [
+		{
+			"address": "fd00:0:1:11::",
+			"mask": 64,
+			"local-address": {
+				"address": "fd00:0:1:11::1",
+				"mask": 64
+			}
+		}
+	],
+	"route": [
+		{
+			"target": "0.0.0.0",
+			"mask": 0,
+			"nexthop": "10.128.28.254",
+			"source": "10.128.28.73/32"
+		}
+	],
+	"dns-server": [
+		"127.0.0.1"
+	],
+	"dns-search": [
+		
+	],
+	"neighbors": [
+		
+	],
+	"inactive": {
+		"ipv4-address": [
+			
+		],
+		"ipv6-address": [
+			
+		],
+		"route": [
+			
+		],
+		"dns-server": [
+			"198.18.0.117",
+			"198.18.0.118"
+		],
+		"dns-search": [
+			"host-14"
+		],
+		"neighbors": [
+			
+		]
+	},
+	"data": {
+		"dhcpserver": "172.23.159.254",
+		"leasetime": 2000,
+		"ntpserver": "198.18.0.68"
+	}
+}

@@ -33,4 +33,4 @@ case "&${QUERY_STRING}&" in
 esac
 
 printf 'Content-Type: text/plain; version=0.0.4; charset=utf-8\r\n\r\n'
-exec /usr/libexec/trafficctl/trafficctl-metrics.sh
+exec /usr/sbin/trafficctl metrics

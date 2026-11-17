@@ -58,9 +58,20 @@
 			"acl": [ "luci-app-trafficctl" ]
 		}
 	},
+	"admin/status/trafficctl/notify": {
+		"title": "Notifications",
+		"order": 5,
+		"action": {
+			"type": "view",
+			"path": "trafficctl/notify"
+		},
+		"depends": {
+			"acl": [ "luci-app-trafficctl" ]
+		}
+	},
 	"admin/status/trafficctl/settings": {
 		"title": "Settings",
-		"order": 5,
+		"order": 6,
 		"action": {
 			"type": "view",
 			"path": "trafficctl/settings"

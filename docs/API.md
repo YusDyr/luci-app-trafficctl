@@ -1,18 +1,18 @@
 # API Reference
 
-All backend functionality is exposed through shell scripts in `/usr/libexec/trafficctl/trafficctl-*.sh`. The LuCI frontend calls them via JSON-RPC through the rpcd backend at `/usr/libexec/rpcd/luci.trafficctl`.
+All backend functionality is exposed through the `/usr/sbin/trafficctl` CLI, written in ucode. Up to 1.30.x it was a set of shell scripts, `/usr/libexec/trafficctl/trafficctl-<command>.sh`; from 2.0.0 they are gone, and `trafficctl <command>` takes the same arguments. The LuCI frontend calls them via JSON-RPC through the rpcd plugin at `/usr/share/rpcd/ucode/luci.trafficctl.uc`, a ucode script that rpcd-mod-ucode runs inside rpcd: it handles the settings, their validation, the activity log and the device names itself, and runs `trafficctl <command>` for everything else through rpcd's `file.exec`, as an argument list (no shell) with the caller (`TCTL_VIA`, `TCTL_SRC`, `TCTL_USER`) in the environment. Releases up to 1.30.x shipped it as an exec plugin at `/usr/libexec/rpcd/luci.trafficctl`.
 
 ---
 
 ## Common Conventions
 
-- **Input validation**: scripts that take an address validate it with regex + octet range (0–255) via `tctl_validate_ip`; `tctl_validate_target` additionally accepts a CIDR or `all`.
+- **Input validation**: commands that take an address validate it with regex + octet range (0–255, no leading zeros: `010.0.0.1` is refused) via `lib.valid_ip`; `lib.valid_target` additionally accepts a CIDR (prefix length without a leading zero) or `all`.
 - **Error format**: `{"ok":false,"msg":"Human-readable error message"}`
 - **Success format (actions)**: `{"ok":true,"msg":"Human-readable success message"}`
 - **Rate units**: All rate values are in **kbit/s** (kilobits per second).
 - **Exit codes**: 0 on success, 1 on input validation failure.
 - **Label sanitization**: `block`, `unblock`, `ratelimit` and `shape_add` strip their label to `[a-zA-Z0-9_.-]`.
-- **Labels do not identify rules.** A label is recorded in the activity log only. Firewall rule comments are derived from the target (`tctl_block_<slug>`, `rl_ratelimit_<slug>`), so a control created from one surface can be removed from another — a label-derived comment made a block placed in LuCI un-removable from the Telegram bot. Rules written before v1.13.2 still carry such a comment (`tctl_block_tg`, `rl_ratelimit_tg`), shared by every target given that label; on nft, `unblock` and `ratelimit` with rate 0 remove one only when it names the exact target (`ip saddr`, and `ip daddr` for a download limit), so other targets keep theirs.
+- **Labels do not identify rules.** A label is recorded in the activity log only. Firewall rule comments are derived from the target (`tctl_block_<slug>`, `rl_ratelimit_<slug>`), so a control created from one surface can be removed from another — a label-derived comment made a block placed in LuCI un-removable from the Telegram bot. Rules written before v1.13.2 still carry such a comment (`tctl_block_tg`, `rl_ratelimit_tg`), shared by every target given that label; `unblock` and `ratelimit` with rate 0 remove one only when it names the exact target (`ip saddr`, and `ip daddr` for a download limit), so other targets keep theirs.
 - **`log_file` is constrained** to `/tmp/trafficctl/*` or `/var/log/*`, and `max_lines` to 20–100000. The path is both an append target and a `tail`/rewrite target, so an unconstrained value was an arbitrary root read and truncate.
 
 ---
@@ -58,15 +58,14 @@ the same bypass as having no rule, reached more slowly. A MAC does not rotate.
   reply says so.
 - **A client with no DHCP lease and no neighbour entry** (`extra_subnets`, a
   static route, anything behind a downstream router) has no MAC visible to this
-  router. `tctl_lookup_mac` **fails** rather than guessing; the IPv4 rules are
+  router. `net.lookup_mac` **fails** rather than guessing; the IPv4 rules are
   applied unchanged and the reply carries `"ipv6":false` plus an explicit
   *"IPv4 only: no MAC known…"* in `msg`. Installing nothing and reporting
   success is the failure this issue was about.
 - **A downstream router** is excluded even when its MAC *is* known
-  (`tctl_ip_is_nexthop`): its MAC is the source of every packet it forwards, so
+  (`net.ip_is_nexthop`): its MAC is the source of every packet it forwards, so
   a MAC-keyed rule would hit every client behind it. Reported the same way,
   naming the reason.
-- **fw3 / iptables (21.02)** is IPv4-only throughout; no `ip6tables` path.
 
 **The IPv6 scope expression differs by family.** The block lives in `inet fw4
 forward` and uses `meta nfproto ipv6`. The limiter's chains are in the **netdev**
@@ -96,46 +95,59 @@ Every method is listed here. The ACL group is `luci-app-trafficctl`
 `read`, everything that changes state under `write`. `activity_log` is a **write**
 method because it returns the contents of the configured log file.
 
+"Script" is what `trafficctl <command>` runs; "(in plugin)" methods run inside the plugin.
+
 | Method | Script | Params | ACL |
 |--------|--------|--------|-----|
-| `summary` | `trafficctl-summary.sh` | (none) | read |
-| `device` | `trafficctl-device.sh` | `ip`, `proto` | read |
-| `bytes` | `trafficctl-totals.sh` | (none) | read |
-| `ifaces` | `trafficctl-ifaces.sh` | (none) | read |
-| `rdns` | `trafficctl-rdns.sh` | `ip` | read |
-| `ratelimit_stats` | `trafficctl-ratelimit-stats.sh` | (none) | read |
-| `subnets` | `trafficctl-subnets.sh` | (none) | read |
-| `shape_stats` | `trafficctl-shape-stats.sh` | (none) | read |
-| `shape_status` | `trafficctl-shape.sh status` | `ip` | read |
-| `names_list` | `trafficctl-names.sh list` | (none) | read |
-| `portfw_list` | `trafficctl-portfw.sh list` | (none) | read |
-| `rules_list` | `trafficctl-rules.sh list` | (none) | read |
-| `netify_status` | `trafficctl-netify.sh status` | (none) | read |
-| `netify_list` | `trafficctl-netify.sh list` | (none) | read |
-| `config_get` | (inline) | (none) — returns `enabled`, `default_mode`, `offload_mode`, `sw`, `hw`, `poll_interval`, `avg_window` | read |
-| `telegram_config_get` | (inline) | (none) — `bot_token` is masked as `***` | read |
-| `logging_config_get` | (inline) | (none) | read |
-| `newdevice_config_get` | (inline) | (none) — returns `enabled`, `limit_kbit`, `limit_mode`, plus `seeded` and `seen_count` describing the seen-MAC ledger | read |
-| `version` | (inline) | (none) | read |
-| `cut_status` | `trafficctl-cut.sh status` | (none) | **write** — see below |
-| `cut_set` | `trafficctl-cut.sh engage`/`release` | `active` (bool), `duration` (seconds, `0` = indefinite), `persist` (bool) | write |
-| `block` | `trafficctl-block.sh` | `ip`, `label` | write |
-| `unblock` | `trafficctl-unblock.sh` | `ip`, `label` | write |
-| `ratelimit` | `trafficctl-ratelimit.sh` | `ip` (host, CIDR or `all`), `rate_kbit`, `label`, `mode` (`each`\|`shared`) | write |
-| `shape_add` | `trafficctl-shape.sh add` | `ip`, `rate_kbit`, `label` | write |
-| `shape_remove` | `trafficctl-shape.sh remove` | `ip`, `label` | write |
-| `macfilter_add` | `trafficctl-macfilter-add.sh` | `ip` | write |
-| `macfilter_remove` | `trafficctl-macfilter-remove.sh` | `ip` or `mac` (`mac` wins when both are sent) | write |
-| `name_set` | `trafficctl-names.sh set` | `ip`, `name` (empty `name` clears the alias) | write |
-| `name_clear` | `trafficctl-names.sh remove` | `ip` | write |
-| `portfw_ctl` | `trafficctl-portfw.sh` | `action`, `scope`, `proto`, `ip`, `port`, `rate_kbit` | write |
-| `netify_collect` | `trafficctl-netify.sh collect` | `secs` | write |
-| `config_set` | (inline) | `enabled`, `default_mode`, `sw`, `hw`, `poll_interval`, `avg_window` (all optional) | write |
-| `telegram_config_set` | (inline) | `enabled`, `bot_token`, `chat_id`, `poll_interval`, `notify_new_device`, `notify_known_device`, `control_enabled`, `notify_template`, `btn_block_inet`, `btn_block_wifi`, `btn_limiter`, `btn_shaper` | write |
-| `telegram_test` | `trafficctl-telegram-test.sh` | `bot_token`, `chat_id`, `message` | write |
-| `logging_config_set` | (inline) | `enabled`, `log_file`, `max_lines`, `syslog`, `log_blocks`, `log_ratelimits`, `log_shapes`, `log_telegram`, `log_config` | write |
-| `newdevice_config_set` | (inline) | `enabled`, `limit_kbit`, `limit_mode` (`limiter`\|`shaper`) | write |
-| `activity_log` | (inline) | `lines` (default 50, capped at 1000) | write |
+| `summary` | `trafficctl summary` (ucode) | (none) | read |
+| `device` | `trafficctl device` (ucode) | `ip`, `proto` | read |
+| `bytes` | `trafficctl totals` (ucode) | (none) | read |
+| `ifaces` | `trafficctl ifaces` (ucode) | (none) | read |
+| `rdns` | `trafficctl rdns` (ucode) | `ip` | read |
+| `ratelimit_stats` | `trafficctl ratelimit-stats` (ucode) | (none) | read |
+| `subnets` | `trafficctl subnets` (ucode) | (none) | read |
+| `shape_stats` | `trafficctl shape-stats` (ucode) | (none) | read |
+| `shape_status` | `trafficctl shape status` (ucode) | `ip` | read |
+| `names_list` | (in plugin) | (none) | read |
+| `portfw_list` | `trafficctl portfw list` (ucode) | (none) | read |
+| `rules_list` | `trafficctl rules list` (ucode) | (none) | read |
+| `netify_status` | `trafficctl netify status` (ucode) | (none) | read |
+| `netify_list` | `trafficctl netify list` (ucode) | (none) | read |
+| `config_get` | (in plugin) | (none) — returns `enabled`, `default_mode`, `offload_mode`, `sw`, `hw`, `poll_interval`, `avg_window` | read |
+| `telegram_config_get` | (in plugin) | (none) — `bot_token` is masked as `***`; `bot_running` comes from procd (`ubus call service list`) | read |
+| `logging_config_get` | (in plugin) | (none) | read |
+| `newdevice_config_get` | (in plugin) | (none) — returns `enabled`, `limit_kbit`, `limit_mode`, plus `seeded` and `seen_count` describing the seen-MAC ledger | read |
+| `version` | (in plugin) | (none) — the installed `luci-app-trafficctl` version, read from the opkg status file or the apk database; `dev` when neither lists it | read |
+| `cut_status` | `trafficctl cut status` (ucode) | (none) | **write** — see below |
+| `cut_set` | `trafficctl cut engage`/`release` (ucode) | `active` (bool), `duration` (seconds, `0` = indefinite), `persist` (bool) | write |
+| `block` | `trafficctl block` (ucode) | `ip`, `label` | write |
+| `unblock` | `trafficctl unblock` (ucode) | `ip`, `label` | write |
+| `ratelimit` | `trafficctl ratelimit` (ucode) | `ip` (host, CIDR or `all`), `rate_kbit`, `label`, `mode` (`each`\|`shared`) | write |
+| `shape_add` | `trafficctl shape add` (ucode) | `ip`, `rate_kbit`, `label`, `rate_kbit_up` | write |
+| `shape_remove` | `trafficctl shape remove` (ucode) | `ip`, `label` | write |
+| `macfilter_add` | `trafficctl macfilter-add` (ucode) | `ip` | write |
+| `macfilter_remove` | `trafficctl macfilter-remove` (ucode) | `ip` or `mac` (`mac` wins when both are sent) | write |
+| `name_set` | (in plugin) | `ip`, `name` (empty `name` clears the alias) | write |
+| `name_clear` | (in plugin) | `ip` | write |
+| `portfw_ctl` | `trafficctl portfw` (ucode) | `action`, `scope`, `proto`, `ip`, `port`, `rate_kbit` | write |
+| `netify_collect` | `trafficctl netify collect` (ucode) | `secs` (1–30, default 3) | write |
+| `config_set` | (in plugin) | `enabled`, `default_mode`, `sw`, `hw`, `poll_interval`, `avg_window` (all optional) | write |
+| `telegram_config_set` | (in plugin) | `enabled`, `bot_token`, `chat_id`, `poll_interval`, `notify_new_device`, `notify_known_device`, `control_enabled`, `notify_template`, `btn_block_inet`, `btn_block_wifi`, `btn_limiter`, `btn_shaper` | write |
+| `telegram_test` | `trafficctl telegram-test` (ucode) | `bot_token`, `chat_id`, `message` — the token goes to the plugin's wrapping shell on stdin, which exports it as `TCTL_TG_TOKEN` for the command; it is never in an argument list | write |
+| `notify_config_get` | (in plugin) | (none) — the Notifications tab: `enabled`, `scan`, `scan_interval`, `scan_wanted`, `events`, `types`, `msmtp`, `hotplug_scripts`, `bot_token_set`, `bot_chat_id`, `senders` (secrets as `***` plus `<option>_set`) | read |
+| `notify_config_set` | (in plugin) | `sender` (a type or a section name; empty = the global options), `enabled`, `events`, `scan`, `scan_interval`, and the sender's own options (see [Notifications](#notifications)) | write |
+| `notify_test` | `trafficctl notify test` (ucode) | `sender` | write |
+| `logging_config_set` | (in plugin) | `enabled`, `log_file`, `max_lines`, `syslog`, `log_blocks`, `log_ratelimits`, `log_shapes`, `log_telegram`, `log_config`, `persist_rules` (stored as `main.persist_rules`) | write |
+| `newdevice_config_set` | (in plugin) | `enabled`, `limit_kbit`, `limit_mode` (`limiter`\|`shaper`) | write |
+| `activity_log` | (in plugin) | `lines` (default 50, capped at 1000) | write |
+
+`notify_config_set` runs `trafficctl notify migrate` first, validates every
+value before it writes any, refuses to switch on a sender that lacks what it
+needs (`telegram needs a bot token and a chat id`, `mail needs msmtp`, ...),
+then commits, enables `/etc/init.d/trafficctl-notify` and restarts it. Since
+1.31 `telegram_config_get` reads `notify_new_device`, `notify_known_device` and
+`notify_template` back from the `notify_telegram` sender once it exists, and
+`telegram_config_set` writes them there.
 
 `telegram_config_set` keeps `/etc/init.d/trafficctl-telegram` enabled in rc.d
 while `telegram.enabled` is 1 and disabled while it is 0, then reloads the bot.
@@ -157,15 +169,74 @@ browser. Both are bounded: `poll_interval` is 0 (polling off) or 1–300 seconds
 is how many samples every open browser keeps *per device*, and each poll costs
 the router a conntrack read.
 
-`port` accepts a single port or a `lo-hi` range. On the iptables path a range is
-passed through as `lo:hi`; it used to be truncated to the low port, which left the
-rest of the range open while the UI reported the whole range paused.
+`port` accepts a single port or a `lo-hi` range.
+
+`history_config_set` takes a `dir` below `/etc/trafficctl`, `/mnt`, `/media`,
+`/srv` or `/tmp`, at least one level down, and every component a name: no
+empty, `.` or `..` component. `/mnt/.` or `/mnt//` would otherwise pass the
+prefix check and make a mount root the store, whose prune deletes inside it.
+The keeper's own check (`trafficctl history validate-dir`, `history.uc`)
+applies to the stored value, which `uci` can set past the plugin: it refuses
+`..`, quoting characters and any path that names a bare root once `//` and
+`/./` fold away (`/mnt/.`, `/mnt/./`), and accepts `/mnt//x` and `/mnt/./x`,
+as v1.30.0 did. A refused value falls back to `/etc/trafficctl/history`.
+The check is on the path as written: a symlink in it is not resolved, so a
+store dir that is a symlink is written through, and prune deletes period
+files wherever it points. `prune` deletes only files named like a period
+(`2026-11.tsv`, `2026-11-11.tsv`, `2026-W46.tsv` and their `.if.tsv`).
+
+**Failures.** A setter whose commit fails (a read-only or full overlay)
+replies `{"ok":false,"msg":"could not save the trafficctl settings"}` (or
+`firewall`), logs nothing and leaves nothing staged in `/tmp/.uci`; `cut_set`
+then engages nothing.
+
+**Types.** rpcd checks every call against the types the plugin declares
+(`ubus -v list luci.trafficctl`) before the method runs: a string for an int,
+a string for a bool, a double, a `null`, an argument the method does not
+declare, or an int beyond 32 bits fails the whole call with `Invalid argument`
+(ubus status 2), and an unknown method with `Method not found`. The exec plugin
+of 1.30.x read the raw JSON and answered those with `ok:false` or coerced
+them. Leave an argument out to leave it unchanged (the views pass
+`undefined`, which LuCI drops, never `null`).
+
+**Delegated commands** run through rpcd's `file.exec`, as a deferred reply:
+rpcd keeps serving other calls meanwhile. When a command is still running
+after 60 s (`TCTL_CLI_TIMEOUT_MS`, at most 110 s) the plugin stops waiting and
+replies `{"ok":false,"msg":"trafficctl <command> did not finish within 60 s"}`.
+That does not stop the command: it runs on until rpcd's exec timeout
+(`rpcd -t`, 120 s by default), where rpcd kills it. A write can therefore still
+complete after the timeout reply: read the state back before repeating it.
+rpcd also gives the plugin's own call that exec timeout: with a `-t` shorter
+than the plugin's limit the caller gets `Request timed out` (status 7) instead.
+Only the CLI process is killed: on 22.03 nothing can give it a process group of its own
+(busybox has no `setsid`, ash no job control without a terminal), so what it
+started runs to its end. `file.exec` takes at most 256 KiB of output: a longer
+reply is `{"ok":false,"msg":"trafficctl <command> printed more than rpcd takes
+(256 KiB)"}`, and `device` caps its connection list below that (see `device`).
+A method that answers `{"result": ...}` keeps that key on an error
+(`{"result":null,"ok":false,"msg":...}`), an internal one included.
+
+The plugin asks rpcd's session for the login name, for the activity log, only
+on the `write` methods; the `read` methods are the dashboard's polls. The
+lookup is a deferred call too: rpcd serves its own session object, and a
+plugin that waited on it in process would wait on itself. The plugin and the
+trafficctl modules it imports are loaded once, when rpcd starts: installing or
+upgrading either package restarts rpcd.
 
 ---
 
-## Query Scripts
+## Query Commands
 
-### trafficctl-summary.sh
+`/usr/sbin/trafficctl
+subnets|names|rdns|rdns-refresh|ifaces|bytes|totals|ratelimit-stats|shape-stats|rules|summary|device|metrics|netify`
+takes the arguments of v1.30's `/usr/libexec/trafficctl/trafficctl-<command>.sh`
+and prints the same bytes (differences listed under each command). Those
+scripts are gone from 2.0.0. The metrics CGI (`/www/cgi-bin/trafficctl-metrics`)
+checks the token, then execs `trafficctl metrics`. `bytes-nft` is gone too (see
+`trafficctl bytes` below). The byte commands print their arrays
+sorted by address, where the shell printed awk hash order.
+
+### trafficctl summary
 
 Returns a summary of all active LAN devices with traffic control status and connection type.
 
@@ -219,7 +290,7 @@ Returns a summary of all active LAN devices with traffic control status and conn
 
 ---
 
-### trafficctl-device.sh
+### trafficctl device
 
 Returns detailed connection information for a single device.
 
@@ -286,16 +357,16 @@ single-WAN, or policy-routing that doesn't restore the connmark such as podkop)
 
 `oif` is the **uci interface name** (`wan2`, `Finland`) — what the user called the
 network — and `oif_dev` is the kernel device the route resolved to (`eth2`, `awg3`).
-The name comes from the role map `trafficctl-ifaces.sh` memoizes in
+The name comes from the role map `trafficctl ifaces` memoizes in
 `/tmp/trafficctl_ifroles`; a device with no uci interface gets its device name in
 both fields. The table shows the device next to the name only when they differ.
 
 ---
 
-### trafficctl-bytes.sh
+### trafficctl bytes
 
 Returns raw byte counters for bandwidth speed calculation. These are a *sample*,
-not a lifetime total — see `trafficctl-totals.sh` below.
+not a lifetime total — see `trafficctl totals` below.
 
 **Arguments:** None
 
@@ -313,9 +384,9 @@ not a lifetime total — see `trafficctl-totals.sh` below.
 | `ip` | string | Device IP |
 | `bytes_in` | number | Bytes received (download = conntrack reply direction) |
 | `bytes_out` | number | Bytes sent (upload = conntrack original direction) |
-| `bytes_tcp` | number | TCP bytes, both directions. `-1` when the source cannot split by protocol |
-| `bytes_udp` | number | UDP bytes, both directions. `-1` when the source cannot split by protocol |
-| `src` | string | `ct` = conntrack, `nft` = nftables counter maps |
+| `bytes_tcp` | number | TCP bytes, both directions |
+| `bytes_udp` | number | UDP bytes, both directions |
+| `src` | string | Always `ct` (conntrack). Releases up to 1.30.x could also report `nft` |
 | `degraded` | bool | `true` when these counters are **frozen** for offloaded flows — see below |
 
 `degraded` is about *trust*; `src` is about *magnitude*. They are separate
@@ -324,38 +395,45 @@ folding the two together would make a trust change look like a source change
 and throw away a real delta.
 
 `degraded` is `true` when the router has **uncountered** flow offload (plain
-`hardware` or `software`) *and* the nftables fallback is unavailable — either
-because the kernel has no dynamic counter map support (`trafficctl-bytes-nft.sh`
-re-execs with `TCTL_FORCE_CONNTRACK=1`), or because the router runs fw3/iptables
-and there is no fallback to reach. The counters then stop moving for every
-offloaded flow while traffic continues, so any total built from them is a lower
-bound that stalls. Consumers must refuse to present it as a total.
+`hardware` or `software`: fw4 on OpenWrt 22.03, or a custom flowtable declared
+without `counter`). The counters then stop moving for every offloaded flow while
+traffic continues, so any total built from them is a lower bound that stalls.
+Consumers must refuse to present it as a total. The first such sample per
+offload mode also logs a warning to syslog (tag `trafficctl`) that says to
+disable flow offloading or upgrade to 23.05 or later.
 
-Which source is used is decided per call: with flow offload active and no
-working `counter` flag, conntrack stops accounting for offloaded flows, so the
-script hands over to `trafficctl-bytes-nft.sh`, whose maps sit on the forward
-hook at priority `-200`, ahead of the flowtable at `-150`. Those maps are keyed
-by address alone, which is why `bytes_tcp` / `bytes_udp` are `-1` there.
+The sample always comes from conntrack. With a counter-flagged flowtable (fw4
+from 23.05 on, modes `software-counter` and `hardware-counter`) offloaded byte
+counts are synced back to conntrack, so it stays accurate. Without the flag
+nothing else can count offloaded packets: the flowtable hooks netdev ingress,
+so they never reach an inet forward chain at any priority, and counting
+downloads where they leave the router would need a netdev egress hook (kernel
+5.16+). Releases up to 1.30.x tried nftables counter maps on a forward chain
+at priority `-200` (`trafficctl bytes-nft`); no OpenWrt kernel accepted their
+map type, offloaded packets would have bypassed the chain anyway, and the path
+was removed.
 
-`-1` means "not measurable", never "zero". A consumer that renders it as 0 is
-claiming the device sent no TCP at all.
+Counters are 64-bit integers end to end: a value past 2^53 comes out exact.
+
+`-1` in a protocol field means "not measurable", never "zero". A consumer that
+renders it as 0 is claiming the device sent no TCP at all. A sample from
+conntrack always has the split; `-1` comes from `totals` (below).
 
 ---
 
-### trafficctl-totals.sh
+### trafficctl totals
 
-Wraps `trafficctl-bytes.sh` with a **monotonic per-device accumulator** — the
+Wraps `trafficctl bytes` with a **monotonic per-device accumulator** — the
 lifetime totals behind both the LuCI Bytes / TCP / UDP columns and the
 `trafficctl_device_bytes_total` metric. Neither raw source is a lifetime total:
 conntrack reports only flows that still exist (so a device's number collapses
-when they expire — [#26](https://github.com/YusDyr/luci-app-trafficctl/issues/26)),
-and the nft maps count only since the table was built.
+when they expire — [#26](https://github.com/YusDyr/luci-app-trafficctl/issues/26)).
 
 **Arguments:** `--all` (optional) — also emit devices that have left the sample
 but still carry a total. Used by the exporter so a Prometheus series does not
 vanish and reappear every time an idle device's last flow expires.
 
-**Output:** the `trafficctl-bytes.sh` array, extended per element:
+**Output:** the `trafficctl bytes` array, extended per element:
 
 ```json
 [
@@ -371,8 +449,8 @@ vanish and reappear every time an idle device's last flow expires.
 |-------|------|-------------|
 | `bytes_in_total` | number | Lifetime bytes received |
 | `bytes_out_total` | number | Lifetime bytes sent |
-| `bytes_tcp_total` | number | Lifetime TCP bytes, or `-1` if not measurable |
-| `bytes_udp_total` | number | Lifetime UDP bytes, or `-1` if not measurable |
+| `bytes_tcp_total` | number | Lifetime TCP bytes, or `-1` without a protocol baseline (a state line from before the split, or from 1.30.x on its nft maps) |
+| `bytes_udp_total` | number | Lifetime UDP bytes, or `-1` likewise |
 | `total_since` | number | Unix time accumulation began for this device |
 | `live` | bool | Whether the device was in this sample (always `true` without `--all`) |
 
@@ -386,10 +464,11 @@ accumulated history and stay exact.
 - **Only positive movement counts.** A drop in the raw counter means flows
   expired; their bytes were accumulated while they lived, so the drop rebaselines
   and adds nothing.
-- **A source switch rebaselines.** conntrack and nft counters have unrelated
-  magnitudes, so toggling flow offload (or the nft path falling back on a kernel
-  without dynamic counter maps) must not be differenced. The source is stored
-  per device and a change starts a fresh baseline.
+- **A source switch rebaselines.** The source is stored per device and a
+  change starts a fresh baseline. The sampler only reads conntrack now, but a
+  state file written by 1.30.x can record `nft` (counter maps, cumulative since
+  their table was built, a magnitude unrelated to conntrack): the first sample
+  after the upgrade rebaselines that device instead of adding the difference.
 - **Totals reset on reboot.** The store is `/tmp/trafficctl_totals.state`, i.e.
   tmpfs. Deliberate: it is rewritten on every LuCI poll (2–10 s) and every
   scrape, and that write volume into flash would wear the router out. Surviving
@@ -399,7 +478,20 @@ accumulated history and stay exact.
   Prometheus scrape, is what drives accumulation. With the page closed and no
   scraper configured, the counters stand still. There is no background tick.
 - **Concurrent samplers are serialised** with an atomic `mkdir` lock, so a LuCI
-  poll and a scrape landing together cannot discard one another's delta.
+  poll and a scrape landing together cannot discard one another's delta. The
+  lock is `/tmp/trafficctl_totals.lock.d`, an empty directory, as the 1.30.x
+  shell writer held it: either writer takes it over from the other after about
+  3 s, so an upgrade or a downgrade with a sampler running loses nothing. A
+  holder that does not let go is waited for about 3 s; then the sample is
+  accumulated anyway. The lock is released on an error inside the locked
+  section too.
+- **A failed sample is an empty one**, as the shell's empty pipe was: nothing
+  is accumulated, and `totals --all` still lists every stored device with
+  `live: false`, so no Prometheus series vanishes for that scrape.
+- **The store format is the shell's**, one line per device:
+  `ip rx_acc tx_acc rx_last tx_last seen tcp_acc udp_acc tcp_last udp_last src
+  since degraded`. Lines of 5, 6, 10 and 12 fields from older versions load
+  too, and 1.30.x reads what this one writes.
 - **`degraded` is sticky per device.** A total accumulated from frozen counters
   stays understated for the rest of its life, so one tainted sample marks it
   until the counter resets. Clearing the flag as soon as a later sample looked
@@ -410,11 +502,11 @@ accumulated history and stay exact.
 
 ---
 
-### trafficctl-ifaces.sh
+### trafficctl ifaces
 
 Returns per-interface byte counters from `/proc/net/dev`, with a role map, for
 the global (bmon-style) overview. Rates are **not** computed here — the frontend
-diffs two samples the same way it does for `trafficctl-bytes.sh`, so the script
+diffs two samples the same way it does for `trafficctl bytes`, so the command
 is stateless and one sample is cheap.
 
 **Arguments:** None
@@ -453,7 +545,7 @@ router correct:
    `phy0-ap0` are ports of `br-lan` and report the very same bytes the bridge
    reports; naming cannot tell them apart from top-level devices, so
    enslavement is read from `/sys/class/net/<dev>/master`.
-1. A device trafficctl already monitors as a LAN (`tctl_get_lan_devices`) is `lan`.
+1. A device trafficctl already monitors as a LAN (`net.lan_devices`) is `lan`.
 2. A tunnel-named device is `vpn`, **even when it holds the default route**.
    On a WireGuard/AmneziaWG full-tunnel setup the default route is via `awg0`
    while the physical uplink still carries every byte encapsulated; calling the
@@ -470,9 +562,8 @@ WAN. Multi-WAN responses are **not** summed by the frontend: on a failover pair
 that double-counts, and on two independent uplinks the sum describes neither
 link (see issue #28).
 
-**Caching:** the role map is the expensive part (sourcing `trafficctl-fw.sh`
-runs `nft list tables`; `tctl_lan_subnets` forks ubus and jsonfilter per
-network), so it is memoized in `/tmp/trafficctl_ifroles` with a 60 s TTL and the
+**Caching:** the role map is the expensive part (`net.lan_subnets` asks ubus
+and uci about every network), so it is memoized in `/tmp/trafficctl_ifroles` with a 60 s TTL and the
 poll path reads only `/proc/net/dev` plus that file. An interface missing from a
 still-fresh cache triggers one rebuild and a re-emit inside the same invocation,
 so a tunnel coming up is classified on the next poll rather than up to a minute
@@ -481,9 +572,10 @@ later. Overridable for testing via `TCTL_IFROLE_CACHE`, `TCTL_IFROLE_TTL`,
 
 ---
 
-### trafficctl-ratelimit-stats.sh
+### trafficctl ratelimit-stats
 
-Returns drop counters from the nftables rate-limiter.
+`trafficctl ratelimit-stats`. Returns drop counters from the nftables
+rate-limiter.
 
 **Arguments:** None
 
@@ -498,9 +590,14 @@ Returns drop counters from the nftables rate-limiter.
 
 `ip` is the limit's target, so it may be a CIDR block rather than a host, and
 `mode` is the bucket layout (`each`/`shared`) read back from the live rule — an
-nft meter keyed on the address is what makes a bucket per-device. nftables 1.0
-lists it as `meter <name>`, 1.1 as a set update, `add @<name> { ... }`; both
-read as `each`.
+nft meter keyed on the address is what makes a bucket per-device. The rules are
+read from `nft -j list table netdev tm_ratelimit`; of the expressions only
+matches, limits, meters, counters and the verdict are read, so the meter's
+name does not matter (`tctl_m_<slug>_<chain>` since 1.30.5, one per target
+before). nftables 1.1 (OpenWrt 25.12) lists a meter as a named set the rule
+adds to; the v1.30.0 shell reader looked for the word `meter` and reported
+those limits as `shared`, the CLI reports `each`. `pass_packets`/`pass_bytes`
+are always 0, as before.
 
 One entry per target: the download rule is installed on every LAN device's
 egress chain, so a router with several bridges holds several copies of the same
@@ -511,9 +608,15 @@ Returns `[]` if no rate limits are active.
 
 ---
 
-### trafficctl-shape-stats.sh
+### trafficctl shape-stats
 
-Returns tc/HTB class statistics for all shaped devices.
+`trafficctl shape-stats`. Returns tc/HTB class statistics for all shaped
+devices, read from the text of `tc -s class show` and `tc -s qdisc show` (one
+call each) on the LAN device: iproute2 5.15 (OpenWrt 22.03) prints `tc -j
+class` as text, and its JSON qdisc stats give the fq_codel target in kernel
+microseconds (4999 for `5ms`). Classes are mapped to addresses through
+`shapes.json`, parsed as JSON. The shell reader printed a class listed before
+the root or default class twice; the CLI prints it once.
 
 **Arguments:** None
 
@@ -525,11 +628,14 @@ Returns tc/HTB class statistics for all shaped devices.
 ]
 ```
 
-Returns `[]` if tc is not installed or no HTB qdisc exists.
+Returns `[]` if tc is not installed or no HTB qdisc exists. All 15 fields:
+`ip`, `rate_kbit`, `bytes`, `packets`, `backlog`, `drops`, `overlimits`,
+`requeues`, `lended`, `borrowed`, `ecn_mark`, `new_flows`, `old_flows`
+(always 0: iproute2 prints `new_flows_len`), `target_us`, `memory_used`.
 
 ---
 
-### trafficctl-rdns.sh
+### trafficctl rdns
 
 Reverse DNS lookup for a single IP. Used by the Telegram bot and the rpcd `rdns` ubus
 method. The LuCI frontend uses `network.rrdns.lookup` directly for batch resolution.
@@ -547,9 +653,9 @@ Uses `ubus call network.rrdns lookup` (rpcd-mod-rrdns, ships with rpcd) with Bus
 
 ---
 
-### trafficctl-rules.sh
+### trafficctl rules
 
-Every restriction the app holds, whether or not the device is online: internet
+`trafficctl rules [list]`. Every restriction the app holds, whether or not the device is online: internet
 blocks, speed limits (subnets and `all` included), shapes and WiFi deny-list
 entries. This feeds the **Rules** tab. The device table is built from live
 conntrack entries, so a device that goes offline drops out of it while its
@@ -573,19 +679,21 @@ and the two are merged:
 
 | `type` | Live state | Saved state |
 |--------|------------|-------------|
-| `block` | drop rules in `inet fw4 forward` whose comment starts with `tctl_block_` (`tctl_block_<slug>`, or the caller's label on a block written before v1.13.2; the `_mac` IPv6 rule folds into the same record), or the commented `FORWARD` DROP on iptables | `rules.json`, only while `persist_rules` is on |
-| `ratelimit` | `trafficctl-ratelimit-stats.sh` (download) and the `_ul` rule (upload) | `rules.json`, only while `persist_rules` is on |
-| `shape` | HTB classes on the LAN device and on `tctl-ifb0`, mapped through `tctl_shape_classmap` | `shapes.json` (always written) |
+| `block` | drop rules in `inet fw4 forward` on an `ip saddr` whose comment starts with `tctl_block_` (`tctl_block_<slug>`, or the caller's label on a block written before v1.13.2), or whose comment is exactly `tctl_block_<slug>_mac` (the IPv6 rule, folded into the same record) | `rules.json`, only while `persist_rules` is on |
+| `ratelimit` | `ratelimit-stats` (download) and the `ip saddr` rule (upload) | `rules.json`, only while `persist_rules` is on |
+| `shape` | HTB classes on the LAN device and on `tctl-ifb0`, mapped through `shapes.json` | `shapes.json` (always written) |
 | `wifi` | hostapd's running deny ACL, or a ubus ban | uci `maclist` of `macfilter=deny` interfaces |
 
+- The nft rules are read from `nft -j`. A rule's handle is carried along, not
+  matched on. An each-mode limit reads `each` on nftables 1.1 as well (see
+  `ratelimit-stats`).
 - Unblocking a block written before v1.13.2 (`tctl_block_tg` from Telegram,
   `tctl_block_block_<ip>` or a typed label from LuCI) works with any label,
-  the empty one the Rules tab sends included: `trafficctl-unblock.sh` also
+  the empty one the Rules tab sends included: `trafficctl unblock` also
   removes every drop rule on that exact `ip saddr` whose comment starts with
-  `tctl_block_`. On nft the label never selects a rule: such a comment was
-  shared by every device blocked with that label, so unblocking one device
-  leaves the others blocked. On iptables the label comment is still tried,
-  always together with `-s <ip>`.
+  `tctl_block_`. It no longer removes rules by the label alone: v1.30.x
+  deleted every rule commented `tctl_block_<label>`, so unblocking one device
+  with the bot's label `tg` also lifted every other device's Telegram block.
 - `applied`: in the kernel or on the radio now. `persisted`: survives a reboot.
   A saved record that is not applied is restored at the next `ifup lan`; a live
   rule that is not saved is lost at the next reboot. Live rates win over saved ones.
@@ -595,7 +703,7 @@ and the two are merged:
   has a conntrack entry or a REACHABLE/DELAY/PROBE/PERMANENT neighbour entry.
 - `name` follows the usual order: alias, DHCP lease, cached PTR.
 - `wifi` records are keyed on the MAC, and `enforcement` uses the words of
-  `trafficctl-macfilter-add.sh` (below), plus `unknown` when the radio state
+  `trafficctl macfilter-add` (below), plus `unknown` when the radio state
   cannot be read. `applied` is `null` then.
 - A radio with `macfilter=allow` blocks every device missing from its list, which
   cannot be enumerated: only their number is reported, in `wifi_allow_ifaces`.
@@ -603,11 +711,12 @@ and the two are merged:
 
 ---
 
-## Action Scripts
+## Action Commands
 
-### trafficctl-block.sh / trafficctl-unblock.sh
+### trafficctl block / trafficctl unblock
 
-Block/unblock a device's internet access.
+Block/unblock a device's internet access. The reply, the rule text
+and the `rules.json` record are those of v1.30.0 (`tests/equiv.sh`).
 
 **Arguments:** `<ip> [label]`
 
@@ -622,12 +731,11 @@ no MAC can be keyed on — see [Address family coverage](#address-family-coverag
 `msg` names the reason, and LuCI and the Telegram bot both surface it.
 
 **Side effects (block):**
-- Inserts a drop rule matching `ip saddr` in `inet fw4 forward` (nft) or the
-  `FORWARD` chain (iptables).
+- Inserts a drop rule matching `ip saddr` in `inet fw4 forward`.
 - Inserts a second drop rule matching `meta nfproto ipv6 ether saddr <mac>`
-  (nft only), when the device has a resolvable MAC and is not a routed next
-  hop. `insert`, not `add`: fw4's forward chain accepts established and
-  offloaded flows near the top, and a rule below that never fires.
+  when the device has a resolvable MAC and is not a routed next hop. `insert`,
+  not `add`: fw4's forward chain accepts established and offloaded flows near
+  the top, and a rule below that never fires.
 - Kills existing conntrack entries for the device — IPv4 by address, and IPv6
   for every address the neighbour table currently maps to that MAC
   (`conntrack -D -f ipv6`). Without the second pass an established v6 flow
@@ -636,9 +744,12 @@ no MAC can be keyed on — see [Address family coverage](#address-family-coverag
 
 ---
 
-### trafficctl-cut.sh
+### trafficctl cut
 
 Cut internet access for **every** device at once while the LAN keeps working.
+`trafficctl/files/usr/share/ucode/trafficctl/cut.uc`. Ruleset text, state files and replies are
+those of v1.30.0's shell script, so a cut engaged by either is seen and
+released by the other (`tools/ci/live-cut.sh` checks this on a real kernel).
 
 **Arguments:** `engage <seconds|0> [persist]` · `release` · `status` · `restore` · `tick` · `keeper`
 
@@ -646,7 +757,7 @@ Cut internet access for **every** device at once while the LAN keeps working.
 
 **Output (`status`, and the reply to `engage`/`release`):**
 ```json
-{"ok":true,"active":true,"rule_present":true,"supported":true,
+{"ok":true,"active":true,"rule_present":true,"supported":true,"coverage":"full",
  "expires_at":1700000900,"remaining":845,"started_at":1700000000,
  "persist":false,"keeper_running":true,"lan_devices":"br-lan br-guest",
  "default_duration":900,"default_persist":false,"msg":""}
@@ -699,7 +810,10 @@ table inet tctl_cut {
   anything that depends on the LAN device list being correct: whatever else is
   wrong, LuCI, SSH, DNS, DHCP and a VPN terminating *on* the router are
   accepted. A prerouting drop without that escape hatch would be a total LAN
-  lockout, which is also why the install is atomic (see below).
+  lockout, which is also why the install is atomic (see below). After the
+  load the chain is listed back, and unless its **first** rule is that accept
+  it is taken down again and the forward-only fallback is used (v1.30 only
+  checked that the accept was somewhere in the table).
 - **Interface matching, not addresses.** IPv4 *and* IPv6 are cut by the same
   rules — an address-keyed cut would let a device walk out over a SLAAC
   address. (The per-device block reaches the same end differently: a second
@@ -729,26 +843,81 @@ table inet tctl_cut {
 (tmpfs), so a reboot always clears it. This is the one control that can lock out
 its own operator, and the remedy must never become "be physically present".
 Ticking *Keep after reboot* additionally writes `/etc/trafficctl/cut.state`,
-restored on `ifup lan` by `trafficctl-cut.sh restore` — guarded on that file's
+restored on `ifup lan` by `trafficctl cut restore` — guarded on that file's
 own `persist=1`, **not** on the global `persist_rules` flag, and honouring the
 original absolute deadline rather than restarting the clock. It is deliberately
 absent from `trafficctl/files/lib/upgrade/keep.d/trafficctl`: a cut outliving a *firmware upgrade* is
 strictly worse than one outliving a reboot.
 
-**Auto-revert.** `/etc/init.d/trafficctl-cut` supervises a keeper that ticks
-every 5s: it enforces the deadline and re-asserts the rule if the table went
-missing (a wholesale `nft flush ruleset` still takes it). `status` reconciles
-independently — it releases a cut whose deadline has passed and starts a
-replacement keeper if one died — which is why it is a **write** method despite
-reading like one, the same reasoning that makes `activity_log` a write method.
+**Auto-revert.** `/etc/init.d/trafficctl-cut` has procd run
+`/usr/sbin/trafficctl cut keeper`, one ucode process that ticks every 5s: it
+enforces the deadline and re-asserts the rule if the table went missing (a
+wholesale `nft flush ruleset` still takes it). An exception in a tick is
+logged and the loop goes on, because the auto-revert depends on it. `status`
+reconciles independently — it releases a cut whose deadline has passed and
+starts a replacement keeper if one died — which is why it is a **write** method
+despite reading like one, the same reasoning that makes `activity_log` a write
+method. Whether the keeper runs is asked of procd (`ubus call service list`),
+not of the process list. `engage`, `release`, `status`, `restore` and each tick
+hold `/var/run/trafficctl/cut.lock`, so a tick cannot re-install a rule a
+release has just removed; the lock is waited for, never required.
+
+**Upgrade and removal.** The postinst restarts the keeper when a cut is
+engaged, so a keeper started by an older release stops running its code. The
+prerm runs `trafficctl cut release`, then removes both state files and the
+table itself: a cut left behind by a removed package is a lockout with no UI
+to undo it, and the release needs every ucode module to load.
+
+**By hand.** If `trafficctl cut release` itself fails (a broken ucode
+install, a module that no longer loads), the router stays reachable over SSH,
+because traffic addressed to it is accepted ahead of the drop. Two commands
+end the cut without any of this code:
+
+```sh
+/etc/init.d/trafficctl-cut stop
+nft delete table inet tctl_cut; rm -f /var/run/trafficctl/cut.state /etc/trafficctl/cut.state
+```
+
+Removing the state files matters as much as the table: a keeper or the next
+`ifup lan` would otherwise put the cut back.
 
 ---
 
-### trafficctl-ratelimit.sh
+### trafficctl portfw
 
-Set or remove a rate limit (policer, both directions).
+Inbound control of port forwards and open ports (the "Port Forwards" tab).
+`trafficctl/files/usr/share/ucode/trafficctl/portfw.uc`.
 
-**Arguments:** `<target> <rate_kbit> [label] [each|shared]`
+**Arguments:** `list` · `pause|resume <forward|input> <tcp|udp|tcpudp> <ip|-> <port>` ·
+`limit <forward|input> <tcp|udp|tcpudp> <ip|-> <port> <rate_kbit>`
+
+`port` is a port or a range `lo-hi`. `rate_kbit` `0` removes the limit; any
+other rate goes through the same check as the per-device limiter (no leading
+zero, at most 100000000).
+
+`list` returns one entry per DNAT redirect and per `ACCEPT` rule from a wan
+zone with a destination port and no destination zone (an open port on the
+router itself, `kind: "open"`, `ip: "-"`), with its connections, distinct
+clients and bytes from conntrack, `paused` and `limit_kbit`.
+
+Rules live in the own table `inet tctl_pfw`, chains at forward/input priority
+−190 (after DNAT, before fw4's flowtable rule). Their comment,
+`tctl_pfw_<pause|limit>_<proto>_<ip|local>_<port>`, is the only record of the
+state, and it is matched whole, quotes included: v1.30 matched a substring,
+so a paused port 8080 also listed port 80 as paused. An open port's rules are
+commented `local`; v1.30 wrote the `-` it was given and then looked for
+`local`, so such a pause never showed and could not be resumed. Rules in that
+form are still read, and removed by a resume or a new limit.
+
+---
+
+### trafficctl ratelimit
+
+Set or remove a rate limit (policer, both directions). The ucode CLI,
+`trafficctl/files/usr/share/ucode/trafficctl/limit.uc`. It takes the
+arguments of v1.30's `trafficctl-ratelimit.sh`.
+
+**Arguments:** `<target> <rate_kbit> [label] [each|shared] [upload_kbit]`
 
 Rate of `0` removes the limit.
 
@@ -770,11 +939,11 @@ usual reason to limit a subnet at all — must ask for `shared` explicitly.
 
 ```sh
 # 20 Mbit shared by the whole IoT VLAN
-trafficctl-ratelimit.sh 192.168.20.0/24 20000 "iot-cap" shared
+trafficctl ratelimit 192.168.20.0/24 20000 "iot-cap" shared
 # 5 Mbit for each device on the guest VLAN
-trafficctl-ratelimit.sh 10.0.0.0/24 5000 "guest-cap" each
+trafficctl ratelimit 10.0.0.0/24 5000 "guest-cap" each
 # remove (mode is irrelevant when removing)
-trafficctl-ratelimit.sh 192.168.20.0/24 0 "iot-cap"
+trafficctl ratelimit 192.168.20.0/24 0 "iot-cap"
 ```
 
 **Output:**
@@ -785,15 +954,11 @@ trafficctl-ratelimit.sh 192.168.20.0/24 0 "iot-cap"
 **Two constraints worth knowing before relying on a subnet limit:**
 
 - **The subnet has to be one this router monitors.** The policing hooks are
-  attached to the devices that `tctl_lan_subnets` resolves, which skips
+  attached to the devices that `net.lan_subnets` resolves, which skips
   `wan`/`wan6` and any zone other than `lan` with `masq=1`. A guest VLAN
   isolated with `masq 1` is therefore not covered: the rule is accepted and
-  never matches a packet. `trafficctl-subnets.sh` lists what is covered, and
+  never matches a packet. `trafficctl subnets` lists what is covered, and
   the dashboard warns when a target falls outside it.
-- **`shared` needs nftables.** On the iptables fallback the policer is
-  `hashlimit --hashlimit-mode dstip`, which is per-address whatever mode was
-  asked for; `trafficctl-ratelimit-stats.sh` reports `each` there for that
-  reason.
 
 **Partial results are kept and reported.** The download rule goes on the
 egress chain of every LAN device (`dl_<dev>`) and the upload rule on the
@@ -812,9 +977,29 @@ loaded:
 When a direction went in on no device at all, the message says `UPLOAD ONLY`
 or `DOWNLOAD ONLY` with the reason. `ok` is `false` only if nothing went in, in
 either direction. Applying the limit again (or the next `ifup lan`) replaces
-the rules and fills the missing device in. The restore hook logs
+the rules and fills the missing device in. The restore (`trafficctl
+restore`, run by the `ifup lan` hook) logs
 `Restored ratelimit for <target> (<rate>kbit) PARTIALLY: ...` for a partial
-restore and `Failed to restore ratelimit ...` when nothing went in.
+restore and `Failed to restore ratelimit ...` when nothing went in. A saved
+record with an invalid rate or target is skipped with a `Not restoring
+ratelimit for ...` line, and the records after it are still restored. A rate
+saved as anything but a string or a number (`true`, an object) is an invalid
+rate too. The blocks and the limits are restored independently: an error in
+one is logged (`restore: blocks failed: ...`) and counted, and the other still
+runs.
+
+**Device names are checked.** A LAN device, bridge port or WAN device whose
+name the kernel could not have made (more than 15 characters, a space, a `/`,
+anything but letters, digits and `._@-`) never reaches nft: it is skipped,
+named with the odd characters masked in the result (`lan2?x: invalid device
+name`) and in syslog.
+
+**Zero-padded masks from 1.30.x.** Releases up to 1.30.6 accepted
+`10.0.0.0/024` and kept it as typed, in `rules.json` and in the rule comment
+(`rl_ratelimit_10_0_0_0_024`). The target is now read in its normal form,
+`10.0.0.0/24`: setting or removing a limit in either spelling also removes the
+padded rules and record, and the restore puts a padded record back as
+`10.0.0.0/24` (the record itself is left as it is).
 
 **Meters are per chain.** In `each` mode every chain gets its own meter,
 `tctl_m_<target slug>_<chain>` (`tctl_m_10_0_20_0_24_ul_lan1`). Releases up to
@@ -836,7 +1021,7 @@ limit on `192.168.1.10` alone.
 
 ---
 
-### trafficctl-subnets.sh
+### trafficctl subnets
 
 Lists the subnets a limit can actually be enforced on: directly connected LANs,
 plus subnets routed via a LAN next-hop and any `trafficctl.main.extra_subnets`.
@@ -860,31 +1045,88 @@ neither.
 
 ---
 
-### trafficctl-shape.sh
+### trafficctl shape
 
-Manage tc/HTB traffic shaping.
+Set, remove or show a shape (tc/HTB, a queue, both directions). The ucode CLI,
+`trafficctl/files/usr/share/ucode/trafficctl/shape.uc`. It takes the
+arguments of v1.30's `trafficctl-shape.sh`.
 
-**Arguments:** `<add|remove|status> <ip> [rate_kbit] [label]`
+**Arguments:** `<add|remove|status> <ip> [rate_kbit] [label] [upload_kbit]`
+
+A host only (no CIDR, no `all`). Download is an HTB class on the LAN device
+(`match ip dst`), upload a class with the same classid on the IFB device
+`tctl-ifb0`, fed by `mirred` from the ingress of every LAN port (`match ip
+src`). `upload_kbit` empty or absent is the download rate; without `kmod-ifb`
+only download is shaped and the message says so. The label is accepted and
+not used.
 
 **Output (add):**
 ```json
-{"ok": true, "msg": "shape 10000 kbit/s applied to 192.168.0.111 (class 1:6f)"}
+{"ok": true, "nss": "absent", "msg": "shape 8000 kbit/s down, 1000 kbit/s up applied to 192.168.0.50 both directions (class 1:2)"}
 ```
 
 **Output (status):**
 ```json
-{"ok": true, "ip": "192.168.0.111", "classid": "1:6f", "info": "rate 10000Kbit"}
+{"ok": true, "ip": "192.168.0.50", "classid": "1:2", "info": "8Mbit"}
 ```
 
-**Persistence:** Writes to `/etc/trafficctl/shapes.json` on every add/remove.
+Errors are `{"ok": false, "msg": "..."}` with exit status 1: an invalid
+address or rate (whole kbit/s, 1 to the limiter's maximum), no free classid,
+a root qdisc another QoS setup owns (SQM's cake, HFSC, any root that is not
+HTB or a default qdisc: declined, never torn down), or `tc setup failed for
+<ip> on <dev>`. An HTB root is taken for the shaper's own, as the shell did: one
+with a class `1:1` is reused, one without is replaced. A shape applied whose
+record cannot be written stays `ok`, and `msg` ends in a warning that the
+restore will not know it; a remove whose record cannot be written warns that
+the shape comes back on the next `ifup lan`.
+
+**Persistence:** `/etc/trafficctl/shapes.json`, written on every add and
+remove whatever `persist_rules` says, in the bytes the shell shaper wrote
+(`{"ip":...,"rate_kbit":...,"classid":"1:<hex>"[,"rate_kbit_up":...]}`, one
+array, mode 0644, replaced atomically) and under the same mkdir lock,
+`/tmp/trafficctl_shapes.lock.d` (taken over after 5 s). An add holds the lock
+from the read of the file through the classid pick and the tc calls to the
+write, so concurrent adds get distinct classids. A record the shell's
+pattern would not have matched is dropped on the next write, as before.
+`trafficctl restore` (the `ifup lan` hook) applies every record again and
+counts them in its `restored`/`failed`; a record it cannot apply is logged as
+`Failed to restore shape for <ip> (<rate>kbit)` (a record whose apply dies
+too, and the next record is still applied), a `shapes.json` that is not a JSON
+array is logged and restores nothing, and nothing is written to the activity
+log. The hook no longer has a shape loop of its own.
+
+**Differences from the shell shaper (v1.30.6):**
+
+- A shape's u32 filters are deleted by their handle. The shell deleted by prio
+  (`tc filter del ... prio 10 ... match ip dst <ip>/32`), and with no handle
+  the kernel deletes every filter of that prio on the device, whatever the
+  match: each shape added or removed took the filters of all the other shapes
+  with it, so only the last one applied was in force while the others' classes
+  stayed and the UI showed them shaped. On a restore this left one shape of
+  all those saved.
+- stdout is the JSON reply only; the shell printed tc's error text before the
+  `tc setup failed` reply.
+- `remove` of an address with no record touches no class. The shell fell back
+  to the classid derived from the address (`1:<hex(o3*256+o4)>`) whenever no
+  classid was recorded, so removing an address never shaped (192.168.0.4, 1:4)
+  tore down the device that had been allocated 1:4. The derived classid is
+  used only for a record written before classids were allocated.
+- The classid pick and the record's write are under one lock; the shell took
+  the lock for the write only, so two adds at once could pick the same classid.
+- The restore takes each record as it is (two records for one address are both
+  applied, the last wins), skips a record with an empty address, and logs a
+  record with an invalid rate, which the shell handed to the shaper and
+  dropped without a word. Its exit status is 1 when a record failed.
+- The default limit for new devices (`trafficctl newdevice`, mode `shaper`)
+  applies the shape in process instead of running v1.30's `trafficctl-shape.sh`.
 
 ---
 
-### trafficctl-macfilter-add.sh / trafficctl-macfilter-remove.sh
+### trafficctl macfilter-add / trafficctl macfilter-remove
 
 Block/unblock a device from WiFi (MAC filter).
 
-**Arguments:** `<ip>`; the remove script also takes `<mac>`. A device that has
+**Arguments:** `<ip>`; `macfilter-remove` also takes `<mac>`. A device that has
 been offline long enough has no lease or neighbour entry left to find its MAC
 by, and the deny list is keyed on the MAC.
 
@@ -915,50 +1157,242 @@ radio, so it is never done automatically).
 - Applies at runtime via `hostapd_cli deny_acl`/`accept_acl` + `deauthenticate` (no wifi reload -- only the target client is affected), then reads the ACL back with `deny_acl SHOW` / `accept_acl SHOW` to confirm. An exit status of 0 is not treated as proof.
 - Runs the runtime half **unconditionally**, even when uci already listed the MAC, so that a block which was previously only written to config can be repaired by repeating the action.
 - Where `hostapd_cli` is unavailable, falls back to `ubus call hostapd.<iface> del_client` with `ban_time`, confirmed via `list_bans`. hostapd's ubus object exposes no ACL method, so this is a timed ban, never a substitute for the durable `maclist` entry.
+- Every `hostapd_cli` call has a 3 s timeout; an AP whose hostapd does not answer in time is treated as one without `hostapd_cli` and gets the ubus ban.
+- With several APs, `enforcement` is the weakest outcome of any of them (`none`, then `ban`, then `acl`).
 
 **Requires:** `hostapd-utils` (declared in `LUCI_DEPENDS`). Without it only the
 degraded `ban` path is available and every block reports `ok:false`.
 
 ---
 
+## Notifications
+
+`trafficctl.notify` (`/usr/share/ucode/trafficctl/notify.uc`) turns what
+happens on the router into events, and hands each event to three consumers:
+
+1. **ubus**: event `trafficctl.notify` with `{ "event", "time", ...fields }`,
+   always (`ubus listen trafficctl.notify`).
+2. **hotplug**: every script in `/etc/hotplug.d/trafficctl/` through
+   `hotplug-call trafficctl`, with `ACTION=<event>`, `TIME=<epoch>` and each
+   field upper-cased (`IP`, `MAC`, `RATE_KBIT`, ...), always.
+3. **senders**: each enabled sender subscribed to the event, unless
+   `notify.enabled` is `0` (that switch silences the senders only).
+
+Steps 2 and 3 run in a detached `trafficctl notify dispatch`: the command that
+caused the event never waits on the network.
+
+| Event | Emitted by | Fields |
+|-------|------------|--------|
+| `new_device` | the device scan, the DHCP hotplug | `mac`, `ip`, `name`, `link` |
+| `known_device` | the device scan (a known MAC back online) | `mac`, `ip`, `name`, `link` |
+| `limit_applied` | `trafficctl ratelimit` (`limit.uc`), `trafficctl shape add` (`shape.uc`; not its restore) | `ip`, `rate_kbit`, `rate_kbit_up`, `mode` (`limiter`\|`shaper`) |
+| `block_applied` | `trafficctl block`, `trafficctl macfilter-add` (when the deny took) | `ip`, `mac`, `kind` (`internet`\|`wifi`) |
+| `cut_engaged` | `trafficctl cut engage` (not its boot restore) | `duration` (seconds left, `0` = indefinite), `persist` |
+
+Putting saved rules back is not an event: the `ifup lan` restore hook sets
+`TCTL_NOTIFY=0`, which `notify.emit_action` honours, so a
+reboot sends no "Limit applied" per device. A block already in place, an
+unblock and a refused action send nothing either.
+
+Every event also carries `via` (`luci`, `telegram`, `cli`) and `src` (the
+caller's address or `local`). Unknown fields are dropped, and so is a text
+field with a control character or over 256 bytes, or a number field that is
+not a number.
+
+### Senders
+
+One uci section per sender, of type `notify_<type>`, each with `enabled` and
+`list events` (unset: every event):
+
+```
+config notify 'notify'
+	option enabled '1'          # 0: senders off; ubus and hotplug still get every event
+	option scan 'auto'          # 1, 0, or auto: only when something wants new_device/known_device
+	option scan_interval '30'   # seconds, 0 or 10..86400
+
+config notify_telegram 'notify_telegram'
+	option enabled '1'
+	list events 'new_device'
+	option template ''          # new_device message, {{ name }} {{ ip }} ... ; empty = built-in
+	# bot_token, chat_id: optional, default to the bot's (trafficctl.telegram)
+
+config notify_ntfy 'notify_ntfy'
+	option server 'https://ntfy.sh'
+	option topic 'my-router'
+	option token ''             # optional access token
+	option priority '3'         # 1..5
+
+config notify_webhook 'notify_webhook'
+	option url 'https://example.com/hook'
+	option auth ''              # optional Authorization header value
+
+config notify_mail 'notify_mail'
+	list to 'me@example.com'
+	option from ''
+	option account ''           # msmtp account, needs msmtp and /etc/msmtprc
+```
+
+- **telegram**: `sendMessage` with HTML; values are HTML-escaped. Sends only:
+  the bot is a separate service.
+- **ntfy**: a JSON publish (`topic`, `title`, `message`, `priority`, `tags`).
+- **webhook**: a JSON POST of `event`, `time`, `router`, `title`, `text` and the
+  event's fields; any 2xx is success.
+- **mail**: a plain-text message through `msmtp`.
+
+Tokens and URLs go to curl as a config file on stdin, never in an argument
+list (`ps` shows argv to every local user). The LuCI ACL grants no direct uci
+access: the views read the settings through `luci.trafficctl`, which shows
+every token and `auth` as `***`.
+
+Delivery is one attempt per event and sender: there is no retry, rate limit or
+coalescing, so a sender that answers 429 (Telegram's flood limit, ntfy's
+quota) loses that message, and a burst of events is a burst of requests. The
+scan sends synchronously; a config change restarts `trafficctl-notify`, and a
+send in flight at that moment is lost with it.
+
+### The device scan
+
+`new_device` and `known_device` come from a scan of the neighbour table, the
+DHCP leases and the WiFi station lists every `scan_interval` seconds, run by
+`/etc/init.d/trafficctl-notify` (`trafficctl notify watch`). The service starts
+only when `trafficctl notify wanted` says something listens: `scan '1'`, or
+`auto` with a sender taking either event, or a hotplug script. The DHCP hotplug
+(`/etc/hotplug.d/dhcp/99-trafficctl-newdevice`) reports a new lease at once
+through `trafficctl notify dhcp`. The scan keeps the bot's state files:
+`/etc/trafficctl/telegram_known.json` (the known-device ledger; a missing or
+empty one is seeded from what is on the network, so switching notifications on
+does not report the whole LAN) and `/tmp/trafficctl_tg_online`. The scan and
+`notify dhcp` see a new device at the same time; each checks the ledger again
+under `/tmp/.trafficctl_known.lock` before adding it, and only the one that
+added it sends `new_device`. When the lock cannot be had within 10 s nothing
+is written, and the device is reported at its next sighting.
+
+### CLI
+
+```
+trafficctl notify emit <event> [key=value...]      # ubus now, the rest in the background
+trafficctl notify dispatch <event> [key=value...]  # hotplug and senders now: [{sender,type,ok,msg}]
+trafficctl notify scan                             # one scan pass: {ok,new,online,devices}
+trafficctl notify watch                            # scan forever (the service)
+trafficctl notify wanted                           # exit 0 when the scan is needed
+trafficctl notify dhcp <mac> [ip] [name]           # new_device for an unknown MAC
+trafficctl notify migrate                          # the bot's old options to notify_telegram
+trafficctl notify test <sender>                    # a test message through one sender
+```
+
+The action code emits through `notify.emit_action(ev, fields)`, which adds
+`via` and `src` (`TCTL_VIA`, `TCTL_SRC`) and never fails the action.
+
+### Migration
+
+Up to 1.30 the bot's section held `notify_new_device`, `notify_known_device`
+and `notify_template`. `trafficctl notify migrate` (run by the postinst and by
+`/etc/uci-defaults/80_trafficctl-notify`, and by `notify_config_set`) creates
+the `notify` section once and, when there is no `notify_telegram` yet, moves
+those options into one: the events that were on, `enabled` as the bot's
+`enabled` (off when no event was on), the template. It removes the old
+options. Until it has run, the old options act as a Telegram sender, so
+notifications keep working mid-upgrade.
+
+A downgrade to 1.30.x does not move them back: 1.30's bot finds no
+`notify_new_device`, `notify_known_device` or `notify_template` and sends no
+device notifications, with the built-in message, until they are set again
+(`uci set trafficctl.telegram.notify_new_device=1`, and the template copied
+from `notify_telegram.template`).
+
+---
+
 ## Telegram Bot
 
-### trafficctl-telegram.sh
+### trafficctl telegram (package `trafficctl-telegram`)
 
-Bot daemon using Telegram long polling. Runs under procd.
+```
+trafficctl telegram
+```
+
+Bot daemon using Telegram long polling, in ucode (`trafficctl.telegram`,
+`/usr/share/ucode/trafficctl/telegram.uc`). It is its own process,
+`/usr/libexec/trafficctl/trafficctl-telegram.uc`, which imports only `lib` and
+the bot, so the resident bot does not load the CLI's other modules; procd runs
+that file (`/etc/init.d/trafficctl-telegram`), and `trafficctl telegram` runs
+it too. Without the package, `trafficctl telegram`
+replies `{"ok":false,"msg":"trafficctl-telegram is not installed"}`, exit 1.
+
+It reads `trafficctl.telegram` (`enabled`, `bot_token`, `chat_id`,
+`poll_interval` in seconds, at least 2, default 3, `control_enabled`, `btn_*`) at start and every
+60 s, exits 0 when `enabled` is not 1 and 1 without a token or chat id. The
+token is in the request URL, which goes to curl in a config on stdin, never in
+argv. The poll offset is `/tmp/trafficctl_tg_offset`; the device list is the
+summary, cached 5 s in `/tmp/trafficctl_tg_devices.json`. Actions run the
+CLI with `TCTL_VIA=telegram`, `TCTL_SRC=telegram:<chat_id>`,
+`TCTL_USER=telegram-bot`.
+
+`poll_interval` is the long-poll timeout and is capped at 25 s, under curl's
+30 s. A refused or unanswered poll is retried every 5 s and logged once when
+the outage starts and once when it ends. The loop runs `gc()` every 20 polls.
+
+Updates are authorised by chat: a message or a button press is obeyed when
+it comes from `chat_id`, whoever sent it. In a group chat every member
+controls the router, as in 1.30.x.
+
+Downgrading to 1.30.x: remove `trafficctl-telegram` first; 1.30.x ships the
+bot inside its single package and would conflict with the file owner.
 
 **Commands:**
 - `/devices` -- inline keyboard with all active devices
 - `/status` -- text summary of blocked/limited devices
 - `/help` -- usage
 
+Only messages and callbacks from `chat_id` are answered.
+
 **Callback data format:** `act:<verb>:<ip>[:<param>]`
 
 | Callback | Action |
 |----------|--------|
 | `act:menu:<ip>` | Show device action buttons |
-| `act:block:<ip>` | Block internet |
-| `act:unblock:<ip>` | Unblock internet |
-| `act:wblock:<ip>` | Block WiFi |
-| `act:wunblock:<ip>` | Unblock WiFi |
-| `act:limit:<ip>:<rate>` | Apply limiter (rate in kbit/s) |
-| `act:unlimit:<ip>` | Remove limiter |
-| `act:shape:<ip>:<rate>` | Apply shaper |
-| `act:unshape:<ip>` | Remove shaper |
+| `act:block:<ip>` | Block internet (`trafficctl block <ip> tg`) |
+| `act:unblock:<ip>` | Unblock internet (`trafficctl unblock <ip> tg`) |
+| `act:wblock:<ip>` | Block WiFi (`trafficctl macfilter-add <ip>`) |
+| `act:wunblock:<ip>` | Unblock WiFi (`trafficctl macfilter-remove <ip>`) |
+| `act:limit:<ip>:<rate>` | Apply limiter, rate in kbit/s (`trafficctl ratelimit <ip> <rate> tg`) |
+| `act:unlimit:<ip>` | Remove limiter (`trafficctl ratelimit <ip> 0 tg`) |
+| `act:shape:<ip>:<rate>` | Apply shaper (`trafficctl shape add <ip> <rate> tg`) |
+| `act:unshape:<ip>` | Remove shaper (`trafficctl shape remove <ip>`) |
 | `act:back` | Return to device list |
 
-**Known devices file:** `/etc/trafficctl/telegram_known.json` -- tracks MACs for new device notifications.
+The address must be dotted digits and the rate digits (`invalid IP`,
+`invalid param`), anything else is refused before a command is built. The
+toast is the action's `msg`, cut to 196 bytes on a character boundary.
 
-### trafficctl-telegram-test.sh
+Differences from the v1.30.0 shell bot: device names are HTML-escaped (a `<`
+used to break `parse_mode=HTML`) and sent with their backslashes as they are
+(printf `%b` used to interpret them); the toast is cut on a UTF-8 boundary; an
+empty device list gives a keyboard that is valid JSON (v1.30.0 built `[]]}`);
+a garbage or empty offset file means offset 0; callback data with a control
+character is refused; a summary that is not JSON reads as no devices.
+
+**Known devices file:** `/etc/trafficctl/telegram_known.json` -- tracks MACs
+for new device notifications. Since 1.31 the scan behind those notifications
+is `trafficctl notify watch` (see [Notifications](#notifications)); the bot no
+longer runs it, and notifications do not need the bot package.
+
+### trafficctl telegram-test
 
 ```
-trafficctl-telegram-test.sh <token> <chat_id>
+trafficctl telegram-test <token> <chat_id> [message]
+TCTL_TG_TOKEN=<token> trafficctl telegram-test - <chat_id> [message]
 ```
 
-Validates token format and chat_id, sends a test message. Returns `{"ok":true,"msg":"..."}`.
+Validates token format and chat_id, sends a test message (`message` is a
+template, filled with sample values). Returns `{"ok":true,"msg":"..."}`, exit 0
+either way. Differences from
+v1.30.0: `{{ wan_ip }}` reads the WAN interface (v1.30.0's lookup was a
+jsonfilter syntax error and always fell back to the route's source address),
+the request body goes to curl on stdin instead of argv, and an API error text
+is JSON-escaped in the reply.
 
 ---
 
 ## rpcd ACL
 
-The ACL file at `/usr/share/rpcd/acl.d/luci-app-trafficctl.json` grants execution permissions. The rpcd backend at `/usr/libexec/rpcd/luci.trafficctl` handles method dispatch and parameter validation.
+The ACL file at `/usr/share/rpcd/acl.d/luci-app-trafficctl.json` grants execution permissions. The rpcd plugin at `/usr/share/rpcd/ucode/luci.trafficctl.uc` (rpcd-mod-ucode) handles method dispatch and parameter validation; rpcd checks the argument types first.

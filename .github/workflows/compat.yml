@@ -6,7 +6,7 @@ on:
   # doubled the most expensive job in the repository and told us nothing the
   # gating run does not. It still runs in full on every pull request.
   pull_request:
-    branches: [main]
+    branches: [main, 'feature/**', 'ucode/**']
   workflow_call:
     inputs:
       package_artifact:
@@ -159,11 +159,11 @@ jobs:
       - name: Collect APK
         run: |
           mkdir -p dist
-          cp /tmp/luci-app-trafficctl*.ipk /tmp/trafficctl_*.ipk dist/ 2>/dev/null || true
-          # The web interface and the backend (trafficctl-<ver>.apk). -name
-          # matches the whole basename, so "trafficctl-[0-9]*" cannot pick up
-          # luci-app-trafficctl-*.
-          for pkg in luci-app-trafficctl trafficctl; do
+          cp /tmp/luci-app-trafficctl*.ipk /tmp/trafficctl_*.ipk /tmp/trafficctl-telegram_*.ipk dist/ 2>/dev/null || true
+          # The web interface, the backend (trafficctl-<ver>.apk) and the bot.
+          # -name matches the whole basename, so "trafficctl-[0-9]*" cannot
+          # pick up luci-app-trafficctl-* or trafficctl-telegram-*.
+          for pkg in luci-app-trafficctl trafficctl trafficctl-telegram; do
             APK=$(find bin/ -name "${pkg}-[0-9]*.apk" 2>/dev/null | head -1)
             if [ -z "$APK" ]; then
               echo "::error::$pkg APK not found in SDK output"
@@ -182,6 +182,8 @@ jobs:
           ln -f dist/luci-app-trafficctl_0.0.0-test_noarch.apk dist/luci-app-trafficctl.apk
           ln -f dist/trafficctl_0.0.0-test-1_all.ipk dist/trafficctl.ipk
           ln -f dist/trafficctl_0.0.0-test_noarch.apk dist/trafficctl.apk
+          ln -f dist/trafficctl-telegram_0.0.0-test-1_all.ipk dist/trafficctl-telegram.ipk
+          ln -f dist/trafficctl-telegram_0.0.0-test_noarch.apk dist/trafficctl-telegram.apk
           ls -l dist/
 
       - uses: actions/upload-artifact@v5
@@ -212,7 +214,6 @@ jobs:
       # pretended-tested.
       matrix:
         include:
-          - { version: "21.02",   arch: "x86-64", image: "x86-64-v21.02.6" }
           - { version: "22.03",   arch: "x86-64", image: "x86-64-v22.03.7" }
           - { version: "23.05",   arch: "x86-64", image: "x86-64-v23.05.6" }
           - { version: "24.10.1", arch: "x86-64", image: "x86-64-v24.10.1" }
@@ -254,7 +255,8 @@ jobs:
           # Addressed through the version-free aliases both builders create,
           # so this works whether the packages came from this workflow's own
           # build or from the caller's release build.
-          # Both packages, backend first: luci-app-trafficctl depends on it.
+          # The three packages, backend first: luci-app-trafficctl depends on
+          # it and on the bot.
           EXT="${{ steps.fmt.outputs.format }}"
           set +e
           docker run --rm \
@@ -262,7 +264,7 @@ jobs:
             -v "$PWD/dist:/dist" \
             -v "$PWD/tests:/tests" \
             "$IMAGE" \
-            /tests/test_install.sh "/dist/trafficctl.$EXT" "/dist/luci-app-trafficctl.$EXT"
+            /tests/test_install.sh "/dist/trafficctl.$EXT" "/dist/trafficctl-telegram.$EXT" "/dist/luci-app-trafficctl.$EXT"
           rc=$?
           set -e
           # 78 means the image's package feeds were unreachable, so the test
@@ -281,6 +283,130 @@ jobs:
           fi
           exit $rc
 
+  # What the ucode port can rely on in the oldest and newest rootfs. Reports
+  # only: a finding changes the port, not the build, so only a pull fails it.
+  ucode-probe:
+    name: ucode probe ${{ matrix.version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ["22.03.7", "24.10.6", "25.12.4"]
+    steps:
+      - name: Probe ucode, nft and tc
+        run: |
+          IMAGE="ghcr.io/openwrt/rootfs:x86-64-v${{ matrix.version }}"
+          for attempt in 1 2 3; do
+            docker pull -q "$IMAGE" && break
+            [ "$attempt" = 3 ] && { echo "::error::Could not pull $IMAGE"; exit 1; }
+            sleep $((attempt * 5))
+          done
+          sudo modprobe sch_htb || true
+          docker run -i --rm --cap-add NET_ADMIN --entrypoint /bin/sh "$IMAGE" -s <<'PROBE' || true
+          mkdir -p /var/lock /var/log
+          pkgs() { opkg list-installed 2>/dev/null || apk info -v 2>/dev/null; }
+          have() { pkgs | grep -qE "^$1( |-[0-9])"; }
+          add() { if command -v opkg >/dev/null; then opkg install "$@"; else apk add "$@"; fi >/dev/null 2>&1; }
+          echo "== release: $(. /etc/openwrt_release; echo "$DISTRIB_RELEASE")"
+          echo "== ucode -v"; ucode -v 2>&1; echo "(rc=$?)"
+          echo "== packages"; pkgs | grep -E '^(ucode|libucode|firewall4|nftables|rpcd|jsonfilter|libubox|ubus|uci)' | sort
+          echo "== /usr/lib/ucode"; ls /usr/lib/ucode
+          for p in firewall4 nftables-json ucode-mod-fs ucode-mod-ubus ucode-mod-uci rpcd-mod-ucode; do
+              have "$p" && echo "  $p: yes" || echo "  $p: no"
+          done
+          echo "== brctl: $(command -v brctl || echo missing)"
+          echo "== nft -j list tables"; nft -j list tables 2>&1; echo "(rc=$?)"
+          # The rootfs ships no tc.
+          { opkg update || apk update; } >/dev/null 2>&1
+          command -v tc >/dev/null || add tc-tiny
+          if tc qdisc add dev eth0 root handle 1: htb default fffe &&
+             tc class add dev eth0 parent 1: classid 1:1 htb rate 100mbit &&
+             tc class add dev eth0 parent 1:1 classid 1:2 htb rate 10mbit ceil 20mbit; then
+              echo "== tc -j class show"; tc -j class show dev eth0; echo "(rc=$?)"
+              echo "== tc -j -s class show"; tc -j -s class show dev eth0
+              echo "== tc -j qdisc show"; tc -j qdisc show dev eth0
+          else
+              echo "== HTB not available"
+          fi
+          PROBE
+
+  # The read-only nft/tc readers on real kernel state: the current shell
+  # writers build blocks, limits and shapes in an OpenWrt rootfs, and the
+  # v1.30.0 shell readers and the ucode CLI must report the same (see
+  # tools/ci/live-compare.sh for the one difference nft 1.1 brings).
+  live-readers:
+    name: Live readers ${{ matrix.version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: "22.03.7"
+            nft: "1.0"
+          - version: "25.12.4"
+            nft: "1.1"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Build state and read it back in OpenWrt ${{ matrix.version }}
+        run: |
+          IMAGE="ghcr.io/openwrt/rootfs:x86-64-v${{ matrix.version }}"
+          for attempt in 1 2 3; do
+            docker pull -q "$IMAGE" && break
+            [ "$attempt" = 3 ] && { echo "::error::Could not pull $IMAGE"; exit 1; }
+            sleep $((attempt * 5))
+          done
+          # A container cannot load modules; the writers need these.
+          for m in sch_htb sch_fq_codel sch_ingress ifb act_mirred cls_u32 \
+                   nf_tables nft_limit nft_ct; do
+            sudo modprobe "$m" || echo "::warning::no module $m"
+          done
+          git fetch -q --depth=1 origin "refs/tags/v1.30.0:refs/tags/v1.30.0" 2>/dev/null || true
+          mkdir -p "$RUNNER_TEMP/legacy" "$RUNNER_TEMP/out"
+          git archive v1.30.0 trafficctl/files | tar -x -C "$RUNNER_TEMP/legacy"
+          docker run --rm --cap-add NET_ADMIN --tmpfs /work:size=300m,exec \
+            -v "$PWD:/src:ro" -v "$RUNNER_TEMP/legacy/trafficctl/files:/legacy:ro" \
+            -v "$RUNNER_TEMP/out:/out" \
+            --entrypoint /bin/sh "$IMAGE" /src/tools/ci/live-readers.sh
+          sudo chown -R "$(id -u)" "$RUNNER_TEMP/out"
+          tools/ci/live-compare.sh "$RUNNER_TEMP/out" "${{ matrix.nft }}"
+
+  # ── the global cut on a real kernel ──
+  # A cut engaged by v1.30.0's trafficctl-cut.sh is released by
+  # `trafficctl cut` and the other way round, the router-local accept is the
+  # first prerouting rule nft lists back whoever installed it, and with no LAN
+  # device both refuse (tools/ci/live-cut.sh).
+  live-cut:
+    name: Live cut ${{ matrix.version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ["22.03.7", "24.10.6", "25.12.4"]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Engage and release across versions in OpenWrt ${{ matrix.version }}
+        run: |
+          IMAGE="ghcr.io/openwrt/rootfs:x86-64-v${{ matrix.version }}"
+          for attempt in 1 2 3; do
+            docker pull -q "$IMAGE" && break
+            [ "$attempt" = 3 ] && { echo "::error::Could not pull $IMAGE"; exit 1; }
+            sleep $((attempt * 5))
+          done
+          # A container cannot load modules; the cut's prerouting chain needs fib.
+          for m in nf_tables nft_fib nft_fib_inet nft_fib_ipv4 nft_fib_ipv6 nft_ct bridge dummy; do
+            sudo modprobe "$m" || echo "::warning::no module $m"
+          done
+          git fetch -q --depth=1 origin "refs/tags/v1.30.0:refs/tags/v1.30.0" 2>/dev/null || true
+          mkdir -p "$RUNNER_TEMP/legacy"
+          git archive v1.30.0 trafficctl/files | tar -x -C "$RUNNER_TEMP/legacy"
+          docker run --rm --cap-add NET_ADMIN --tmpfs /work:size=300m,exec \
+            -v "$PWD:/src:ro" -v "$RUNNER_TEMP/legacy/trafficctl/files:/legacy:ro" \
+            --entrypoint /bin/sh "$IMAGE" /src/tools/ci/live-cut.sh
+
   # ──────────────────────────────────────────────────────────────────────────
   # Live limiter: real nft against the runner's kernel, in the OpenWrt rootfs,
   # on a bridge with two dummy ports. An each-mode limit must reach BOTH ports
@@ -294,7 +420,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version: ["22.03.7", "25.12.4"]
+        version: ["22.03.7", "24.10.6", "25.12.4"]
     steps:
       - uses: actions/checkout@v6
       - name: Limiter on a two-port bridge in OpenWrt ${{ matrix.version }}
@@ -313,11 +439,70 @@ jobs:
             -v "$PWD:/src:ro" --entrypoint /bin/sh "$IMAGE" /src/tools/ci/live-ratelimit.sh /src
 
   # ──────────────────────────────────────────────────────────────────────────
+  # Live shaper: real tc/HTB/u32/mirred and an IFB device against the runner's
+  # kernel, in the OpenWrt rootfs, on a bridge with two dummy ports. Two
+  # shapes must both keep their filters (up to v1.30.x a u32 delete by prio
+  # took every other shape's filters with it), removing one must leave the
+  # other, and `trafficctl restore` must bring them back after a reboot and
+  # replace them over live ones. Needs no package build.
+  # ──────────────────────────────────────────────────────────────────────────
+  live-shape:
+    name: Live shaper ${{ matrix.version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ["22.03.7", "24.10.6", "25.12.4"]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Shaper on a two-port bridge in OpenWrt ${{ matrix.version }}
+        run: |
+          IMAGE="ghcr.io/openwrt/rootfs:x86-64-v${{ matrix.version }}"
+          for attempt in 1 2 3; do
+            docker pull -q "$IMAGE" && break
+            [ "$attempt" = 3 ] && { echo "::error::Could not pull $IMAGE"; exit 1; }
+            sleep $((attempt * 5))
+          done
+          # A container cannot load modules.
+          for m in sch_htb sch_fq_codel sch_ingress cls_u32 act_mirred ifb bridge dummy; do
+            sudo modprobe "$m" || echo "::warning::no module $m"
+          done
+          docker run --rm --cap-add NET_ADMIN --tmpfs /work:size=300m,exec \
+            -v "$PWD:/src:ro" --entrypoint /bin/sh "$IMAGE" /src/tools/ci/live-shape.sh /src
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Live rpcd: the plugin inside the release's own rpcd and rpcd-mod-ucode
+  # (tools/ci/live-rpcd.sh). Every method through rpcd, a call with a
+  # session, the type policy, a CLI that hangs, and uhttpd's /ubus with a
+  # login. The unit tests model rpcd (tests/lib/rpcd.uc); this is the real
+  # one, on the oldest ucode (22.03) and the newest. Needs no package build.
+  # ──────────────────────────────────────────────────────────────────────────
+  live-rpcd:
+    name: Live rpcd ${{ matrix.version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ["22.03.7", "24.10.6", "25.12.4"]
+    steps:
+      - uses: actions/checkout@v6
+      - name: The rpcd plugin in OpenWrt ${{ matrix.version }}
+        run: |
+          IMAGE="ghcr.io/openwrt/rootfs:x86-64-v${{ matrix.version }}"
+          for attempt in 1 2 3; do
+            docker pull -q "$IMAGE" && break
+            [ "$attempt" = 3 ] && { echo "::error::Could not pull $IMAGE"; exit 1; }
+            sleep $((attempt * 5))
+          done
+          docker run --rm --tmpfs /work:size=300m,exec \
+            -v "$PWD:/src:ro" --entrypoint /bin/sh "$IMAGE" /src/tools/ci/live-rpcd.sh /src
+
+  # ──────────────────────────────────────────────────────────────────────────
   # Upgrade — install previous GitHub release, then install current build.
   # Verifies pre-upgrade/post-upgrade hooks, config file preservation.
   # ──────────────────────────────────────────────────────────────────────────
   upgrade:
-    name: Upgrade ${{ matrix.version }}
+    name: Upgrade ${{ matrix.version }}${{ matrix.label }}
     runs-on: ubuntu-latest
     needs: build-packages
     # build-packages is SKIPPED in the reuse case, and a job with an unmet
@@ -328,12 +513,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Only test IPK upgrade for now — APK releases prior to the fix in
-        # this branch are broken (issue #7), so APK upgrade is gated on a
-        # known-good baseline being released first.
+        # One row per package manager and the oldest supported image, plus
+        # the backend upgraded alone first (backend_first): a web interface up
+        # to 1.30.x depends on any trafficctl, so opkg and apk allow that, and
+        # the postinst has to say to upgrade luci-app-trafficctl too.
         include:
+          - { version: "22.03.7", image: "x86-64-v22.03.7", format: "ipk" }
           - { version: "23.05.6", image: "x86-64-v23.05.6", format: "ipk" }
           - { version: "24.10.6", image: "x86-64-v24.10.6", format: "ipk" }
+          - { version: "24.10.6", image: "x86-64-v24.10.6", format: "ipk", backend_first: "1", label: " (backend first)" }
+          - { version: "25.12.4", image: "x86-64-v25.12.4", format: "apk" }
+          - { version: "25.12.4", image: "x86-64-v25.12.4", format: "apk", backend_first: "1", label: " (backend first)" }
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -378,9 +568,14 @@ jobs:
           fi
           OLD_PKGS="/dist-old/$(basename "$OLD_PKG")"
           # Releases up to 1.28.x are one package; later ones also ship the
-          # backend as trafficctl, which then has to be part of the old install.
-          OLD_BE=$(find dist-old -maxdepth 1 -name 'trafficctl*.${{ matrix.format }}' | sort | head -1)
-          [ -n "$OLD_BE" ] && OLD_PKGS="/dist-old/$(basename "$OLD_BE") $OLD_PKGS"
+          # backend as trafficctl, which then has to be part of the old install,
+          # and releases after 1.30.x the bot as trafficctl-telegram.
+          # "trafficctl[._]" and "trafficctl-telegram[._]": the bare
+          # "trafficctl*" also matches the bot.
+          for p in trafficctl-telegram trafficctl; do
+            OLD_P=$(find dist-old -maxdepth 1 \( -name "$p.${{ matrix.format }}" -o -name "${p}_*.${{ matrix.format }}" \) | sort | head -1)
+            [ -n "$OLD_P" ] && OLD_PKGS="/dist-old/$(basename "$OLD_P") $OLD_PKGS"
+          done
           echo "Old packages: $OLD_PKGS"
 
           IMAGE="ghcr.io/openwrt/rootfs:${{ matrix.image }}"
@@ -390,14 +585,18 @@ jobs:
             sleep $((attempt * 5))
           done
           [ "$pulled" = "1" ] || { echo "::error::Could not pull $IMAGE after 3 attempts"; exit 1; }
+          FMT="${{ matrix.format }}"
           # shellcheck disable=SC2086 # OLD_PKGS is a list of package files
-          docker run --rm \
+          # NET_ADMIN: the old release writes a block and a port pause, which
+          # the new one must restore on ifup lan and remove.
+          docker run --rm --cap-add NET_ADMIN \
+            -e UPGRADE_BACKEND_FIRST="${{ matrix.backend_first || '0' }}" \
             --entrypoint /bin/sh \
             -v "$PWD/dist:/dist" \
             -v "$PWD/dist-old:/dist-old" \
             -v "$PWD/tests:/tests" \
             "$IMAGE" \
-            /tests/test_upgrade.sh $OLD_PKGS -- /dist/trafficctl.ipk /dist/luci-app-trafficctl.ipk
+            /tests/test_upgrade.sh $OLD_PKGS -- "/dist/trafficctl.$FMT" "/dist/trafficctl-telegram.$FMT" "/dist/luci-app-trafficctl.$FMT"
 
   # ──────────────────────────────────────────────────────────────────────────
   # Dependencies — verify install fails cleanly when deps are missing, and
@@ -441,4 +640,4 @@ jobs:
             -v "$PWD/dist:/dist" \
             -v "$PWD/tests:/tests" \
             "$IMAGE" \
-            /tests/test_dependencies.sh "/dist/trafficctl.$EXT" "/dist/luci-app-trafficctl.$EXT"
+            /tests/test_dependencies.sh "/dist/trafficctl.$EXT" "/dist/trafficctl-telegram.$EXT" "/dist/luci-app-trafficctl.$EXT"

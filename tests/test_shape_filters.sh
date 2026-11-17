@@ -2,7 +2,7 @@
 # Several shapes at once: each one's u32 filters survive the others' changes.
 #
 # Every shape is one HTB class plus one prio-10 u32 filter on the LAN device
-# (match ip dst) and one on the IFB (match ip src). The shaper deleted a
+# (match ip dst) and one on the IFB (match ip src). The shell shaper deleted a
 # shape's filter with "tc filter del ... prio 10 ... match ip dst <ip>/32"
 # and no handle, and the kernel's u32 then deletes EVERY filter of that prio
 # on the device, whatever match is given. Adding a shape (attach detaches
@@ -10,21 +10,17 @@
 # last shape applied was in force, while the classes stayed and the UI showed
 # every device as shaped. After a reboot the restore left one working shape.
 #
-# tests/lib/tc-htb.sh is a stateful tc that keeps that kernel behaviour, so
-# the test reads what the router holds afterwards.
+# Runs `trafficctl shape` (trafficctl.shape) against tests/lib/tc-htb.sh, a
+# stateful tc that keeps that kernel behaviour, so the test reads what the
+# router holds afterwards.
 
 PASS=0
 FAIL=0
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="$ROOT/trafficctl/files/usr/libexec/trafficctl"
-TCHTB="$ROOT/tests/lib/tc-htb.sh"
-
-TMPDIR=$(mktemp -d)
-trap 'rm -rf "$TMPDIR"' EXIT
-MOCKBIN="$TMPDIR/bin"
-mkdir -p "$MOCKBIN"
-export TC_STATE="$TMPDIR/tc"
+# shellcheck source=tests/lib/ucode.sh
+. "$(dirname "$0")/lib/ucode.sh"
+# shellcheck source=tests/lib/shape_env.sh
+. "$UC_TESTLIB/shape_env.sh"
 
 assert_eq() {
     if [ "$2" = "$3" ]; then
@@ -44,62 +40,21 @@ assert_contains() {
     fi
 }
 
-cat > "$MOCKBIN/uci" <<'MOCK'
-#!/bin/sh
-case "$3" in
-    network.wan.device) echo "eth1" ;;
-    network.lan.device) echo "br-lan" ;;
-    "firewall.@zone[0].name") echo "lan" ;;
-    "firewall.@zone[0].network") echo "lan" ;;
-    *) exit 1 ;;
-esac
-MOCK
-cat > "$MOCKBIN/ubus" <<'MOCK'
-#!/bin/sh
-case "$2" in
-    network.interface.wan) echo '{"l3_device":"eth1"}' ;;
-    *) echo '{"l3_device":"br-lan","ipv4-address":[{"address":"192.168.1.1","mask":24}]}' ;;
-esac
-MOCK
-cat > "$MOCKBIN/jsonfilter" <<'MOCK'
-#!/bin/sh
-input=$(cat)
-case "$2" in
-    '@.l3_device') echo "$input" | sed -n 's/.*"l3_device":"\([^"]*\)".*/\1/p' ;;
-    '@["ipv4-address"][0].address') echo "$input" | sed -n 's/.*"address":"\([^"]*\)".*/\1/p' ;;
-    '@["ipv4-address"][0].mask') echo "$input" | sed -n 's/.*"mask":\([0-9]*\).*/\1/p' ;;
-esac
-MOCK
-printf '#!/bin/sh\nexec sh "%s" tc "$@"\n' "$TCHTB" > "$MOCKBIN/tc"
-printf '#!/bin/sh\nexec sh "%s" ip "$@"\n' "$TCHTB" > "$MOCKBIN/ip"
-printf '#!/bin/sh\nexit 0\n' > "$MOCKBIN/logger"
-chmod +x "$MOCKBIN"/*
+lt_cfg 0
+st_net br-lan lan1 lan2
 
-mkdir -p "$TMPDIR/sys/class/net/eth1" \
-         "$TMPDIR/sys/class/net/br-lan/brif/lan1" \
-         "$TMPDIR/sys/class/net/br-lan/brif/lan2"
-export TCTL_SYSFS_NET="$TMPDIR/sys/class/net"
-
-SHAPE="$TMPDIR/shape.sh"
-sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" \
-    -e "s|SHAPES_FILE=\"/etc/trafficctl/shapes.json\"|SHAPES_FILE=\"$TMPDIR/shapes.json\"|" \
-    -e "s|/sys/class/net/|$TMPDIR/sys/class/net/|g" \
-    "$BIN/trafficctl-shape.sh" > "$SHAPE"
-
-shape() { PATH="$MOCKBIN:$PATH" sh "$SHAPE" "$@" 2>&1; }
+shape() { st_run "$@"; }
 # "<dir> <ip> flowid <class>" for every prio-10 filter on a device.
 filters() {
-    PATH="$MOCKBIN:$PATH" sh "$TCHTB" dump | awk -v d="$1" '
+    st_dump | awk -v d="$1" '
         $1 == "dev" { cur = $2; next }
         cur == d && $1 == "filter" && $3 == "10" { print $4, $5, $6, $7 }' | sort
 }
 classes() {
-    PATH="$MOCKBIN:$PATH" sh "$TCHTB" dump | awk -v d="$1" '
+    st_dump | awk -v d="$1" '
         $1 == "dev" { cur = $2; next }
         cur == d && $1 == "class" && $2 != "1:1" && $2 != "1:fffe" { print $2 }' | sort | tr '\n' ' '
 }
-
-PATH="$MOCKBIN:$PATH" sh "$TCHTB" init br-lan lan1 lan2 eth1
 
 # ── three shapes: every one keeps its filters ───────────────────────────────
 OUT=$(shape add 192.168.1.50 5000)

@@ -1,0 +1,127 @@
+package network
+
+config interface 'loopback'
+	option device 'lo'
+	option proto 'static'
+	option ipaddr '127.0.0.1'
+	option netmask '255.0.0.0'
+
+config globals 'globals'
+	option ula_prefix 'fd00:0:1::/48'
+	option packet_steering '1'
+	option steering_flows '128'
+
+config device
+	option name 'br-lan'
+	option type 'bridge'
+	list ports 'lan2'
+	list ports 'lan3'
+	list ports 'lan4'
+
+config interface 'lan'
+	option device 'br-lan'
+	option proto 'static'
+	option ip6assign '60'
+	list ipaddr '192.168.0.1/24'
+
+config device
+	option name 'wan'
+	option macaddr '02:00:00:00:00:01'
+	option sendredirects '0'
+
+config interface 'wan'
+	option device 'wan'
+	option proto 'dhcp'
+	option hostname '*'
+	option peerdns '0'
+	list dns '127.0.0.1'
+	option ip6assign '64'
+
+config interface 'wan6'
+	option device 'wan'
+	option proto 'dhcpv6'
+	option reqaddress 'try'
+	option reqprefix 'auto'
+	option ip6assign '64'
+	option peerdns '0'
+	list dns '::1'
+	option norelease '1'
+
+config interface 'wan6_alias0'
+	option proto 'static'
+	option device 'wan'
+	list ip6addr '2001:db8:2:4b02::1/128'
+	option delegate '0'
+
+config interface 'awg0'
+	option proto 'amneziawg'
+	option defaultroute '0'
+	option ip6assign '64'
+	option nohostroute '1'
+	option delegate '0'
+	list dns '10.254.254.254'
+	list addresses '10.32.90.208/32'
+	list addresses '2001:db8:3::2/128'
+
+config interface 'awg1'
+	option proto 'amneziawg'
+	option delegate '0'
+	option defaultroute '0'
+	list dns '10.254.254.254'
+	list addresses '10.32.55.195/32'
+	list addresses '2001:db8:3::3/128'
+
+config interface 'awg2'
+	option proto 'amneziawg'
+	option defaultroute '0'
+	list dns '10.254.254.254'
+	list addresses '10.32.55.119/32'
+	list addresses '2001:db8:3::4/128'
+
+config device 'lan2_dev'
+	option name 'lan2'
+
+config device 'lan3_dev'
+	option name 'lan3'
+
+config device 'lan4_dev'
+	option name 'lan4'
+
+config interface 'awg3'
+	option proto 'amneziawg'
+	list dns '10.254.254.254'
+	list addresses '10.32.55.197/32'
+	list addresses '2001:db8:3::5/128'
+
+config amneziawg_awg0
+	list allowed_ips '0.0.0.0/0'
+	list allowed_ips '::/0'
+	option persistent_keepalive '30'
+
+config amneziawg_awg2
+	list allowed_ips '0.0.0.0/0'
+	list allowed_ips '::/0'
+	option persistent_keepalive '15'
+
+config interface 'awg4'
+	option proto 'amneziawg'
+	list addresses '100.64.0.1/32'
+	option defaultroute '0'
+	option delegate '0'
+	option auto '0'
+
+config amneziawg_awg4
+	list allowed_ips '0.0.0.0/0'
+	list allowed_ips '::/0'
+	option persistent_keepalive '30'
+
+config amneziawg_awg1
+	list allowed_ips '0.0.0.0/0'
+	list allowed_ips '::/0'
+	option persistent_keepalive '10'
+
+config amneziawg_awg3
+	list allowed_ips '0.0.0.0/0'
+	list allowed_ips '::/0'
+	option persistent_keepalive '10'
+

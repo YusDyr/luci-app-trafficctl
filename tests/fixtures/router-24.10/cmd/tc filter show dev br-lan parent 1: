@@ -1,0 +1,4 @@
+filter protocol ip pref 10 u32 chain 0 
+filter protocol ip pref 10 u32 chain 0 fh 800: ht divisor 1 
+filter protocol ip pref 10 u32 chain 0 fh 2001:db8:4::6 order 2048 key ht 800 bkt 0 flowid 1:5 not_in_hw 
+  match c0a800fb/ffffffff at 16

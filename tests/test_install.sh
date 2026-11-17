@@ -1,18 +1,18 @@
 #!/bin/sh
 # Runs INSIDE an OpenWrt rootfs Docker container.
-# Usage: sh /tests/test_install.sh /dist/trafficctl.ipk /dist/luci-app-trafficctl.ipk
-#    or: sh /tests/test_install.sh /dist/trafficctl.apk /dist/luci-app-trafficctl.apk
-# Detects format by extension. Installs both packages in one run, verifies the
-# files and who owns them, then removes both.
+# Usage: sh /tests/test_install.sh /dist/trafficctl.ipk /dist/trafficctl-telegram.ipk /dist/luci-app-trafficctl.ipk
+#    or: sh /tests/test_install.sh /dist/trafficctl.apk /dist/trafficctl-telegram.apk /dist/luci-app-trafficctl.apk
+# Detects format by extension. Installs the three packages in one run, verifies
+# the files and who owns them, then removes them.
 set -e
 
-[ "$#" -ge 2 ] || { echo "usage: $0 <trafficctl package> <luci-app-trafficctl package>"; exit 1; }
+[ "$#" -ge 3 ] || { echo "usage: $0 <trafficctl package> <trafficctl-telegram package> <luci-app-trafficctl package>"; exit 1; }
 PKG="$1"
 for p in "$@"; do
     [ -f "$p" ] || { echo "Package not found: $p"; exit 1; }
     [ "${p##*.}" = "${PKG##*.}" ] || { echo "Mixed package formats: $*"; exit 1; }
 done
-PKGS="trafficctl luci-app-trafficctl"
+PKGS="trafficctl trafficctl-telegram luci-app-trafficctl"
 
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
@@ -98,24 +98,21 @@ esac
 
 # Verify all expected files are present
 for f in \
-  /usr/libexec/trafficctl/trafficctl-summary.sh \
-  /usr/libexec/trafficctl/trafficctl-fw.sh \
-  /usr/libexec/trafficctl/trafficctl-device.sh \
-  /usr/libexec/trafficctl/trafficctl-telegram.sh \
-  /usr/libexec/trafficctl/trafficctl-telegram-test.sh \
-  /usr/libexec/trafficctl/trafficctl-block.sh \
-  /usr/libexec/trafficctl/trafficctl-unblock.sh \
-  /usr/libexec/trafficctl/trafficctl-ratelimit.sh \
-  /usr/libexec/trafficctl/trafficctl-ratelimit-stats.sh \
-  /usr/libexec/trafficctl/trafficctl-shape.sh \
-  /usr/libexec/trafficctl/trafficctl-shape-stats.sh \
-  /usr/libexec/trafficctl/trafficctl-bytes.sh \
-  /usr/libexec/trafficctl/trafficctl-totals.sh \
-  /usr/libexec/trafficctl/trafficctl-rdns.sh \
-  /usr/libexec/trafficctl/trafficctl-rules.sh \
-  /usr/libexec/trafficctl/trafficctl-macfilter-add.sh \
-  /usr/libexec/trafficctl/trafficctl-macfilter-remove.sh \
-  /usr/libexec/rpcd/luci.trafficctl \
+  /usr/sbin/trafficctl \
+  /usr/share/ucode/trafficctl/lib.uc \
+  /usr/share/ucode/trafficctl/net.uc \
+  /usr/share/ucode/trafficctl/report.uc \
+  /usr/share/ucode/trafficctl/cut.uc \
+  /usr/share/ucode/trafficctl/portfw.uc \
+  /usr/share/ucode/trafficctl/ctl.uc \
+  /usr/share/ucode/trafficctl/limit.uc \
+  /usr/share/ucode/trafficctl/shape.uc \
+  /usr/share/ucode/trafficctl/history.uc \
+  /etc/init.d/trafficctl-cut \
+  /etc/init.d/trafficctl-history \
+  /usr/libexec/trafficctl/trafficctl-telegram.uc \
+  /usr/share/ucode/trafficctl/telegram.uc \
+  /usr/share/rpcd/ucode/luci.trafficctl.uc \
   /www/luci-static/resources/view/trafficctl/status.js \
   /www/luci-static/resources/view/trafficctl/status.css \
   /usr/share/luci/menu.d/luci-app-trafficctl.json \
@@ -124,28 +121,140 @@ for f in \
   /etc/hotplug.d/dhcp/99-trafficctl-newdevice \
   /etc/hotplug.d/iface/99-trafficctl-shapes \
   /etc/init.d/trafficctl-telegram \
+  /etc/init.d/trafficctl-notify \
+  /usr/share/ucode/trafficctl/notify.uc \
   /lib/upgrade/keep.d/trafficctl \
   /www/cgi-bin/trafficctl-metrics; do
   [ -f "$f" ] || { echo "MISSING: $f"; exit 1; }
 done
 
-# Verify syntax for all shell scripts
+# The shell scripts of 1.30.x in /usr/libexec/trafficctl are gone; only the
+# bot's ucode entry is left there.
+for s in /usr/libexec/trafficctl/*.sh; do
+  [ -e "$s" ] && { echo "LEFT OVER: $s (removed in 2.0.0)"; exit 1; }
+done
+
+# What is still shell: the init scripts, the hooks and the CGI.
 for s in \
-  /usr/libexec/trafficctl/trafficctl-*.sh \
-  /usr/libexec/rpcd/luci.trafficctl \
   /etc/hotplug.d/dhcp/99-trafficctl-newdevice \
   /etc/hotplug.d/iface/99-trafficctl-shapes \
-  /etc/init.d/trafficctl-telegram; do
+  /etc/init.d/trafficctl-cut \
+  /etc/init.d/trafficctl-history \
+  /etc/init.d/trafficctl-notify \
+  /etc/init.d/trafficctl-telegram \
+  /www/cgi-bin/trafficctl-metrics; do
   ash -n "$s" || { echo "SYNTAX ERROR: $s"; exit 1; }
+done
+
+# Every ucode file compiles on this release's own interpreter: a construct
+# the 2022-12 parser does not know fails here, not on the first call. `-c`
+# compiles a module only through an import (one on its own is refused for
+# its export), so the entry points are compiled: the CLI imports every
+# backend module, the bot entry telegram.uc.
+for s in /usr/sbin/trafficctl /usr/libexec/trafficctl/trafficctl-telegram.uc; do
+  ucode -c -o /dev/null "$s" || { echo "UCODE COMPILE ERROR: $s"; exit 1; }
+done
+for m in /usr/share/ucode/trafficctl/*.uc; do
+  m=${m##*/}; m=${m%.uc}
+  grep -q "from 'trafficctl\.$m'" /usr/sbin/trafficctl /usr/libexec/trafficctl/trafficctl-telegram.uc ||
+    { echo "UCODE COMPILE: trafficctl.$m is imported by neither entry point, so it was not compiled"; exit 1; }
 done
 
 # Verify execute bit on files that are called directly (not via sh)
 for s in \
-  /usr/libexec/trafficctl/trafficctl-*.sh \
-  /usr/libexec/rpcd/luci.trafficctl \
+  /usr/sbin/trafficctl \
+  /usr/libexec/trafficctl/trafficctl-telegram.uc \
+  /www/cgi-bin/trafficctl-metrics \
+  /etc/init.d/trafficctl-cut \
+  /etc/init.d/trafficctl-history \
+  /etc/init.d/trafficctl-notify \
   /etc/init.d/trafficctl-telegram; do
   [ -x "$s" ] || { echo "NOT EXECUTABLE: $s"; exit 1; }
 done
+
+# The ucode CLI runs on this release's own interpreter and finds its modules
+# on the default search path. None of these needs a running ubusd.
+out=$(/usr/sbin/trafficctl names list 2>&1)
+[ "$out" = "[]" ] || { echo "CLI FAILED: trafficctl names list printed: $out"; exit 1; }
+for c in subnets ifaces bytes totals "totals --all" summary "netify list"; do
+    out=$(/usr/sbin/trafficctl $c 2>&1)
+    case "$out" in "["*"]") ;; *) echo "CLI FAILED: trafficctl $c printed: $out"; exit 1 ;; esac
+done
+out=$(/usr/sbin/trafficctl metrics 2>&1)
+case "$out" in "# trafficctl metrics are disabled"*) ;; *) echo "CLI FAILED: trafficctl metrics printed: $out"; exit 1 ;; esac
+# The postinst moved the config to the notification layout (or found it
+# there), and with no Telegram bot set up nothing wants the device scan, so
+# the watcher service stays down.
+out=$(/usr/sbin/trafficctl notify migrate 2>&1)
+case "$out" in '{"ok":true,'*) ;; *) echo "CLI FAILED: notify migrate printed: $out"; exit 1 ;; esac
+[ "$(uci -q get trafficctl.notify.scan)" = auto ] || { echo "CONFIG: trafficctl.notify.scan is not auto"; exit 1; }
+if /usr/sbin/trafficctl notify wanted >/dev/null 2>&1; then
+    echo "CLI FAILED: notify wanted on a router with no sender set up"; exit 1
+fi
+# Cut and port forwards: status only reads (no rule, no keeper), and a
+# container without nf_tables still answers with JSON.
+out=$(/usr/sbin/trafficctl cut status 2>&1)
+case "$out" in '{"ok":true,"active":false,'*) ;; *) echo "CLI FAILED: trafficctl cut status printed: $out"; exit 1 ;; esac
+out=$(/usr/sbin/trafficctl portfw list 2>&1)
+case "$out" in "["*"]") ;; *) echo "CLI FAILED: trafficctl portfw list printed: $out"; exit 1 ;; esac
+if /usr/sbin/trafficctl bogus >/dev/null 2>&1; then
+    echo "CLI FAILED: an unknown command exited 0"; exit 1
+fi
+
+# History: the init script runs the ucode keeper.
+grep -q '/usr/sbin/trafficctl history keeper' /etc/init.d/trafficctl-history ||
+    { echo "INIT FAILED: trafficctl-history does not run the ucode keeper"; exit 1; }
+out=$(/usr/sbin/trafficctl history status 2>&1)
+case "$out" in '{"enabled":false,'*'}') ;; *) echo "CLI FAILED: trafficctl history status printed: $out"; exit 1 ;; esac
+out=$(/usr/sbin/trafficctl history periods 2>&1)
+[ "$out" = "[]" ] || { echo "CLI FAILED: trafficctl history periods printed: $out"; exit 1; }
+/usr/sbin/trafficctl history validate-dir /mnt/usb ||
+    { echo "CLI FAILED: validate-dir refused /mnt/usb"; exit 1; }
+if /usr/sbin/trafficctl history validate-dir /etc; then
+    echo "CLI FAILED: validate-dir accepted /etc"; exit 1
+fi
+
+# The rpcd plugin runs inside this release's own rpcd (rpcd-mod-ucode, a
+# dependency): its signature, a read that needs only uci, the version read
+# from this package manager's database (never "dev" once installed, never by
+# running opkg), a call with arguments, and rpcd's policy refusing a value of
+# the wrong type. The exec plugin of releases up to 1.30.x is not there.
+[ ! -e /usr/libexec/rpcd/luci.trafficctl ] || {
+    echo "RPCD FAILED: the exec plugin of 1.30.x is still installed"; exit 1; }
+[ -f /usr/lib/rpcd/ucode.so ] || { echo "RPCD FAILED: rpcd-mod-ucode is not installed"; exit 1; }
+mkdir -p /var/run
+/sbin/ubusd & UBUSD_PID=$!
+sleep 1
+/sbin/rpcd & RPCD_PID=$!
+i=0
+until ubus list luci.trafficctl >/dev/null 2>&1; do
+    i=$((i + 1))
+    [ "$i" -lt 20 ] || { echo "RPCD FAILED: rpcd never registered luci.trafficctl"; exit 1; }
+    sleep 1
+done
+case "$(ubus -v list luci.trafficctl 2>&1)" in *'"version":{}'*) ;;
+    *) echo "RPCD FAILED: list printed: $(ubus -v list luci.trafficctl 2>&1)"; exit 1 ;; esac
+out=$(ubus -t 30 call luci.trafficctl config_get 2>&1)
+case "$out" in *'"enabled":'*) ;; *) echo "RPCD FAILED: config_get printed: $out"; exit 1 ;; esac
+out=$(ubus -t 30 call luci.trafficctl version 2>&1)
+case "$out" in *'"version": "dev"'*|*'"version": ""'*) echo "RPCD FAILED: version printed: $out"; exit 1 ;;
+    *'"version": "'*) echo "rpcd plugin: $out" ;;
+    *) echo "RPCD FAILED: version printed: $out"; exit 1 ;; esac
+t0=$(date +%s)
+out=$(ubus -t 30 call luci.trafficctl name_set '{"ip":"192.168.77.5","name":"ci-probe"}' 2>&1) || {
+    echo "RPCD FAILED: name_set through rpcd: $out"; exit 1; }
+case "$out" in *'"ok": true'*) ;; *) echo "RPCD FAILED: name_set through rpcd printed: $out"; exit 1 ;; esac
+out=$(ubus -t 30 call luci.trafficctl names_list 2>&1)
+case "$out" in *ci-probe*) ;; *) echo "RPCD FAILED: names_list through rpcd printed: $out"; exit 1 ;; esac
+out=$(ubus -t 30 call luci.trafficctl name_clear '{"ip":"192.168.77.5"}' 2>&1) || {
+    echo "RPCD FAILED: name_clear through rpcd: $out"; exit 1; }
+echo "rpcd: calls with arguments returned in $(( $(date +%s) - t0 )) s"
+if out=$(ubus -t 30 call luci.trafficctl config_set '{"poll_interval":"3"}' 2>&1); then
+    echo "RPCD FAILED: rpcd took a string for an int: $out"; exit 1
+fi
+case "$out" in *'Invalid argument'*) ;; *) echo "RPCD FAILED: a string for an int gave: $out"; exit 1 ;; esac
+kill "$RPCD_PID" "$UBUSD_PID" 2>/dev/null || true
+wait "$RPCD_PID" "$UBUSD_PID" 2>/dev/null || true
 
 # Each file belongs to the package that is meant to ship it: the backend to
 # trafficctl, the view and its rpcd plugin to luci-app-trafficctl.
@@ -156,9 +265,12 @@ owner_of() {
     esac
 }
 for f in \
-  /usr/libexec/trafficctl/trafficctl-fw.sh \
+  /usr/sbin/trafficctl \
+  /usr/share/ucode/trafficctl/lib.uc \
+  /usr/share/ucode/trafficctl/ctl.uc \
   /etc/config/trafficctl \
-  /etc/init.d/trafficctl-telegram \
+  /etc/init.d/trafficctl-notify \
+  /usr/share/ucode/trafficctl/notify.uc \
   /etc/hotplug.d/iface/99-trafficctl-shapes \
   /lib/upgrade/keep.d/trafficctl \
   /www/cgi-bin/trafficctl-metrics; do
@@ -166,7 +278,14 @@ for f in \
   [ "$o" = trafficctl ] || { echo "WRONG OWNER: $f is owned by '$o', expected trafficctl"; exit 1; }
 done
 for f in \
-  /usr/libexec/rpcd/luci.trafficctl \
+  /etc/init.d/trafficctl-telegram \
+  /usr/libexec/trafficctl/trafficctl-telegram.uc \
+  /usr/share/ucode/trafficctl/telegram.uc; do
+  o=$(owner_of "$f")
+  [ "$o" = trafficctl-telegram ] || { echo "WRONG OWNER: $f is owned by '$o', expected trafficctl-telegram"; exit 1; }
+done
+for f in \
+  /usr/share/rpcd/ucode/luci.trafficctl.uc \
   /www/luci-static/resources/view/trafficctl/status.js \
   /usr/share/rpcd/acl.d/luci-app-trafficctl.json; do
   o=$(owner_of "$f")
@@ -197,23 +316,25 @@ case "$PKG" in
         # in opkg's DB — remove it the real way and require success.
         # The web interface first: it depends on the backend.
         opkg remove luci-app-trafficctl || { echo "REMOVAL FAILED: opkg remove luci-app-trafficctl returned non-zero"; exit 1; }
+        opkg remove trafficctl-telegram || { echo "REMOVAL FAILED: opkg remove trafficctl-telegram returned non-zero"; exit 1; }
         opkg remove trafficctl || { echo "REMOVAL FAILED: opkg remove trafficctl returned non-zero"; exit 1; }
         ;;
     *.apk)
-        apk del luci-app-trafficctl trafficctl || {
+        apk del luci-app-trafficctl trafficctl-telegram trafficctl || {
             echo "REMOVAL FAILED: apk del returned non-zero"; exit 1; }
         ;;
 esac
 
 # Verify primary files are gone (config files in /etc/config may be kept by design)
 for f in \
-  /usr/libexec/trafficctl/trafficctl-summary.sh \
-  /usr/libexec/trafficctl/trafficctl-fw.sh \
-  /usr/libexec/trafficctl/trafficctl-block.sh \
-  /usr/libexec/rpcd/luci.trafficctl \
+  /usr/sbin/trafficctl \
+  /usr/share/ucode/trafficctl/lib.uc \
+  /usr/share/rpcd/ucode/luci.trafficctl.uc \
   /www/luci-static/resources/view/trafficctl/status.js \
   /www/luci-static/resources/view/trafficctl/status.css \
   /etc/init.d/trafficctl-telegram \
+  /usr/share/ucode/trafficctl/telegram.uc \
+  /etc/init.d/trafficctl-notify \
   /www/cgi-bin/trafficctl-metrics; do
   [ -f "$f" ] && { echo "REMOVAL FAILED: $f still exists"; exit 1; }
 done

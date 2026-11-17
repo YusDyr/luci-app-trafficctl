@@ -13,86 +13,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      # The runner has gawk and mawk, both 64-bit clean on "%d". The byte
-      # overflow the exporter hits is a busybox-awk behaviour, so without
-      # busybox here test_byte_overflow.sh passes whether or not the bug is
-      # present. mawk is pulled in for the same reason test_changelog_gen.sh
-      # wants several awks: the interpreters disagree.
+      # test_changelog_gen.sh runs the release-notes awk under every awk on
+      # the box, busybox's and mawk included: the interpreters disagree.
       - name: Install extra awk implementations
         run: sudo apt-get install -y --no-install-recommends busybox-static mawk
-      - name: Shell unit tests
-        run: bash tests/test_fw.sh
-      - name: nft bytes parser tests
-        run: bash tests/test_bytes_nft.sh
-      - name: Port-forward control tests
-        run: bash tests/test_portfw.sh
-      - name: Device naming tests
-        run: bash tests/test_names.sh
-      - name: Netify (DPI) integration tests
-        run: bash tests/test_netify.sh
-      - name: Bidirectional limit/shape tests
-        run: bash tests/test_direction.sh
-      - name: Shaper filters
-        run: bash tests/test_shape_filters.sh
-      - name: Per-chain limiter meters on a multi-port bridge
-        run: bash tests/test_meter_per_chain.sh
-      - name: Cumulative byte counter tests
-        run: bash tests/test_totals.sh
-      - name: Prometheus exporter tests
-        run: bash tests/test_metrics.sh
-      - name: Telegram unit tests
-        run: bash tests/test_telegram.sh
-      - name: Telegram mock tests
-        run: bash tests/test_telegram_mock.sh
-      - name: Telegram E2E tests
-        run: bash tests/test_telegram_e2e.sh
       - name: Security tests
         run: bash tests/test_security.sh
-      - name: rpcd backend tests
-        run: bash tests/test_rpcd.sh
-      - name: Block/unblock tests
-        run: bash tests/test_block.sh
-      - name: Rules tab backend tests
-        run: bash tests/test_rules.sh
-      - name: IPv6 enforcement tests
-        run: bash tests/test_ipv6.sh
-      - name: WiFi MAC filter tests
-        run: bash tests/test_macfilter.sh
-      - name: Metrics CGI endpoint tests
-        run: bash tests/test_metrics_cgi.sh
-      - name: Byte counter overflow tests
-        run: bash tests/test_byte_overflow.sh
-      - name: New device default-limit tests
-        run: bash tests/test_newdevice.sh
-      - name: Subnet / aggregate limit tests
-        run: bash tests/test_subnet_limits.sh
-      # Independent up/down ceilings. Most of the risk is the shapes.json
-      # record format: a record the extraction pattern misses disappears from
-      # the classid allocator and two devices end up sharing an HTB class.
-      - name: Asymmetric rate limit tests
-        run: bash tests/test_asymmetric_limits.sh
-      - name: Shape classid lookup tests (summary, shape-stats)
-        run: bash tests/test_shape_lookup.sh
-      - name: Rate limit lookup tests (summary, device, stats)
-        run: bash tests/test_rl_lookup.sh
+      # Destination names behind AdGuard Home's per-client rate limit (#165).
+      - name: Device view reverse DNS scheduling
+        run: bash tests/test_rdns_ui.sh
       # Slices the CIDR helpers out of status.js and runs them under node —
       # the only frontend logic with a wrong answer an operator cannot see.
       - name: Subnet target warning (frontend slices)
         run: bash tests/test_subnet_ui.sh
-      # Cross-checks the offload modes the shell can emit against the badge
+      # Cross-checks the offload modes net.uc can report against the badge
       # table in status.js, and pins the Telegram preset button rendering.
       - name: Offload badge / preset button rendering
         run: bash tests/test_offload_ui.sh
       # The upload row was built but never attached to the panel (#66).
       - name: Split up/down control and split ceiling display
         run: bash tests/test_split_ui.sh
-      # Destination names behind AdGuard Home's per-client rate limit (#165).
-      - name: Device view reverse DNS scheduling
-        run: bash tests/test_rdns_ui.sh
-      - name: Per-interface counter tests (global overview)
-        run: bash tests/test_ifaces.sh
-      - name: Egress interface naming tests
-        run: bash tests/test_oif_label.sh
+      # The History view's verdicts and fields against history.uc's replies.
+      - name: History view tests
+        run: bash tests/test_history_ui.sh
       - name: Postinst parity tests
         run: bash tests/test_postinst_parity.sh
       # trafficctl/Makefile lists its files by name; this compares the list
@@ -104,8 +47,6 @@ jobs:
       # compares against a golden .lmo built by the real po2lmo.
       - name: Translation packaging tests
         run: bash tests/test_i18n_packaging.sh
-      - name: Global internet cut tests
-        run: bash tests/test_cut.sh
       - name: Regression tests
         run: bash tests/test_regressions.sh
       - name: Release version-bump tests
@@ -114,6 +55,121 @@ jobs:
         run: bash tests/test_changelog_gen.sh
       - name: IPK build test
         run: bash tests/test_build_ipk.sh
+
+  # The ucode backend: its unit tests, and its output against v1.30.0's
+  # shell one (tests/equiv.sh), on the oldest and the newest ucode we support.
+  # A missing ucode fails the job.
+  ucode-tests:
+    name: ucode ${{ matrix.ucode }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ucode: ["2022-12-02", "25.12"]
+    steps:
+      - uses: actions/checkout@v6
+      # equiv.sh runs the shell rpcd plugin under busybox ash, as on the
+      # router, where its printf %d differs from dash's. test_byte_overflow.sh:
+      # the 32-bit %d it guards against is a busybox-awk behaviour (see the
+      # same step in the job above). socat: test_netify.sh reads the agent's
+      # socket through both readers, and the runner has nc only.
+      - name: Install busybox, extra awk implementations and socat
+        run: sudo apt-get install -y --no-install-recommends busybox-static mawk socat
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/trafficctl-ucode/${{ matrix.ucode }}
+          key: ucode-${{ matrix.ucode }}-${{ runner.os }}-${{ hashFiles('tools/ci/build-ucode.sh') }}
+      - name: Build ucode, ubus and uci at pinned commits
+        run: tools/ci/build-ucode.sh "${{ matrix.ucode }}"
+      - name: ucode library tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_ucode_lib.sh
+      - name: Device naming tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_names.sh
+      - name: Per-interface counter tests (global overview)
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_ifaces.sh
+      - name: Cumulative byte counter tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_totals.sh
+      - name: Prometheus exporter tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_metrics.sh
+      - name: Byte counter overflow tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_byte_overflow.sh
+      - name: Metrics CGI endpoint tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_metrics_cgi.sh
+      # The summary is the 2-second LuCI poll; the device report is its detail.
+      - name: Summary and device report tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_report.sh
+      - name: Egress interface naming tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_oif_label.sh
+      - name: Netify (DPI) integration tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_netify.sh
+      # The limiter, block and shaper readers (trafficctl.ctl), read from the
+      # nft -j output of both nft versions.
+      - name: Block/unblock tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_block.sh
+      - name: IPv6 block tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_ipv6_block.sh
+      - name: WiFi MAC filter tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_macfilter.sh
+      - name: New device default-limit tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_newdevice.sh
+      # The limiter (trafficctl.limit) and the shaper (trafficctl.shape).
+      - name: Bidirectional limit/shape tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_direction.sh
+      - name: Per-chain limiter meters on a multi-port bridge
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_meter_per_chain.sh
+      # Device names, the v6 set timeout and rules.json fields as they reach
+      # nft; 1.30.x's zero-padded masks; one restore half failing.
+      - name: Limiter input tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_limit_inputs.sh
+      - name: IPv6 enforcement tests (limiter)
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_ipv6.sh
+      - name: Qualcomm NSS reporting tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_nss.sh
+      # Independent up/down ceilings. Most of the risk is the shapes.json
+      # record format: a record the extraction pattern misses disappears from
+      # the classid allocator and two devices end up sharing an HTB class.
+      - name: Asymmetric rate limit tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_asymmetric_limits.sh
+      - name: Persistence tests (rules.json, restore, the shared lock)
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_persistence.sh
+      - name: Rules tab backend tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_rules.sh
+      - name: Subnet / aggregate limit tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_subnet_limits.sh
+      - name: Shape classid lookup tests (summary, shape-stats)
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_shape_lookup.sh
+      - name: Shaper tests (trafficctl shape, its restore, a stateful tc)
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_shape.sh
+      - name: Shaper filters (several shapes keep their u32 filters)
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_shape_filters.sh
+      - name: Rate limit lookup tests (summary, device, stats)
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_rl_lookup.sh
+      - name: Reader tests (exact comments, nft 1.1 meters)
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_readers.sh
+      # Events, senders, the device scan, migration, the Notifications tab's
+      # methods and telegram-test (trafficctl.notify).
+      - name: Notification tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_notify.sh
+      # Commands, callbacks, the device cache and the CLI command
+      # (trafficctl.telegram, package trafficctl-telegram).
+      - name: Telegram bot tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_telegram_bot.sh
+      - name: rpcd plugin tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_rpcd.sh
+      # Every rpc.declare in the views against the plugin's list: methods,
+      # params and value types, since rpcd refuses a call outside the policy.
+      - name: rpcd contract tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_rpcd_contract.sh
+      - name: Port-forward control tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_portfw.sh
+      - name: Global internet cut tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_cut.sh
+      # The history store (history.uc): flush, cursors, the interface series,
+      # the keeper, the flush guard and the ISO week against date(1).
+      - name: History tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/test_history.sh
+      - name: Equivalence tests
+        run: UCODE_PREFIX="$HOME/.cache/trafficctl-ucode/${{ matrix.ucode }}" bash tests/equiv.sh
 
   telegram-integration:
     name: Telegram Integration

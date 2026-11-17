@@ -1,0 +1,76 @@
+{
+	"up": true,
+	"pending": false,
+	"available": true,
+	"autostart": true,
+	"dynamic": false,
+	"uptime": 292947,
+	"l3_device": "awg0",
+	"proto": "amneziawg",
+	"updated": [
+		"addresses"
+	],
+	"metric": 0,
+	"dns_metric": 0,
+	"delegation": false,
+	"ipv4-address": [
+		{
+			"address": "10.32.90.208",
+			"mask": 32
+		}
+	],
+	"ipv6-address": [
+		{
+			"address": "2001:db8:3::2",
+			"mask": 128
+		}
+	],
+	"ipv6-prefix": [
+		
+	],
+	"ipv6-prefix-assignment": [
+		{
+			"address": "fd00:0:1:10::",
+			"mask": 64,
+			"local-address": {
+				"address": "fd00:0:1:10::1",
+				"mask": 64
+			}
+		}
+	],
+	"route": [
+		
+	],
+	"dns-server": [
+		"10.254.254.254"
+	],
+	"dns-search": [
+		
+	],
+	"neighbors": [
+		
+	],
+	"inactive": {
+		"ipv4-address": [
+			
+		],
+		"ipv6-address": [
+			
+		],
+		"route": [
+			
+		],
+		"dns-server": [
+			
+		],
+		"dns-search": [
+			
+		],
+		"neighbors": [
+			
+		]
+	},
+	"data": {
+		
+	}
+}

@@ -1,0 +1,64 @@
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host 
+       valid_lft forever preferred_lft forever
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1504 qdisc mq state UP qlen 1000
+    link/ether 02:00:00:00:00:6a brd ff:ff:ff:ff:ff:ff
+    inet6 fe80::7/64 scope link 
+       valid_lft forever preferred_lft forever
+3: lan4@eth0: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 qdisc noqueue master br-lan state LOWERLAYERDOWN qlen 1000
+    link/ether 02:00:00:00:00:6a brd ff:ff:ff:ff:ff:ff
+4: lan3@eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-lan state UP qlen 1000
+    link/ether 02:00:00:00:00:6a brd ff:ff:ff:ff:ff:ff
+5: lan2@eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-lan state UP qlen 1000
+    link/ether 02:00:00:00:00:6a brd ff:ff:ff:ff:ff:ff
+6: wan@eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP qlen 1000
+    link/ether 02:00:00:00:00:01 brd ff:ff:ff:ff:ff:ff
+    inet 10.128.28.73/24 brd 10.128.28.255 scope global wan
+       valid_lft forever preferred_lft forever
+    inet6 2001:db8:2:4b02::1/128 scope global 
+       valid_lft forever preferred_lft forever
+    inet6 fd00:0:1:11::1/64 scope global noprefixroute 
+       valid_lft forever preferred_lft forever
+    inet6 fe80::8/64 scope link 
+       valid_lft forever preferred_lft forever
+7: br-lan: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc htb state UP qlen 1000
+    link/ether 02:00:00:00:00:6a brd ff:ff:ff:ff:ff:ff
+    inet 192.168.0.1/24 brd 192.168.0.255 scope global br-lan
+       valid_lft forever preferred_lft forever
+    inet6 fd00:0:1::1/60 scope global noprefixroute 
+       valid_lft forever preferred_lft forever
+    inet6 fe80::7/64 scope link 
+       valid_lft forever preferred_lft forever
+8: awg0: <POINTOPOINT,NOARP,UP,LOWER_UP> mtu 1420 qdisc noqueue state UNKNOWN qlen 1000
+    link/[65534] 
+    inet 10.32.90.208/32 brd 255.255.255.255 scope global awg0
+       valid_lft forever preferred_lft forever
+    inet6 fd00:0:1:10::1/64 scope global noprefixroute 
+       valid_lft forever preferred_lft forever
+    inet6 2001:db8:3::2/128 scope global 
+       valid_lft forever preferred_lft forever
+12: phy1-ap0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-lan state UP qlen 1000
+    link/ether 02:00:00:00:00:6c brd ff:ff:ff:ff:ff:ff
+13: phy0-ap0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue master br-lan state UP qlen 1000
+    link/ether 02:00:00:00:00:6b brd ff:ff:ff:ff:ff:ff
+15: awg2: <POINTOPOINT,NOARP,UP,LOWER_UP> mtu 1420 qdisc noqueue state UNKNOWN qlen 1000
+    link/[65534] 
+    inet 10.32.55.119/32 brd 255.255.255.255 scope global awg2
+       valid_lft forever preferred_lft forever
+    inet6 2001:db8:3::4/128 scope global 
+       valid_lft forever preferred_lft forever
+16: awg3: <POINTOPOINT,NOARP,UP,LOWER_UP> mtu 1420 qdisc noqueue state UNKNOWN qlen 1000
+    link/[65534] 
+    inet 10.32.55.197/32 brd 255.255.255.255 scope global awg3
+       valid_lft forever preferred_lft forever
+    inet6 2001:db8:3::5/128 scope global 
+       valid_lft forever preferred_lft forever
+17: awg1: <POINTOPOINT,NOARP,UP,LOWER_UP> mtu 1420 qdisc noqueue state UNKNOWN qlen 1000
+    link/[65534] 
+    inet 10.32.55.195/32 brd 255.255.255.255 scope global awg1
+       valid_lft forever preferred_lft forever
+    inet6 2001:db8:3::3/128 scope global 
+       valid_lft forever preferred_lft forever

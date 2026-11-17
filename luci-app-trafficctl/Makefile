@@ -8,7 +8,7 @@ PKG_LICENSE:=Apache-2.0
 PKG_MAINTAINER:=Denis Iusupov <yusdyr@gmail.com>
 
 LUCI_TITLE:=LuCI Traffic Control
-LUCI_DESCRIPTION:=Per-device traffic monitoring, rate limiting (nft/iptables), \
+LUCI_DESCRIPTION:=Per-device traffic monitoring, rate limiting (nftables), \
  traffic shaping (tc/HTB), internet blocking, and WiFi MAC filtering.
 # The backend (helper scripts, init scripts, hotplug hooks, the config and the
 # metrics CGI) is its own package, ../trafficctl. What is left here is the
@@ -28,7 +28,20 @@ LUCI_DESCRIPTION:=Per-device traffic monitoring, rate limiting (nft/iptables), \
 # optional there, for wired-only builds), but it stays here so the upgrade from
 # 1.28.0 does not drop it and silently turn every WiFi block into a temporary
 # ban. trafficctl on its own does not need it.
-LUCI_DEPENDS:=+trafficctl +conntrack +curl +tc +iw +kmod-nft-netdev +hostapd-utils +luci-base +rpcd
+#
+# trafficctl-telegram is the Telegram bot, a package of its own since releases
+# after 1.30.x (it was part of trafficctl). The Settings panel configures it,
+# and with it here an upgrade from 1.30.x keeps a bot that was running.
+#
+# rpcd-mod-ucode runs the rpcd plugin (/usr/share/rpcd/ucode/luci.trafficctl.uc)
+# inside rpcd. Releases up to 1.30.x shipped it as an exec plugin. The plugin
+# runs the CLI through rpcd's file.exec, which is rpcd-mod-file (luci-base
+# pulls it in too).
+LUCI_DEPENDS:=+trafficctl +trafficctl-telegram +conntrack +curl +tc +iw +kmod-nft-netdev +firewall4 +ucode +ucode-mod-fs +ucode-mod-uci +ucode-mod-ubus +hostapd-utils +luci-base +rpcd +rpcd-mod-ucode +rpcd-mod-file
+# Versioned: the rpcd plugin of this release calls the ucode backend, which a
+# trafficctl up to 1.30.x does not have (and 1.30.x's exec plugin sources
+# trafficctl-fw.sh, which 2.0.0 removed). luci.mk turns this into EXTRA_DEPENDS.
+LUCI_EXTRA_DEPENDS:=trafficctl (>=$(PKG_VERSION))
 LUCI_PKGARCH:=all
 
 include $(TOPDIR)/feeds/luci/luci.mk
@@ -53,17 +66,23 @@ include $(TOPDIR)/feeds/luci/luci.mk
 # with this upgrade. The config itself is kept by trafficctl, so the copy is
 # removed only while the real file is there.
 #
+# /usr/libexec/rpcd/luci.trafficctl is the exec plugin of releases up to
+# 1.30.x. The package manager drops it with the upgrade; a copy put there by
+# hand would register the same ubus object, and rpcd would then refuse the
+# ucode one. It goes before the restart.
+#
 # The config mode, the services and the cut release on removal belong to the
 # backend and live in ../trafficctl/Makefile.
-define Package/$(PKG_NAME)/postinst
+define Package/luci-app-trafficctl/postinst
 #!/bin/sh
+rm -f "$${IPKG_INSTROOT}/usr/libexec/rpcd/luci.trafficctl"
 if [ -z "$${IPKG_INSTROOT}" ]; then
 	if [ -f /etc/config/trafficctl ]; then
 		rm -f /etc/config/trafficctl-opkg.backup
 	fi
 	rm -f /tmp/luci-indexcache.*
 	rm -rf /tmp/luci-modulecache
-	/etc/init.d/rpcd restart 2>/dev/null || true
+	/etc/init.d/rpcd reload 2>/dev/null || true
 fi
 exit 0
 endef

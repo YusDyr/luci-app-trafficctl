@@ -157,8 +157,8 @@ I hope it turns out as useful for you as it has been for me.
 - **Interactive Speed Graphs** -- Hover any sparkline for a full-size popup graph with: download + upload dual lines, gradient area fill, min/max band, crosshair with precise values, rate limit line, nice-value Y axis (multiples of 100/500 Kbit/s). Full history from page load.
 - **Traffic Shaping (Queue)** -- tc/HTB classes on the LAN bridge with fq_codel leaf qdiscs. Queues excess traffic instead of dropping, providing smoother throughput.
 - **Separate Upload and Download Ceilings** -- Both the shaper and the limiter take an upload ceiling of its own: click **⇅ Split up/down** in the Speed Limit panel, type the upload speed and pick the download one (or press Enter). The device's status line and the Limit column then show both, e.g. `↓ 10 Mbit/s / ↑ 2 Mbit/s`. Without a split, upload gets the same ceiling as download.
-- **Rate Limiting (Policer)** -- nftables or iptables-based packet dropping when a device exceeds the configured rate. Instant enforcement, no queuing. Unlike the shaper it owns no qdisc, so it works on a router already running SQM/cake — where the shaper deliberately declines rather than tear down somebody else's QoS, and says so.
-- **Subnet / VLAN Limits** -- A limit can target a whole subnet (`192.168.20.0/24`) or the entire network, not only one device. Two readings of "20 Mbit for the IoT VLAN" are both available and are chosen explicitly: **each** gives every device its own 20 Mbit bucket, **shared** gives the whole VLAN one 20 Mbit bucket *between them* — the aggregate cap. Pick a monitored subnet from the target chips in the Speed Limit panel (select "All active devices" first); active subnet limits are listed there with their drop counters and a Remove button. Subnets the router does not monitor are flagged rather than silently accepted: a firewall zone other than `lan` with `masq=1` — the usual way to isolate a guest VLAN — is excluded from monitoring, and a limit on it would never match a packet. From the CLI: `trafficctl-ratelimit.sh 192.168.20.0/24 20000 "iot-cap" shared`.
+- **Rate Limiting (Policer)** -- nftables packet dropping when a device exceeds the configured rate. Instant enforcement, no queuing. Unlike the shaper it owns no qdisc, so it works on a router already running SQM/cake — where the shaper deliberately declines rather than tear down somebody else's QoS, and says so.
+- **Subnet / VLAN Limits** -- A limit can target a whole subnet (`192.168.20.0/24`) or the entire network, not only one device. Two readings of "20 Mbit for the IoT VLAN" are both available and are chosen explicitly: **each** gives every device its own 20 Mbit bucket, **shared** gives the whole VLAN one 20 Mbit bucket *between them* — the aggregate cap. Pick a monitored subnet from the target chips in the Speed Limit panel (select "All active devices" first); active subnet limits are listed there with their drop counters and a Remove button. Subnets the router does not monitor are flagged rather than silently accepted: a firewall zone other than `lan` with `masq=1` — the usual way to isolate a guest VLAN — is excluded from monitoring, and a limit on it would never match a packet. From the CLI: `trafficctl ratelimit 192.168.20.0/24 20000 "iot-cap" shared`.
 - **Internet Blocking** -- Layer 3 drop rules per device. Connections are killed immediately and counter stats are tracked.
 - **Global Internet Cut** -- One control that takes every device off the internet while the LAN keeps working, for plugging in a new device and configuring it locally before it is allowed out. Timed by default (15 min / 1 h / 4 h, or until you switch it back), so it reverts by itself. Devices keep reaching each other and the router, so LuCI stays available from the LAN; remote access that lands on a LAN host first (Tailscale on a NAS, a tunnel from a LAN box) stops while it is on. Traffic is stopped on the way in, at prerouting, so a transparent proxy running on the router (podkop/sing-box, passwall) cannot carry it out either — and the router's own traffic, including that proxy's outbound path, is untouched. It does **not** survive a reboot unless you tick "Keep after reboot".
 - **WiFi MAC Filtering** -- Block any device from associating with WiFi via hostapd_cli deny ACL. Only the target client is deauthenticated -- no wifi reload, other clients stay connected. Works across all radio interfaces (2.4 GHz, 5 GHz, 6 GHz) automatically.
@@ -169,7 +169,8 @@ I hope it turns out as useful for you as it has been for me.
 - **Live Speed Polling** -- Optional polling with configurable interval (Off/1/2/5/10/30s) and averaging window (5s-5min); shows sparkline per device with spike filtering. Both can be stored as router-wide defaults via UCI (`poll_interval`, `avg_window`) for browsers that have not chosen their own.
 - **Reverse DNS** -- Optional hostname resolution for external destination IPs with in-memory cache (no repeated lookups). At most 16 new lookups per device poll, so it also works behind resolvers that rate-limit the router, such as AdGuard Home on port 53 with dnsmasq moved to another port.
 - **Searchable Device Picker** -- Command palette (search by name, IP, or MAC) with recent devices quick-access bar stored in localStorage.
-- **Telegram Bot** -- Optional bot for remote control: device list, block/unblock, rate limit, shape traffic, new device notifications. Runs on the router via long polling, no external server needed.
+- **Telegram Bot** -- Optional bot for remote control: device list, block/unblock, rate limit, shape traffic. Runs on the router via long polling, no external server needed. Package `trafficctl-telegram`.
+- **Notifications** -- New device, known device back online, limit applied, block applied and internet cut, sent to Telegram, ntfy, a webhook or email (msmtp), each sender with its own events (Status > Traffic Control > Notifications). Every event is also a ubus event (`ubus listen trafficctl.notify`) and runs the scripts in `/etc/hotplug.d/trafficctl/`, for your own automation. See [docs/API.md](docs/API.md#notifications).
 - **New Device Detection** -- Discovers new devices via three sources: ARP table, DHCP leases, Wi-Fi station list. Instant DHCP hotplug trigger for near-realtime alerts.
 - **Activity Logging** -- Configurable logging of all actions (blocks, ratelimits, shapes, config changes) to a local file and/or syslog. Includes source IP, username, and trigger (LuCI/Telegram/CLI).
 - **Default Limit for New Devices** -- Optionally rate-limit or shape a device the first time it appears on the network (Settings > New Device Defaults). Off by default. Switching it on records the devices already present, so only genuinely new ones are affected, and a device that already carries a limit is never overridden.
@@ -193,15 +194,17 @@ I hope it turns out as useful for you as it has been for me.
 |---------|-------------|-------|
 | `conntrack` | Core monitoring | Always required |
 | `kmod-nft-netdev` | Rate limiter (fw4) | Installed as a dependency; firewall4 does not pull it in |
-| `iptables-mod-hashlimit` | Rate limiter (fw3, 21.02) | Not a dependency: install it yourself on fw3 |
 | `luci-base` | Web interface | Always required |
 | `rpcd` | Backend RPC | Always required |
+| `rpcd-mod-ucode` | Runs the rpcd plugin | Always required |
+| `rpcd-mod-file` | The plugin runs the CLI through `file.exec` | Always required (luci-base pulls it in) |
 | `tc-full` + `kmod-sched-core` + `kmod-sched-htb` | Traffic shaping | For HTB/fq_codel queues |
 | `kmod-ifb` | Upload shaping | Without it the shaper applies to download only, and reports that |
 | `iw-full` | Interface detection | WiFi band identification |
 | `bridge-utils` | Interface detection | LAN port identification (brctl) |
 | `hostapd-utils` | WiFi MAC filtering | Optional for the `trafficctl` backend, so it installs on wired-only builds; `luci-app-trafficctl` still pulls it in. Without it a WiFi block is a temporary (one hour) hostapd ban |
-| `curl` + `jsonfilter` | Telegram bot | jsonfilter is part of base OpenWrt |
+| `curl` + `jsonfilter` | Telegram bot, notifications | jsonfilter is part of base OpenWrt |
+| `msmtp` | Email notifications | Optional; configure `/etc/msmtprc` |
 | `rpcd-mod-rrdns` | Reverse DNS | Included with `rpcd`; enables rDNS in LuCI, Telegram, and CLI |
 
 ## Compatibility
@@ -216,13 +219,14 @@ Runs on all architectures (no compiled code, pure shell + LuCI JavaScript).
 | 24.10           | fw4 / nftables | Fully supported |
 | 23.05           | fw4 / nftables | Fully supported |
 | 22.03           | fw4 / nftables | Fully supported |
-| 21.02           | fw3 / iptables | Supported (auto-detected) |
+| 21.02           | fw3 / iptables | Not supported; use 1.30.x |
 
-**CI-tested on 52 combinations** — every push is verified against real OpenWrt rootfs containers:
+Version 2.0+ requires OpenWrt 22.03 or newer with firewall4/nftables. OpenWrt 21.02 users should stay on the 1.30.x release series.
+
+**CI-tested on 48 combinations** — every push is verified against real OpenWrt rootfs containers:
 
 | | x86‑64 | x86‑generic | mips\_24kc | aarch64 | arm\_a9 | arm\_a15 | armsr | armvirt32 | i386 |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **21.02.6** | ✓ | | | ✓ | | ✓ | | ✓ | |
 | **22.03.7** | ✓ | | | ✓ | | ✓ | | ✓ | |
 | **23.05.6** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | | ✓ |
 | **24.10.1** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | | ✓ |
@@ -276,7 +280,6 @@ rule. The MAC does not rotate, so the rules that *can* be keyed on it are.
   address of every packet it forwards, so a MAC-keyed rule aimed at it would
   black-hole or throttle every client behind it. It too is reported as
   "IPv4 only", naming the reason.
-- **fw3 / iptables (OpenWrt 21.02)** stays IPv4-only throughout.
 
 If a device must be cut off completely and its IPv6 cannot be covered, the
 **WiFi block** (for wireless clients) and the **global internet cut** (for all
@@ -288,34 +291,43 @@ devices) are family-independent and work regardless.
 
 > **Which file do I need?**
 > - **Recommended**: v1.6.5+ (earlier releases are broken — missing status.css, invalid APK format)
-> - OpenWrt **21.02 — 24.10** → download `.ipk` (opkg)
+> - OpenWrt **22.03 — 24.10** → download `.ipk` (opkg)
 > - OpenWrt **25.12+** and snapshot → download `.apk` (apk)
 > - Want upgrades through `opkg upgrade` / `apk upgrade`? Add the [package feed](#package-feed-recommended) instead
 
-The app is two packages, released together with the same version:
+The app is three packages, released together with the same version:
 
-- **`trafficctl`**: the backend. Helper scripts in `/usr/libexec/trafficctl/`,
-  `/etc/config/trafficctl`, the Telegram bot and history services, the hotplug
+- **`trafficctl`**: the backend. The `trafficctl` CLI and helper scripts,
+  `/etc/config/trafficctl`, the notification and history services, the hotplug
   hooks and the Prometheus CGI.
+- **`trafficctl-telegram`**: the Telegram bot (`/etc/init.d/trafficctl-telegram`).
+  It depends on `trafficctl`. Up to 1.30.x the bot was part of `trafficctl`.
 - **`luci-app-trafficctl`**: the web interface (LuCI views and the rpcd plugin).
-  It depends on `trafficctl`.
+  It depends on `trafficctl` and `trafficctl-telegram`.
+
+A router without LuCI needs only `trafficctl`, and `trafficctl-telegram` for
+the bot. Upgrading such a router from 1.30.x with only `trafficctl` stops the
+bot (the postinst says so in the system log): add `trafficctl-telegram` to the
+same command to keep it. To go back to 1.30.x, remove `trafficctl-telegram`
+first (`opkg remove trafficctl-telegram` / `apk del trafficctl-telegram`):
+1.30.x's single package holds the bot's files itself.
 
 Releases up to 1.28.x shipped both as `luci-app-trafficctl` alone. Upgrading
 from one of them moves the backend files into `trafficctl` and keeps your
 configuration. From the feed, `opkg upgrade luci-app-trafficctl` /
-`apk upgrade luci-app-trafficctl` does it. From downloaded files, install both
-files in one command, as below.
+`apk upgrade luci-app-trafficctl` does it. From downloaded files, install all
+of them in one command, as below.
 
 Each release includes multiple filenames for each package:
 
 | Asset name | Purpose |
 |-----------|---------|
-| `trafficctl.ipk`, `luci-app-trafficctl.ipk` | Stable download URLs (opkg) |
-| `trafficctl_all.ipk`, `luci-app-trafficctl_all.ipk` | Same files, OpenWrt naming convention |
-| `trafficctl_X.Y.Z-1_all.ipk`, `luci-app-trafficctl_X.Y.Z-1_all.ipk` | Same files, version-pinned |
-| `trafficctl.apk`, `luci-app-trafficctl.apk` | Stable download URLs (apk) |
-| `trafficctl_noarch.apk`, `luci-app-trafficctl_noarch.apk` | Same files, OpenWrt naming convention |
-| `trafficctl_X.Y.Z-r1_noarch.apk`, `luci-app-trafficctl_X.Y.Z-r1_noarch.apk` | Same files, version-pinned |
+| `trafficctl.ipk`, `trafficctl-telegram.ipk`, `luci-app-trafficctl.ipk` | Stable download URLs (opkg) |
+| `trafficctl_all.ipk`, `trafficctl-telegram_all.ipk`, `luci-app-trafficctl_all.ipk` | Same files, OpenWrt naming convention |
+| `trafficctl_X.Y.Z-1_all.ipk`, `trafficctl-telegram_X.Y.Z-1_all.ipk`, `luci-app-trafficctl_X.Y.Z-1_all.ipk` | Same files, version-pinned |
+| `trafficctl.apk`, `trafficctl-telegram.apk`, `luci-app-trafficctl.apk` | Stable download URLs (apk) |
+| `trafficctl_noarch.apk`, `trafficctl-telegram_noarch.apk`, `luci-app-trafficctl_noarch.apk` | Same files, OpenWrt naming convention |
+| `trafficctl_X.Y.Z-r1_noarch.apk`, `trafficctl-telegram_X.Y.Z-r1_noarch.apk`, `luci-app-trafficctl_X.Y.Z-r1_noarch.apk` | Same files, version-pinned |
 
 The "stable URL" links below always download from the latest release — the filename stays constant across versions.
 
@@ -328,7 +340,7 @@ and upgrades the app like any other package, and checks the feed's signature on
 every update. Needs HTTPS in `wget` (`libustream-*`, present in default images
 since 21.02).
 
-**OpenWrt 21.02 — 24.10 (opkg):**
+**OpenWrt 22.03 — 24.10 (opkg):**
 
 ```sh
 wget -O /tmp/trafficctl.pub https://yusdyr.github.io/luci-app-trafficctl/keys/usign-64513c3027229c14.pub
@@ -349,7 +361,7 @@ apk add luci-app-trafficctl
 /etc/init.d/rpcd restart
 ```
 
-`luci-app-trafficctl` pulls in `trafficctl`. Translations install the same way
+`luci-app-trafficctl` pulls in `trafficctl` and `trafficctl-telegram`. Translations install the same way
 (`luci-i18n-trafficctl-zh-cn`). To upgrade later:
 `opkg update && opkg upgrade trafficctl luci-app-trafficctl`, or
 `apk update && apk upgrade trafficctl luci-app-trafficctl`.
@@ -376,14 +388,14 @@ The single-file methods below still work and need no feed.
 ### OpenWrt 25.12+ (.apk)
 
 **Option A — LuCI web UI:**
-1. Download [`trafficctl.apk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.apk) and [`luci-app-trafficctl.apk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.apk) to your computer
+1. Download [`trafficctl.apk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.apk), [`trafficctl-telegram.apk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-telegram.apk) and [`luci-app-trafficctl.apk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.apk) to your computer
 2. In LuCI: **System → Software → Upload Package...**
-3. Upload `trafficctl.apk` first, then `luci-app-trafficctl.apk`
+3. Upload `trafficctl.apk` first, then `trafficctl-telegram.apk`, then `luci-app-trafficctl.apk`
 
-**Option B — SSH (recommended):** both files in one command, `trafficctl` first:
+**Option B — SSH (recommended):** the three files in one command, `trafficctl` first:
 
 ```sh
-cd /tmp && wget -O trafficctl.apk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.apk && wget -O luci-app-trafficctl.apk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.apk && apk add --allow-untrusted trafficctl.apk luci-app-trafficctl.apk
+cd /tmp && wget -O trafficctl.apk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.apk && wget -O trafficctl-telegram.apk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-telegram.apk && wget -O luci-app-trafficctl.apk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.apk && apk add --allow-untrusted trafficctl.apk trafficctl-telegram.apk luci-app-trafficctl.apk
 # If you get "modified conffile" on upgrade, add `--force-maintainer` to override
 ```
 
@@ -397,33 +409,35 @@ cd /tmp && wget -O trafficctl.apk https://github.com/YusDyr/luci-app-trafficctl/
 > `latest` URLs, so the files cannot change under you between download and
 > install.
 
-### OpenWrt 21.02 — 24.10 (.ipk)
+### OpenWrt 22.03 — 24.10 (.ipk)
 
 **Option A — LuCI web UI:**
-1. Download [`trafficctl.ipk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.ipk) and [`luci-app-trafficctl.ipk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk) to your computer
+1. Download [`trafficctl.ipk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.ipk), [`trafficctl-telegram.ipk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-telegram.ipk) and [`luci-app-trafficctl.ipk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk) to your computer
 2. In LuCI: **System → Software → Upload Package...**
-3. Upload `trafficctl.ipk` first, then `luci-app-trafficctl.ipk`
+3. Upload `trafficctl.ipk` first, then `trafficctl-telegram.ipk`, then `luci-app-trafficctl.ipk`
 
-**Option B — SSH** (requires HTTPS support — `libustream-wolfssl` or `libustream-openssl`). Both files in one command, `trafficctl` first:
+**Option B — SSH** (requires HTTPS support — `libustream-wolfssl` or `libustream-openssl`). The three files in one command, `trafficctl` first:
 
 ```sh
-opkg install https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk
+opkg install https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-telegram.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk
 ```
 
 **Option C — SSH from your machine:**
 
 ```sh
-ssh root@router 'opkg install https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk'
+ssh root@router 'opkg install https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-telegram.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk'
 ```
 
 ### Uninstalling
 
 ```sh
 # OpenWrt 25.12+ (apk)
-apk del luci-app-trafficctl trafficctl
+apk del luci-app-trafficctl trafficctl-telegram trafficctl
 
-# OpenWrt 21.02 - 24.10 (opkg): the web interface first, then the backend
+# OpenWrt 22.03 - 24.10 (opkg): the web interface first, then the bot, then
+# the backend
 opkg remove luci-app-trafficctl
+opkg remove trafficctl-telegram
 opkg remove trafficctl
 
 # either way, reload the LuCI backend afterwards
@@ -443,12 +457,8 @@ firewall/tc state — they disappear on the next reboot. To clear them
 immediately before removing the package, unblock/unlimit the affected devices
 from the dashboard first, or reboot the router after uninstalling.
 
-If you also enabled the Telegram bot, stop it before removing:
-
-```sh
-/etc/init.d/trafficctl-telegram stop
-/etc/init.d/trafficctl-telegram disable
-```
+Removing `trafficctl-telegram` stops and disables the bot, and removing
+`trafficctl` the notification watcher (`trafficctl-notify`).
 
 ### From source (OpenWrt build system)
 
@@ -478,7 +488,7 @@ filesystem, then restart rpcd:
 scp -r trafficctl/files/* root@router:/
 scp -r luci-app-trafficctl/root/* root@router:/
 scp -r luci-app-trafficctl/htdocs/luci-static root@router:/www/
-ssh root@router 'chmod +x /usr/libexec/trafficctl/trafficctl-*.sh /usr/libexec/rpcd/luci.trafficctl && /etc/init.d/rpcd restart'
+ssh root@router 'chmod +x /usr/sbin/trafficctl /usr/libexec/trafficctl/trafficctl-telegram.uc && /etc/init.d/rpcd restart'
 ```
 
 ### Required packages
@@ -488,7 +498,7 @@ ssh root@router 'chmod +x /usr/libexec/trafficctl/trafficctl-*.sh /usr/libexec/r
 
 ```sh
 # Core (always required)
-apk add conntrack luci-base rpcd
+apk add conntrack luci-base rpcd rpcd-mod-ucode
 
 # For traffic shaping
 apk add tc-full kmod-sched-core kmod-sched-htb
@@ -507,18 +517,18 @@ apk add hostapd-utils
 
 # rpcd-mod-rrdns is included with rpcd (no extra install needed)
 
-# For Telegram bot (optional)
-apk add curl
+# For the Telegram bot (optional; luci-app-trafficctl pulls it in)
+apk add trafficctl-telegram
 ```
 
 </details>
 
 <details>
-<summary>OpenWrt 21.02 — 24.10 (opkg)</summary>
+<summary>OpenWrt 22.03 — 24.10 (opkg)</summary>
 
 ```sh
 # Core (always required)
-opkg install conntrack luci-base rpcd
+opkg install conntrack luci-base rpcd rpcd-mod-ucode
 
 # For traffic shaping
 opkg install tc-full kmod-sched-core kmod-sched-htb
@@ -537,8 +547,8 @@ opkg install hostapd-utils
 
 # rpcd-mod-rrdns is included with rpcd (no extra install needed)
 
-# For Telegram bot (optional)
-opkg install curl
+# For the Telegram bot (optional; luci-app-trafficctl pulls it in)
+opkg install trafficctl-telegram
 ```
 
 </details>
@@ -560,6 +570,20 @@ opkg install curl
 2. Send any message to your bot and find your chat ID via `https://api.telegram.org/bot<TOKEN>/getUpdates`.
 3. In LuCI, expand **Settings > Telegram Bot**, enter token and chat ID, click **Test**, then **Save**.
 4. In Telegram, send `/devices` to see the device list with action buttons.
+5. Which events reach the chat, and the new device message, are set on the **Notifications** tab (Telegram card). The bot does not have to run for notifications.
+
+The bot obeys the chat, not a person: with a group's chat ID, every member of that group can block, limit and unblock devices (as in 1.30.x). Use your private chat with the bot unless that is what you want.
+
+### Notifications (optional)
+
+On **Status > Traffic Control > Notifications**, switch on a sender (Telegram, ntfy, webhook, email), pick its events, fill in its fields and click **Save**, then **Send test**. The device scan behind "New device" and "Known device online" runs as `/etc/init.d/trafficctl-notify` only while some sender (or a hotplug script) takes those events.
+
+A script in `/etc/hotplug.d/trafficctl/` gets every event, with `ACTION` set to the event name:
+
+```sh
+# /etc/hotplug.d/trafficctl/10-log
+[ "$ACTION" = new_device ] && logger -t my-hook "new device $MAC $IP $NAME"
+```
 
 ---
 
@@ -570,7 +594,7 @@ opkg install curl
 | Mode | Mechanism | Behavior | Best For |
 |------|-----------|----------|----------|
 | **Shaper** | tc/HTB + fq_codel | Queues excess packets | Smooth streaming, lower jitter |
-| **Limiter** | nft `limit rate` / iptables `hashlimit` | Drops excess packets | Quick enforcement, low overhead |
+| **Limiter** | nft `limit rate` | Drops excess packets | Quick enforcement, low overhead |
 
 ### Persistence
 
@@ -629,12 +653,9 @@ flowchart LR
     D --> G[(iw / brctl)]
     D --> N[(ARP / DHCP)]
 
-    E --> H[Firewall\nabstraction]
+    E --> H[nftables]
     E --> I[tc / HTB]
     E --> J[hostapd]
-
-    H --> K[(nftables)]
-    H --> L[(iptables)]
 
     I --> M[(shapes.json)]
     H --> R[(rules.json)]
@@ -646,7 +667,7 @@ flowchart LR
     LOG --> SL[(syslog)]
 ```
 
-The frontend talks to a thin rpcd dispatcher over ubus. The Telegram bot provides parallel remote control via long polling. Backend shell scripts split into two groups: **monitoring** (read-only, pulls data from conntrack, ARP, DHCP leases, and wireless subsystems) and **control** (writes firewall rules, tc classes, or WiFi MAC filters). A firewall abstraction layer auto-detects nft vs iptables at runtime. All mutable actions are logged to a local file and optionally syslog. Rules optionally persist across reboots via hotplug scripts.
+The frontend talks to a thin rpcd dispatcher over ubus. The Telegram bot provides parallel remote control via long polling. Backend shell scripts split into two groups: **monitoring** (read-only, pulls data from conntrack, ARP, DHCP leases, and wireless subsystems) and **control** (writes firewall rules via nftables, tc classes, or WiFi MAC filters). All mutable actions are logged to a local file and optionally syslog. Rules optionally persist across reboots via hotplug scripts.
 
 ---
 
@@ -656,14 +677,17 @@ The frontend talks to a thin rpcd dispatcher over ubus. The Telegram bot provide
 |------|------|
 | `luci-app-trafficctl/htdocs/.../view/trafficctl/status.js` | Frontend — single ES5 file, no deps |
 | `luci-app-trafficctl/htdocs/.../view/trafficctl/status.css` | Frontend styles |
-| `luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl` | rpcd backend — JSON-RPC dispatch |
+| `luci-app-trafficctl/root/usr/share/rpcd/ucode/luci.trafficctl.uc` | rpcd plugin (rpcd-mod-ucode) — JSON-RPC dispatch |
 | `luci-app-trafficctl/root/usr/share/rpcd/acl.d/` | ACL permissions |
 | `trafficctl/Makefile` | Backend package (`trafficctl`), installs everything under `trafficctl/files/` |
-| `trafficctl/files/usr/libexec/trafficctl/trafficctl-*.sh` | Backend scripts (monitoring + control) |
-| `trafficctl/files/usr/libexec/trafficctl/trafficctl-fw.sh` | Firewall abstraction layer (sourced) |
-| `trafficctl/files/usr/libexec/trafficctl/trafficctl-telegram.sh` | Telegram bot daemon (long polling) |
+| `trafficctl/files/usr/sbin/trafficctl` | The backend's CLI (ucode): every monitoring and control command, JSON on stdout |
+| `trafficctl/files/usr/share/ucode/trafficctl/*.uc` | Its modules: lib, net, ctl, report, limit, shape, portfw, cut, history, notify |
+| `trafficctl/files/usr/share/ucode/trafficctl/telegram.uc` | Telegram bot (long polling): commands, device menu, actions (package `trafficctl-telegram`) |
+| `trafficctl/files/usr/libexec/trafficctl/trafficctl-telegram.uc` | The bot's entry point, run by its init script and by `trafficctl telegram` |
 | `trafficctl/files/etc/init.d/trafficctl-telegram` | procd init script for the bot |
-| `trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes` | Boot persistence for tc + block + ratelimit rules |
+| `trafficctl/files/usr/share/ucode/trafficctl/notify.uc` | Notification events and senders (ubus, hotplug, Telegram, ntfy, webhook, mail) |
+| `trafficctl/files/etc/init.d/trafficctl-notify` | procd init script for the new/known device scan |
+| `trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes` | Boot persistence: runs `trafficctl restore` (blocks, limits, shapes, port controls, a kept cut) |
 | `trafficctl/files/etc/hotplug.d/dhcp/99-trafficctl-newdevice` | Instant new-device detection via DHCP events |
 | `trafficctl/files/www/cgi-bin/trafficctl-metrics` | Prometheus scrape endpoint (CGI) |
 | `Makefile` | OpenWrt package build |
@@ -677,7 +701,7 @@ The frontend talks to a thin rpcd dispatcher over ubus. The Telegram bot provide
 |----------|-------------|
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Component diagram, data flow sequences, tc/HTB hierarchy, security model |
 | [API.md](docs/API.md) | All rpcd methods, script arguments, JSON output formats |
-| [COMPATIBILITY.md](docs/COMPATIBILITY.md) | OpenWrt version matrix, nft/iptables feature parity, known limitations |
+| [COMPATIBILITY.md](docs/COMPATIBILITY.md) | OpenWrt version matrix, known limitations |
 | [DEVELOPMENT.md](docs/DEVELOPMENT.md) | Dev setup, deploy commands, code style, debugging |
 
 ---
@@ -688,10 +712,9 @@ Contributions are welcome. Please:
 
 1. Fork the repository and create a feature branch.
 2. Test on at least one real OpenWrt device.
-3. Ensure both nftables and iptables code paths work if your change touches firewall logic.
-4. Keep the single-file JavaScript approach -- no bundlers, no npm, no transpilation.
-5. Shell scripts must be POSIX sh compatible (BusyBox ash/dash).
-6. All scripts emit JSON to stdout.
+3. Keep the single-file JavaScript approach -- no bundlers, no npm, no transpilation.
+4. Shell scripts must be POSIX sh compatible (BusyBox ash/dash).
+5. All scripts emit JSON to stdout.
 
 ### Code Style
 

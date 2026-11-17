@@ -1,0 +1,7 @@
+table inet fw4 {
+	chain forward {
+		ip saddr 192.168.1.140 counter packets 12 bytes 3456 drop comment "tctl_block_192_168_1_140"
+		meta nfproto ipv6 ether saddr aa:bb:cc:dd:ee:8c counter packets 3 bytes 240 drop comment "tctl_block_192_168_1_140_mac"
+		meta nfproto ipv6 ether saddr aa:bb:cc:dd:ee:32 counter packets 3 bytes 300 drop comment "tctl_block_192_168_1_50_mac"
+	}
+}

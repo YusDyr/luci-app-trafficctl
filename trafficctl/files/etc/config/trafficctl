@@ -141,14 +141,33 @@ config telegram 'telegram'
 	option bot_token ''
 	option chat_id ''
 	option poll_interval '3'
-	option notify_new_device '1'
-	option notify_known_device '0'
 	option control_enabled '1'
-	option notify_template ''
 	option btn_block_inet '1'
 	option btn_block_wifi '1'
 	option btn_limiter '1'
 	option btn_shaper '1'
+
+config notify 'notify'
+	# Notifications: new_device, known_device, limit_applied, block_applied,
+	# cut_engaged. Each event goes out on ubus (trafficctl.notify), to the
+	# scripts in /etc/hotplug.d/trafficctl, and to every sender section below
+	# that is enabled and lists it. enabled '0' silences the senders only.
+	option enabled '1'
+	# The device scan behind new_device and known_device (the
+	# trafficctl-notify service): 'auto' runs it while a sender or a hotplug
+	# script takes those events, '1' always, '0' never.
+	option scan 'auto'
+	# Seconds between scans.
+	option scan_interval '30'
+
+# One section per sender: notify_telegram, notify_ntfy, notify_webhook,
+# notify_mail. No 'list events' means every event. Telegram uses the bot's
+# token and chat unless the section sets bot_token / chat_id; template is the
+# new_device message ({{name}}, {{mac}}, {{ip}}, ...; empty = the default).
+config notify_telegram 'notify_telegram'
+	option enabled '1'
+	list events 'new_device'
+	option template ''
 
 config metrics 'metrics'
 	# Prometheus/OpenMetrics exporter. Off by default: it exposes device

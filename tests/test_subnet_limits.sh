@@ -5,7 +5,7 @@
 # v1.13, but three things around it were broken or missing, and all three are
 # invisible from the CLI success message:
 #
-#   1. trafficctl-ratelimit-stats.sh reported the target of every "each"-mode
+#   1. trafficctl-ratelimit-stats.sh (now `trafficctl ratelimit-stats`) reported the target of every "each"-mode
 #      rule as the literal string "limit" (the meter key is a bare "ip daddr"
 #      with no operand and the parser took the LAST match). "each" is the
 #      default for a CIDR, so every per-device subnet limit was invisible to
@@ -20,16 +20,19 @@
 PASS=0
 FAIL=0
 
-BIN="$(cd "$(dirname "$0")/.." && pwd)/trafficctl/files/usr/libexec/trafficctl"
 HOTPLUG="$(cd "$(dirname "$0")/.." && pwd)/trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes"
 
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
+# shellcheck source=tests/lib/ucode.sh
+. "$(dirname "$0")/lib/ucode.sh"
+TMP="$UC_TMP/t"
+mkdir -p "$TMP/root"
 MOCKBIN="$TMP/bin"
 mkdir -p "$MOCKBIN"
 NFT_LOG="$TMP/nft.log"
-RULES="$TMP/rules.json"
-SHAPES="$TMP/shapes.json"
+# rules.json under the TCTL_ROOT the CLI runs with (a symlink would not do:
+# the writer renames a new file over it).
+RULES="$TMP/root/etc/trafficctl/rules.json"
+mkdir -p "$TMP/root/etc/trafficctl" "$TMP/root/etc/config" "$TMP/root/tmp"
 
 assert_eq() {
     local desc="$1" expected="$2" actual="$3"
@@ -154,6 +157,12 @@ echo "\$*" >> "$NFT_LOG"
 case "\$*" in
     "list tables") echo "table inet fw4" ;;
     "list table netdev tm_ratelimit") cat "$TMP/nft_table.txt" 2>/dev/null ;;
+    "-j list table netdev tm_ratelimit") cat "$TMP/nft_table.json" 2>/dev/null ;;
+    # fw4_late holds how many more probes fail before fw4 has its table.
+    "list table inet fw4")
+        n=\$(cat "$TMP/fw4_late" 2>/dev/null || echo 0)
+        [ "\$n" -gt 0 ] && { echo \$((n - 1)) > "$TMP/fw4_late"; exit 1; }
+        ;;
 esac
 exit 0
 MOCK
@@ -177,28 +186,21 @@ export TCTL_TEST_PERSIST="$TMP/persist_on"
 mkdir -p "$TMP/sys/class/net/br-lan/brif/lan1" "$TMP/sys/class/net/br-guest/brif/lan4"
 export TCTL_SYSFS_NET="$TMP/sys/class/net"
 
-# fw.sh names its state files by absolute path, as it must on the router; the
-# tests rewrite those into the scratch directory rather than adding test-only
-# seams to the shipped script.
-FW="$TMP/trafficctl-fw.sh"
-sed -e "s|TCTL_RULES_FILE=\"/etc/trafficctl/rules.json\"|TCTL_RULES_FILE=\"$RULES\"|" \
-    -e "s|TCTL_SHAPES_FILE=\"/etc/trafficctl/shapes.json\"|TCTL_SHAPES_FILE=\"$SHAPES\"|" \
-    "$BIN/trafficctl-fw.sh" > "$FW"
-assert_not_contains "harness: no production rules path survived the rewrite" \
-    "/etc/trafficctl/rules.json" "$(cat "$FW")"
+# The same router for the ucode CLI: lan (br-lan, 10.10.4.128/25), a guest
+# VLAN (br-guest, 192.168.20.0/24) and wan, as the uci and ubus fakes above.
+printf "config trafficctl 'main'\n\toption persist_rules '1'\n" > "$TMP/root/etc/config/trafficctl"
+printf "config interface 'lan'\n\toption device 'br-lan'\n\nconfig interface 'guest'\n\toption device 'br-guest'\n\nconfig interface 'wan'\n\toption device 'eth1'\n" \
+    > "$TMP/root/etc/config/network"
+printf "config zone\n\toption name 'lan'\n\tlist network 'lan'\n\nconfig zone\n\toption name 'guest'\n\tlist network 'guest'\n\nconfig zone\n\toption name 'wan'\n\tlist network 'wan'\n\toption masq '1'\n" \
+    > "$TMP/root/etc/config/firewall"
+mkdir -p "$TMP/ubus" "$TMP/sys/class/net/eth1" "$TMP/sys/class/net/lan1" "$TMP/sys/class/net/lan4"
+ln -s "$TMP/sys" "$TMP/root/sys"
+printf '{"interface":[{"interface":"lan","up":true,"l3_device":"br-lan","ipv4-address":[{"address":"10.10.4.130","mask":25}]},{"interface":"guest","up":true,"l3_device":"br-guest","ipv4-address":[{"address":"192.168.20.1","mask":24}]},{"interface":"wan","up":true,"l3_device":"eth1"}]}\n' \
+    > "$TMP/ubus/network.interface@dump.json"
+printf '{"up":true,"l3_device":"eth1"}\n' > "$TMP/ubus/network.interface.wan@status.json"
+ubus_start "$TMP/ubus"
 
-# Every script under test sources fw.sh by absolute path too.
-patch_script() {
-    sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FW|" \
-        -e "s|SHAPES_FILE=\"/etc/trafficctl/shapes.json\"|SHAPES_FILE=\"$SHAPES\"|" \
-        "$1" > "$2"
-    chmod +x "$2"
-}
-patch_script "$BIN/trafficctl-ratelimit-stats.sh" "$TMP/ratelimit-stats.sh"
-patch_script "$BIN/trafficctl-subnets.sh"         "$TMP/subnets.sh"
-patch_script "$BIN/trafficctl-ratelimit.sh"       "$TMP/ratelimit.sh"
-
-run() { PATH="$MOCKBIN:$PATH" sh "$@" 2>/dev/null; }
+rl() { PATH="$MOCKBIN:$PATH" TCTL_ROOT="$TMP/root" tctl ratelimit "$@" 2>/dev/null; }
 
 # ════════════════════════════════════════════════════════════════════════════
 # 1. Rate-limit statistics: the target of an "each"-mode rule
@@ -208,79 +210,50 @@ run() { PATH="$MOCKBIN:$PATH" sh "$@" 2>/dev/null; }
 # subnet limit appears once per bridge. Only the chain on the device the
 # subnet lives behind ever matches; the copies are what made "take one entry"
 # report zero drops for most targets.
-cat > "$TMP/nft_table.txt" <<'TABLE'
-table netdev tm_ratelimit {
-	chain dl_br_lan {
-		type filter hook egress device "br-lan" priority filter; policy accept;
-		ip daddr 192.168.20.0/24 meter tctl_d_192_168_20_0_24 { ip daddr limit rate over 2500000 bytes/second } counter packets 12 bytes 3456 drop comment "rl_ratelimit_192_168_20_0_24"
-		ip daddr 10.0.0.0/24 limit rate over 1250000 bytes/second counter packets 40 bytes 5000 drop comment "rl_ratelimit_10_0_0_0_24"
-		ip daddr 192.168.1.50 limit rate over 625000 bytes/second counter packets 7 bytes 900 drop comment "rl_ratelimit_192_168_1_50"
-	}
-	chain dl_br_guest {
-		type filter hook egress device "br-guest" priority filter; policy accept;
-		ip daddr 192.168.20.0/24 meter tctl_d_192_168_20_0_24 { ip daddr limit rate over 2500000 bytes/second } counter packets 8 bytes 1544 drop comment "rl_ratelimit_192_168_20_0_24"
-		ip daddr 10.0.0.0/24 limit rate over 1250000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_10_0_0_0_24"
-		ip daddr 192.168.1.50 limit rate over 625000 bytes/second counter packets 0 bytes 0 drop comment "rl_ratelimit_192_168_1_50"
-	}
-	chain ul_lan1 {
-		type filter hook ingress device "lan1" priority -200; policy accept;
-		ip saddr 192.168.20.0/24 meter tctl_u_192_168_20_0_24 { ip saddr limit rate over 2500000 bytes/second } counter packets 3 bytes 300 drop comment "rl_ratelimit_192_168_20_0_24_ul"
-	}
-}
-TABLE
+# The table is tests/fixtures/nft-src/subnet.nft, as `nft -j` of OpenWrt
+# 22.03 (nft 1.0.2) and 25.12 (1.1.6) lists it.
+stats() { PATH="$MOCKBIN:$PATH" TCTL_ROOT="$TMP/root" tctl ratelimit-stats 2>/dev/null; }
+for v in 1.0.2 1.1.6; do
+    cp "$UC_REPO/tests/fixtures/nft-$v/subnet.tm_ratelimit.json" "$TMP/nft_table.json"
+    STATS=$(stats)
 
-STATS=$(run "$TMP/ratelimit-stats.sh")
+    assert_contains "stats $v: an each-mode subnet reports its CIDR as the target" \
+        '"ip":"192.168.20.0/24"' "$STATS"
+    # The exact symptom: the meter key "ip daddr limit ..." overwrote the target.
+    assert_not_contains "stats $v: no rule reports the target as 'limit'" \
+        '"ip":"limit"' "$STATS"
+    assert_contains "stats $v: a per-device subnet limit is labelled each" \
+        '"ip":"192.168.20.0/24","mode":"each"' "$STATS"
+    assert_contains "stats $v: an aggregate subnet limit is labelled shared" \
+        '"ip":"10.0.0.0/24","mode":"shared"' "$STATS"
+    assert_contains "stats $v: a single host is labelled shared" \
+        '"ip":"192.168.1.50","mode":"shared"' "$STATS"
+    assert_contains "stats $v: rate survives the meter form (2500000 bytes = 20000 kbit)" \
+        '"192.168.20.0/24","mode":"each","rate_kbit":20000' "$STATS"
 
-assert_contains "stats: an each-mode subnet reports its CIDR as the target" \
-    '"ip":"192.168.20.0/24"' "$STATS"
-# The exact symptom: the meter key "ip daddr limit ..." overwrote the target.
-assert_not_contains "stats: no rule reports the target as 'limit'" \
-    '"ip":"limit"' "$STATS"
-assert_contains "stats: a per-device subnet limit is labelled each" \
-    '"ip":"192.168.20.0/24","mode":"each"' "$STATS"
-assert_contains "stats: an aggregate subnet limit is labelled shared" \
-    '"ip":"10.0.0.0/24","mode":"shared"' "$STATS"
-assert_contains "stats: a single host is labelled shared" \
-    '"ip":"192.168.1.50","mode":"shared"' "$STATS"
-assert_contains "stats: rate survives the meter form (2500000 bytes = 20000 kbit)" \
-    '"192.168.20.0/24","mode":"each","rate_kbit":20000' "$STATS"
+    # Summed across chains: 12+8 packets, 3456+1544 bytes. Not 12, and not 8.
+    assert_contains "stats $v: counters are summed across the per-device chains" \
+        '"packets":20,"bytes":5000' "$STATS"
+    # The whole network (target "all"): per-device, 1250000 bytes = 10000
+    # kbit, 30+2 packets and 4000+600 bytes over the two bridges.
+    assert_contains "stats $v: the whole network is one each-mode target" \
+        '"ip":"0.0.0.0/0","mode":"each","rate_kbit":10000,"packets":32,"bytes":4600' "$STATS"
+    assert_eq "stats $v: the whole network's upload rule is no target of its own" "1" \
+        "$(printf '%s' "$STATS" | grep -o '0.0.0.0/0' | wc -l | tr -d ' ')"
+    assert_eq "stats $v: one entry per target, not one per chain" "4" \
+        "$(printf '%s' "$STATS" | tr ',' '\n' | grep -c '"ip":')"
+    # The upload rule matches on saddr and must not become a second entry.
+    assert_eq "stats $v: upload rules are not counted as separate targets" "1" \
+        "$(printf '%s' "$STATS" | grep -o '192.168.20.0/24' | wc -l | tr -d ' ')"
+done
 
-# Summed across chains: 12+8 packets, 3456+1544 bytes. Not 12, and not 8.
-assert_contains "stats: counters are summed across the per-device chains" \
-    '"packets":20,"bytes":5000' "$STATS"
-assert_eq "stats: one entry per target, not one per chain" "3" \
-    "$(printf '%s' "$STATS" | tr ',' '\n' | grep -c '"ip":')"
-# The upload rule matches on saddr and must not become a second entry.
-assert_eq "stats: upload rules are not counted as separate targets" "1" \
-    "$(printf '%s' "$STATS" | grep -o '192.168.20.0/24' | wc -l | tr -d ' ')"
+printf '{"nftables": [{"metainfo": {"version": "1.0.2", "release_name": "Lester Gooch", "json_schema_version": 1}}, {"table": {"family": "netdev", "name": "tm_ratelimit", "handle": 9}}]}\n' > "$TMP/nft_table.json"
+assert_eq "stats: an empty table is an empty array" "[]" "$(stats)"
+rm -f "$TMP/nft_table.json"
+assert_eq "stats: no table is an empty array" "[]" "$(stats)"
 
-: > "$TMP/nft_table.txt"
-assert_eq "stats: an empty table is an empty array" "[]" "$(run "$TMP/ratelimit-stats.sh")"
-
-# ════════════════════════════════════════════════════════════════════════════
-# 2. Which subnets a limit can be enforced on
-# ════════════════════════════════════════════════════════════════════════════
-rm -f "$TCTL_TEST_GUEST_MASQ"
-SUBNETS=$(run "$TMP/subnets.sh")
-
-assert_contains "subnets: a connected LAN is offered, with its device" \
-    '{"cidr":"10.10.4.128/25","device":"br-lan","kind":"lan"}' "$SUBNETS"
-assert_contains "subnets: a guest VLAN without masq is offered" \
-    '{"cidr":"192.168.20.0/24","device":"br-guest","kind":"lan"}' "$SUBNETS"
-assert_contains "subnets: a downstream routed subnet is offered too" \
-    '{"cidr":"10.0.5.0/24","device":"br-lan","kind":"routed"}' "$SUBNETS"
-assert_not_contains "subnets: the wan zone is never offered" '"eth1"' "$SUBNETS"
-
-# The #64 case: masq on a non-lan zone takes it out of tctl_lan_subnets, so no
-# netdev hook is ever attached to br-guest and a limit there matches nothing.
-# The list must not offer it — the dashboard picker is built from this.
-: > "$TCTL_TEST_GUEST_MASQ"
-SUBNETS_MASQ=$(run "$TMP/subnets.sh")
-assert_not_contains "subnets: a masquerading guest VLAN is NOT offered" \
-    '192.168.20.0/24' "$SUBNETS_MASQ"
-assert_contains "subnets: the other LANs are unaffected by that exclusion" \
-    '10.10.4.128/25' "$SUBNETS_MASQ"
-rm -f "$TCTL_TEST_GUEST_MASQ"
+# Which subnets a limit can be enforced on (`trafficctl subnets`, now ucode):
+# tests/test_ucode_lib.sh.
 
 # ════════════════════════════════════════════════════════════════════════════
 # 3. The bucket layout survives a reboot
@@ -289,32 +262,32 @@ rm -f "$TCTL_TEST_GUEST_MASQ"
 printf '[]\n' > "$RULES"
 
 : > "$NFT_LOG"
-OUT=$(run "$TMP/ratelimit.sh" 192.168.20.0/24 20000 "iot-cap" each)
+OUT=$(rl 192.168.20.0/24 20000 "iot-cap" each)
 assert_contains "ratelimit: an each-mode subnet limit is accepted" '"ok":true' "$OUT"
 assert_contains "persist: the mode is stored beside the rate" \
     '"type":"ratelimit","ip":"192.168.20.0/24","param":"20000","mode":"each"' "$(cat "$RULES")"
 
 printf '[]\n' > "$RULES"
-run "$TMP/ratelimit.sh" 10.0.0.0/24 20000 "guest-cap" shared >/dev/null
+rl 10.0.0.0/24 20000 "guest-cap" shared >/dev/null
 assert_contains "persist: a shared cap is stored as shared" \
     '"ip":"10.0.0.0/24","param":"20000","mode":"shared"' "$(cat "$RULES")"
 
 # A block record has no bucket layout and must keep its exact previous shape,
 # or an older restore hook would choke on the extra field.
 printf '[]\n' > "$RULES"
-PATH="$MOCKBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; tctl_persist_save block 192.168.1.9 ''" 2>/dev/null
+PATH="$MOCKBIN:$PATH" TCTL_ROOT="$TMP/root" tcall trafficctl.lib persist_save '"block"' '"192.168.1.9"' '""' >/dev/null 2>&1
 assert_eq "persist: a block record is unchanged" \
     '[{"type":"block","ip":"192.168.1.9","param":""}]' "$(cat "$RULES")"
 
 # ── the restore path ────────────────────────────────────────────────────────
 HOOK="$TMP/99-trafficctl-shapes"
-sed -e "s|/usr/libexec/trafficctl/trafficctl-fw.sh|$FW|" \
-    -e "s|RULES_FILE=\"/etc/trafficctl/rules.json\"|RULES_FILE=\"$RULES\"|" \
-    -e "s|SHAPES_FILE=\"/etc/trafficctl/shapes.json\"|SHAPES_FILE=\"$SHAPES\"|" \
-    -e "s|/etc/trafficctl/cut.state|$TMP/cut.state|" \
-    "$HOTPLUG" > "$HOOK"
-assert_not_contains "harness: the hook's rules path was redirected" \
-    "/etc/trafficctl/rules.json" "$(cat "$HOOK")"
+sed -e "s|/usr/sbin/trafficctl|$TMP/tctl-cli|" "$HOTPLUG" > "$HOOK"
+# The hook runs `trafficctl restore`, here on the same fake nft and the same
+# rules.json.
+printf '#!/bin/sh\nTCTL_ROOT="%s" exec "%s" -S -L "%s" -- "%s" "$@"\n' "$TMP/root" "$UCODE" "$UC_LIB" \
+    "$UC_REPO/trafficctl/files/usr/sbin/trafficctl" > "$TMP/tctl-cli"
+chmod +x "$TMP/tctl-cli"
+assert_contains "harness: the hook runs the CLI under test" "$TMP/tctl-cli restore" "$(cat "$HOOK")"
 
 # What ends the restore loop is a sentinel, not a counted range (#108), so a
 # broken sentinel is an infinite loop and a skipped increment is an infinite
@@ -376,7 +349,7 @@ assert_not_contains "restore: a shared cap does NOT come back per-device" \
     "meter" "$RESTORED"
 
 # Records written before the mode was stored must land on the same default the
-# CLI would have chosen, not on tctl_ratelimit_add's own "shared" fallback —
+# CLI would have chosen, not on the limiter's own "shared" fallback —
 # that turned "5 Mbit each" into "5 Mbit for the whole subnet" on reboot.
 RESTORED=$(restore '[{"type":"ratelimit","ip":"192.168.20.0/24","param":"20000"}]')
 assert_terminated "restore: the loop ended on its own"
@@ -388,6 +361,17 @@ assert_terminated "restore: the loop ended on its own"
 assert_contains "restore: a legacy host record still applies" \
     "ip daddr 192.168.1.50 limit rate over 625000 bytes/second" "$RESTORED"
 assert_not_contains "restore: a host needs no meter" "meter" "$RESTORED"
+
+# At boot ifup lan can come before fw4 has loaded its ruleset. A block restored
+# then went nowhere, so `trafficctl restore` waits for inet fw4 first.
+echo 2 > "$TMP/fw4_late"
+RESTORED=$(restore '[{"type":"block","ip":"192.168.1.60","param":""}]')
+assert_terminated "restore: the loop ended on its own"
+assert_eq "restore: the hook waits for inet fw4 before restoring a block" \
+    "list table inet fw4|list table inet fw4|list table inet fw4|insert rule inet fw4 forward" \
+    "$(printf '%s\n' "$RESTORED" | grep -E '^(list table inet fw4|insert rule inet fw4 forward)' \
+        | sed 's/^\(insert rule inet fw4 forward\).*/\1/' | head -4 | paste -sd'|' -)"
+rm -f "$TMP/fw4_late"
 
 # ── the restore loop's bounds (#108) ───────────────────────────────────────
 # The loop used to be `for idx in $(seq 0 99)`, so rule 101 onward was never
@@ -418,27 +402,12 @@ assert_contains "restore: the hundred-and-first rule comes back" \
     "10.9.1.101" "$RESTORED"
 assert_terminated "restore: a hundred-and-one records end the loop on their own"
 
-# A fixture cannot prove the absence of a bound: raising the cap to 500 passes
-# every assertion above. So the absence is asserted structurally — the loop
-# header carries no condition, and the only way out is the absent-record
-# sentinel. Comments are stripped first because the hook's own comment quotes
-# `seq 0 99` while explaining why it is gone.
-RULES_LOOP=$(awk '/^# Restore blocks and ratelimits/ { f = 1 } f { print } f && /^fi$/ { exit }' \
-             "$HOTPLUG" | grep -v '^[[:space:]]*#')
-assert_not_contains "restore: the loop bound is not a counted range" "seq " "$RULES_LOOP"
-assert_contains "restore: the loop header carries no bound at all" "while :; do" "$RULES_LOOP"
-assert_contains "restore: and ends only when a record is absent" \
-    '[ -z "$type" ] && break' "$RULES_LOOP"
-# The increment must be the first thing in the body, ahead of the `continue`
-# further down; at the bottom it would be skipped and the loop would spin.
-FIRST_STMT=$(printf '%s' "$RULES_LOOP" | awk '/while :; do/ { getline; print; exit }')
-assert_contains "restore: the index is advanced before anything can skip it" \
-    'idx=$((idx + 1))' "$FIRST_STMT"
-
-# The index is advanced at the TOP of the loop. With the increment at the
-# bottom, the `[ -z "$ip" ] && continue` below it would skip the increment and
-# spin forever on the same record — inside a boot hook, which is worse than
-# the bug above.
+# A fixture cannot prove the absence of a bound. Up to 1.30.x the port-forward
+# records were read by a shell loop in the hook (`while :; do`, ended by the
+# absent-record sentinel); `trafficctl restore` walks the parsed array, so
+# there is no index or bound left to pin.
+# A record with no address is skipped, and the next one still restored: the
+# shell loop spun forever on it when its increment came after the `continue`.
 RESTORED=$(restore '[{"type":"block"},{"type":"block","ip":"192.168.1.77","param":""}]')
 assert_terminated "restore: a record with no ip must not spin the loop"
 assert_contains "restore: a record after a malformed one is still restored" \
@@ -446,48 +415,11 @@ assert_contains "restore: a record after a malformed one is still restored" \
 
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# 4. The shaper declining under SQM says so
-# ════════════════════════════════════════════════════════════════════════════
-#
-# The requester in #64 runs SQM. Refusing to replace a root qdisc it does not
-# recognise is deliberate — it is what stops this app destroying an SQM setup —
-# but the refusal used to surface as "tc setup failed", which reads as a bug
-# and does not point anywhere. The limiter is a policer, owns no qdisc, and is
-# the answer on such a router; a subnet target only ever uses it.
-patch_script "$BIN/trafficctl-shape.sh" "$TMP/shape.sh"
-
-cat > "$MOCKBIN/tc" <<'MOCK'
-#!/bin/sh
-case "$*" in
-    "qdisc show dev br-lan") echo "qdisc cake 8001: root refcnt 2 bandwidth 100Mbit" ;;
-    *"class show"*) exit 0 ;;
-esac
-exit 0
-MOCK
-chmod +x "$MOCKBIN/tc"
-
-SQM_OUT=$(PATH="$MOCKBIN:$PATH" sh "$TMP/shape.sh" add 192.168.1.50 5000 2>/dev/null)
-assert_contains "shaper: declines rather than claiming success under SQM" '"ok":false' "$SQM_OUT"
-assert_contains "shaper: names the root qdisc as the reason" "root qdisc" "$SQM_OUT"
-assert_contains "shaper: points at the limiter, which coexists with SQM" "limiter" "$SQM_OUT"
-
-# A qdisc the kernel or OpenWrt put there carries no configuration worth
-# keeping, so that path must NOT produce the decline message.
-cat > "$MOCKBIN/tc" <<'MOCK'
-#!/bin/sh
-case "$*" in
-    "qdisc show dev br-lan") echo "qdisc fq_codel 0: root refcnt 2" ;;
-esac
-exit 0
-MOCK
-chmod +x "$MOCKBIN/tc"
-PLAIN_OUT=$(PATH="$MOCKBIN:$PATH" sh "$TMP/shape.sh" add 192.168.1.50 5000 2>/dev/null)
-assert_not_contains "shaper: a default root qdisc is not reported as somebody's QoS" \
-    "will not be torn down" "$PLAIN_OUT"
+# 4. The shaper declining under SQM says so: `trafficctl shape` since the
+# ucode port, tests/test_shape.sh.
 
 # ── the default itself ──────────────────────────────────────────────────────
-mode_of() { PATH="$MOCKBIN:$PATH" sh -c ". '$FW' >/dev/null 2>&1; tctl_ratelimit_default_mode '$1'" 2>/dev/null; }
+mode_of() { tcall trafficctl.limit default_mode "\"$1\"" 2>/dev/null; }
 assert_eq "default mode: a subnet is per-device"      "each"   "$(mode_of 192.168.20.0/24)"
 assert_eq "default mode: a /32 is a single host"      "shared" "$(mode_of 192.168.1.50/32)"
 assert_eq "default mode: a bare address is one host"  "shared" "$(mode_of 192.168.1.50)"
