@@ -31,6 +31,27 @@ rest) are gone.
 
 ---
 
+## [2.1.0] - 2026-11-17
+
+### Features
+- name private destinations from aliases and DHCP leases ([#177](https://github.com/YusDyr/luci-app-trafficctl/issues/177)) ([01bda8e](https://github.com/YusDyr/luci-app-trafficctl/commit/01bda8e73369e6b227dd21154ffa847e7a729382))
+  The device view never sends a private destination to reverse DNS, so the
+  connection table showed "—" for LAN hosts the router already knows. The
+  host cell now takes the name from the manual alias, then the DHCPv4/v6
+  lease (names_list + luci-rpc getDHCPLeases, re-read at most once a
+  minute), and shows the bare address when neither names it. While rDNS is
+  off, the table footer says public hostnames are not looked up and links
+
+### Other
+- run the upgrade test from the newest 1.x release ([#180](https://github.com/YusDyr/luci-app-trafficctl/issues/180)) ([b44abd8](https://github.com/YusDyr/luci-app-trafficctl/commit/b44abd8fa970bc1becf947dfaa96340df9b0d8ff))
+  test_upgrade.sh checks the move off the 1.30.x shell backend, so with
+  v2.0.0 as the latest release its old install failed the first check
+  (trafficctl-fw.sh missing) in every row, and the 2.1.0 release stopped.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v2.0.0...v2.1.0
+
+---
+
 ## [2.0.0] - 2026-11-17
 
 ### Features
