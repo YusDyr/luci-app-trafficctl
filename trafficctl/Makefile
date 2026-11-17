@@ -232,6 +232,14 @@ if [ -z "$${IPKG_INSTROOT}" ]; then
 			/etc/init.d/trafficctl-history restart 2>/dev/null || true
 		fi
 	fi
+	# Every saved block, limit, shape and port control goes back in force, as
+	# the `ifup lan` hook does. Up to 1.30.x each shape added removed the u32
+	# filters of the others, so only the last one was in force, and an upgrade
+	# from there left the rest unshaped until the next reboot. TCTL_NOTIFY=0:
+	# nothing new is applied, so no notification per device.
+	if [ -x /usr/sbin/trafficctl ]; then
+		TCTL_NOTIFY=0 /usr/sbin/trafficctl restore >/dev/null 2>&1 || true
+	fi
 	if [ -f /usr/share/rpcd/ucode/luci.trafficctl.uc ]; then
 		/etc/init.d/rpcd reload 2>/dev/null || true
 	fi

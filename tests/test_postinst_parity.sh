@@ -210,7 +210,7 @@ assert_contains "trafficctl build-apk.sh post-install tightens the config mode" 
 #    The bot is trafficctl-telegram's, so its postinst does this, after
 #    trafficctl's (a dependency is configured first) has moved the
 #    notification options.
-for step in "/usr/sbin/trafficctl notify migrate" \
+for step in "/usr/sbin/trafficctl notify migrate" "TCTL_NOTIFY=0 /usr/sbin/trafficctl restore" \
     "/etc/init.d/trafficctl-notify enable" "/etc/init.d/trafficctl-notify restart"; do
     assert_contains "trafficctl Makefile postinst runs '$step'" "$step" "$BE_MK_POSTINST"
     assert_contains "trafficctl build-ipk.sh postinst runs '$step'" "$step" "$BE_IPK_POSTINST"
@@ -455,6 +455,8 @@ for f in "$TMP/trafficctl.postinst" "$TMP/ipk.postinst" "$TMP/apk.postinst"; do
     assert_eq "$n, the bot installed: it is not stopped" 0 "$(grep -c '^ubus ' "$FAKE/calls")"
     assert_eq "$n, the bot installed: its boot links stay" yes "$(in_rcd S99trafficctl-telegram)"
     assert_eq "$n: the Telegram notification options are migrated" 1 "$(calls 'trafficctl notify migrate')"
+    # An upgrade from 1.30.x left all shapes but the last without filters.
+    assert_eq "$n: the saved rules and shapes are put back" 1 "$(calls 'trafficctl restore')"
     assert_eq "$n: the notification watcher is enabled in rc.d" yes "$(in_rcd trafficctl-notify)"
     assert_eq "$n: the notification watcher is restarted" 1 "$(calls 'trafficctl-notify restart')"
     assert_eq "$n, history.enabled=1: the sampler is enabled in rc.d" yes "$(in_rcd trafficctl-history)"
