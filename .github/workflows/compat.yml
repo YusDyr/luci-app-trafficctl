@@ -536,12 +536,12 @@ jobs:
       - name: Download previous release
         run: |
           mkdir -p dist-old
-          # Find the latest published release prior to current
-          PREV_TAG=$(gh release list --limit 5 --json tagName,isLatest \
-                     --jq '.[] | select(.isLatest == true) | .tagName')
-          if [ -z "$PREV_TAG" ]; then
-            PREV_TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
-          fi
+          # The newest 1.x release, not the latest one: test_upgrade.sh checks
+          # the move off the 1.30.x shell backend (trafficctl-fw.sh, the rules
+          # it wrote, the backend-first warning), so a 2.x "old" install fails
+          # it at the first check. Since v2.0.0 became latest, every run did.
+          PREV_TAG=$(gh release list --limit 100 --json tagName \
+                     --jq '[.[] | select(.tagName | test("^v1\\."))][0].tagName')
           echo "Previous release: $PREV_TAG"
           if ! gh release download "$PREV_TAG" \
                -p "*.${{ matrix.format }}" -D dist-old 2>/tmp/dl-err; then
