@@ -53,7 +53,7 @@ function now() {
 }
 
 function fail(msg) {
-	return { reply: { ok: false, msg }, rc: 1 };
+	return lib.reply({ ok: false, msg });
 }
 
 function logger(msg) {

@@ -93,7 +93,7 @@ luci-app-trafficctl/                     # repository
 │       │                                #   block, unblock, macfilter-add, macfilter-remove, newdevice, restore,
 │       │                                #   cut, portfw, history, ratelimit, shape, notify, telegram, telegram-test
 │       ├── usr/share/ucode/trafficctl/
-│       │   ├── lib.uc                   # Shared helpers: uci/ubus, commands, JSON, validation, files, log
+│       │   ├── lib.uc                   # Shared helpers: uci/ubus, commands, nft rule deletion, JSON, validation, files, log, command replies
 │       │   ├── net.uc                   # Subnets, interface roles, reverse DNS, byte samples, totals
 │       │   ├── ctl.uc                   # nft/tc readers, the block, the WiFi deny, newdevice, restore
 │       │   ├── report.uc                # Summary, device detail, Prometheus exporter, netifyd DPI

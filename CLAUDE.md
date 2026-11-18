@@ -49,7 +49,7 @@ trafficctl/
   Makefile                                  — OpenWrt package Makefile (package.mk, explicit INSTALL_* per file)
   files/usr/sbin/trafficctl                 — ucode CLI: subnets, names, rdns, rdns-refresh, ifaces, bytes, totals, ratelimit-stats, shape-stats, rules, summary, device, metrics, netify, block, unblock, macfilter-add, macfilter-remove, newdevice, restore, cut, portfw, history, ratelimit, shape, notify, telegram, telegram-test
   files/usr/share/ucode/trafficctl/
-    lib.uc                                  — Shared ucode helpers; its header is the API doc
+    lib.uc                                  — Shared ucode helpers, also the command reply, awk field split and nft rule deletion every module uses; its header is the API doc
     net.uc                                  — Subnets, interface roles, reverse DNS, byte samples, lifetime totals
     ctl.uc                                  — nft -j/tc readers (limits, blocks, shapes, the Rules tab list); the block, the WiFi deny, the DHCP hook (newdevice) and the block restore
     report.uc                               — Read-only reports: summary, device detail, Prometheus exporter, netifyd DPI

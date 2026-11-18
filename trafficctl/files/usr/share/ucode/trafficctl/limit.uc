@@ -87,10 +87,6 @@ function comment(t) {
 	return 'rl_ratelimit_' + lib.slug(t);
 }
 
-function fields(l) {
-	return filter(split(l, /[ \t]+/), (w) => w != '');
-}
-
 // Device names come from ubus, uci, the routing table and sysfs, and go
 // into an nft command (device %s) and a sysfs path: only what the kernel
 // itself allows in a name (IFNAMSIZ, no '/' or space) and nft parses as one
@@ -120,7 +116,7 @@ function wan_device() {
 	push(cands, ...lib.uci_words('network', 'wan', 'ifname'));
 	let rt = null;
 	for (let l in lib.lines('ip route show default')) {
-		let f = fields(l);
+		let f = lib.fields(l);
 		if (substr(l, 0, 7) != 'default')
 			continue;
 		for (let i = 0; i < length(f) - 1 && rt == null; i++)
@@ -359,7 +355,7 @@ function delete_rules(pick) {
 			ch = m[1];
 			continue;
 		}
-		let f = fields(l);
+		let f = lib.fields(l);
 		if (!pick(f))
 			continue;
 		let h = null, set = null;
@@ -379,7 +375,7 @@ function delete_rules(pick) {
 		}
 	}
 	for (let r in rules)
-		nft([ 'delete', 'rule', ...TABLE, r[0], 'handle', r[1] ]);
+		lib.nft_delete(TABLE, r[0], [ r[1] ]);
 	for (let set in sets)
 		nft([ 'delete', 'set', ...TABLE, set ]);
 }
@@ -440,12 +436,8 @@ function remove_legacy(ip, cmt) {
 	});
 }
 
-function reply(o, rc) {
-	return { reply: o, rc: rc ?? (o.ok ? 0 : 1) };
-}
-
 function fail(msg) {
-	return reply({ ok: false, msg });
+	return lib.reply({ ok: false, msg });
 }
 
 function arg(a) {
@@ -511,7 +503,7 @@ function ratelimit(args) {
 		remove(ip, cmt);
 		let removed = both(unsave_others(ip), lib.persist_enabled() ? lib.persist_remove('ratelimit', ip) : null);
 		lib.log('ratelimit_remove', ip, '', via, src);
-		return reply({ ok: true, msg: 'rate limit removed for ' + ip +
+		return lib.reply({ ok: true, msg: 'rate limit removed for ' + ip +
 			lib.persist_warn(removed, 'the saved limit is still there and comes back on the next ifup lan') });
 	}
 
@@ -564,7 +556,7 @@ function ratelimit(args) {
 	else
 		o.msg = sprintf('rate limit %s for %s (both directions, %s)%s%s%s', rates, ip, mode,
 			partial ? ' — PARTIAL: ' + joined(r.dl_err, r.ul_err) : '', v6note, note);
-	return reply(o);
+	return lib.reply(o);
 }
 
 // A record field as the shell's jsonfilter printed it: absent or null is
