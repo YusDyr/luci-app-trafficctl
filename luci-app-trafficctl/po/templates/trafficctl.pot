@@ -124,6 +124,9 @@ msgstr ""
 msgid "All devices"
 msgstr ""
 
+msgid "All devices share"
+msgstr ""
+
 msgid "All of"
 msgstr ""
 
@@ -140,6 +143,9 @@ msgid "Applied — firewall reloading"
 msgstr ""
 
 msgid "Apply"
+msgstr ""
+
+msgid "Apply this limit now?"
 msgstr ""
 
 msgid "Applying…"
@@ -416,6 +422,9 @@ msgid "Every block, speed limit, shape and WiFi block the router holds, includin
 msgstr ""
 
 msgid "Every device in"
+msgstr ""
+
+msgid "Every device may use"
 msgstr ""
 
 msgid "Every device this router forwards for"
@@ -1009,6 +1018,9 @@ msgstr ""
 msgid "Saved"
 msgstr ""
 
+msgid "Saved, MAC filter off"
+msgstr ""
+
 msgid "Saved, applies when WiFi starts"
 msgstr ""
 
@@ -1208,6 +1220,9 @@ msgid "The auto-revert helper is not running; this page re-checks the deadline w
 msgstr ""
 
 msgid "The deny list names this device but the running radio does not. Install hostapd-utils, or restart WiFi (disconnects every client)."
+msgstr ""
+
+msgid "The deny list names this device, but MAC filtering is off on that WiFi interface (macfilter is not \"deny\"), so the radio ignores the list. Block WiFi for the device again to switch filtering on, or remove the entry."
 msgstr ""
 
 msgid "The flowtable"
@@ -1432,7 +1447,13 @@ msgstr ""
 msgid "at least"
 msgstr ""
 
+msgid "between them — one bucket for the whole network."
+msgstr ""
+
 msgid "between them — one bucket for the whole subnet."
+msgstr ""
+
+msgid "between them — one bucket per direction for the whole network."
 msgstr ""
 
 msgid "between them — one bucket per direction for the whole subnet."
@@ -1505,9 +1526,6 @@ msgid "error"
 msgstr ""
 
 msgid "every"
-msgstr ""
-
-msgid "every device"
 msgstr ""
 
 msgid "failed"

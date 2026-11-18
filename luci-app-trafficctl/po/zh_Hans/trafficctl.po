@@ -1186,8 +1186,6 @@ msgstr "已丢弃"
 msgid "each"
 msgstr "每个"
 
-msgid "every device"
-msgstr "每个设备"
 
 msgid "failed"
 msgstr "失败"
@@ -1359,3 +1357,24 @@ msgstr ""
 
 msgid "🆕 New device\\n{{ name }} ({{ ip }})\\nMAC: {{ mac }}\\nLink: {{ link }}"
 msgstr "🆕 新设备\\n{{ name }} ({{ ip }})\\nMAC：{{ mac }}\\nLink：{{ link }}"
+
+msgid "All devices share"
+msgstr "所有设备共享"
+
+msgid "Apply this limit now?"
+msgstr "现在应用此限制吗？"
+
+msgid "Every device may use"
+msgstr "每个设备可使用"
+
+msgid "Saved, MAC filter off"
+msgstr "已保存，MAC 过滤已关闭"
+
+msgid "The deny list names this device, but MAC filtering is off on that WiFi interface (macfilter is not \"deny\"), so the radio ignores the list. Block WiFi for the device again to switch filtering on, or remove the entry."
+msgstr "拒绝列表包含此设备，但该 WiFi 接口的 MAC 过滤已关闭（macfilter 不是 \"deny\"），因此无线电会忽略该列表。再次对该设备阻止 WiFi 以开启过滤，或删除此条目。"
+
+msgid "between them — one bucket for the whole network."
+msgstr "它们之间 — 整个网络一个桶。"
+
+msgid "between them — one bucket per direction for the whole network."
+msgstr "它们之间 — 整个网络每个方向一个桶。"

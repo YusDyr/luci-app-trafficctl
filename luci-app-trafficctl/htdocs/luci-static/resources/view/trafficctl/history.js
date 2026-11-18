@@ -133,6 +133,7 @@ return view.extend({
 	sel: '',
 	selTo: '',
 	sortKey: 'total',
+	sortDir: 'desc',
 	tbody: null,
 	ifRows: [],
 	ifBody: null,
@@ -159,16 +160,17 @@ return view.extend({
 	sorted: function() {
 		var self = this;
 		var rows = this.rows.slice();
+		var sign = this.sortDir === 'asc' ? 1 : -1;
 		rows.sort(function(a, b) {
 			if (self.sortKey === 'name') {
 				var an = (a.name || a.ip || '').toLowerCase();
 				var bn = (b.name || b.ip || '').toLowerCase();
-				return an < bn ? -1 : (an > bn ? 1 : 0);
+				return sign * (an < bn ? -1 : (an > bn ? 1 : 0));
 			}
-			if (self.sortKey === 'last') return (b.last_seen || 0) - (a.last_seen || 0);
-			if (self.sortKey === 'down') return (b.bytes_in || 0) - (a.bytes_in || 0);
-			if (self.sortKey === 'up') return (b.bytes_out || 0) - (a.bytes_out || 0);
-			return self.totalOf(b) - self.totalOf(a);
+			if (self.sortKey === 'last') return sign * ((a.last_seen || 0) - (b.last_seen || 0));
+			if (self.sortKey === 'down') return sign * ((a.bytes_in || 0) - (b.bytes_in || 0));
+			if (self.sortKey === 'up') return sign * ((a.bytes_out || 0) - (b.bytes_out || 0));
+			return sign * (self.totalOf(a) - self.totalOf(b));
 		});
 		return rows;
 	},
@@ -496,13 +498,22 @@ return view.extend({
 				'class': 'th ' + (cls || ''),
 				'style': 'cursor:pointer',
 				'title': title || _('Sort by this column')
-			}, label + (self.sortKey === key ? ' ▾' : ''));
+			}, label + (self.sortKey === key ? (self.sortDir === 'asc' ? ' ▲' : ' ▼') : ''));
+			// A second click on the same column reverses it. A new column starts
+			// where it reads naturally: names A to Z, figures and dates largest
+			// or newest first.
 			th.addEventListener('click', function() {
-				self.sortKey = key;
+				if (self.sortKey === key) {
+					self.sortDir = self.sortDir === 'asc' ? 'desc' : 'asc';
+				} else {
+					self.sortKey = key;
+					self.sortDir = key === 'name' ? 'asc' : 'desc';
+				}
 				self.renderTable();
-				var fresh = buildHead();
-				thead.parentNode.replaceChild(fresh, thead);
-				thead = fresh;
+				// buildHead() reassigns thead, so keep the one in the table to
+				// replace it.
+				var old = thead;
+				old.parentNode.replaceChild(buildHead(), old);
 			});
 			return th;
 		}
