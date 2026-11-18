@@ -41,6 +41,9 @@ jobs:
       # limited every device unasked, and Off on a shape said "rate limit removed".
       - name: Speed Limit panel target change, network-wide confirm, Off message
         run: bash tests/test_rate_panel_ui.sh
+      # The Devices tab showed bytes in 1024 steps, History and Port Forwards in 1000.
+      - name: Byte totals in SI on every tab
+        run: bash tests/test_bytes_ui.sh
       # The History view's verdicts and fields against history.uc's replies.
       - name: History view tests
         run: bash tests/test_history_ui.sh

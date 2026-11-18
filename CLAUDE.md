@@ -233,7 +233,7 @@ ssh root@192.168.0.1 sh -c '"cat > /www/luci-static/resources/view/trafficctl/st
 - Byte counts under flow offload come from conntrack only, and stay accurate only with a counter-flagged flowtable (fw4 from 23.05 on: offload modes `*-counter`). The flowtable hooks netdev ingress, so offloaded packets never reach an inet forward chain at any priority and no nft rule can count them. fw4 on 22.03 declares the flowtable without `counter`: every sample is `degraded: true`, the UI hides speeds and totals, and syslog gets one hint per mode (disable offload or upgrade). Releases up to 1.30.x tried counter maps in `inet trafficctl_mon`; no OpenWrt kernel accepted them, and the postinst now deletes that table
 - Spike filter: cap speed at 125 MB/s (1 Gbit/s), discard anomalous samples
 - Y-axis scaling: 98th percentile, nice ticks (multiples of 100/500 Kbit/s, min 5 gridlines)
-- Speed units: ×1000 (SI network convention), not ×1024
+- Speed and byte units: ×1000 (SI network convention), not ×1024, on every tab (`fmtBytes` in status.js, history.js, portfw.js; `tests/test_bytes_ui.sh`)
 
 ## CSS / JS Display Gotcha
 
