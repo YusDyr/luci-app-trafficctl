@@ -55,8 +55,10 @@ def extract(path):
             ids.append(joined)
     return ids
 
+# The views, and the module they share (resources/trafficctl/common.js).
+RES='luci-app-trafficctl/htdocs/luci-static/resources/'
 ids=[]
-for f in sorted(glob.glob('luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/*.js')):
+for f in sorted(glob.glob(RES + 'view/trafficctl/*.js')) + sorted(glob.glob(RES + 'trafficctl/*.js')):
     ids += extract(f)
 # Menu titles and ACL descriptions are translated too: LuCI looks them up at
 # runtime, and luci's own build/i18n-scan.pl collects them, so a .pot without

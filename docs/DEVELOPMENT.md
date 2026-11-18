@@ -32,6 +32,9 @@ ssh root@192.168.0.1 '/etc/init.d/rpcd restart'
 scp luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js \
     luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.css \
     root@192.168.0.1:/www/luci-static/resources/view/trafficctl/
+# The module every view requires (status.css loader, shared rpc declarations)
+scp luci-app-trafficctl/htdocs/luci-static/resources/trafficctl/common.js \
+    root@192.168.0.1:/www/luci-static/resources/trafficctl/
 ```
 
 After deploying, hard-refresh the browser (Ctrl+Shift+R) to pick up JavaScript changes.
@@ -109,10 +112,13 @@ luci-app-trafficctl/                     # repository
 ├── luci-app-trafficctl/                 # package luci-app-trafficctl: the web interface
 │   ├── Makefile                         # OpenWrt package build (luci.mk), depends on trafficctl
 │   ├── htdocs/luci-static/resources/view/trafficctl/
-│   │   ├── status.js                    # Frontend (single ES5 file)
+│   │   ├── status.js                    # "Devices" tab (ES5)
 │   │   ├── rules.js                     # "Rules" tab
 │   │   ├── portfw.js                    # "Port Forwards" tab
+│   │   ├── history.js, notify.js, settings.js  # "History", "Notifications", "Settings" tabs
 │   │   └── status.css                   # Frontend styles
+│   ├── htdocs/luci-static/resources/trafficctl/
+│   │   └── common.js                    # Shared by the views: status.css loader, rpc declarations, fmtRate/fmtCeiling
 │   ├── root/usr/share/
 │   │   ├── luci/menu.d/luci-app-trafficctl.json
 │   │   └── rpcd/
@@ -207,7 +213,7 @@ shellcheck -s sh trafficctl/files/etc/hotplug.d/*/* trafficctl/files/www/cgi-bin
 
 # JavaScript (requires node + eslint)
 npm install   # installs eslint from package.json devDependencies
-npx eslint luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js
+npx eslint --max-warnings 0 luci-app-trafficctl/htdocs/   # every view and trafficctl/common.js, as CI does
 ```
 
 ### Automated Tests

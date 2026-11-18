@@ -82,7 +82,10 @@ luci-app-trafficctl/
     rules.js                                — "Rules" tab (all restrictions, offline devices included)
     portfw.js                               — "Port Forwards" tab (inbound traffic control)
     notify.js                               — "Notifications" tab (senders, their events, the device scan)
-    status.css                              — Frontend styles (shared by both views)
+    history.js, settings.js                 — "History" and "Settings" tabs
+    status.css                              — Frontend styles (shared by every view)
+  htdocs/luci-static/resources/trafficctl/
+    common.js                               — Module the views share (`'require trafficctl.common as common'`): the status.css loader, RPC_INT_MAX, the block/unblock/ratelimit/shape/macfilter_remove rpc declarations, fmtRate/fmtCeiling
   root/usr/share/rpcd/ucode/
     luci.trafficctl.uc                      — rpcd plugin (rpcd-mod-ucode, runs inside rpcd): settings, names, activity log in process; the rest via /usr/sbin/trafficctl through file.exec
   root/usr/share/luci/menu.d/, root/usr/share/rpcd/acl.d/ — menu entry and ACL
@@ -147,6 +150,16 @@ docs/
 - `var` everywhere, `function` keyword only
 - LuCI globals available: `E()`, `_()`, `L`, `view`, `rpc`, `dom`, `ui`, `form`, `fs`
 - `rpc.declare()` for ubus calls
+- What more than one view needs lives in `resources/trafficctl/common.js`
+  (`return baseclass.extend({...})`, loaded with
+  `'require trafficctl.common as common';`, resolved by LuCI to
+  `/luci-static/resources/trafficctl/common.js`). Every view requires it,
+  which also loads status.css. A view takes what it uses into local names
+  (`var fmtRate = common.fmtRate;`) so its functions and the tests that slice
+  them keep calling plain names; common.js declares plain top-level functions
+  for the same reason. portfw.js keeps its own `fmtRate` (0 shows as
+  "0 kbit/s", not a dash). `tools/genpot.py` and the i18n and rpcd contract
+  tests read common.js along with the views
 - ESLint config: `.eslintrc.json` (no-var: off, prefer-const: off)
 - Run `node --check status.js` for syntax validation
 
@@ -200,6 +213,7 @@ ssh root@192.168.0.1 sh -c '"cat > /usr/sbin/trafficctl && chmod +x /usr/sbin/tr
 # Frontend:
 ssh root@192.168.0.1 sh -c '"cat > /www/luci-static/resources/view/trafficctl/status.js"' < luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js
 ssh root@192.168.0.1 sh -c '"cat > /www/luci-static/resources/view/trafficctl/status.css"' < luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.css
+ssh root@192.168.0.1 sh -c '"mkdir -p /www/luci-static/resources/trafficctl && cat > /www/luci-static/resources/trafficctl/common.js"' < luci-app-trafficctl/htdocs/luci-static/resources/trafficctl/common.js
 ```
 
 ## Key Technical Details

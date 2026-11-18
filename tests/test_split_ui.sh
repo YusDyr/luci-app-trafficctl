@@ -15,6 +15,7 @@
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 JS="$REPO_ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js"
+COMMON_JS="$REPO_ROOT/luci-app-trafficctl/htdocs/luci-static/resources/trafficctl/common.js"
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
@@ -60,7 +61,7 @@ assert_contains "Enter in the upload field applies" "upInput.addEventListener('k
 if ! command -v node >/dev/null 2>&1; then
     printf "SKIP: node is not installed — fmtCeiling cannot be run here.\n"
 else
-    { echo 'function _(s) { return s; }'; js_slice "$JS" fmtRate; js_slice "$JS" fmtCeiling; } > "$TMP/slices.js"
+    { echo 'function _(s) { return s; }'; js_slice "$COMMON_JS" fmtRate; js_slice "$COMMON_JS" fmtCeiling; } > "$TMP/slices.js"
     run() { node -e "$(cat "$TMP/slices.js"); console.log($1);"; }
     assert_eq "symmetric: one figure" "5 Mbit/s" "$(run 'fmtCeiling(5000, 5000)')"
     assert_eq "no upload figure: download alone" "5 Mbit/s" "$(run 'fmtCeiling(5000, 0)')"

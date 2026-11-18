@@ -4,16 +4,17 @@
 'require rpc';
 'require fs';
 'require ui';
+'require trafficctl.common as common';
 
-(function() {
-	if (!document.querySelector('link[href*="trafficctl/status.css"]')) {
-		var lnk = document.createElement('link');
-		lnk.rel = 'stylesheet';
-		lnk.type = 'text/css';
-		lnk.href = '/luci-static/resources/view/trafficctl/status.css';
-		document.head.appendChild(lnk);
-	}
-})();
+var RPC_INT_MAX = common.RPC_INT_MAX;
+var callBlock = common.callBlock;
+var callUnblock = common.callUnblock;
+var callMacfilterRemove = common.callMacfilterRemove;
+var callRatelimit = common.callRatelimit;
+var callShapeAdd = common.callShapeAdd;
+var callShapeRemove = common.callShapeRemove;
+var fmtRate = common.fmtRate;
+var fmtCeiling = common.fmtCeiling;
 
 // Per-device DPI app breakdown from netifyd, keyed by IP. Stays empty when the
 // agent isn't running, which is what makes the App column degrade quietly.
@@ -85,42 +86,10 @@ var callIfaces = rpc.declare({
 	expect: { result: [] }
 });
 
-var callBlock = rpc.declare({
-	object: 'luci.trafficctl',
-	method: 'block',
-	params: ['ip', 'label']
-});
-
-var callUnblock = rpc.declare({
-	object: 'luci.trafficctl',
-	method: 'unblock',
-	params: ['ip', 'label']
-});
-
 var callMacfilterAdd = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'macfilter_add',
 	params: ['ip']
-});
-
-var callMacfilterRemove = rpc.declare({
-	object: 'luci.trafficctl',
-	method: 'macfilter_remove',
-	params: ['ip']
-});
-
-// rpcd takes an int argument as a signed 32-bit number and refuses the whole
-// call (Invalid argument) for anything larger. A rate typed beyond that is
-// sent as this, so the backend answers with its own range message.
-var RPC_INT_MAX = 2147483647;
-
-var callRatelimit = rpc.declare({
-	object: 'luci.trafficctl',
-	method: 'ratelimit',
-	// rate_kbit_up is omitted for a symmetric limit rather than sent equal to
-	// rate_kbit: the backend reads absence as "same as download", and sending
-	// it always would make every record asymmetric-shaped on disk.
-	params: ['ip', 'rate_kbit', 'label', 'mode', 'rate_kbit_up']
 });
 
 var callRatelimitStats = rpc.declare({
@@ -133,18 +102,6 @@ var callSubnets = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'subnets',
 	expect: { result: [] }
-});
-
-var callShapeAdd = rpc.declare({
-	object: 'luci.trafficctl',
-	method: 'shape_add',
-	params: ['ip', 'rate_kbit', 'label', 'rate_kbit_up']
-});
-
-var callShapeRemove = rpc.declare({
-	object: 'luci.trafficctl',
-	method: 'shape_remove',
-	params: ['ip', 'label']
 });
 
 var callShapeStats = rpc.declare({
@@ -328,20 +285,6 @@ function fmtSpeed(bps) {
 	if (bits < 1000000) { var k = bits/1000; return (k % 1 === 0 ? k.toFixed(0) : k.toFixed(1)) + ' ' + _('Kbit/s'); }
 	if (bits < 1000000000) { var m = bits/1000000; return (m % 1 === 0 ? m.toFixed(0) : m.toFixed(1)) + ' ' + _('Mbit/s'); }
 	var g = bits/1000000000; return (g % 1 === 0 ? g.toFixed(0) : g.toFixed(2)) + ' ' + _('Gbit/s');
-}
-function fmtRate(kbit) {
-	if (!kbit || kbit <= 0) return '—';
-	var mbit = kbit / 1000;
-	if (mbit >= 1) return (mbit % 1 === 0 ? mbit.toFixed(0) : mbit.toFixed(1)) + ' ' + _('Mbit/s');
-	return kbit + ' ' + _('kbit/s');
-}
-
-// A ceiling as one figure, or both when upload has its own (#66). An upload
-// figure of 0 means the backend found no upload ceiling to report; the
-// download one is still the limit, so it is shown alone.
-function fmtCeiling(kbit, kbitUp) {
-	if (!kbitUp || kbitUp <= 0 || kbitUp === kbit) return fmtRate(kbit);
-	return '↓ ' + fmtRate(kbit) + ' / ↑ ' + fmtRate(kbitUp);
 }
 
 // Render a "↓ down / ↑ up" speed cell. Both halves come from the same

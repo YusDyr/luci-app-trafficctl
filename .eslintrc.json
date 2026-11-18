@@ -17,6 +17,7 @@
     "poll": "readonly",
     "request": "readonly",
     "baseclass": "readonly",
+    "common": "readonly",
     "dom": "readonly",
     "form": "readonly",
     "fs": "readonly",

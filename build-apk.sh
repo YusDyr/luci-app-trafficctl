@@ -281,9 +281,10 @@ DATA="$WORKDIR/data"
 mkdir -p "$DATA"
 
 cp -a "$SRC/root/"* "$DATA/"
-mkdir -p "$DATA/www/luci-static/resources/view/trafficctl"
-# Copy every view/asset so new files (portfw.js, ...) can't be missed
-cp "$SRC/htdocs/luci-static/resources/view/trafficctl/"* "$DATA/www/luci-static/resources/view/trafficctl/"
+# All of htdocs/, as luci.mk installs it, so a new view, asset or shared
+# module (resources/trafficctl/common.js) cannot be missed.
+mkdir -p "$DATA/www"
+cp -a "$SRC/htdocs/"* "$DATA/www/"
 
 
 SCRIPTS="$WORKDIR/scripts"

@@ -115,6 +115,7 @@ for f in \
   /usr/share/rpcd/ucode/luci.trafficctl.uc \
   /www/luci-static/resources/view/trafficctl/status.js \
   /www/luci-static/resources/view/trafficctl/status.css \
+  /www/luci-static/resources/trafficctl/common.js \
   /usr/share/luci/menu.d/luci-app-trafficctl.json \
   /usr/share/rpcd/acl.d/luci-app-trafficctl.json \
   /etc/config/trafficctl \
@@ -332,6 +333,7 @@ for f in \
   /usr/share/rpcd/ucode/luci.trafficctl.uc \
   /www/luci-static/resources/view/trafficctl/status.js \
   /www/luci-static/resources/view/trafficctl/status.css \
+  /www/luci-static/resources/trafficctl/common.js \
   /etc/init.d/trafficctl-telegram \
   /usr/share/ucode/trafficctl/telegram.uc \
   /etc/init.d/trafficctl-notify \

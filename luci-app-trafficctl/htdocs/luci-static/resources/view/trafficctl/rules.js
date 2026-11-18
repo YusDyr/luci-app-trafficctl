@@ -4,6 +4,16 @@
 'require rpc';
 'require poll';
 'require ui';
+'require trafficctl.common as common';
+
+var RPC_INT_MAX = common.RPC_INT_MAX;
+var callBlock = common.callBlock;
+var callUnblock = common.callUnblock;
+var callMacfilterRemove = common.callMacfilterRemove;
+var callRatelimit = common.callRatelimit;
+var callShapeAdd = common.callShapeAdd;
+var callShapeRemove = common.callShapeRemove;
+var fmtCeiling = common.fmtCeiling;
 
 // "Rules" tab (#128): every block, speed limit, shape and WiFi deny the app
 // holds, whether or not the device is online. The Devices tab is built from
@@ -12,76 +22,13 @@
 // `trafficctl rules`, which reads the kernel and the saved state; edits and
 // removals go through the same rpcd methods the Devices tab uses.
 
-(function() {
-	if (!document.querySelector('link[href*="trafficctl/status.css"]')) {
-		var lnk = document.createElement('link');
-		lnk.rel = 'stylesheet';
-		lnk.type = 'text/css';
-		lnk.href = '/luci-static/resources/view/trafficctl/status.css';
-		document.head.appendChild(lnk);
-	}
-})();
-
-// rpcd takes an int argument as a signed 32-bit number and refuses the whole
-// call (Invalid argument) for anything larger. A rate typed beyond that is
-// sent as this, so the backend answers with its own range message.
-var RPC_INT_MAX = 2147483647;
-
 var callRulesList = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'rules_list',
 	expect: { result: {} }
 });
 
-var callBlock = rpc.declare({
-	object: 'luci.trafficctl',
-	method: 'block',
-	params: ['ip', 'label']
-});
-
-var callUnblock = rpc.declare({
-	object: 'luci.trafficctl',
-	method: 'unblock',
-	params: ['ip', 'label']
-});
-
-var callMacfilterRemove = rpc.declare({
-	object: 'luci.trafficctl',
-	method: 'macfilter_remove',
-	params: ['ip', 'mac']
-});
-
-var callRatelimit = rpc.declare({
-	object: 'luci.trafficctl',
-	method: 'ratelimit',
-	params: ['ip', 'rate_kbit', 'label', 'mode', 'rate_kbit_up']
-});
-
-var callShapeAdd = rpc.declare({
-	object: 'luci.trafficctl',
-	method: 'shape_add',
-	params: ['ip', 'rate_kbit', 'label', 'rate_kbit_up']
-});
-
-var callShapeRemove = rpc.declare({
-	object: 'luci.trafficctl',
-	method: 'shape_remove',
-	params: ['ip', 'label']
-});
-
 var TYPE_ORDER = { block: 0, wifi: 1, ratelimit: 2, shape: 3 };
-
-function fmtRate(kbit) {
-	if (!kbit || kbit <= 0) return '—';
-	var mbit = kbit / 1000;
-	if (mbit >= 1) return (mbit % 1 === 0 ? mbit.toFixed(0) : mbit.toFixed(1)) + ' ' + _('Mbit/s');
-	return kbit + ' ' + _('kbit/s');
-}
-
-function fmtCeiling(kbit, kbitUp) {
-	if (!kbitUp || kbitUp <= 0 || kbitUp === kbit) return fmtRate(kbit);
-	return '↓ ' + fmtRate(kbit) + ' / ↑ ' + fmtRate(kbitUp);
-}
 
 function isSubnet(target) {
 	return target.indexOf('/') >= 0 && !/\/32$/.test(target);

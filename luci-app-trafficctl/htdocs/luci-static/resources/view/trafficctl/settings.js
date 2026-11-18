@@ -3,6 +3,9 @@
 'require view';
 'require rpc';
 'require ui';
+'require trafficctl.common as common';
+
+var RPC_INT_MAX = common.RPC_INT_MAX;
 
 // Settings, moved off the Devices page (#90). The reporter's complaint was
 // that the main view had become cluttered; @the-e3n chose one page with
@@ -17,21 +20,6 @@
 // The four sections here were already self-contained: each is lazy-loaded
 // into its own container and none of them read any Devices-page state, which
 // is why this is a move rather than a rewrite.
-
-(function() {
-	if (!document.querySelector('link[href*="trafficctl/status.css"]')) {
-		var lnk = document.createElement('link');
-		lnk.rel = 'stylesheet';
-		lnk.type = 'text/css';
-		lnk.href = '/luci-static/resources/view/trafficctl/status.css';
-		document.head.appendChild(lnk);
-	}
-})();
-
-// rpcd takes an int argument as a signed 32-bit number and refuses the whole
-// call (Invalid argument) for anything larger. A rate typed beyond that is
-// sent as this, so the backend answers with its own range message.
-var RPC_INT_MAX = 2147483647;
 
 var callTelegramGet = rpc.declare({
 	object: 'luci.trafficctl',
