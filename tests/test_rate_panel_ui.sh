@@ -37,12 +37,13 @@ if ! command -v node >/dev/null 2>&1; then
 fi
 
 # A nested function of the view, from its line to the closing brace at the
-# same indent.
+# same indent. String tests, not regexes, so it does not depend on which awk
+# runs it (CI has mawk).
 slice() {
     awk -v fn="$1" '
-        $0 ~ "^\t\tfunction " fn "\\(" { inside = 1 }
+        index($0, "\t\tfunction " fn "(") == 1 { inside = 1 }
         inside { print }
-        inside && /^\t\t}$/ { exit }
+        inside && $0 == "\t\t}" { exit }
     ' "$JS"
 }
 
@@ -107,6 +108,10 @@ console.log(out.join('\n'));
 NODE
 
 got=$(node "$TMP/run.js" "$TMP/slices.js" 2>&1)
+# Every scenario prints a line; without them node failed, and its error says why.
+if ! printf '%s\n' "$got" | grep -q '^device limit:'; then
+    printf "node output:\n%s\n" "$got"
+fi
 line() { printf '%s\n' "$got" | grep -F "$1:" | head -1; }
 
 assert_eq "harness: both functions were sliced" "2" "$(grep -cE '^function (applyRate|updateModeUI)\(' "$TMP/slices.js")"
