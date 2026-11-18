@@ -111,7 +111,7 @@ function wan_device() {
 	let cands = [];
 	let l3 = lib.ubus_call('network.interface.wan', 'status')?.l3_device;
 	if (type(l3) == 'string')
-		push(cands, ...fields(l3));
+		push(cands, ...lib.fields(l3));
 	push(cands, ...lib.uci_words('network', 'wan', 'device'));
 	push(cands, ...lib.uci_words('network', 'wan', 'ifname'));
 	let rt = null;
