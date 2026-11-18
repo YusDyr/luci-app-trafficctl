@@ -10,8 +10,8 @@
 # shellcheck source=tests/lib/ucode.sh
 . "$(dirname "$0")/lib/ucode.sh"
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 
 export TCTL_ROOT="$UC_TMP/root"
 MOCKBIN="$UC_TMP/bin"
@@ -33,36 +33,6 @@ config zone
 	option masq '1'
 	list network 'wan'
 EOF
-
-assert_eq() {
-    local desc="$1" expected="$2" actual="$3"
-    if [ "$expected" = "$actual" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$desc" "$expected" "$actual"
-    fi
-}
-
-assert_contains() {
-    local desc="$1" needle="$2" haystack="$3"
-    if printf '%s' "$haystack" | grep -qF -- "$needle"; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected to find: '%s'\n  in:\n%s\n" "$desc" "$needle" "$haystack"
-    fi
-}
-
-assert_not_contains() {
-    local desc="$1" needle="$2" haystack="$3"
-    if printf '%s' "$haystack" | grep -qF -- "$needle"; then
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  should NOT contain: '%s'\n  in:\n%s\n" "$desc" "$needle" "$haystack"
-    else
-        PASS=$((PASS + 1))
-    fi
-}
 
 # ── fixtures ────────────────────────────────────────────────────────────────
 
@@ -507,5 +477,4 @@ assert_eq "cache: one 'dev role tun prim dfl ens label' line per device" \
     "wan wan 0 1 1 0 wan|br-lan lan 0 0 0 0 lan|awg0 vpn 1 0 0 0 -" \
     "$(tail -n +2 "$CACHE" | paste -sd '|')"
 
-printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ] || exit 1
+summary

@@ -16,17 +16,8 @@
 # shellcheck source=tests/lib/ucode.sh
 . "$(dirname "$0")/lib/ucode.sh"
 
-PASS=0
-FAIL=0
-
-assert_eq() {
-    if [ "$2" = "$3" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$1" "$2" "$3"
-    fi
-}
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 
 assert_contains() {
     if printf '%s' "$3" | grep -qF -- "$2"; then
@@ -334,5 +325,4 @@ assert_contains "init script runs the bot itself" "procd_set_param command /usr/
     "$(cat "$FILES/etc/init.d/trafficctl-telegram")"
 assert_eq "entry: executable" yes "$([ -x "$ENTRY" ] && echo yes)"
 
-printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+summary

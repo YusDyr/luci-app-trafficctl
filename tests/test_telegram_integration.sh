@@ -24,21 +24,11 @@ if [ -z "$TEST_TELEGRAM_TOKEN" ] || [ -z "$TEST_TELEGRAM_CHAT_ID" ]; then
     exit 0
 fi
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 TOKEN="$TEST_TELEGRAM_TOKEN"
 CHAT_ID="$TEST_TELEGRAM_CHAT_ID"
 API="https://api.telegram.org/bot${TOKEN}"
-
-assert_eq() {
-    local desc="$1" expected="$2" actual="$3"
-    if [ "$expected" = "$actual" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$desc" "$expected" "$actual"
-    fi
-}
 
 assert_contains() {
     local desc="$1" needle="$2" haystack="$3"

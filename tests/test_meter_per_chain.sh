@@ -19,40 +19,13 @@
 # (nftables 1.0.2) and 25.12.4 (nftables 1.1.6) rootfs images. The limiter is
 # `trafficctl ratelimit` and its restore on ifup lan `trafficctl restore`.
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 
 # shellcheck source=tests/lib/ucode.sh
 . "$(dirname "$0")/lib/ucode.sh"
 # shellcheck source=tests/lib/limit_env.sh
 . "$UC_TESTLIB/limit_env.sh"
-
-assert_eq() {
-    if [ "$2" = "$3" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$1" "$2" "$3"
-    fi
-}
-
-assert_contains() {
-    if printf '%s' "$3" | grep -qF -- "$2"; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected to find: '%s'\n  in:\n%s\n" "$1" "$2" "$3"
-    fi
-}
-
-assert_not_contains() {
-    if printf '%s' "$3" | grep -qF -- "$2"; then
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  should NOT contain: '%s'\n  in:\n%s\n" "$1" "$2" "$3"
-    else
-        PASS=$((PASS + 1))
-    fi
-}
 
 # br-lan with three ports: the first one always took the rule, so it takes
 # at least two to see the bug, and three to see that it is not just "the
@@ -297,5 +270,4 @@ NAME=$(rules_of rl_ratelimit_255_255_255_255_32_ul | awk '{print $2}')
 assert_eq "name: deterministic" "tctl_m_255_255_255_255_32_ul_wlan_guest_5gx" "$NAME"
 [ "${#NAME}" -le 64 ] && PASS=$((PASS + 1)) || { FAIL=$((FAIL + 1)); echo "FAIL: name: ${#NAME} characters"; }
 
-printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ] || exit 1
+summary

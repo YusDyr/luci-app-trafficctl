@@ -16,8 +16,8 @@
 # and the MAC-keyed v6 one — with stable handles, because the interesting
 # assertions are about which of several coexisting rules a removal picks.
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 
 # The limiter is `trafficctl ratelimit` (ucode, run with TCTL_ROOT=$ROOT), its
 # MAC helpers net.lookup_mac, target_mac and ip_is_nexthop.
@@ -27,36 +27,6 @@ TMPDIR="$UC_TMP/ipv6"
 ROOT="$TMPDIR/root"
 MOCKBIN="$TMPDIR/bin"
 mkdir -p "$MOCKBIN"
-
-assert_eq() {
-    local desc="$1" expected="$2" actual="$3"
-    if [ "$expected" = "$actual" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$desc" "$expected" "$actual"
-    fi
-}
-
-assert_contains() {
-    local desc="$1" needle="$2" haystack="$3"
-    if printf '%s' "$haystack" | grep -qF -- "$needle"; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected to find: '%s'\n  in:\n%s\n" "$desc" "$needle" "$haystack"
-    fi
-}
-
-assert_not_contains() {
-    local desc="$1" needle="$2" haystack="$3"
-    if printf '%s' "$haystack" | grep -qF -- "$needle"; then
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  should NOT contain: '%s'\n  in:\n%s\n" "$desc" "$needle" "$haystack"
-    else
-        PASS=$((PASS + 1))
-    fi
-}
 
 # ── scratch state the mocks read and write ───────────────────────────────────
 
@@ -420,5 +390,4 @@ LAST=$(grep '^delete' "$NFT_LOG" | tail -1)
 assert_eq "limiter removal: the v6 set is deleted after its rules" \
     "delete set netdev tm_ratelimit tctl_v6_192_168_1_5" "$LAST"
 
-printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ] || exit 1
+summary

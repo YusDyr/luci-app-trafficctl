@@ -21,8 +21,8 @@
 # Neither is visible by reading a diff, neither breaks a build, and both fail
 # by silently showing English. Hence a test rather than a documented rule.
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VIEWS="$REPO_ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl"
@@ -31,15 +31,6 @@ GEN="$REPO_ROOT/tools/genpot.py"
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
-
-assert_eq() {
-    if [ "$2" = "$3" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$1" "$2" "$3"
-    fi
-}
 
 for f in "$POT" "$GEN"; do
     if [ ! -f "$f" ]; then
@@ -145,5 +136,4 @@ PY
     assert_eq "$name: no entry has an empty msgstr" "0" "$empty"
 done
 
-printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+summary

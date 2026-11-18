@@ -19,8 +19,10 @@
 # The scheduling is SLICED OUT OF status.js and driven against a model of
 # that resolver with a virtual clock, so it cannot drift into testing a copy.
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
+# shellcheck source=tests/lib/js_slice.sh
+. "$(dirname "$0")/lib/js_slice.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 JS="$REPO_ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js"
@@ -28,32 +30,15 @@ JS="$REPO_ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-assert_eq() {
-    if [ "$2" = "$3" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$1" "$2" "$3"
-    fi
-}
-
 if ! command -v node >/dev/null 2>&1; then
     printf "SKIP: node is not installed — the frontend slices cannot be run here.\n"
     printf "0 passed, 0 failed\n"
     exit 0
 fi
 
-slice() {
-    awk -v fn="$1" '
-        $0 ~ "^function " fn "\\(" { inside = 1 }
-        inside { print }
-        inside && /^}/ { exit }
-    ' "$JS"
-}
-
 {
     grep -E '^var RDNS_[A-Z_]+ = ' "$JS"
-    for fn in rdnsState rdnsPick rdnsShown rdnsResolve; do slice "$fn"; done
+    for fn in rdnsState rdnsPick rdnsShown rdnsResolve; do js_slice "$JS" "$fn"; done
 } > "$TMP/slices.js"
 
 for fn in rdnsState rdnsPick rdnsShown rdnsResolve; do
@@ -161,5 +146,4 @@ assert_eq "no answer and a failed call show '—', and are retried after RDNS_RE
 assert_eq "one tick asks for at most RDNS_BATCH addresses, under AGH's 20/s" \
     "16" "$(run batch)"
 
-printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ] || exit 1
+summary

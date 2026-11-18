@@ -14,8 +14,10 @@
 # The functions are SLICED OUT OF status.js and run under node, so the test
 # cannot drift into testing a copy.
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
+# shellcheck source=tests/lib/js_slice.sh
+. "$(dirname "$0")/lib/js_slice.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 JS="$REPO_ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js"
@@ -23,15 +25,6 @@ ACL="$REPO_ROOT/luci-app-trafficctl/root/usr/share/rpcd/acl.d/luci-app-trafficct
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
-
-assert_eq() {
-    if [ "$2" = "$3" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$1" "$2" "$3"
-    fi
-}
 
 FNS="localNames localName localNamesCache hostLabel rdnsHint"
 for fn in $FNS; do
@@ -58,24 +51,14 @@ assert_eq "no write grant on luci-rpc" "" \
 
 if ! command -v node >/dev/null 2>&1; then
     printf "SKIP: node is not installed — the frontend slices cannot be run here.\n"
-    printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
-    [ "$FAIL" -eq 0 ] || exit 1
-    exit 0
+    summary
 fi
-
-slice() {
-    awk -v fn="$1" '
-        $0 ~ "^function " fn "\\(" { inside = 1 }
-        inside { print }
-        inside && /^}/ { exit }
-    ' "$JS"
-}
 
 {
     echo 'function _(s) { return s; }'
     echo 'function E(tag, attrs, kids) { return { tag: tag, attrs: attrs || {}, kids: kids || [] }; }'
     grep -E '^var (PRIVATE_RE|LOCAL_NAMES_TTL) = ' "$JS"
-    for fn in $FNS; do slice "$fn"; done
+    for fn in $FNS; do js_slice "$JS" "$fn"; done
 } > "$TMP/slices.js"
 
 cat > "$TMP/sim.js" <<'EOF'
@@ -182,5 +165,4 @@ assert_eq "a failed re-read keeps the previous names and is not retried before t
 assert_eq "the hint shows with rDNS off, hides with it on, and links to the switch" \
     "shown hidden a #tm-rdns" "$(run hint)"
 
-printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ] || exit 1
+summary

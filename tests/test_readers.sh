@@ -14,20 +14,11 @@
 # shellcheck source=tests/lib/ucode.sh
 . "$(dirname "$0")/lib/ucode.sh"
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 FIXTURES="$UC_REPO/tests/fixtures"
 T="$UC_TMP/t"
 mkdir -p "$T/bin" "$T/root"
-
-assert_eq() {
-    if [ "$2" = "$3" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$1" "$2" "$3"
-    fi
-}
 
 # nft answers from $NFT_DIR: <name>.<table>.json, as captured.
 cat > "$T/bin/nft" <<'MOCK'
@@ -96,5 +87,4 @@ done
 printf '#!/bin/sh\necho "{not json"\n' > "$T/bin/nft"
 assert_eq "output that is not JSON reads as no rules" "[]" "$(uc nft_rules '["table","netdev","tm_ratelimit"]' | jq -c .)"
 
-printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ] || exit 1
+summary

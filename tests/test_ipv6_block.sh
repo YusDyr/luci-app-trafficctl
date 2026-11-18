@@ -11,30 +11,13 @@
 # with stable handles, because the interesting assertions are about which of
 # several coexisting rules a removal picks.
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 
 # shellcheck source=tests/lib/ucode.sh
 . "$(dirname "$0")/lib/ucode.sh"
 # shellcheck source=tests/lib/fw4_env.sh
 . "$UC_TESTLIB/fw4_env.sh"
-
-assert_eq() {
-    if [ "$2" = "$3" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$1" "$2" "$3"
-    fi
-}
-assert_contains() {
-    if printf '%s' "$3" | grep -qF -- "$2"; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected to find: '%s'\n  in:\n%s\n" "$1" "$2" "$3"
-    fi
-}
 assert_not_contains() {
     if printf '%s' "$3" | grep -qF -- "$2"; then
         FAIL=$((FAIL + 1))
@@ -218,5 +201,4 @@ assert_eq "is_blocked: an accept rule is not a block" "false" "$(ctl is_blocked 
 # The summary and the device report read the same rule forms, the MAC half
 # included: tests/test_report.sh.
 
-printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ] || exit 1
+summary

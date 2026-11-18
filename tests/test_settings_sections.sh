@@ -13,8 +13,8 @@
 # shapes satisfy this test, so it keeps its meaning across the change instead
 # of having to be rewritten with it — which is the point of writing it first.
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VIEWS="$REPO_ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl"
@@ -22,15 +22,6 @@ MENU="$REPO_ROOT/luci-app-trafficctl/root/usr/share/luci/menu.d/luci-app-traffic
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
-
-assert_eq() {
-    if [ "$2" = "$3" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$1" "$2" "$3"
-    fi
-}
 
 # Every view file is a candidate home for the sections.
 cat "$VIEWS"/*.js > "$TMP/all.js"
@@ -132,5 +123,4 @@ esac
 bare=$(grep -oE "mkCollapsible\('[^']+'" "$TMP/all.js" | sed "s/mkCollapsible('//; s/'$//" | tr '\n' ' ')
 assert_eq "no section title bypasses _()" "" "$bare"
 
-printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+summary

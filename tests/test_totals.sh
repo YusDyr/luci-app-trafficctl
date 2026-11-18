@@ -28,8 +28,8 @@
 # shellcheck source=tests/lib/bytes_env.sh
 . "$(dirname "$0")/lib/bytes_env.sh"
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 
 STATUS_JS="$UC_REPO/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js"
 REPORT_UC="$UC_REPO/trafficctl/files/usr/share/ucode/trafficctl/report.uc"
@@ -38,39 +38,9 @@ STATE="$BE_ROOT/tmp/trafficctl_totals.state"
 LOCKD="$BE_ROOT/tmp/trafficctl_totals.lock.d"
 SAMPLE="$UC_TMP/sample.json"
 
-assert_eq() {
-    local desc="$1" expected="$2" actual="$3"
-    if [ "$expected" = "$actual" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$desc" "$expected" "$actual"
-    fi
-}
-
 # The haystack is often a whole file, and `grep -q` exits at the first match,
 # so printf takes a SIGPIPE and bash prints "write error: Broken pipe". That is
 # noise, not a failure, but it buries real output in the CI log.
-assert_contains() {
-    local desc="$1" needle="$2" haystack="$3"
-    if printf '%s' "$haystack" 2>/dev/null | grep -qF -- "$needle"; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected to find: '%s'\n  in:\n%s\n" "$desc" "$needle" "$haystack"
-    fi
-}
-
-assert_not_contains() {
-    local desc="$1" needle="$2" haystack="$3"
-    if printf '%s' "$haystack" 2>/dev/null | grep -qF -- "$needle"; then
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  should NOT contain: '%s'\n  in:\n%s\n" "$desc" "$needle" "$haystack"
-    else
-        PASS=$((PASS + 1))
-    fi
-}
-
 run()    { be_totals "$SAMPLE"; }
 runall() { be_totals "$SAMPLE" --all; }
 sample() { printf '%s\n' "$1" > "$SAMPLE"; }
@@ -629,5 +599,4 @@ assert_contains "status.js keeps the -1 sentinel for the TCP total" \
 assert_contains "status.js renders a negative total as unmeasurable" \
     'if (total == null || total < 0) {' "$(cat "$STATUS_JS")"
 
-printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ] || exit 1
+summary

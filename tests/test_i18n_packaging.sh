@@ -22,8 +22,8 @@
 # what luci.mk produces, or a router with both the feed package and a release
 # artifact ends up with one file owned by two packages.
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 FIXTURES="$REPO_ROOT/tests/fixtures/i18n"
@@ -38,16 +38,6 @@ cleanup() {
     rm -rf "$REPO_ROOT/luci-app-trafficctl/po/xx_Test" "$TMP"
 }
 trap cleanup EXIT
-
-assert_eq() {
-    local desc="$1" expected="$2" actual="$3"
-    if [ "$expected" = "$actual" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$desc" "$expected" "$actual"
-    fi
-}
 
 assert_ok() {
     local desc="$1"
@@ -240,5 +230,4 @@ else
     printf 'skip: no LuCI checkout, not cross-checking the language table\n'
 fi
 
-printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+summary

@@ -26,22 +26,13 @@
 # discard their errors outright, so these two were the only writers sharing an
 # element with the action handlers — and that sharing was the whole bug.
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VIEWS="$REPO_ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl"
 JS="$VIEWS/status.js"
 CSS="$VIEWS/status.css"
-
-assert_eq() {
-    if [ "$2" = "$3" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$1" "$2" "$3"
-    fi
-}
 assert_has() {
     if printf '%s' "$3" | grep -qF -- "$2"; then
         PASS=$((PASS + 1))
@@ -202,5 +193,4 @@ assert_lacks "the result is not reported only when IPv6 is uncovered" \
 assert_has "an IPv4-only block still reads as an error" \
     "res.ipv6 === false) {" "$inet"
 
-printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+summary

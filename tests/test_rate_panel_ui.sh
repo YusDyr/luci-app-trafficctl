@@ -15,8 +15,10 @@
 # run under node
 # with the panel's state stubbed.
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
+# shellcheck source=tests/lib/js_slice.sh
+. "$(dirname "$0")/lib/js_slice.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 JS="$REPO_ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js"
@@ -24,37 +26,20 @@ JS="$REPO_ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-assert_eq() {
-    local desc="$1" expected="$2" actual="$3"
-    if [ "$expected" = "$actual" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$desc" "$expected" "$actual"
-    fi
-}
-
 if ! command -v node >/dev/null 2>&1; then
     printf "FAIL: node is not installed\n"
     exit 1
 fi
 
-# A nested function of the view, from its line to the closing brace at the
-# same indent. String tests, not regexes, so it does not depend on which awk
-# runs it (CI has mawk).
-slice() {
-    awk -v fn="$1" '
-        index($0, "\t\tfunction " fn "(") == 1 { inside = 1 }
-        inside { print }
-        inside && $0 == "\t\t}" { exit }
-    ' "$JS"
-}
+# Nested functions of the view, from their line to the closing brace at the
+# same indent (two tabs).
+IND=$(printf '\t\t')
 
 {
-    slice applyRate
+    js_slice "$JS" applyRate "$IND"
     awk 'index($0, "\t\tvar _panelFor = ") == 1' "$JS"
-    slice updateModeUI
-    slice runSingle
+    js_slice "$JS" updateModeUI "$IND"
+    js_slice "$JS" runSingle "$IND"
 } | sed 's/^\t\t//' > "$TMP/slices.js"
 
 cat > "$TMP/run.js" <<'NODE'
@@ -153,5 +138,4 @@ assert_eq "a device limit is not asked" \
 assert_eq "a device poll answered after the target changed is dropped" \
     "late poll: dropped, poll ended 1, chip 0" "$(line 'late poll')"
 
-printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ] || exit 1
+summary
