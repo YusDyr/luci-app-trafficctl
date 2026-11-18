@@ -49,7 +49,7 @@ slice() {
 
 {
     slice applyRate
-    grep -E '^\t\tvar _panelFor = ' "$JS"
+    awk 'index($0, "\t\tvar _panelFor = ") == 1' "$JS"
     slice updateModeUI
 } | sed 's/^\t\t//' > "$TMP/slices.js"
 
