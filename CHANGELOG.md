@@ -41,6 +41,21 @@ rest) are gone.
 
 ---
 
+## [2.1.4] - 2026-11-18
+
+### Bug Fixes
+- WiFi filter-off states, macfilter=disable on block, stale device poll ([#184](https://github.com/YusDyr/luci-app-trafficctl/issues/184)) ([ea24dde](https://github.com/YusDyr/luci-app-trafficctl/commit/ea24ddea1d4da9e423c60ee59ac9aa182d1531f0))
+  - Block WiFi now switches macfilter=disable to deny, as it already did for an
+  unset policy. Before, the MAC went into the running ACL and the Rules tab
+  showed Active, but hostapd ignored the list after the next wifi restart.
+  - filter-off is reported with no AP running and next to an allow-list radio,
+  where it read "applies when WiFi starts" or unknown, and gives way to a
+  live ubus ban as well as to the running ACL.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v2.1.3...v2.1.4
+
+---
+
 ## [2.1.3] - 2026-11-18
 
 ### Bug Fixes
