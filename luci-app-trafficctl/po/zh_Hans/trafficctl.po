@@ -1370,8 +1370,8 @@ msgstr "每个设备可使用"
 msgid "Saved, MAC filter off"
 msgstr "已保存，MAC 过滤已关闭"
 
-msgid "The deny list names this device, but MAC filtering is off on that WiFi interface (macfilter is not \"deny\"), so the radio ignores the list. Block WiFi for the device again to switch filtering on, or remove the entry."
-msgstr "拒绝列表包含此设备，但该 WiFi 接口的 MAC 过滤已关闭（macfilter 不是 \"deny\"），因此无线电会忽略该列表。再次对该设备阻止 WiFi 以开启过滤，或删除此条目。"
+msgid "The deny list names this device, but MAC filtering is off on that WiFi interface (macfilter is unset or \"disable\"), so the radio ignores the list. Block WiFi for the device again to switch filtering on, or remove the entry."
+msgstr "拒绝列表包含此设备，但该 WiFi 接口的 MAC 过滤已关闭（macfilter 未设置或为 \"disable\"），因此无线电会忽略该列表。再次对该设备阻止 WiFi 以开启过滤，或删除此条目。"
 
 msgid "between them — one bucket for the whole network."
 msgstr "它们之间 — 整个网络一个桶。"

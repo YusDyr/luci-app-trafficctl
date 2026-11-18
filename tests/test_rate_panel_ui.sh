@@ -7,9 +7,12 @@
 # "Every device in every device may use 10 Mbit/s of its own", which looks like
 # a limit already in force, and one click on a chip there limited every device
 # on the network with no question asked. Off on a shaped device then reported
-# "rate limit removed", which reads as if the shape were still there.
+# "rate limit removed", which reads as if the shape were still there. A device
+# poll still in flight when the target changed put that device's chip back on
+# the new panel.
 #
-# applyRate() and updateModeUI() are sliced out of status.js and run under node
+# applyRate(), updateModeUI() and runSingle() are sliced out of status.js and
+# run under node
 # with the panel's state stubbed.
 
 PASS=0
@@ -51,6 +54,7 @@ slice() {
     slice applyRate
     awk 'index($0, "\t\tvar _panelFor = ") == 1' "$JS"
     slice updateModeUI
+    slice runSingle
 } | sed 's/^\t\t//' > "$TMP/slices.js"
 
 cat > "$TMP/run.js" <<'NODE'
@@ -65,7 +69,8 @@ var searchSelect = { getValue: function() { return sel; } };
 var ratePick = { getValue: function() { return rate; }, setValue: function(v) { rate = v; } };
 var scopeInput = { value: 'all' }, scopeExplain = { textContent: 'Every device may use 10 Mbit/s of its own.' };
 var _scopeSelected = 'each', _modeSelected = 'shaper', _upPinned = false, _customPinned = false;
-var customRow = { classList: cls() }, statusDiv = {}, status = [];
+var customHidden = false, customRow = { classList: { add: function() { customHidden = true; }, remove: function() { customHidden = false; }, toggle: function() {}, contains: function() { return customHidden; } } };
+var statusDiv = {}, status = [];
 function showUpRow() {}
 function getRateKbit() { return rate; }
 function getRateKbitUp() { return ''; }
@@ -93,8 +98,8 @@ sel = '192.168.1.50'; updateModeUI(); rate = '10000';
 sel = '__all__'; updateModeUI();
 out.push('after All devices the chip is ' + rate);
 
-step('declined', function() { rate = '10000'; confirmAnswer = false; applyRate(); });
-out.push('declined leaves the chip at ' + rate);
+step('declined', function() { rate = '10000'; customHidden = false; _customPinned = true; confirmAnswer = false; applyRate(); });
+out.push('declined leaves the chip at ' + rate + ', custom ' + (customHidden ? 'closed' : 'open') + (_customPinned ? ' pinned' : ''));
 step('confirmed', function() { rate = '10000'; confirmAnswer = true; applyRate(); });
 step('network off', function() { rate = '0'; applyRate(); });
 
@@ -104,23 +109,37 @@ step('off shaped', function() { rate = '0'; applyRate(); });
 self._devRate = { ip: '192.168.1.50', shape: 0, limit: 5000 };
 step('off limited', function() { rate = '0'; applyRate(); });
 step('device limit', function() { _modeSelected = 'limiter'; rate = '5000'; applyRate(); });
+
+// A device poll answered after the panel went to "All devices": nothing of
+// it may reach the panel.
+var pending = null, readPast = false, pollsEnded = 0;
+Promise.all = function() { return { then: function(f) { pending = f; return { catch: function() {} }; } }; };
+var opts = { get showStats() { readPast = true; return false; } };
+function pollStart() {}
+function pollEnd() { pollsEnded++; }
+function callDevice() {}
+self._localNames = { get: function() {} };
+sel = '192.168.1.50'; rate = '0'; runSingle('192.168.1.50');
+sel = '__all__';
+try { pending([{ shape_kbit: 10000, protocols: {} }, {}]); } catch (e) {}
+out.push('late poll: ' + (readPast ? 'used' : 'dropped') + ', poll ended ' + pollsEnded + ', chip ' + rate);
 console.log(out.join('\n'));
 NODE
 
 got=$(node "$TMP/run.js" "$TMP/slices.js" 2>&1)
 # Every scenario prints a line; without them node failed, and its error says why.
-if ! printf '%s\n' "$got" | grep -q '^device limit:'; then
+if ! printf '%s\n' "$got" | grep -q '^late poll:'; then
     printf "node output:\n%s\n" "$got"
 fi
 line() { printf '%s\n' "$got" | grep -F "$1:" | head -1; }
 
-assert_eq "harness: both functions were sliced" "2" "$(grep -cE '^function (applyRate|updateModeUI)\(' "$TMP/slices.js")"
+assert_eq "harness: the three functions were sliced" "3" "$(grep -cE '^function (applyRate|updateModeUI|runSingle)\(' "$TMP/slices.js")"
 assert_eq "a device's rate is not carried onto the network-wide panel" \
     "after All devices the chip is 0" "$(printf '%s\n' "$got" | grep -F 'after All devices')"
 assert_eq "a network-wide limit is asked first; no means nothing is sent" \
     "declined:  [asked] | " "$(line declined)"
-assert_eq "declining puts the chip back to Off" \
-    "declined leaves the chip at 0" "$(printf '%s\n' "$got" | grep -F 'declined leaves')"
+assert_eq "declining puts the chip back to Off and closes the custom field" \
+    "declined leaves the chip at 0, custom closed" "$(printf '%s\n' "$got" | grep -F 'declined leaves')"
 assert_eq "a network-wide limit goes out after a yes" \
     "confirmed: ratelimit all 10000 [asked] | loading:Limiting all → 10000 (each)… action:rate limit removed for all" "$(line confirmed)"
 assert_eq "lifting the network-wide limit is not asked" \
@@ -131,6 +150,8 @@ assert_eq "Off on a limited device names the limit" \
     "off limited: ratelimit 192.168.1.50 0, shape_remove 192.168.1.50 | loading:Removing throttle… ok:rate limit removed for 192.168.1.50" "$(line 'off limited')"
 assert_eq "a device limit is not asked" \
     "device limit: shape_remove 192.168.1.50, ratelimit 192.168.1.50 5000" "$(line 'device limit' | sed 's/ |.*//')"
+assert_eq "a device poll answered after the target changed is dropped" \
+    "late poll: dropped, poll ended 1, chip 0" "$(line 'late poll')"
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

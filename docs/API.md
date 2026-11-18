@@ -705,9 +705,12 @@ and the two are merged:
 - `wifi` records are keyed on the MAC, and `enforcement` uses the words of
   `trafficctl macfilter-add` (below), plus `unknown` when the radio state
   cannot be read (`applied` is `null` then) and `filter-off` when the MAC is
-  in the `maclist` of an interface whose `macfilter` is not `deny`: the radio
-  ignores that list, so `applied` is false. The device table counts such a MAC
-  as WiFi-blocked and not applied.
+  in the `maclist` of an interface whose `macfilter` is unset or `disable`: the
+  radio ignores that list, so `applied` is false. `filter-off` is reported with
+  no AP running and next to an allow-list radio too, and gives way only to
+  `acl` or `ban`: a MAC in the running ACL or under a ubus ban is kept off
+  whatever the list says. The device table counts such a MAC as WiFi-blocked
+  and not applied.
 - A radio with `macfilter=allow` blocks every device missing from its list, which
   cannot be enumerated: only their number is reported, in `wifi_allow_ifaces`.
 - Port-forward pauses (own tab) and the global cut (own control) are not listed.
@@ -1198,7 +1201,7 @@ true only when the operator's intent is in force:
 radio, so it is never done automatically).
 
 **Side effects:**
-- Sets `macfilter=deny` on all wifi-iface sections that have no policy yet; an existing `allow` (whitelist) policy is respected, and blocking there means dropping the MAC from the accept list.
+- Sets `macfilter=deny` on all wifi-iface sections that have no policy yet or have `macfilter=disable` (whose list hostapd ignores); an existing `allow` (whitelist) policy is respected, and blocking there means dropping the MAC from the accept list.
 - Adds/removes MAC from `maclist`.
 - Applies at runtime via `hostapd_cli deny_acl`/`accept_acl` + `deauthenticate` (no wifi reload -- only the target client is affected), then reads the ACL back with `deny_acl SHOW` / `accept_acl SHOW` to confirm. An exit status of 0 is not treated as proof.
 - Runs the runtime half **unconditionally**, even when uci already listed the MAC, so that a block which was previously only written to config can be repaired by repeating the action.
