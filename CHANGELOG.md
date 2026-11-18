@@ -41,6 +41,21 @@ rest) are gone.
 
 ---
 
+## [2.1.3] - 2026-11-18
+
+### Bug Fixes
+- History sort direction, network-wide limit confirm, WiFi denies with MAC filter off ([#183](https://github.com/YusDyr/luci-app-trafficctl/issues/183)) ([5b8d289](https://github.com/YusDyr/luci-app-trafficctl/commit/5b8d289858bb51a29ca6ee582b9021b1bc1d16fb))
+  - History: a second click on a column header reverses the sort, and the
+  sorted column shows ▲ or ▼. The header was never redrawn: the click handler
+  read the old thead after buildHead() had replaced it and threw.
+  - Devices: the Speed Limit panel resets its rate chips when its target
+  changes, so a device's rate no longer shows as picked on the network-wide
+  panel. A limit on every device is asked for first; no puts the chips back
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v2.1.2...v2.1.3
+
+---
+
 ## [2.1.2] - 2026-11-17
 
 ### Bug Fixes
