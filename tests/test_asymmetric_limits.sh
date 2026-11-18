@@ -382,12 +382,17 @@ function say(dl, up, scope) {
     updateScopeExplain();
     return scopeExplain.textContent;
 }
-console.log([
+var lines = [
     say('5000', '',     'each'),
     say('5000', '500',  'each'),
     say('5000', '',     'shared'),
     say('5000', '500',  'shared')
-].join('\n'));
+];
+scopeInput.value = 'all';
+lines.push('WHOLE ' + say('10000', '', 'each'));
+lines.push('WHOLE ' + say('10000', '', 'shared'));
+lines.push('WHOLE ' + say('10000', '1000', 'shared'));
+console.log(lines.join('\n'));
 NODE
     explain=$(node "$TMP/explain_run.js" 2>&1)
 
@@ -400,6 +405,15 @@ NODE
     # Two rates in shared mode means two buckets, one per direction.
     assert_contains "a split aggregate says one bucket PER DIRECTION" \
         "one bucket per direction for the whole subnet." "$explain"
+    # The whole network is not a subnet to be "in": the sentence once read
+    # "Every device in every device may use 10 Mbit/s of its own."
+    assert_contains "whole network, per device" \
+        "WHOLE Every device may use 10 Mbit/s of its own." "$explain"
+    assert_contains "whole network, shared" \
+        "WHOLE All devices share 10 Mbit/s between them — one bucket for the whole network." "$explain"
+    assert_contains "whole network, shared split" \
+        "one bucket per direction for the whole network." "$explain"
+    assert_not_contains "no sentence names every device as a place" "in every device" "$explain"
     assert_not_contains "no sentence describes a split ceiling with the download figure alone" \
         "may use 5 Mbit/s of its own. Every device in 10.0.20.0/24 may use 5 Mbit/s of its own." "$explain"
 fi

@@ -323,6 +323,20 @@ for NFTV in 1.0.2 1.1.6; do
     assert_eq "allow-mode radio: counted" "1" "$(top "$OUT" wifi_allow_ifaces)"
     assert_eq "allow-mode radio: its maclist is not read as a deny list" "<none>" "$(rec "$OUT" wifi aa:aa:aa:aa:aa:50 mac)"
     setcfg 1 deny
+
+    # ── maclist on a radio with filtering off ──────────────────────────────────
+    # The device table counts these MACs as WiFi-blocked and not applied, so
+    # the tab has to list them too, and say why they are not in effect. One
+    # still in the running ACL is blocked regardless.
+    for mode in '' disable; do
+        setcfg 1 "$mode"
+        OUT=$(list)
+        assert_eq "macfilter '$mode': a listed MAC is still a rule" "aa:aa:aa:aa:aa:99" "$(rec "$OUT" wifi aa:aa:aa:aa:aa:99 mac)"
+        assert_eq "macfilter '$mode': the radio ignores the list" "filter-off" "$(rec "$OUT" wifi aa:aa:aa:aa:aa:99 enforcement)"
+        assert_eq "macfilter '$mode': not applied" "false" "$(rec "$OUT" wifi aa:aa:aa:aa:aa:99 applied)"
+        assert_eq "macfilter '$mode': in the running ACL, it is in effect" "acl" "$(rec "$OUT" wifi aa:aa:aa:aa:aa:50 enforcement)"
+    done
+    setcfg 1 deny
 done
 CTX=""
 

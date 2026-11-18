@@ -580,16 +580,22 @@ function cli_alive(iface) {
 // "unknown" when which AP carries which policy cannot be told, "no-radio"
 // when no AP runs (the uci maclist applies when one starts).
 function wifi_denies() {
-	let allow = 0, words = [];
+	// A maclist on an interface without macfilter=deny is listed too: the
+	// device table counts such a MAC as WiFi-blocked (not applied), and this
+	// list skipping it left the tab without the rule the table warned about.
+	// The radio ignores that list, so its state is filter-off.
+	let allow = 0, words = [], enforced = {};
 	lib.uci_foreach('wireless', 'wifi-iface', (s) => {
 		if (s.macfilter == 'allow') {
 			allow++;
 			return;
 		}
-		if (s.macfilter != 'deny')
-			return;
 		for (let v in (type(s.maclist) == 'array') ? s.maclist : [ s.maclist ?? '' ])
-			push(words, ...fields(v));
+			for (let w in fields(v)) {
+				push(words, w);
+				if (s.macfilter == 'deny')
+					enforced[lc(w)] = true;
+			}
 	});
 	let macs = uniq(sort(filter(map(words, lc), (w) => match(w, /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/))));
 	let out = [];
@@ -616,7 +622,12 @@ function wifi_denies() {
 			if (rank[st] < worst)
 				worst = rank[st];
 		}
-		push(out, { mac, state: (worst == 3) ? 'acl' : (worst == 2) ? 'ban' : 'none' });
+		let state = (worst == 3) ? 'acl' : (worst == 2) ? 'ban' : 'none';
+		// In the running ACL it is blocked whatever uci says; otherwise a list
+		// no radio reads is the reason, and the one worth naming.
+		if (state != 'acl' && !enforced[mac])
+			state = 'filter-off';
+		push(out, { mac, state });
 	}
 	return { allow, macs: out };
 }
@@ -712,7 +723,7 @@ function rules_list() {
 			ip = n.lip[mac] ?? n.nip[mac] ?? '';
 			if (r.enf == 'acl' || r.enf == 'ban')
 				applied = true;
-			else if (r.enf == 'none')
+			else if (r.enf == 'none' || r.enf == 'filter-off')
 				applied = false;
 		}
 		else {

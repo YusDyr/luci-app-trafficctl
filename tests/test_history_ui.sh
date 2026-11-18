@@ -292,6 +292,68 @@ for pat in '\blet\b' '\bconst\b' '=>' '\bclass\b' '\.\.\.' '`'; do
     assert_eq "no ES6 construct /$pat/ in the view" "0" "$hits"
 done
 
+# ── sorting: a second click reverses, the header shows which way ───────────
+# The header used to sort descending only, and the arrow never moved: the
+# click handler called buildHead(), which reassigns thead, and then asked the
+# NEW thead for a parent it does not have, so the old header stayed on screen.
+sed -n '/^\tsorted: function() {/,/^\t},/p' "$JS" | sed '$ s/},$/}/' > "$TMP/sorted.js"
+sed -n '/^\t\tfunction sortHeader(/,/^\t\tbuildHead();/p' "$JS" > "$TMP/head.js"
+cat > "$TMP/sort_run.js" <<'NODE'
+var fs = require('fs');
+function _(s) { return s; }
+function E(tag, attrs, kids) {
+    var n = { tag: tag, attrs: attrs || {}, children: [], parentNode: null, on: {} };
+    (Array.isArray(kids) ? kids : (kids == null ? [] : [kids])).forEach(function(k) {
+        if (k && typeof k === 'object') k.parentNode = n;
+        n.children.push(k);
+    });
+    n.addEventListener = function(ev, fn) { n.on[ev] = fn; };
+    n.replaceChild = function(nu, old) {
+        var i = n.children.indexOf(old);
+        if (i < 0) throw new Error('not a child');
+        n.children[i] = nu; nu.parentNode = n; old.parentNode = null;
+    };
+    return n;
+}
+var self = {
+    sortKey: 'total', sortDir: 'desc',
+    rows: [
+        { name: 'b', bytes_in: 1, bytes_out: 5, last_seen: 30 },
+        { name: 'a', bytes_in: 3, bytes_out: 1, last_seen: 10 },
+        { name: 'c', bytes_in: 2, bytes_out: 0, last_seen: 20 }
+    ],
+    totalOf: function(r) { return (r.bytes_in || 0) + (r.bytes_out || 0); },
+    renderTable: function() {}
+};
+eval('self.sorted = function' + fs.readFileSync(process.argv[2], 'utf8').replace(/^\s*sorted: function/, ''));
+eval(fs.readFileSync(process.argv[3], 'utf8'));
+var table = E('table', {}, [thead]);
+function names() { return self.sorted().map(function(r) { return r.name; }).join(''); }
+function th(label) {
+    var row = table.children[0].children[0];
+    return row.children.filter(function(c) { return String(c.children[0]).indexOf(label) === 0; })[0];
+}
+function click(label) { th(label).on.click(); return th(label).children[0] + ' ' + names(); }
+console.log([
+    th('Total').children[0] + ' ' + names(),
+    click('Total'),
+    click('Total'),
+    click('Device'),
+    click('Device'),
+    click('Last seen'),
+    th('Total').children[0]
+].join('\n'));
+NODE
+sorting=$(node "$TMP/sort_run.js" "$TMP/sorted.js" "$TMP/head.js" 2>&1)
+assert_eq "sorting: clicks reverse the order and the arrow follows" \
+"Total ▼ bac
+Total ▲ cab
+Total ▼ bac
+Device ▲ abc
+Device ▼ cba
+Last seen ▼ bca
+Total" "$sorting"
+
 # ── the tab is actually reachable ──────────────────────────────────────────
 python3 - "$MENU" <<'PY'
 import json, sys

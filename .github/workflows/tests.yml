@@ -37,6 +37,10 @@ jobs:
       # The upload row was built but never attached to the panel (#66).
       - name: Split up/down control and split ceiling display
         run: bash tests/test_split_ui.sh
+      # A device's rate stayed picked on the network-wide panel, one click there
+      # limited every device unasked, and Off on a shape said "rate limit removed".
+      - name: Speed Limit panel target change, network-wide confirm, Off message
+        run: bash tests/test_rate_panel_ui.sh
       # The History view's verdicts and fields against history.uc's replies.
       - name: History view tests
         run: bash tests/test_history_ui.sh

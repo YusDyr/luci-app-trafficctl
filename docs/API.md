@@ -704,7 +704,10 @@ and the two are merged:
 - `name` follows the usual order: alias, DHCP lease, cached PTR.
 - `wifi` records are keyed on the MAC, and `enforcement` uses the words of
   `trafficctl macfilter-add` (below), plus `unknown` when the radio state
-  cannot be read. `applied` is `null` then.
+  cannot be read (`applied` is `null` then) and `filter-off` when the MAC is
+  in the `maclist` of an interface whose `macfilter` is not `deny`: the radio
+  ignores that list, so `applied` is false. The device table counts such a MAC
+  as WiFi-blocked and not applied.
 - A radio with `macfilter=allow` blocks every device missing from its list, which
   cannot be enumerated: only their number is reported, in `wifi_allow_ifaces`.
 - Port-forward pauses (own tab) and the global cut (own control) are not listed.

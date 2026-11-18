@@ -126,6 +126,7 @@ function stateCell(r, persist) {
 		case 'acl': return E('span', { 'class': 'tc-c-ok' }, '● ' + _('Active'));
 		case 'ban': return E('span', { 'class': 'tc-c-warn', 'title': _('hostapd-utils is missing, so hostapd only banned the device for a while. The deny list entry applies when WiFi restarts.') }, '◐ ' + _('Temporary ban only'));
 		case 'no-radio': return E('span', { 'class': 'tc-c-muted' }, '○ ' + _('Saved, applies when WiFi starts'));
+		case 'filter-off': return E('span', { 'class': 'tc-c-err tc-fw-bold', 'title': _('The deny list names this device, but MAC filtering is off on that WiFi interface (macfilter is not "deny"), so the radio ignores the list. Block WiFi for the device again to switch filtering on, or remove the entry.') }, '✗ ' + _('Saved, MAC filter off'));
 		case 'none': return E('span', { 'class': 'tc-c-err tc-fw-bold', 'title': _('The deny list names this device but the running radio does not. Install hostapd-utils, or restart WiFi (disconnects every client).') }, '✗ ' + _('Saved, not in effect'));
 		}
 		return E('span', { 'class': 'tc-c-muted' }, '? ' + _('Saved, radio state unknown'));

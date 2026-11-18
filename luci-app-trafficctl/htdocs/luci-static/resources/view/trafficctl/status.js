@@ -15,9 +15,6 @@
 	}
 })();
 
-var TRAFFICCTL_BUILD = '20260928a';
-console.log('[trafficctl] build:' + TRAFFICCTL_BUILD);
-
 // Per-device DPI app breakdown from netifyd, keyed by IP. Stays empty when the
 // agent isn't running, which is what makes the App column degrade quietly.
 var netifyMap = {};
@@ -2706,7 +2703,7 @@ return view.extend({
 			// this row exists on the first render.
 			if (!scopeExplain) { return; }
 			var t = (scopeInput.value || 'all').trim();
-			var shown = (t === 'all' || t === 'any') ? _('every device') : t;
+			var whole = (t === 'all' || t === 'any' || t === '0.0.0.0/0');
 			var kbit = parseInt(getRateKbit(), 10);
 			// The sentence has to quote the rate that will actually be applied.
 			// Naming only the download figure while a split ceiling is set would
@@ -2719,18 +2716,21 @@ return view.extend({
 				: fmtRate(kbit);
 			// A split ceiling is two buckets, one per direction, so the aggregate
 			// wording changes with it.
-			var sharedTail = (kbitUp && kbitUp !== kbit)
-				? _('between them — one bucket per direction for the whole subnet.')
-				: _('between them — one bucket for the whole subnet.');
+			var split = !!(kbitUp && kbitUp !== kbit);
+			var sharedTail = whole
+				? (split ? _('between them — one bucket per direction for the whole network.')
+				         : _('between them — one bucket for the whole network.'))
+				: (split ? _('between them — one bucket per direction for the whole subnet.')
+				         : _('between them — one bucket for the whole subnet.'));
 			if (!kbit || kbit <= 0) {
 				scopeExplain.textContent =
 					_('Pick a rate to apply it to this target, or Off to remove its limit.');
 			} else if (_scopeSelected === 'shared') {
-				scopeExplain.textContent = _('All of') + ' ' + shown + ' ' + _('share') + ' ' +
-					rateWords + ' ' + sharedTail;
+				scopeExplain.textContent = (whole ? _('All devices share') : _('All of') + ' ' + t + ' ' + _('share')) +
+					' ' + rateWords + ' ' + sharedTail;
 			} else {
-				scopeExplain.textContent = _('Every device in') + ' ' + shown + ' ' +
-					_('may use') + ' ' + rateWords + ' ' + _('of its own.');
+				scopeExplain.textContent = (whole ? _('Every device may use') : _('Every device in') + ' ' + t + ' ' + _('may use')) +
+					' ' + rateWords + ' ' + _('of its own.');
 			}
 
 			var bad = !targetIsMonitored(t);
@@ -2895,6 +2895,12 @@ return view.extend({
 			var scope = all ? _scopeSelected : '';
 
 			if (all && kbit !== '0') {
+				// One click here limits every device on the target, so it is
+				// asked first, in the same sentence the panel shows.
+				if (!window.confirm(scopeExplain.textContent + '\n\n' + _('Apply this limit now?'))) {
+					ratePick.setValue('0');
+					return;
+				}
 				setStatus(statusDiv, 'loading',
 					_('Limiting') + ' ' + ip + ' → ' + rateLabel(kbit, kbitUp) + ' (' + scope + ')…');
 				callRatelimit(ip, parseInt(kbit), name, scope, kbitUp ? parseInt(kbitUp) : undefined).then(function(res) {
@@ -2914,12 +2920,20 @@ return view.extend({
 
 			if (kbit === '0') {
 				setStatus(statusDiv, 'loading', _('Removing throttle…'));
+				// Both are removed, whichever is set, and the message names
+				// what was there: "rate limit removed" after taking a shape off
+				// read as if the shape were still in place.
+				var dr = (self._devRate && self._devRate.ip === ip) ? self._devRate : {};
+				var hadShape = dr.shape > 0, hadLimit = dr.limit > 0;
 				Promise.all([
 					callRatelimit(ip, 0, name),
 					callShapeRemove(ip, name)
 				]).then(function(results) {
-					var res = results[0] || {};
-					setStatus(statusDiv, 'ok', res.msg || _('Throttle removed'));
+					var lim = results[0] || {}, shp = results[1] || {};
+					var msgs = [];
+					if (hadLimit || !hadShape) msgs.push(lim.msg);
+					if (hadShape) msgs.push(shp.msg);
+					setStatus(statusDiv, 'ok', msgs.filter(Boolean).join('; ') || _('Throttle removed'));
 					runQuery();
 				}).catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); });
 			} else if (mode === 'shaper') {
@@ -2948,8 +2962,24 @@ return view.extend({
 
 		function isAllMode() { return searchSelect.getValue() === '__all__'; }
 
+		// Which target the rate chips were last set for. The panel is shared
+		// between the devices and the network-wide target, and the chips are
+		// synced from a device only by its poll: left as they were, a device's
+		// 10 Mbit/s showed as picked on the network-wide panel, read as a limit
+		// on every device, and a click there limits every device at once.
+		var _panelFor = null;
+
 		function updateModeUI() {
 			var all = isAllMode();
+			var target = searchSelect.getValue();
+			if (target !== _panelFor) {
+				_panelFor = target;
+				_customPinned = false;
+				customRow.classList.add('tc-hidden');
+				showUpRow(false);
+				_upPinned = false;
+				ratePick.setValue('0');
+			}
 			actionRow.classList.toggle('tc-hidden', all);
 			// The throttle panel used to be hidden in all-devices mode, which
 			// left no way to limit a subnet or the whole network at all.
@@ -3363,6 +3393,8 @@ return view.extend({
 
 				var curShapeRate = data.shape_kbit || 0;
 				var curLimitRate = data.rate_limit_kbit || 0;
+				// What Off will be taking away, for its message.
+				self._devRate = { ip: ip, shape: curShapeRate, limit: curLimitRate };
 				var curRate = curShapeRate > 0 ? curShapeRate : curLimitRate;
 				modePick.setValue(curShapeRate > 0 ? 'shaper' : (curLimitRate > 0 ? 'limiter' : 'shaper'));
 
@@ -4021,7 +4053,7 @@ return view.extend({
 		callVersion().then(function(res) {
 			var el = document.getElementById('tc-version-footer');
 			if (el && res && res.version) {
-				el.textContent = 'trafficctl v' + res.version + ' (' + TRAFFICCTL_BUILD + ')';
+				el.textContent = 'trafficctl v' + res.version;
 			}
 		});
 
@@ -4421,7 +4453,7 @@ return view.extend({
 				activityDiv
 			]),
 			E('div', {'id':'tc-version-footer','class':'tc-version-footer'},
-				'trafficctl (' + TRAFFICCTL_BUILD + ')')
+				'trafficctl')
 		]);
 	},
 
