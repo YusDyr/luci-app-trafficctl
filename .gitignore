@@ -9,3 +9,10 @@
 # Python bytecode from tools/
 __pycache__/
 *.pyc
+
+# Screenshot capture: session id, local names and test devices, raw frames
+/docs/capture/.sid
+/docs/capture/local.json
+/docs/capture/frames/
+/docs/capture/node_modules/
+/docs/capture/package*.json

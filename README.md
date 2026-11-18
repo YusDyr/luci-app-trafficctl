@@ -58,91 +58,101 @@ I hope it turns out as useful for you as it has been for me.
 
 <table>
 <tr>
-<td align="center"><b>Dashboard — live speed graph</b></td>
-<td align="center"><b>Block / Unblock Internet</b></td>
+<td align="center"><b>Devices: every client, its traffic and link</b></td>
+<td align="center"><b>One device: live speed graph and its connections</b></td>
 </tr>
 <tr>
-<td><img src="docs/img/speed-graph-dark.gif" alt="Speed graph" width="480"/></td>
-<td><img src="docs/img/block-internet-dark.gif" alt="Block internet" width="480"/></td>
+<td><img src="docs/img/dark/devices.png" alt="Devices tab" width="480"/></td>
+<td><img src="docs/img/graph-dark.gif" alt="Device graph" width="480"/></td>
 </tr>
 <tr>
-<td align="center"><b>Rate Limiting &amp; Traffic Shaping</b></td>
-<td align="center"><b>Interactive speed graph popup</b></td>
+<td align="center"><b>Speed limit, then lifted on the Rules tab</b></td>
+<td align="center"><b>Traffic shaping</b></td>
 </tr>
 <tr>
-<td><img src="docs/img/rate-limit-dark.gif" alt="Rate limiting" width="480"/></td>
-<td><img src="docs/img/graph-popup-dark.gif" alt="Graph popup" width="480"/></td>
+<td><img src="docs/img/limit-dark.gif" alt="Rate limiting" width="480"/></td>
+<td><img src="docs/img/shape-dark.gif" alt="Traffic shaping" width="480"/></td>
+</tr>
+<tr>
+<td align="center"><b>Block and unblock internet</b></td>
+<td align="center"><b>Hover a sparkline for the full graph</b></td>
+</tr>
+<tr>
+<td><img src="docs/img/block-dark.gif" alt="Block internet" width="480"/></td>
+<td><img src="docs/img/dark/graph-popup.png" alt="Graph popup" width="480"/></td>
 </tr>
 </table>
 
+The router in these captures runs hardware flow offload, so devices whose traffic is offloaded show `—` for live speed (the Devices tab says why and how to turn it off). Blocks, limits and shapes work either way. MAC addresses, public addresses, destination hostnames and personal device names are masked.
+
 <details>
-<summary>More screenshots — light theme, settings, Telegram, activity log…</summary>
+<summary>More screenshots: light theme, Rules, History, Port Forwards, Notifications, Settings</summary>
 <br/>
 
 <table>
 <tr>
-<td align="center"><b>Overview — light theme</b></td>
-<td align="center"><b>Per-device connections</b></td>
+<td align="center"><b>Every tab, dark</b></td>
+<td align="center"><b>Every tab, light</b></td>
 </tr>
 <tr>
-<td><img src="docs/img/light/01-overview.png" alt="Overview light" width="480"/></td>
-<td><img src="docs/img/dark/02-device-detail.png" alt="Device detail" width="480"/></td>
+<td><img src="docs/img/tour-dark.gif" alt="Tab tour dark" width="480"/></td>
+<td><img src="docs/img/tour-light.gif" alt="Tab tour light" width="480"/></td>
 </tr>
 <tr>
-<td align="center"><b>WiFi blocked</b></td>
-<td align="center"><b>Link / band column</b></td>
+<td align="center"><b>Devices, light</b></td>
+<td align="center"><b>One device, light</b></td>
 </tr>
 <tr>
-<td><img src="docs/img/dark/05-wifi-blocked.png" alt="WiFi blocked" width="480"/></td>
-<td><img src="docs/img/dark/17-link-band.png" alt="Link band column" width="480"/></td>
+<td><img src="docs/img/light/devices.png" alt="Devices light" width="480"/></td>
+<td><img src="docs/img/light/device.png" alt="Device light" width="480"/></td>
 </tr>
 <tr>
-<td align="center"><b>Extended statistics (all devices)</b></td>
-<td align="center"><b>Extended statistics (per device)</b></td>
+<td align="center"><b>Rules: every restriction in one list</b></td>
+<td align="center"><b>Rules, light</b></td>
 </tr>
 <tr>
-<td><img src="docs/img/dark/12-extended-stats-all.png" alt="Extended stats all" width="480"/></td>
-<td><img src="docs/img/dark/13-extended-stats-device.png" alt="Extended stats device" width="480"/></td>
+<td><img src="docs/img/dark/rules.png" alt="Rules" width="480"/></td>
+<td><img src="docs/img/light/rules.png" alt="Rules light" width="480"/></td>
 </tr>
 <tr>
-<td align="center"><b>Group connections by service</b></td>
-<td align="center"><b>Group connections by hostname</b></td>
+<td align="center"><b>History: traffic per device and period</b></td>
+<td align="center"><b>History, light</b></td>
 </tr>
 <tr>
-<td><img src="docs/img/dark/14-group-by-service.png" alt="Group by service" width="480"/></td>
-<td><img src="docs/img/dark/15-group-by-host.png" alt="Group by hostname" width="480"/></td>
+<td><img src="docs/img/dark/history.png" alt="History" width="480"/></td>
+<td><img src="docs/img/light/history.png" alt="History light" width="480"/></td>
 </tr>
 <tr>
-<td align="center"><b>Searchable device picker</b></td>
-<td align="center"><b>Unreachable device indicator</b></td>
+<td align="center"><b>Port Forwards: pause or limit inbound traffic</b></td>
+<td align="center"><b>Port Forwards, light</b></td>
 </tr>
 <tr>
-<td><img src="docs/img/dark/16-search-filter.png" alt="Search" width="480"/></td>
-<td><img src="docs/img/dark/18-unreachable-tooltip.png" alt="Unreachable tooltip" width="480"/></td>
+<td><img src="docs/img/dark/portfw.png" alt="Port Forwards" width="480"/></td>
+<td><img src="docs/img/light/portfw.png" alt="Port Forwards light" width="480"/></td>
 </tr>
 <tr>
-<td align="center"><b>Settings walkthrough</b></td>
-<td align="center"><b>Column toggles</b></td>
+<td align="center"><b>Notifications: Telegram, ntfy, webhook, email</b></td>
+<td align="center"><b>Notifications, light</b></td>
 </tr>
 <tr>
-<td><img src="docs/img/settings-walkthrough-dark.gif" alt="Settings walkthrough" width="480"/></td>
-<td><img src="docs/img/column-toggle-dark.gif" alt="Column toggle" width="480"/></td>
+<td><img src="docs/img/dark/notifications.png" alt="Notifications" width="480"/></td>
+<td><img src="docs/img/light/notifications.png" alt="Notifications light" width="480"/></td>
 </tr>
 <tr>
-<td align="center"><b>Telegram Bot — configure &amp; toggle</b></td>
-<td align="center"><b>Telegram Bot settings</b></td>
+<td align="center"><b>Settings, every section open</b></td>
+<td align="center"><b>Settings, light</b></td>
 </tr>
 <tr>
-<td><img src="docs/img/telegram-toggle-dark.gif" alt="Telegram toggle" width="480"/></td>
-<td><img src="docs/img/dark/19-telegram-settings.png" alt="Telegram settings" width="480"/></td>
+<td><img src="docs/img/dark/settings.png" alt="Settings" width="480"/></td>
+<td><img src="docs/img/light/settings.png" alt="Settings light" width="480"/></td>
 </tr>
 <tr>
-<td align="center"><b>Logging &amp; Persistence settings</b></td>
-<td align="center"><b>Activity Log panel</b></td>
+<td align="center"><b>Speed limit, light</b></td>
+<td align="center"><b>Block and unblock internet, light</b></td>
 </tr>
 <tr>
-<td><img src="docs/img/dark/20-logging-settings.png" alt="Logging settings" width="480"/></td>
-<td><img src="docs/img/dark/22-activity-log.png" alt="Activity log" width="480"/></td>
+<td><img src="docs/img/limit-light.gif" alt="Rate limiting light" width="480"/></td>
+<td><img src="docs/img/block-light.gif" alt="Block internet light" width="480"/></td>
 </tr>
 </table>
 
@@ -153,7 +163,7 @@ I hope it turns out as useful for you as it has been for me.
 ## Features
 
 - **Real-time Per-device Monitoring** -- View active connections per device with TCP/UDP counts, TCP state breakdown, destination IPs, and live bandwidth speed (sparkline graphs with rate limit overlay).
-- **Global Overview** -- Optional whole-router panel (the **Overview** toggle in Settings > Display): uplink throughput graph, per-interface breakdown with WAN/LAN/VPN roles and sparklines, and a live top-talkers list. Reads per-interface kernel counters and the speed map the device table already computes, and polls on the existing Poll interval rather than a timer of its own.
+- **Global Overview** -- Optional whole-router panel (the **Overview** toggle under Settings > Display on the Devices tab): uplink throughput graph, per-interface breakdown with WAN/LAN/VPN roles and sparklines, and a live top-talkers list. Reads per-interface kernel counters and the speed map the device table already computes, and polls on the existing Poll interval rather than a timer of its own.
 - **Interactive Speed Graphs** -- Hover any sparkline for a full-size popup graph with: download + upload dual lines, gradient area fill, min/max band, crosshair with precise values, rate limit line, nice-value Y axis (multiples of 100/500 Kbit/s). Full history from page load.
 - **Traffic Shaping (Queue)** -- tc/HTB classes on the LAN bridge with fq_codel leaf qdiscs. Queues excess traffic instead of dropping, providing smoother throughput.
 - **Separate Upload and Download Ceilings** -- Both the shaper and the limiter take an upload ceiling of its own: click **⇅ Split up/down** in the Speed Limit panel, type the upload speed and pick the download one (or press Enter). The device's status line and the Limit column then show both, e.g. `↓ 10 Mbit/s / ↑ 2 Mbit/s`. Without a split, upload gets the same ceiling as download.
@@ -165,7 +175,9 @@ I hope it turns out as useful for you as it has been for me.
 - **Interface Detection** -- Shows actual connection interface: WiFi band (2.4G/5G/6G), LAN port name (lan2/lan3/lan4), or `routed` for clients behind a downstream router.
 - **Downstream Routers** -- Devices on subnets behind a second router are monitored too: subnets with a route via a LAN next-hop are detected automatically, any flow this router NATs is attributed to its original source, and additional CIDRs can be listed in `trafficctl.main.extra_subnets`.
 - **Rules tab** -- Every block, speed limit (subnets included), shape and WiFi block in one list, including those on devices that are offline and so missing from the device table. Shows the target, the hostname, whether each rule is in effect now and whether it survives a reboot, with Edit, Remove and Apply.
+- **History tab** -- Per-device download and upload totals per accounting period (day, ISO week or month), including devices that are offline now, with CSV export. Off by default because it writes to storage on a schedule: switch it on in the tab and pick the directory (`/etc/trafficctl/history` on flash by default, or a USB disk under `/mnt`, `/media` or `/srv`). The figures survive reboots; a reboot costs at most one flush interval of traffic.
 - **Port Forwards tab** -- Inbound traffic control for DNAT port forwards and router-local open ports: live connection/client/byte stats per forward, instant pause/resume (drop rule, no firewall reload) and inbound rate limiting.
+- **Flow Offload** -- Settings > Flow Offload shows the firewall's software and hardware flow offload and switches them. With hardware offload on, many drivers (Mediatek Filogic among them) do not report byte counts for offloaded flows, so live speeds read `—`; the Devices tab says so. Blocks, limits and shapes work either way.
 - **Live Speed Polling** -- Optional polling with configurable interval (Off/1/2/5/10/30s) and averaging window (5s-5min); shows sparkline per device with spike filtering. Both can be stored as router-wide defaults via UCI (`poll_interval`, `avg_window`) for browsers that have not chosen their own.
 - **Reverse DNS** -- Optional hostname resolution for external destination IPs with in-memory cache (no repeated lookups). At most 16 new lookups per device poll, so it also works behind resolvers that rate-limit the router, such as AdGuard Home on port 53 with dnsmasq moved to another port. Private (LAN) destinations are never sent to DNS: they are named from the device alias or the DHCP lease (v4 and v6) the router already holds, else shown as the bare address. While rDNS is off, a note under the connection table links to the toggle.
 - **Searchable Device Picker** -- Command palette (search by name, IP, or MAC) with recent devices quick-access bar stored in localStorage.
@@ -561,16 +573,17 @@ opkg install trafficctl-telegram
 
 1. Install the package (see above).
 2. Navigate to **Status > Traffic Control** in LuCI.
-3. The summary table shows all active devices with connection counts, traffic, speed limits, and connection interface.
+3. The **Devices** tab shows all active devices with connection counts, traffic, speed limits, and connection interface.
 4. Use the search bar to find a device by name, IP, or MAC.
-5. Select a device to see its per-connection detail table.
-6. Use the action buttons to pause internet, block WiFi, or set a speed limit.
+5. Select a device to see its live graph and per-connection detail table.
+6. Use the action buttons to block internet, block WiFi, or set a speed limit.
+7. The **Rules** tab lists every block, limit and shape, offline devices included, and lifts them. **History**, **Port Forwards**, **Notifications** and **Settings** are the other tabs.
 
 ### Telegram Bot (optional)
 
 1. Create a bot via [@BotFather](https://t.me/BotFather) and copy the token.
 2. Send any message to your bot and find your chat ID via `https://api.telegram.org/bot<TOKEN>/getUpdates`.
-3. In LuCI, expand **Settings > Telegram Bot**, enter token and chat ID, click **Test**, then **Save**.
+3. In LuCI, open the **Settings** tab, expand **Telegram Bot**, enter token and chat ID, click **Test**, then **Save**.
 4. In Telegram, send `/devices` to see the device list with action buttons.
 5. Which events reach the chat, and the new device message, are set on the **Notifications** tab (Telegram card). The bot does not have to run for notifications.
 
@@ -677,7 +690,8 @@ The frontend talks to a thin rpcd dispatcher over ubus. The Telegram bot provide
 
 | Path | Role |
 |------|------|
-| `luci-app-trafficctl/htdocs/.../view/trafficctl/status.js` | Frontend — single ES5 file, no deps |
+| `luci-app-trafficctl/htdocs/.../view/trafficctl/status.js` | Devices tab — ES5, no deps |
+| `luci-app-trafficctl/htdocs/.../view/trafficctl/{rules,history,portfw,notify,settings}.js` | The other tabs |
 | `luci-app-trafficctl/htdocs/.../view/trafficctl/status.css` | Frontend styles |
 | `luci-app-trafficctl/root/usr/share/rpcd/ucode/luci.trafficctl.uc` | rpcd plugin (rpcd-mod-ucode) — JSON-RPC dispatch |
 | `luci-app-trafficctl/root/usr/share/rpcd/acl.d/` | ACL permissions |
@@ -693,7 +707,7 @@ The frontend talks to a thin rpcd dispatcher over ubus. The Telegram bot provide
 | `trafficctl/files/etc/hotplug.d/dhcp/99-trafficctl-newdevice` | Instant new-device detection via DHCP events |
 | `trafficctl/files/www/cgi-bin/trafficctl-metrics` | Prometheus scrape endpoint (CGI) |
 | `Makefile` | OpenWrt package build |
-| `docs/` | Extended docs (architecture, API, compat) |
+| `docs/` | Extended docs (architecture, API, compat); `docs/capture/` records the screenshots |
 
 ---
 

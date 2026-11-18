@@ -1,0 +1,8 @@
+{
+  "router": "192.168.1.1",
+  "devices": { "limit": "192.168.1.50", "shape": "192.168.1.51", "graph": "192.168.1.51" },
+  "replace": [
+    ["myrouter\\.example\\.org", "OpenWrt"],
+    ["Alice-Laptop", "Laptop"]
+  ]
+}
