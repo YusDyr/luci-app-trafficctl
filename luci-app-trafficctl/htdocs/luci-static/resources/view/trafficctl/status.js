@@ -2899,6 +2899,8 @@ return view.extend({
 				// asked first, in the same sentence the panel shows.
 				if (!window.confirm(scopeExplain.textContent + '\n\n' + _('Apply this limit now?'))) {
 					ratePick.setValue('0');
+					customRow.classList.add('tc-hidden');
+					_customPinned = false;
 					return;
 				}
 				setStatus(statusDiv, 'loading',
@@ -3338,6 +3340,12 @@ return view.extend({
 				self._localNames.get(Date.now())
 			]).then(function(res) {
 				var data = res[0], local = res[1];
+				// The panel moved on while this was in flight: its rate
+				// belongs to a device no longer shown.
+				if (searchSelect.getValue() !== ip) {
+					pollEnd();
+					return;
+				}
 				if (!data || data.error) {
 					pollEnd((data && data.error) || _('Unknown error'));
 					return;

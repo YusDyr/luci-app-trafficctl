@@ -604,28 +604,35 @@ function wifi_denies() {
 	let ifaces = (allow > 0) ? null : hostapd_ifaces();
 	let fixed = (allow > 0 || ifaces == null) ? 'unknown' : !length(ifaces) ? 'no-radio' : null;
 	let rank = { acl: 3, ban: 2, none: 1 };
+	// Each AP's ACL and bans are read once, not once per MAC: a long maclist
+	// left behind with filtering off would cost two timed calls per entry.
+	let acls = {}, bans = {};
+	for (let ifc in (fixed ? [] : ifaces)) {
+		acls[ifc] = cli_alive(ifc) ? lc(lib.run('hostapd_cli -i ' + lib.q(ifc) + ' deny_acl SHOW', CLI_MS) ?? '') : '';
+		let b = lib.ubus_call('hostapd.' + ifc, 'list_bans');
+		bans[ifc] = (b != null) ? lc(lib.to_json(b)) : '';
+	}
 	for (let mac in macs) {
+		// A list no radio reads is the reason, and the one worth naming: with
+		// no AP running it will not apply when one starts either, and an
+		// allow-list elsewhere does not make it unknowable.
 		if (fixed) {
-			push(out, { mac, state: fixed });
+			push(out, { mac, state: enforced[mac] ? fixed : 'filter-off' });
 			continue;
 		}
 		let worst = 3;
 		for (let ifc in ifaces) {
 			let st = 'none';
-			if (cli_alive(ifc) && index(lc(lib.run('hostapd_cli -i ' + lib.q(ifc) + ' deny_acl SHOW', CLI_MS)), mac) >= 0)
+			if (index(acls[ifc], mac) >= 0)
 				st = 'acl';
-			else {
-				let b = lib.ubus_call('hostapd.' + ifc, 'list_bans');
-				if (b != null && index(lc(lib.to_json(b)), mac) >= 0)
-					st = 'ban';
-			}
+			else if (index(bans[ifc], mac) >= 0)
+				st = 'ban';
 			if (rank[st] < worst)
 				worst = rank[st];
 		}
 		let state = (worst == 3) ? 'acl' : (worst == 2) ? 'ban' : 'none';
-		// In the running ACL it is blocked whatever uci says; otherwise a list
-		// no radio reads is the reason, and the one worth naming.
-		if (state != 'acl' && !enforced[mac])
+		// In the running ACL or under a ban it is kept off whatever uci says.
+		if (state == 'none' && !enforced[mac])
 			state = 'filter-off';
 		push(out, { mac, state });
 	}
@@ -1050,12 +1057,12 @@ function macfilter(op, arg) {
 			mode = 'allow';
 		let list = (type(s.maclist) == 'array') ? join(' ', s.maclist) : '' + (s.maclist ?? '');
 		let listed = index(lc(list), mac) >= 0;
-		if (!allow && op == 'add' && (s.macfilter == null || s.macfilter == '')) {
+		if (!allow && op == 'add' && (s.macfilter == null || s.macfilter == '' || s.macfilter == 'disable')) {
 			lib.uci_cli([ 'set', 'wireless.' + name + '.macfilter=deny' ]);
 			changed = true;
 		}
 		// Blocking takes the MAC off an allow-list or puts it on a deny-list
-		// (made one if unset); unblocking does the opposite.
+		// (made one if unset or disabled); unblocking does the opposite.
 		if (allow ? (listed == (op == 'add')) : (listed != (op == 'add'))) {
 			lib.uci_cli([ (allow == (op == 'add')) ? 'del_list' : 'add_list',
 				'wireless.' + name + '.maclist=' + mac ]);

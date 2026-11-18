@@ -419,7 +419,7 @@ uci show wireless | grep '=wifi-iface' | cut -d= -f1
 ```
 
 This returns paths like `wireless.default_radio0`, `wireless.default_radio1`, etc. The scripts then:
-1. Set `macfilter=deny` on each interface (UCI).
+1. Set `macfilter=deny` on each interface with no policy or `macfilter=disable` (UCI); an `allow` list is kept.
 2. Add/remove the target MAC from each interface's `maclist` (UCI).
 3. `uci commit wireless` persists the change.
 4. At runtime, use `hostapd_cli` to apply immediately without wifi reload:
@@ -432,7 +432,7 @@ This approach disconnects only the target client. All other WiFi clients remain 
 
 The WiFi deny is `trafficctl macfilter-add` / `macfilter-remove` (`ctl.macfilter`). Every `hostapd_cli` call runs under a 3 s timeout: a hostapd that stopped answering its control socket used to hang the rpcd call until rpcd killed it, with the maclist written and nothing reported. A call that times out counts as no `hostapd_cli` for that AP, so it falls back to the ubus ban. With several APs the reply carries the weakest outcome (`none` < `ban` < `acl`): a block applied on one radio and missed on the other leaves the device a radio to join.
 
-A maclist entry on an interface whose `macfilter` is unset or `disable` does nothing: hostapd ignores the list. That happens when someone switches filtering off after a block, or edits `/etc/config/wireless` by hand. `rules-list` still lists such a MAC, with enforcement `filter-off` and `applied: false`, and the Rules tab shows it as "Saved, MAC filter off". Blocking WiFi for the device again sets `macfilter=deny` and puts it in force.
+A maclist entry on an interface whose `macfilter` is unset or `disable` does nothing: hostapd ignores the list. That happens when someone switches filtering off after a block, or edits `/etc/config/wireless` by hand. `rules-list` still lists such a MAC, with enforcement `filter-off` and `applied: false`, and the Rules tab shows it as "Saved, MAC filter off", unless it is in the running ACL or under a ubus ban. Blocking WiFi for the device again sets `macfilter=deny` (from unset or `disable`) and puts it in force.
 
 ---
 

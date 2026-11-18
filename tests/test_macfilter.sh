@@ -115,6 +115,17 @@ assert_contains "add (unconfigured radio): creates deny mode on demand" \
 assert_contains "add (unconfigured radio): MAC added to the new blacklist" \
     "add_list wireless.wifi0.maclist=aa:bb:cc:dd:ee:ff" "$UCI"
 
+# ── add on a radio with filtering switched off: the list would be ignored ──
+# ── (the Rules tab says "Saved, MAC filter off"), so blocking turns it on ──
+
+set_uci_single_iface "disable" "aa:bb:cc:dd:ee:ff"
+OUT=$(run_add 192.168.1.50)
+UCI=$(cat "$UCI_LOG")
+assert_contains "add (macfilter disable): switches the radio to deny" \
+    "wireless.wifi0.macfilter=deny" "$UCI"
+assert_not_contains "add (macfilter disable): MAC already listed, not added twice" \
+    "add_list wireless.wifi0.maclist" "$UCI"
+
 # ── add on an allow/whitelist radio where the target IS listed (i.e. an ──────
 # ── allowed device): blocking means DROPPING it from the allow-list, never ──
 # ── forcing deny mode (that would invert the whole whitelist). ─────────────

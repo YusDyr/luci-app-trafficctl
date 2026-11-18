@@ -1222,7 +1222,7 @@ msgstr ""
 msgid "The deny list names this device but the running radio does not. Install hostapd-utils, or restart WiFi (disconnects every client)."
 msgstr ""
 
-msgid "The deny list names this device, but MAC filtering is off on that WiFi interface (macfilter is not \"deny\"), so the radio ignores the list. Block WiFi for the device again to switch filtering on, or remove the entry."
+msgid "The deny list names this device, but MAC filtering is off on that WiFi interface (macfilter is unset or \"disable\"), so the radio ignores the list. Block WiFi for the device again to switch filtering on, or remove the entry."
 msgstr ""
 
 msgid "The flowtable"

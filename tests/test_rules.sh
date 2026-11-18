@@ -336,6 +336,17 @@ for NFTV in 1.0.2 1.1.6; do
         assert_eq "macfilter '$mode': not applied" "false" "$(rec "$OUT" wifi aa:aa:aa:aa:aa:99 applied)"
         assert_eq "macfilter '$mode': in the running ACL, it is in effect" "acl" "$(rec "$OUT" wifi aa:aa:aa:aa:aa:50 enforcement)"
     done
+    # A timed ubus ban keeps the device off whatever the list says.
+    echo '{"clients":["aa:aa:aa:aa:aa:99"]}' > "$TMPDIR/ubus/hostapd.phy0-ap0@list_bans.json"
+    OUT=$(list)
+    assert_eq "filtering off, under a ban: in effect" "ban" "$(rec "$OUT" wifi aa:aa:aa:aa:aa:99 enforcement)"
+    echo '{"clients":[]}' > "$TMPDIR/ubus/hostapd.phy0-ap0@list_bans.json"
+    # An allow-list on another interface makes the running state unknowable,
+    # but not that this list is ignored.
+    printf "\nconfig wifi-iface 'guest'\n\toption macfilter 'allow'\n\tlist maclist 'aa:aa:aa:aa:aa:77'\n" >> "$ROOT/etc/config/wireless"
+    OUT=$(list)
+    assert_eq "filtering off next to an allow-list: still filter-off" "filter-off" "$(rec "$OUT" wifi aa:aa:aa:aa:aa:99 enforcement)"
+    assert_eq "filtering off next to an allow-list: not applied" "false" "$(rec "$OUT" wifi aa:aa:aa:aa:aa:99 applied)"
     setcfg 1 deny
 done
 CTX=""
