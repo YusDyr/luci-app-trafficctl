@@ -388,22 +388,22 @@ shape-stats-none | json | router-24.10 | trafficctl-shape-stats.sh | tctl shape-
 shape-stats-old-records | json | router-24.10 | trafficctl-shape-stats.sh | tctl shape-stats | $OLDSHAPES
 shape-stats-live-1.0 | json | router-24.10 | trafficctl-shape-stats.sh | tctl shape-stats | live 1.0.2
 shape-stats-live-1.1 | json | router-24.10 | trafficctl-shape-stats.sh | tctl shape-stats | live 1.1.6
-rules | json | router-24.10 | trafficctl-rules.sh | tctl rules
-rules-list | json | router-24.10 | trafficctl-rules.sh list | tctl rules list
+rules | json | router-24.10 | trafficctl-rules.sh | nofo tctl rules
+rules-list | json | router-24.10 | trafficctl-rules.sh list | nofo tctl rules list
 rules-bad-arg | text | router-24.10 | trafficctl-rules.sh bogus; echo \"rc=\$?\" | tctl rules bogus; echo \"rc=\$?\"
-rules-persist | json | router-24.10 | trafficctl-rules.sh | tctl rules | $PERSIST
-rules-no-rdns | json | router-24.10 | trafficctl-rules.sh | tctl rules | $NORDNS
-rules-old-shapes | json | router-24.10 | trafficctl-rules.sh | tctl rules | $OLDSHAPES
+rules-persist | json | router-24.10 | trafficctl-rules.sh | nofo tctl rules | $PERSIST
+rules-no-rdns | json | router-24.10 | trafficctl-rules.sh | nofo tctl rules | $NORDNS
+rules-old-shapes | json | router-24.10 | trafficctl-rules.sh | nofo tctl rules | $OLDSHAPES
 rules-wifi-deny | json | router-24.10 | trafficctl-rules.sh | tctl rules | $WIFIDENY
 rules-wifi-acl | json | router-24.10 | trafficctl-rules.sh | tctl rules | $WIFIACL
 rules-wifi-allow | json | router-24.10 | trafficctl-rules.sh | tctl rules | $WIFIALLOW
-rules-live-1.0 | json | router-24.10 | trafficctl-rules.sh | tctl rules | live 1.0.2; $PERSIST
-rules-live-1.0-transient | json | router-24.10 | trafficctl-rules.sh | tctl rules | live 1.0.2
-rules-live-1.1 | json | router-24.10 | sh:meterize; sh \"\$LEXEC/trafficctl-rules.sh\" | tctl rules | live 1.1.6; $PERSIST
-rules-nft-1.0 | json | router-24.10 | trafficctl-rules.sh | tctl rules | nftfix 1.0.2 rules; $PERSIST
-rules-nft-1.1 | json | router-24.10 | sh:meterize; sh \"\$LEXEC/trafficctl-rules.sh\" | tctl rules | nftfix 1.1.6 rules; $PERSIST
-rules-subnet-1.0 | json | router-24.10 | trafficctl-rules.sh | tctl rules | nftfix 1.0.2 subnet
-rules-subnet-1.1 | json | router-24.10 | sh:meterize; sh \"\$LEXEC/trafficctl-rules.sh\" | tctl rules | nftfix 1.1.6 subnet
+rules-live-1.0 | json | router-24.10 | trafficctl-rules.sh | nofo tctl rules | live 1.0.2; $PERSIST
+rules-live-1.0-transient | json | router-24.10 | trafficctl-rules.sh | nofo tctl rules | live 1.0.2
+rules-live-1.1 | json | router-24.10 | sh:meterize; sh \"\$LEXEC/trafficctl-rules.sh\" | nofo tctl rules | live 1.1.6; $PERSIST
+rules-nft-1.0 | json | router-24.10 | trafficctl-rules.sh | nofo tctl rules | nftfix 1.0.2 rules; $PERSIST
+rules-nft-1.1 | json | router-24.10 | sh:meterize; sh \"\$LEXEC/trafficctl-rules.sh\" | nofo tctl rules | nftfix 1.1.6 rules; $PERSIST
+rules-subnet-1.0 | json | router-24.10 | trafficctl-rules.sh | nofo tctl rules | nftfix 1.0.2 subnet
+rules-subnet-1.1 | json | router-24.10 | sh:meterize; sh \"\$LEXEC/trafficctl-rules.sh\" | nofo tctl rules | nftfix 1.1.6 subnet
 tg-test-default | text+$CURLF | router-24.10 | trafficctl-telegram-test.sh 777:ABC 4242 | tctl telegram-test 777:ABC 4242
 tg-test-env | text+$CURLF | router-24.10 | sh:TCTL_TG_TOKEN=777:ABC sh \"\$LEXEC/trafficctl-telegram-test.sh\" - -100123 | TCTL_TG_TOKEN=777:ABC tctl telegram-test - -100123
 tg-test-template | text+$CURLF | router-24.10 | sh:sh \"\$LEXEC/trafficctl-telegram-test.sh\" 777:ABC 4242 '<b>{{name}}</b> {{ ip }}\\n{{mac}} {{link}} on {{router}} {{ssid}} {{signal}} {{freq}} {{iface}} {{clients}} {{conns}} {{nope}} \"q\"' | tctl telegram-test 777:ABC 4242 '<b>{{name}}</b> {{ ip }}\\n{{mac}} {{link}} on {{router}} {{ssid}} {{signal}} {{freq}} {{iface}} {{clients}} {{conns}} {{nope}} \"q\"'
@@ -1017,6 +1017,17 @@ st_init() {
 }
 stt() { echo "--- tc"; TC_STATE="$W/root/tmp/tc-htb" sh "$UC_TESTLIB/tc-htb.sh" dump; }
 sttnf() { stt | grep -v '^  filter '; }
+# A maclist entry on a wifi-iface whose macfilter is unset or disable is not
+# enforced by hostapd. v1.30.0 left it out of the rules; the port lists it as
+# enforcement "filter-off", applied false (an intentional difference). The
+# fixture's wireless config is such a case, so for the new side only, those
+# entries are dropped; the rules-wifi-* cases set macfilter and compare in full.
+nofo() {
+    local r
+    "$@" > "$W/nofo.out"; r=$?
+    jq '(.. | arrays) |= map(select(type != "object" or .enforcement != "filter-off"))' "$W/nofo.out"
+    return $r
+}
 # v1.30.0 named "a custom HTB tree" among the root qdiscs it declines; an HTB
 # root is in fact reused or replaced, so shape.uc no longer says so (an
 # intentional difference). For the legacy side only, the new wording.
