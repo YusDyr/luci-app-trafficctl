@@ -388,53 +388,49 @@ set -x
 
 ## Screenshots & GIF Capture
 
-The `docs/capture.js` script automates screenshot and GIF generation using Playwright (Chromium CDP).
+`docs/capture/` records the README screenshots and GIFs against a real router with headless Chromium (Playwright). It needs no password and opens no login window: `mksid.sh` creates a two-hour LuCI session for root over ssh and the script sends it as the session cookie.
 
 ### Prerequisites
 
 ```sh
-npm install playwright
-# Requires ffmpeg for GIF generation
-brew install ffmpeg  # macOS
+cd docs/capture
+npm install playwright && npx playwright install chromium
+brew install ffmpeg            # GIFs
+cp local.example.json local.json
 ```
+
+`local.json` is not committed. It holds:
+
+| Key | Meaning |
+|-----|---------|
+| `router` | LAN address of the router (also `ROUTER=` in the environment) |
+| `devices.limit` | IP of the device the limiter GIF limits |
+| `devices.shape` | IP of the device the shaper and block GIFs use, and the graphs |
+| `devices.graph` | optional: another device for the graphs |
+| `replace` | `[regex, replacement]` pairs for the router's hostname and personal device names |
 
 ### Running
 
-1. Open the LuCI page in Chrome/Chromium with remote debugging:
-   ```sh
-   /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
-     --remote-debugging-port=9222 "https://router.local/cgi-bin/luci/admin/status/trafficctl"
-   ```
-2. Run the capture script:
-   ```sh
-   node docs/capture.js
-   ```
+```sh
+./mksid.sh && node capture.js                  # everything, dark and light
+node capture.js shots light                    # PNGs, light theme only
+node capture.js gifs dark only=limit,block     # chosen scenes
+```
 
-### Output
+Output goes to `docs/img/` (`OUT=` overrides it): `dark/*.png` and `light/*.png` for the tabs, `<scene>-<theme>.gif` for the GIFs. Scenes are in `scenes.js`.
 
-| File | Content |
-|------|---------|
-| `docs/img/dark/*.png` | Static screenshots (dark theme) |
-| `docs/img/light/*.png` | Static screenshots (light theme) |
-| `docs/img/speed-graph-{dark,light}.gif` | Live speed sparklines |
-| `docs/img/graph-popup-{dark,light}.gif` | Graph popup hover with crosshair |
-| `docs/img/block-internet-{dark,light}.gif` | Block/unblock internet sequence |
-| `docs/img/rate-limit-{dark,light}.gif` | Limiter → shaper → off sequence |
-| `docs/img/column-toggle-{dark,light}.gif` | Column visibility toggle demo |
-| `docs/img/telegram-toggle-{dark,light}.gif` | Telegram bot enable/disable |
-| `docs/img/settings-walkthrough-{dark,light}.gif` | All settings subsections |
+### What the GIFs change on the router
 
-### Privacy Masking
+The limit, shape and block GIFs apply real restrictions to the test devices from `local.json`, and only to them. The script refuses to press a rate chip unless the device is shown as selected: with no device selected, the Speed Limit panel limits the whole network. After every GIF scene, and once more at the end, it lifts every block, limit and shape on the test devices and any network-wide limit. Without test devices those scenes are skipped. The History tab shows data only if history is switched on.
 
-The script automatically masks sensitive data before every screenshot:
-- **MAC addresses**: replaced with `XX:XX:XX:XX` (keeps first 2 octets for OUI)
-- **Router hostname**: replaced with `router.local`
+### Privacy masking
 
-No manual redaction needed.
+Before every frame the script:
+- cuts MAC addresses to their first two octets (`76:11:XX:XX:XX:XX`);
+- applies the `replace` pairs from `local.json`;
+- blurs public IPv4 addresses, destination hostnames, the external ports on Port Forwards, and the Telegram chat ID and token.
 
-### Device Selection
-
-The script auto-detects a target device from the overview table, preferring (in order): `Eugene-Asus`, `vivo-X200`, any phone-like device, any WiFi device.
+Check the result before committing it: masking works on what the page shows, and a new field can need a new rule.
 
 ---
 
