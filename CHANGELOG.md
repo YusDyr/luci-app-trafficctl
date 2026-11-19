@@ -41,6 +41,19 @@ rest) are gone.
 
 ---
 
+## [2.1.5] - 2026-11-19
+
+### Bug Fixes
+- byte totals in SI units on the Devices tab, as on the other tabs ([#185](https://github.com/YusDyr/luci-app-trafficctl/issues/185)) ([c8e1440](https://github.com/YusDyr/luci-app-trafficctl/commit/c8e1440288ea8d7b54bdef598f3aab53862213e6))
+  The Devices tab divided by 1024 while History and Port Forwards divide by
+  1000, so one device's 5 GB read 4.66 GB on one tab and 5.00 GB on the next.
+  Speeds are SI everywhere, and so are bytes now: status.js uses the History
+  tab's formatting, with "—" for an unknown value as before.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v2.1.4...v2.1.5
+
+---
+
 ## [2.1.4] - 2026-11-18
 
 ### Bug Fixes
