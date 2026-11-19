@@ -91,13 +91,14 @@ function ensure_table() {
 
 function delete_by_comment(cmt) {
 	let q = '"' + cmt + '"';
-	for (let chain in CHAINS)
-		for (let l in lib.lines('nft -a list chain inet tctl_pfw ' + lib.q(chain))) {
-			if (index(l, q) < 0)
-				continue;
-			for (let m in match(l, /handle ([0-9]+)/g) ?? [])
-				nft([ 'delete', 'rule', 'inet', 'tctl_pfw', chain, 'handle', m[1] ]);
-		}
+	for (let chain in CHAINS) {
+		let hs = [];
+		for (let l in lib.lines('nft -a list chain inet tctl_pfw ' + lib.q(chain)))
+			if (index(l, q) >= 0)
+				for (let m in match(l, /handle ([0-9]+)/g) ?? [])
+					push(hs, m[1]);
+		lib.nft_delete([ 'inet', 'tctl_pfw' ], chain, hs);
+	}
 }
 
 // The match half of a rule: a forward has its LAN host, an open port none.
@@ -344,11 +345,11 @@ function check_args(scope, proto, ip, port) {
 }
 
 function ok(msg) {
-	return { reply: { ok: true, msg }, rc: 0 };
+	return lib.reply({ ok: true, msg });
 }
 
 function fail(msg) {
-	return { reply: { ok: false, msg }, rc: 1 };
+	return lib.reply({ ok: false, msg });
 }
 
 function log(action, cmt_ip, port, detail) {

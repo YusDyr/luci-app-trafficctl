@@ -43,6 +43,11 @@
 //                                 err, stderr is in out too (ms may be null)
 //   lines(cmd, ms)                run() split into lines
 //   sh(cmd, ms)                   exit status, all output dropped
+//   nft_delete(table, chain, handles)
+//                                 nft delete rule <table...> <chain> handle h
+//                                 for each h in order (table an argv such as
+//                                 [ 'inet', 'fw4' ]): the status of the last
+//                                 delete, 0 with no handles (the shell's loop)
 //   pipe(cmd, input)              run() with input on cmd's stdin, so a
 //                                 secret need not be in anybody's argv
 //   curl_config(url, headers, body)
@@ -100,6 +105,13 @@
 //                                 fn runs anyway, or with strict returns null.
 //                                 Every writer of a state file goes through it
 //   field(line, n)                awk's $(n+1)
+//   fields(line)                  awk's default split: the words between
+//                                 spaces and tabs, never an empty one; null
+//                                 for anything but a string
+// Command replies
+//   reply(o, rc)                  { reply: o, rc }, rc 0 for o.ok else 1
+//                                 unless given: what a command returns to
+//                                 the CLI and the rpcd plugin
 // Activity log
 //   log(action, target, detail, via, src)   port of tctl_log
 //   set_context({ via, src, user })   what log() records when its caller
@@ -299,6 +311,13 @@ function sh(cmd, ms) {
 	if (ms)
 		return system('exec >/dev/null 2>&1 </dev/null; exec ' + cmd, ms);
 	return system('{ ' + cmd + '\n} >/dev/null 2>&1 </dev/null');
+}
+
+function nft_delete(table, chain, handles) {
+	let rc = 0;
+	for (let h in handles)
+		rc = sh('nft ' + qv([ 'delete', 'rule', ...table, chain, 'handle', h ]));
+	return rc;
 }
 
 function uci_cli(argv) {
@@ -770,6 +789,20 @@ function with_lock(dir, tries, max_age, fn, strict) {
 
 function field(l, n) {
 	return split(ltrim(l, ' \t'), /[ \t]+/)[n] ?? '';
+}
+
+function fields(l) {
+	// split() stops at a NUL, and on 25.12 a line starting with one splits
+	// into [ '' ]; the filter keeps that rare line empty. The common line
+	// takes the cheaper trim + split.
+	if (!plain(l))
+		return filter(split(l, /[ \t]+/), (w) => w != '');
+	l = trim(l, ' \t');
+	return (l == '') ? [] : split(l, /[ \t]+/);
+}
+
+function reply(o, rc) {
+	return { reply: o, rc: rc ?? (o.ok ? 0 : 1) };
 }
 
 function append(p, data) {
@@ -1284,3 +1317,5 @@ export { ubus_event };
 // The block, WiFi and new-device commands.
 export { append, uci_cli, persist_enabled, persist_save, persist_remove, persist_note,
 	persist_warn, read_records, nss_status, nss_note, nss_defunct, slug, logger, with_lock };
+// Shared by the command modules.
+export { fields, reply, nft_delete };

@@ -50,12 +50,6 @@ const WIFI_TYPES = { wifi: true, '2.4G': true, '5G': true, '6G': true };
 
 // ── how awk and the shell read things ───────────────────────────────────────
 
-// awk's default field split.
-function fields(l) {
-	l = trim(l, ' \t');
-	return (l == '') ? [] : split(l, /[ \t]+/);
-}
-
 // A string as awk turns it into a number: its numeric prefix, else 0.
 const NUM_PREFIX = /^[ \t]*([-+]?([0-9]+|[0-9]+\.[0-9]+|\.[0-9]+)([eE][-+]?[0-9]+)?)/;
 function anum(s) {
@@ -136,7 +130,7 @@ function sections(text) {
 function first_by(ls, n, fn) {
 	let m = {};
 	for (let l in ls) {
-		let f = fields(l), k = f[n];
+		let f = lib.fields(l), k = f[n];
 		if (k != null && !exists(m, k)) {
 			let v = fn(l, f);
 			if (v != null)
@@ -259,13 +253,13 @@ function wifi_stations() {
 			let ch = [];
 			for (let l in s.lines)
 				if (index(l, 'channel') >= 0)
-					push(ch, fields(l)[1] ?? '');
+					push(ch, lib.fields(l)[1] ?? '');
 			band = band_of(strip_nl(join('\n', ch)));
 		}
 		else
 			for (let l in s.lines)
 				if (index(l, 'Station') >= 0)
-					push(out, lc(fields(l)[1] ?? '') + ' ' + iface + ' ' + band);
+					push(out, lc(lib.fields(l)[1] ?? '') + ' ' + iface + ' ' + band);
 	}
 	return out;
 }
@@ -281,7 +275,7 @@ function station_type(st, mac) {
 	let hit = grep_i(st, mac);
 	if (!length(hit))
 		return null;
-	let b = strip_nl(join('\n', map(hit, (l) => fields(l)[2] ?? '')));
+	let b = strip_nl(join('\n', map(hit, (l) => lib.fields(l)[2] ?? '')));
 	return (b == '') ? 'wifi' : b;
 }
 
@@ -323,7 +317,7 @@ function bridge_macs(devs) {
 				first = false;
 				continue;
 			}
-			let f = fields(l), port = '' + int(anum(f[0] ?? ''));
+			let f = lib.fields(l), port = '' + int(anum(f[0] ?? ''));
 			if (f[2] == 'no' && exists(names, port))
 				push(out, lc(f[1] ?? '') + ' ' + names[port]);
 		}
@@ -439,7 +433,7 @@ function cache_last(ls, ip) {
 			last = l;
 	if (last == null)
 		return '';
-	let f = fields(last);
+	let f = lib.fields(last);
 	return (f[1] ?? '') + '@' + (f[2] ?? '');
 }
 
@@ -566,7 +560,7 @@ function summary() {
 					ctype = '';
 					let hit = grep_i(br, mac);
 					if (length(hit)) {
-						let port = strip_nl(join('\n', map(hit, (l) => fields(l)[1] ?? '')));
+						let port = strip_nl(join('\n', map(hit, (l) => lib.fields(l)[1] ?? '')));
 						ctype = match(port, /^(phy|wlan)/) ? 'wifi' : port;
 					}
 				}
@@ -661,7 +655,7 @@ const CONN_STATES = { ...META_STATES, FIN_WAIT: true };
 // after the destination, the state is the last state word outside the span
 // between the two.
 function ct_line(l, ip) {
-	let f = fields(l), key = 'src=' + ip, n = length(f);
+	let f = lib.fields(l), key = 'src=' + ip, n = length(f);
 	let r = { proto: '', dst: '', dport: '', bytes: 0, meta: '', state: '', mark: '0' };
 	let s = -1, d = -1;
 	for (let i = 0; i < n; i++) {
@@ -717,7 +711,7 @@ function device_conn_type(ip, mac) {
 			first = false;
 			continue;
 		}
-		let f = fields(l);
+		let f = lib.fields(l);
 		if (f[2] == 'no' && lc(f[1] ?? '') == mac) {
 			port = f[0];
 			break;
@@ -769,7 +763,7 @@ function oif_labels(need) {
 	for (let l in split(readfile(p) ?? '', '\n')) {
 		if (substr(l, 0, 1) == '#')
 			continue;
-		let f = fields(l);
+		let f = lib.fields(l);
 		if (length(f) >= 7 && f[6] != '-')
 			out[f[0]] = f[6];
 	}
@@ -832,9 +826,9 @@ function device(args) {
 	if (!lib.valid_ip(ip))
 		return { reply: { ok: false, msg: 'invalid IP address' }, rc: 1 };
 
-	let leases = filter(lib.file_lines(LEASES), (l) => fields(l)[2] == ip);
-	let name = fields(leases[0] ?? '')[3] ?? '';
-	let mac = fields(leases[0] ?? '')[1] ?? '';
+	let leases = filter(lib.file_lines(LEASES), (l) => lib.fields(l)[2] == ip);
+	let name = lib.fields(leases[0] ?? '')[3] ?? '';
+	let mac = lib.fields(leases[0] ?? '')[1] ?? '';
 	if (mac == '') {
 		let m = match(lib.run('ip neigh show ' + lib.q(ip)), /[0-9a-fA-F:]{17}/);
 		mac = m ? m[0] : '';
@@ -855,7 +849,7 @@ function device(args) {
 	if (ctype != '')
 		lib.write_atomic(CONN_CACHE, join('\n', cache_put(lib.file_lines(CONN_CACHE), ip, ctype, time())) + '\n');
 	else {
-		let st = strip_nl(join('\n', map(lib.lines('ip neigh show ' + lib.q(ip)), (l) => fields(l)[-1] ?? '')));
+		let st = strip_nl(join('\n', map(lib.lines('ip neigh show ' + lib.q(ip)), (l) => lib.fields(l)[-1] ?? '')));
 		if (ON_LINK[st])
 			ctype = 'ethernet';
 		else {
@@ -1106,7 +1100,7 @@ function sort_num(s) {
 
 // `sort -k1,1 -k3,3nr`, then the whole line.
 function flow_cmp(a, b) {
-	let x = fields(a), y = fields(b);
+	let x = lib.fields(a), y = lib.fields(b);
 	if ((x[0] ?? '') != (y[0] ?? ''))
 		return ((x[0] ?? '') < (y[0] ?? '')) ? -1 : 1;
 	let p = sort_num(x[2]), q = sort_num(y[2]);
@@ -1119,7 +1113,7 @@ function flow_cmp(a, b) {
 function flows_json(parsed) {
 	let out = '[', cur = '', first = true;
 	for (let l in sort(parsed, flow_cmp)) {
-		let f = fields(l);
+		let f = lib.fields(l);
 		if (length(f) < 4)
 			continue;
 		if (f[0] != cur) {
@@ -1159,7 +1153,7 @@ function collect_locked(secs) {
 	lib.write_atomic(NETIFY_CACHE, flows_json(parsed));
 	let ips = {};
 	for (let l in parsed)
-		ips[fields(l)[0]] = true;
+		ips[lib.fields(l)[0]] = true;
 	return { ok: true, msg: 'collected ' + secs + 's', devices: length(keys(ips)) };
 }
 
@@ -1272,7 +1266,7 @@ function metrics(src) {
 	if (opt_on('state')) {
 		let rdns = {};
 		for (let l in lib.file_lines(RDNS_CACHE)) {
-			let f = fields(l);
+			let f = lib.fields(l);
 			if (length(f) >= 2 && f[1] != '-')
 				rdns[f[0]] = f[1];
 		}

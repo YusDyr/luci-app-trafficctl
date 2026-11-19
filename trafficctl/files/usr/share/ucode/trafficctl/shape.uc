@@ -265,12 +265,8 @@ function locked(fn) {
 
 const NOT_SAVED = ' — WARNING: shapes.json could not be written';
 
-function reply(o, rc) {
-	return { reply: o, rc: rc ?? (o.ok ? 0 : 1) };
-}
-
 function fail(msg) {
-	return reply({ ok: false, msg });
+	return lib.reply({ ok: false, msg });
 }
 
 // 10 ms of data, at least 1600 bytes.
@@ -322,7 +318,7 @@ function apply(ip, rate, up) {
 		msg = sprintf('shape %d kbit/s applied to %s (download only — upload needs kmod-ifb: %s)%s', rate, ip, KMOD_IFB, note);
 	if (!a.saved)
 		msg += NOT_SAVED + ': this shape will not be restored on the next ifup lan';
-	return reply({ ok: true, nss, msg });
+	return lib.reply({ ok: true, nss, msg });
 }
 
 // The class of ip's record: its classid, or for a record written before
@@ -345,7 +341,7 @@ function remove(ip) {
 	let msg = 'shape removed for ' + ip;
 	if (!locked(() => remove_locked(ip)))
 		msg += NOT_SAVED + ': the record stays and the shape comes back on the next ifup lan';
-	return reply({ ok: true, msg });
+	return lib.reply({ ok: true, msg });
 }
 
 function status(ip) {
@@ -357,7 +353,7 @@ function status(ip) {
 			info = m ? split(m[0], ' ')[1] : '';
 		}
 	}
-	return reply({ ok: true, ip, classid: cid ?? '', info });
+	return lib.reply({ ok: true, ip, classid: cid ?? '', info });
 }
 
 function arg(a) {

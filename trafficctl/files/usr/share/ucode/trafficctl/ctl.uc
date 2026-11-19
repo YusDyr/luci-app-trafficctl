@@ -72,11 +72,6 @@ const RDNS_CACHE = '/tmp/trafficctl_rdns_cache';
 // so the same rules are listed.
 const DOTTED = /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/;
 
-// awk's fields of a line.
-function fields(l) {
-	return filter(split(l, /[ \t]+/), (w) => w != '');
-}
-
 // awk's s+0: the leading number, 0 without. Whole numbers stay ints, so a
 // 64-bit tc counter is not rounded.
 function anum(s) {
@@ -330,7 +325,7 @@ function tc_class_rates(dev) {
 	for (let l in lib.lines('tc class show dev ' + lib.q(dev))) {
 		if (substr(l, 0, 12) != 'class htb 1:')
 			continue;
-		let f = fields(l), minor = htb_minor(f);
+		let f = lib.fields(l), minor = htb_minor(f);
 		if (minor == '1' || minor == 'fffe')
 			continue;
 		m['1:' + minor] = line_rate(f, true);
@@ -352,7 +347,7 @@ function htb_stats(text, ipmap) {
 			skip = true;
 			continue;
 		}
-		let f = fields(l);
+		let f = lib.fields(l);
 		if (substr(l, 0, 12) == 'class htb 1:') {
 			// A record ends where the next class starts. v1.30.0 did not
 			// close it at the root or default class, and printed the class
@@ -409,7 +404,7 @@ function fq_stats(text) {
 		cur = null;
 	};
 	for (let l in split(text, '\n')) {
-		let f = fields(l);
+		let f = lib.fields(l);
 		if (substr(l, 0, 14) == 'qdisc fq_codel') {
 			flush();
 			cur = { parent: '', ecn_mark: 0, new_flows: 0, old_flows: 0, target_us: 0, memory_used: 0 };
@@ -476,7 +471,7 @@ function shape_stats() {
 function naming() {
 	let n = { lmac: {}, lip: {}, lname: {}, alias: {}, rdns: {}, nmac: {}, nip: {}, on: {} };
 	for (let l in lib.file_lines(LEASES)) {
-		let f = fields(l);
+		let f = lib.fields(l);
 		if (length(f) < 3)
 			continue;
 		let mac = lc(f[1]), ip = f[2], name = f[3] ?? '';
@@ -489,18 +484,18 @@ function naming() {
 	}
 	// Whitespace runs collapse and a later line wins, as the shell merge had it.
 	for (let l in lib.file_lines(NAMES)) {
-		let f = fields(l);
+		let f = lib.fields(l);
 		if (length(f) >= 2)
-			n.alias[f[0]] = join(' ', fields(replace(l, /^[^ ]+ +/, '')));
+			n.alias[f[0]] = join(' ', lib.fields(replace(l, /^[^ ]+ +/, '')));
 	}
 	if (lib.uci_get('trafficctl', 'main', 'resolve_names') != '0')
 		for (let l in lib.file_lines(RDNS_CACHE)) {
-			let f = fields(l);
+			let f = lib.fields(l);
 			if (length(f) >= 2 && f[1] != '-' && !exists(n.rdns, f[0]))
 				n.rdns[f[0]] = f[1];
 		}
 	for (let l in lib.lines('ip neigh show')) {
-		let f = fields(l), nf = length(f);
+		let f = lib.fields(l), nf = length(f);
 		if (nf == 0 || !match(f[0], DOTTED))
 			continue;
 		let mac = null;
@@ -591,7 +586,7 @@ function wifi_denies() {
 			return;
 		}
 		for (let v in (type(s.maclist) == 'array') ? s.maclist : [ s.maclist ?? '' ])
-			for (let w in fields(v)) {
+			for (let w in lib.fields(v)) {
 				push(words, w);
 				if (s.macfilter == 'deny')
 					enforced[lc(w)] = true;
@@ -810,12 +805,9 @@ function block_add(ip, comment) {
 	return { ok, ipv6, mac };
 }
 
+// The shell's loop: the status of the last delete, 0 with nothing to do.
 function delete_handles(hs) {
-	// The shell's loop: the status of the last delete, 0 with nothing to do.
-	let rc = 0;
-	for (let h in hs)
-		rc = lib.sh('nft delete rule inet fw4 forward handle ' + lib.q(h));
-	return rc == 0;
+	return lib.nft_delete([ 'inet', 'fw4' ], 'forward', hs) == 0;
 }
 
 // The whole comment: a substring match on 192.168.1.1 deletes the rule of
@@ -842,28 +834,24 @@ function block_remove_legacy(ip) {
 	return delete_handles(hs);
 }
 
-function reply(o, rc) {
-	return { reply: o, rc: rc ?? (o.ok ? 0 : 1) };
-}
-
 function block(ip, label) {
 	if (ip == null || ip == '')
-		return reply({ ok: false, msg: 'usage: trafficctl block <ip> [label]' });
+		return lib.reply({ ok: false, msg: 'usage: trafficctl block <ip> [label]' });
 	if (!lib.valid_ip(ip))
-		return reply({ ok: false, msg: 'invalid IP address' });
+		return lib.reply({ ok: false, msg: 'invalid IP address' });
 	label = (label == null || label == '') ? 'block_' + ip : label;
 
 	let m = match(lib.run('ip -4 addr show dev ' + lib.q(net.lan_device())), /inet ([0-9.]+)/);
 	if (m && m[1] == ip)
-		return reply({ ok: false, msg: 'cannot block the router itself' });
+		return lib.reply({ ok: false, msg: 'cannot block the router itself' });
 
 	let comment = block_comment(ip), src = getenv('TCTL_SRC');
 	if (is_blocked(ip))
-		return reply({ ok: true, msg: ip + ' is already blocked' });
+		return lib.reply({ ok: true, msg: ip + ' is already blocked' });
 
 	let b = block_add(ip, comment);
 	if (!b.ok)
-		return reply({ ok: false, msg: 'failed to block ' + ip });
+		return lib.reply({ ok: false, msg: 'failed to block ' + ip });
 
 	lib.sh('conntrack -D -s ' + lib.q(ip), CT_MS);
 	lib.sh('conntrack -D -d ' + lib.q(ip), CT_MS);
@@ -888,15 +876,15 @@ function block(ip, label) {
 	note += lib.nss_note() + lib.persist_note() +
 		lib.persist_warn(saved, 'this block will not be restored on the next ifup lan');
 	let self = (src != null && src != '' && src == ip) ? ' (your device — LuCI access preserved)' : '';
-	return reply({ ok: true, ipv6: b.ipv6, nss: lib.nss_status(), persist,
+	return lib.reply({ ok: true, ipv6: b.ipv6, nss: lib.nss_status(), persist,
 		msg: 'internet blocked for ' + ip + self + note });
 }
 
 function unblock(ip, label) {
 	if (ip == null || ip == '')
-		return reply({ ok: false, msg: 'usage: trafficctl unblock <ip> [label]' });
+		return lib.reply({ ok: false, msg: 'usage: trafficctl unblock <ip> [label]' });
 	if (!lib.valid_ip(ip))
-		return reply({ ok: false, msg: 'invalid IP address' });
+		return lib.reply({ ok: false, msg: 'invalid IP address' });
 	label = (label == null || label == '') ? 'block_' + ip : label;
 
 	// A rule from before v1.13.2 carries the caller's label, so a block
@@ -906,11 +894,11 @@ function unblock(ip, label) {
 	// with the label tg lifted every other device's Telegram block.
 	block_remove_legacy(ip);
 	if (!block_remove(block_comment(ip)))
-		return reply({ ok: false, msg: 'failed to unblock ' + ip });
+		return lib.reply({ ok: false, msg: 'failed to unblock ' + ip });
 
 	let removed = lib.persist_enabled() ? lib.persist_remove('block', ip) : null;
 	lib.log('unblock', ip, label, getenv('TCTL_VIA'), getenv('TCTL_SRC'));
-	return reply({ ok: true, msg: 'internet unblocked for ' + ip +
+	return lib.reply({ ok: true, msg: 'internet unblocked for ' + ip +
 		lib.persist_warn(removed, 'the saved block is still there and comes back on the next ifup lan') });
 }
 
@@ -1023,7 +1011,7 @@ const MACFILTER_USAGE = {
 
 function macfilter(op, arg) {
 	if (arg == null || arg == '')
-		return reply({ ok: false, msg: MACFILTER_USAGE[op] });
+		return lib.reply({ ok: false, msg: MACFILTER_USAGE[op] });
 	let ip = arg, mac = null;
 	// A MAC too: the deny list is keyed on it, and a device long gone has no
 	// lease or neighbour entry left to find it by (#128).
@@ -1039,14 +1027,14 @@ function macfilter(op, arg) {
 			ip = mac;
 	}
 	else if (!lib.valid_ip(arg))
-		return reply({ ok: false, msg: 'invalid IP address' });
+		return lib.reply({ ok: false, msg: 'invalid IP address' });
 	mac ??= wifi_mac(ip);
 	if (mac == null)
-		return reply({ ok: false, msg: 'cannot find MAC for ' + ip });
+		return lib.reply({ ok: false, msg: 'cannot find MAC for ' + ip });
 
 	let secs = wifi_sections();
 	if (!length(secs))
-		return reply({ ok: false, msg: 'no wifi interfaces found' });
+		return lib.reply({ ok: false, msg: 'no wifi interfaces found' });
 
 	// The policy the administrator chose: forcing "deny" once turned a
 	// curated allow-list into a block-list.
@@ -1094,7 +1082,7 @@ function macfilter(op, arg) {
 	if (op == 'add' && ok)
 		notify.emit_action('block_applied', { ip, mac, kind: 'wifi' });
 	// Exit 0 either way, as the scripts did: the reply says how far it got.
-	return reply({ ok, enforcement: enf, msg }, 0);
+	return lib.reply({ ok, enforcement: enf, msg }, 0);
 }
 
 // ── new devices (the DHCP hotplug hook) ─────────────────────────────────────

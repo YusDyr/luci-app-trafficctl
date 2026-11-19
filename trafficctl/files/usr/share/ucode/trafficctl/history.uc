@@ -125,12 +125,6 @@ function anum(s) {
 	return (n == n) ? n : 0;
 }
 
-// awk's default field split.
-function fields(l) {
-	l = trim(l, ' \t');
-	return (l == '') ? [] : split(l, /[ \t]+/);
-}
-
 // A file's lines, '' for each empty one, without the final empty one.
 function lines_of(p) {
 	return lib.file_lines(p);
@@ -390,7 +384,7 @@ function first_by(m, k, v) {
 function lookups() {
 	let lk = { lease_mac: {}, lease_name: {}, neigh: null, hops: null, names: {}, rdns: {} };
 	for (let l in lines_of(LEASES)) {
-		let f = fields(l);
+		let f = lib.fields(l);
 		first_by(lk.lease_mac, f[2], f[1] ?? '');
 		if (f[3] != '*')
 			first_by(lk.lease_name, f[2], f[3] ?? '');
@@ -404,7 +398,7 @@ function lookups() {
 	// this file as tab-separated, which it never is, so it never found a name
 	// here.)
 	for (let l in lines_of(RDNS_CACHE)) {
-		let f = fields(l);
+		let f = lib.fields(l);
 		if (f[1] != null && f[1] != '-')
 			first_by(lk.rdns, f[0], f[1]);
 	}
@@ -418,7 +412,7 @@ function is_nexthop(lk, ip) {
 	if (lk.hops == null) {
 		lk.hops = {};
 		for (let l in lib.lines('ip route show')) {
-			let f = fields(l);
+			let f = lib.fields(l);
 			for (let i = 0; i < length(f) - 1; i++)
 				if (f[i] == 'via')
 					lk.hops[f[i + 1]] = true;
@@ -435,7 +429,7 @@ function lookup_mac(lk, ip) {
 		if (lk.neigh == null) {
 			lk.neigh = {};
 			for (let l in lib.lines('ip neigh show')) {
-				let f = fields(l);
+				let f = lib.fields(l);
 				for (let i = 0; i < length(f) - 1; i++)
 					if (f[i] == 'lladdr') {
 						first_by(lk.neigh, f[0], f[i + 1]);
