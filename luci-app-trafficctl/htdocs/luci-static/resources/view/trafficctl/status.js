@@ -266,12 +266,15 @@ function optWindow(o) {
 function saveOpts(o) {
 	try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(o)); } catch(e) {}
 }
+// SI, as the History and Port Forwards tabs: the same total reads the same
+// on every tab (this one divided by 1024 and showed 4.66 GB for their 5.00).
 function fmtBytes(b) {
 	if (b == null || isNaN(b)) return '—';
-	if (b < 1024) return b + ' B';
-	if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
-	if (b < 1073741824) return (b/1048576).toFixed(2) + ' MB';
-	return (b/1073741824).toFixed(2) + ' GB';
+	if (b >= 1000000000000) return (b / 1000000000000).toFixed(2) + ' TB';
+	if (b >= 1000000000) return (b / 1000000000).toFixed(b >= 10000000000 ? 1 : 2) + ' GB';
+	if (b >= 1000000) return (b / 1000000).toFixed(b >= 10000000 ? 0 : 1) + ' MB';
+	if (b >= 1000) return (b / 1000).toFixed(0) + ' KB';
+	return b + ' B';
 }
 // The Bytes / TCP / UDP columns show a LIFETIME total accumulated on the
 // router by `trafficctl totals`, not the live conntrack sums they used to
