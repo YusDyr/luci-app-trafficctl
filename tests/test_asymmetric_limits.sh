@@ -285,7 +285,7 @@ function fmtRate(kbit) {
     if (mbit >= 1) return (mbit % 1 === 0 ? mbit.toFixed(0) : mbit.toFixed(1)) + ' Mbit/s';
     return kbit + ' kbit/s';
 }
-var RPC_INT_MAX = 2147483647;   // status.js's own, outside the slice
+var RPC_INT_MAX = 2147483647;   // from trafficctl/common.js, outside the slice
 var _hidden = true, _upUnit = 'mbit';
 var upInput = { value: '' };
 var upRow = { classList: { contains: function () { return _hidden; } } };
@@ -388,8 +388,9 @@ NODE
         "may use 5 Mbit/s of its own. Every device in 10.0.20.0/24 may use 5 Mbit/s of its own." "$explain"
 fi
 
-# Static checks on the wiring the slices cannot see.
-js_src=$(cat "$JS")
+# Static checks on the wiring the slices cannot see. The rpc declarations
+# live in the module the views share.
+js_src=$(cat "$JS" "$REPO/luci-app-trafficctl/htdocs/luci-static/resources/trafficctl/common.js")
 assert_contains "the ratelimit rpc call carries an upload rate" \
     "params: ['ip', 'rate_kbit', 'label', 'mode', 'rate_kbit_up']" "$js_src"
 assert_contains "the shape_add rpc call carries an upload rate" \

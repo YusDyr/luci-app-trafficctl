@@ -82,17 +82,24 @@ def may_be_null(a):
 def main():
     sigs = json.load(open(sys.argv[1]))
     fails = declares = 0
-    for path in sys.argv[2:]:
-        src = open(path).read()
+    srcs = dict((path, open(path).read()) for path in sys.argv[2:])
+    # A declare in the module the views share (trafficctl/common.js) is called
+    # from the views, so its call sites are looked for in every file that does
+    # not declare that name itself.
+    decls = {}
+    for path, src in srcs.items():
         for m in DECLARE.finditer(src):
-            var, body = m.group(1), m.group(2)
+            decls.setdefault(path, []).append((m.group(1), m.group(2), m.start()))
+    for path in sys.argv[2:]:
+        src = srcs[path]
+        for var, body, start in decls.get(path, []):
             fields = dict(FIELD.findall(body))
             if strings(fields.get('object', ''))[:1] != ['luci.trafficctl']:
                 continue
             declares += 1
             method = strings(fields.get('method', ''))[0]
             params = strings(fields.get('params', '[]'))
-            where = '%s:%d %s' % (path, src.count('\n', 0, m.start()) + 1, var)
+            where = '%s:%d %s' % (path, src.count('\n', 0, start) + 1, var)
             if method not in sigs:
                 fails += 1
                 print('FAIL: %s calls %s, which the plugin does not list' % (where, method))
@@ -102,18 +109,22 @@ def main():
                 if p not in sig:
                     fails += 1
                     print('FAIL: %s sends %s.%s, which the plugin does not declare' % (where, method, p))
-            for pos, args in call_args(src, var):
-                line = src.count('\n', 0, pos) + 1
-                for p, a in zip(params, args):
-                    if may_be_null(a):
-                        fails += 1
-                        print('FAIL: %s:%d %s can pass null for %s (rpcd refuses the call; pass undefined)'
-                              % (path, line, method, p))
-                        continue
-                    t = literal_type(a)
-                    if t and p in sig and t != sig[p] and a != 'undefined':
-                        fails += 1
-                        print('FAIL: %s:%d %s passes %s as %s, declared %s' % (path, line, method, p, t, sig[p]))
+            users = [path] + [o for o in sys.argv[2:] if o != path
+                              and var not in [d[0] for d in decls.get(o, [])]]
+            for user in users:
+                usrc = srcs[user]
+                for pos, args in call_args(usrc, var):
+                    line = usrc.count('\n', 0, pos) + 1
+                    for p, a in zip(params, args):
+                        if may_be_null(a):
+                            fails += 1
+                            print('FAIL: %s:%d %s can pass null for %s (rpcd refuses the call; pass undefined)'
+                                  % (user, line, method, p))
+                            continue
+                        t = literal_type(a)
+                        if t and p in sig and t != sig[p] and a != 'undefined':
+                            fails += 1
+                            print('FAIL: %s:%d %s passes %s as %s, declared %s' % (user, line, method, p, t, sig[p]))
     print('%d declares checked, %d failed' % (declares, fails))
     return 1 if fails or not declares else 0
 

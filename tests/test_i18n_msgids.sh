@@ -26,6 +26,7 @@
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VIEWS="$REPO_ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl"
+SHARED="$REPO_ROOT/luci-app-trafficctl/htdocs/luci-static/resources/trafficctl"
 POT="$REPO_ROOT/luci-app-trafficctl/po/templates/trafficctl.pot"
 GEN="$REPO_ROOT/tools/genpot.py"
 
@@ -44,12 +45,12 @@ done
 # first literal's edges are not the msgid's edges. Checking the literals
 # individually over-reports by an order of magnitude — the first version of
 # this audit claimed 15 offenders where there were 4.
-offenders=$(python3 - "$VIEWS" <<'PY'
+offenders=$(python3 - "$VIEWS" "$SHARED" <<'PY'
 import re, sys, glob, os
 LIT = r"'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\""
 CALL = re.compile(r"_\(\s*((?:%s)(?:\s*\+\s*(?:%s))*)\s*[,)]" % (LIT, LIT))
 bad=[]
-for path in sorted(glob.glob(os.path.join(sys.argv[1], '*.js'))):
+for path in sorted(glob.glob(os.path.join(sys.argv[1], '*.js'))) + sorted(glob.glob(os.path.join(sys.argv[2], '*.js'))):
     src=open(path).read()
     for m in CALL.finditer(src):
         joined=''.join(p[1:-1] for p in re.findall(LIT, m.group(1)))

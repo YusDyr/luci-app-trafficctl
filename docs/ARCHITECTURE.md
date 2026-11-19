@@ -17,7 +17,7 @@ This document describes the internal architecture of luci-app-trafficctl.
 ```mermaid
 graph TD
     subgraph "Browser (Client)"
-        JS["status.js<br/>LuCI view.extend()"]
+        JS["view/trafficctl/*.js<br/>LuCI view.extend()<br/>+ trafficctl/common.js (shared)"]
         LS["localStorage<br/>(preferences, poll, recent devices)"]
         JS <--> LS
     end

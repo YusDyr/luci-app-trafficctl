@@ -3,22 +3,13 @@
 'require view';
 'require rpc';
 'require ui';
+'require trafficctl.common as common';
 
 // Notifications: the events of trafficctl.notify and the senders that deliver
 // them. Every event also goes out on ubus (trafficctl.notify) and to the
 // scripts in /etc/hotplug.d/trafficctl whatever is set here; this page only
 // chooses which senders get which events. The Telegram sender uses the bot's
 // token and chat from Settings unless it sets its own.
-
-(function() {
-	if (!document.querySelector('link[href*="trafficctl/status.css"]')) {
-		var lnk = document.createElement('link');
-		lnk.rel = 'stylesheet';
-		lnk.type = 'text/css';
-		lnk.href = '/luci-static/resources/view/trafficctl/status.css';
-		document.head.appendChild(lnk);
-	}
-})();
 
 var callNotifyGet = rpc.declare({
 	object: 'luci.trafficctl',

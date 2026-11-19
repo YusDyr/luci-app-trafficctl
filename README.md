@@ -693,6 +693,7 @@ The frontend talks to a thin rpcd dispatcher over ubus. The Telegram bot provide
 | `luci-app-trafficctl/htdocs/.../view/trafficctl/status.js` | Devices tab — ES5, no deps |
 | `luci-app-trafficctl/htdocs/.../view/trafficctl/{rules,history,portfw,notify,settings}.js` | The other tabs |
 | `luci-app-trafficctl/htdocs/.../view/trafficctl/status.css` | Frontend styles |
+| `luci-app-trafficctl/htdocs/.../resources/trafficctl/common.js` | Module the views share: status.css loader, rpc declarations, rate formatting |
 | `luci-app-trafficctl/root/usr/share/rpcd/ucode/luci.trafficctl.uc` | rpcd plugin (rpcd-mod-ucode) — JSON-RPC dispatch |
 | `luci-app-trafficctl/root/usr/share/rpcd/acl.d/` | ACL permissions |
 | `trafficctl/Makefile` | Backend package (`trafficctl`), installs everything under `trafficctl/files/` |
