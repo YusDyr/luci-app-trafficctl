@@ -14,17 +14,8 @@
 # shellcheck source=tests/lib/ucode.sh
 . "$(dirname "$0")/lib/ucode.sh"
 
-PASS=0
-FAIL=0
-
-assert_eq() {
-    if [ "$2" = "$3" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$1" "$2" "$3"
-    fi
-}
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 
 assert_contains() {
     if printf '%s' "$3" | grep -qF -- "$2"; then
@@ -717,5 +708,4 @@ rm -f "$NLOG/hotplug"
 TCTL_NOTIFY=0 tcall trafficctl.notify emit_action '"block_applied"' '{"ip":"192.168.1.9","kind":"internet"}' >/dev/null 2>&1
 assert_eq "emit_action: TCTL_NOTIFY=0 (a restore) sends nothing" "no" "$([ -f "$NLOG/hotplug" ] && echo yes || echo no)"
 
-printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ] || exit 1
+summary

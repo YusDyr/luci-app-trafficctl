@@ -14,8 +14,8 @@
 # success, and that we do not overcorrect: somebody who has turned
 # acceleration OFF must not be told their limits are broken.
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
@@ -26,16 +26,6 @@ mkdir -p "$TMPDIR"
 
 ECM="$TMPDIR/root/sys/kernel/debug/ecm"
 mkdir -p "$TMPDIR/root/sys/kernel/debug"
-
-assert_eq() {
-    local desc="$1" expected="$2" actual="$3"
-    if [ "$expected" = "$actual" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$desc" "$expected" "$actual"
-    fi
-}
 
 assert_contains() {
     local desc="$1" needle="$2" haystack="$3"
@@ -191,5 +181,4 @@ LIBUC="$REPO_ROOT/trafficctl/files/usr/share/ucode/trafficctl/lib.uc"
 assert_contains "config_get reports the NSS status" 'nss: lib.nss_status(),' "$(cat "$RPCD")"
 assert_contains "lib.uc reads the ECM debugfs directory" "'/sys/kernel/debug/ecm'" "$(cat "$LIBUC")"
 
-printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+summary

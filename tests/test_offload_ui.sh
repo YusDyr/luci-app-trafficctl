@@ -13,8 +13,8 @@
 #
 # Nothing here needs a DOM or the LuCI runtime: the slices are plain ES5.
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 JS="$REPO_ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js"
@@ -27,16 +27,6 @@ NET="$REPO_ROOT/trafficctl/files/usr/share/ucode/trafficctl/net.uc"
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
-
-assert_eq() {
-    local desc="$1" expected="$2" actual="$3"
-    if [ "$expected" = "$actual" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$desc" "$expected" "$actual"
-    fi
-}
 
 # --- every mode the backend can emit must have a badge label ---------------
 #
@@ -191,5 +181,4 @@ assert_eq "limit preset buttons render their rate, not NaN" \
 shape=$(grep -c "shapeBtns.push(E('span', {'class':'tg-kbd-btn'}, '🔧 ' + p.l" "$SETTINGS_JS")
 assert_eq "shaper preset buttons concatenate rather than coerce" "1" "$shape"
 
-printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+summary

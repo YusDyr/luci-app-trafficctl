@@ -17,40 +17,13 @@
 #   * `trafficctl restore`: an error in one half (the blocks) does not stop
 #     the other (the limits).
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 
 # shellcheck source=tests/lib/ucode.sh
 . "$(dirname "$0")/lib/ucode.sh"
 # shellcheck source=tests/lib/limit_env.sh
 . "$UC_TESTLIB/limit_env.sh"
-
-assert_eq() {
-    if [ "$2" = "$3" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$1" "$2" "$3"
-    fi
-}
-
-assert_contains() {
-    if printf '%s' "$3" | grep -qF -- "$2"; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected to find: '%s'\n  in:\n%s\n" "$1" "$2" "$3"
-    fi
-}
-
-assert_not_contains() {
-    if printf '%s' "$3" | grep -qF -- "$2"; then
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  should NOT contain: '%s'\n  in:\n%s\n" "$1" "$2" "$3"
-    else
-        PASS=$((PASS + 1))
-    fi
-}
 
 chains() { lt_table | awk '/^[ \t]*chain /{ print $2 }' | sort | tr '\n' ' '; }
 

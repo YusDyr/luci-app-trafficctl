@@ -11,22 +11,12 @@
 # safe to maintain by hand. It also pins the package relationships the
 # upgrade from the single package depends on.
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BE_MK="$REPO_ROOT/trafficctl/Makefile"
 FE_MK="$REPO_ROOT/luci-app-trafficctl/Makefile"
-
-assert_eq() {
-    local desc="$1" expected="$2" actual="$3"
-    if [ "$expected" = "$actual" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$desc" "$expected" "$actual"
-    fi
-}
 
 # ── trafficctl/Makefile installs exactly the tree under files/ ──────────────
 # Between its two packages, each file once.
@@ -180,5 +170,4 @@ assert_eq "both packages carry the same PKG_VERSION" "$v_fe" "$v_be"
 assert_eq "both Makefiles name the same maintainer" \
     "$(grep '^PKG_MAINTAINER:=' "$FE_MK")" "$(grep '^PKG_MAINTAINER:=' "$BE_MK")"
 
-printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ] || exit 1
+summary

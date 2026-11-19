@@ -14,31 +14,13 @@
 # stateful tc that keeps that kernel behaviour, so the test reads what the
 # router holds afterwards.
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 
 # shellcheck source=tests/lib/ucode.sh
 . "$(dirname "$0")/lib/ucode.sh"
 # shellcheck source=tests/lib/shape_env.sh
 . "$UC_TESTLIB/shape_env.sh"
-
-assert_eq() {
-    if [ "$2" = "$3" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$1" "$2" "$3"
-    fi
-}
-
-assert_contains() {
-    if printf '%s' "$3" | grep -qF -- "$2"; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected to find: '%s'\n  in:\n%s\n" "$1" "$2" "$3"
-    fi
-}
 
 lt_cfg 0
 st_net br-lan lan1 lan2
@@ -102,5 +84,4 @@ assert_eq "remove .5: .50, .51 and .52 keep their filters" \
 dst 192.168.1.51/32 flowid 1:3
 dst 192.168.1.52/32 flowid 1:4" "$(filters br-lan)"
 
-printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ] || exit 1
+summary

@@ -4,18 +4,8 @@
 
 set -e
 
-PASS=0
-FAIL=0
-
-assert_eq() {
-    local desc="$1" expected="$2" actual="$3"
-    if [ "$expected" = "$actual" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$desc" "$expected" "$actual"
-    fi
-}
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 
 assert_contains() {
     local desc="$1" haystack="$2" needle="$3"
@@ -161,5 +151,4 @@ assert_not_contains "fe: no cgi" "$DATA" "cgi-bin"
 
 rm -rf dist/
 
-printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ] || exit 1
+summary

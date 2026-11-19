@@ -12,8 +12,8 @@
 # a reader whether a number is a measurement or a floor; a verdict the view
 # does not recognise must produce a warning, never silence.
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 JS="$REPO_ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/history.js"
@@ -31,16 +31,6 @@ for f in "$JS" "$UC" "$RPCD" "$ACL" "$MENU"; do
         exit 1
     fi
 done
-
-assert_eq() {
-    local desc="$1" expected="$2" actual="$3"
-    if [ "$expected" = "$actual" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$desc" "$expected" "$actual"
-    fi
-}
 
 assert_contains() {
     local desc="$1" needle="$2" file="$3"
@@ -372,5 +362,4 @@ else
     printf "FAIL: the history tab is not reachable from the menu, or tab orders collide\n"
 fi
 
-printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+summary

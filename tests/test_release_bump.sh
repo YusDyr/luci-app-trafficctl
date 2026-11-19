@@ -6,8 +6,8 @@
 # holding its own copy of the patterns would keep passing while the released
 # version went wrong — the exact failure mode several tests in this suite had.
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 
 WF="$(cd "$(dirname "$0")/.." && pwd)/.github/workflows/auto-release.yml"
 
@@ -609,14 +609,6 @@ assert_not_contains() {
         PASS=$((PASS + 1))
     fi
 }
-assert_eq() {
-    if [ "$2" = "$3" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$1" "$2" "$3"
-    fi
-}
 # The helpers must actually be callable and must actually be able to fail.
 _before=$FAIL
 # Output suppressed: this assertion is MEANT to fail, and printing its FAIL
@@ -803,5 +795,4 @@ luci-i18n-trafficctl-zh-cn.apk|luci-i18n-trafficctl-zh-cn
 FIXTURES
 fi
 
-printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ] || exit 1
+summary

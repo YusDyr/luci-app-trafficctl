@@ -17,8 +17,8 @@
 #      masquerading non-lan zone (a guest VLAN, typically) is not monitored,
 #      its device gets no netdev hook, and a limit on it matches nothing.
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 
 HOTPLUG="$(cd "$(dirname "$0")/.." && pwd)/trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes"
 
@@ -33,36 +33,6 @@ NFT_LOG="$TMP/nft.log"
 # the writer renames a new file over it).
 RULES="$TMP/root/etc/trafficctl/rules.json"
 mkdir -p "$TMP/root/etc/trafficctl" "$TMP/root/etc/config" "$TMP/root/tmp"
-
-assert_eq() {
-    local desc="$1" expected="$2" actual="$3"
-    if [ "$expected" = "$actual" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$desc" "$expected" "$actual"
-    fi
-}
-
-assert_contains() {
-    local desc="$1" needle="$2" haystack="$3"
-    if printf '%s' "$haystack" | grep -qF -- "$needle"; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected to find: '%s'\n  in:\n%s\n" "$desc" "$needle" "$haystack"
-    fi
-}
-
-assert_not_contains() {
-    local desc="$1" needle="$2" haystack="$3"
-    if printf '%s' "$haystack" | grep -qF -- "$needle"; then
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  should NOT contain: '%s'\n  in:\n%s\n" "$desc" "$needle" "$haystack"
-    else
-        PASS=$((PASS + 1))
-    fi
-}
 
 # ── shared mocks ────────────────────────────────────────────────────────────
 # Three zones: lan, a masquerading guest VLAN, and wan. The guest zone is the
@@ -425,5 +395,4 @@ assert_eq "default mode: a /32 is a single host"      "shared" "$(mode_of 192.16
 assert_eq "default mode: a bare address is one host"  "shared" "$(mode_of 192.168.1.50)"
 assert_eq "default mode: the whole network is split"  "each"   "$(mode_of 0.0.0.0/0)"
 
-printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+summary

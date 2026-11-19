@@ -21,8 +21,8 @@
 # compared with the copy for the SAME package, so a step that moves to the
 # wrong package fails here too.
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BE_MAKEFILE="$REPO_ROOT/trafficctl/Makefile"
@@ -47,16 +47,6 @@ assert_not_contains() {
         printf "FAIL: %s\n  did not expect: '%s'\n" "$desc" "$needle"
     else
         PASS=$((PASS + 1))
-    fi
-}
-
-assert_eq() {
-    local desc="$1" expected="$2" actual="$3"
-    if [ "$expected" = "$actual" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$desc" "$expected" "$actual"
     fi
 }
 
@@ -539,5 +529,4 @@ for f in "$TMP/trafficctl-telegram.postinst" "$TMP/tg-ipk.postinst" "$TMP/tg-apk
     assert_eq "$n: the postinst succeeds" 0 "$(cat "$FAKE/rc")"
 done
 
-printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ] || exit 1
+summary

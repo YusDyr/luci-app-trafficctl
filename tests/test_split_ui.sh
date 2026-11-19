@@ -8,24 +8,16 @@
 # to show a split ceiling, since neither the summary nor the device view
 # reported the upload figure.
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
+# shellcheck source=tests/lib/js_slice.sh
+. "$(dirname "$0")/lib/js_slice.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 JS="$REPO_ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js"
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
-
-assert_eq() {
-    local desc="$1" expected="$2" actual="$3"
-    if [ "$expected" = "$actual" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$desc" "$expected" "$actual"
-    fi
-}
 
 assert_contains() {
     local desc="$1" needle="$2" haystack="$3"
@@ -68,14 +60,7 @@ assert_contains "Enter in the upload field applies" "upInput.addEventListener('k
 if ! command -v node >/dev/null 2>&1; then
     printf "SKIP: node is not installed — fmtCeiling cannot be run here.\n"
 else
-    slice() {
-        awk -v fn="$1" '
-            $0 ~ "^function " fn "\\(" { inside = 1 }
-            inside { print }
-            inside && /^}/ { exit }
-        ' "$JS"
-    }
-    { echo 'function _(s) { return s; }'; slice fmtRate; slice fmtCeiling; } > "$TMP/slices.js"
+    { echo 'function _(s) { return s; }'; js_slice "$JS" fmtRate; js_slice "$JS" fmtCeiling; } > "$TMP/slices.js"
     run() { node -e "$(cat "$TMP/slices.js"); console.log($1);"; }
     assert_eq "symmetric: one figure" "5 Mbit/s" "$(run 'fmtCeiling(5000, 5000)')"
     assert_eq "no upload figure: download alone" "5 Mbit/s" "$(run 'fmtCeiling(5000, 0)')"
@@ -83,5 +68,4 @@ else
     assert_eq "split below 1 Mbit/s" "↓ 2 Mbit/s / ↑ 512 kbit/s" "$(run 'fmtCeiling(2000, 512)')"
 fi
 
-printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ] || exit 1
+summary

@@ -11,24 +11,16 @@
 # cannot drift into testing a stale duplicate. Node is used only as an ES5
 # interpreter: the slices touch no DOM and no LuCI runtime.
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
+# shellcheck source=tests/lib/js_slice.sh
+. "$(dirname "$0")/lib/js_slice.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 JS="$REPO_ROOT/luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js"
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
-
-assert_eq() {
-    local desc="$1" expected="$2" actual="$3"
-    if [ "$expected" = "$actual" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$desc" "$expected" "$actual"
-    fi
-}
 
 if ! command -v node >/dev/null 2>&1; then
     printf "SKIP: node is not installed — the frontend slices cannot be run here.\n"
@@ -38,18 +30,10 @@ fi
 
 # Top-level function declarations, taken from the opening line to the closing
 # brace in column 1.
-slice() {
-    awk -v fn="$1" '
-        $0 ~ "^function " fn "\\(" { inside = 1 }
-        inside { print }
-        inside && /^}/ { exit }
-    ' "$JS"
-}
-
 {
-    slice parseCidr
-    slice cidrOverlaps
-    slice isSubnetTarget
+    js_slice "$JS" parseCidr
+    js_slice "$JS" cidrOverlaps
+    js_slice "$JS" isSubnetTarget
 } > "$TMP/slices.js"
 
 # A silently empty slice would make every assertion below vacuous.
@@ -61,10 +45,7 @@ for fn in parseCidr cidrOverlaps isSubnetTarget; do
         printf "FAIL: harness: %s was not sliced out of status.js\n" "$fn"
     fi
 done
-if [ "$FAIL" -ne 0 ]; then
-    printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
-    exit 1
-fi
+[ "$FAIL" -eq 0 ] || summary
 
 # The caller in status.js, reproduced as its own function only because it is
 # defined inside render() and cannot be sliced. Kept to the exact shape of the
@@ -140,5 +121,4 @@ assert_eq "a bare address is a device"           "device" \
 assert_eq "a /32 is a device, not a subnet"      "device" \
     "$(node "$TMP/run.js" --is-subnet "192.168.10.55/32")"
 
-printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+summary

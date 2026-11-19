@@ -3,8 +3,8 @@
 # production script/function and is written to fail against the OLD (pre-fix)
 # behavior — see the "would have failed before" comment on each section.
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root"
 
@@ -12,26 +12,6 @@ TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 MOCKBIN="$TMPDIR/bin"
 mkdir -p "$MOCKBIN"
-
-assert_eq() {
-    local desc="$1" expected="$2" actual="$3"
-    if [ "$expected" = "$actual" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$desc" "$expected" "$actual"
-    fi
-}
-
-assert_contains() {
-    local desc="$1" needle="$2" haystack="$3"
-    if printf '%s' "$haystack" | grep -qF -- "$needle"; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected to find: '%s'\n  in:\n%s\n" "$desc" "$needle" "$haystack"
-    fi
-}
 
 assert_not_contains() {
     local desc="$1" needle="$2" haystack="$3"
@@ -99,5 +79,4 @@ assert_eq "acl: and no view needs it (no uci module, no form.Map)" "" \
 #    (the command is `trafficctl telegram-test` now).
 # ════════════════════════════════════════════════════════════════════════════
 
-printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ] || exit 1
+summary

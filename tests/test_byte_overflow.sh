@@ -38,8 +38,8 @@
 # shellcheck source=tests/lib/bytes_env.sh
 . "$(dirname "$0")/lib/bytes_env.sh"
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO_ROOT="$UC_REPO"
 F="$REPO_ROOT/trafficctl/files"
@@ -55,36 +55,6 @@ WRAPPED=-2147483648
 BIG=5368709120          # 5 GiB, comfortably past the clamp
 HUGE=9007199254740991   # 2^53-1, the largest integer a double holds exactly
 PAST53=9007199254740994 # 2^53+2: a double holds it, but not 2^53+3 next to it
-
-assert_eq() {
-    local desc="$1" expected="$2" actual="$3"
-    if [ "$expected" = "$actual" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$desc" "$expected" "$actual"
-    fi
-}
-
-assert_contains() {
-    local desc="$1" needle="$2" haystack="$3"
-    if printf '%s' "$haystack" | grep -qF -- "$needle"; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected to find: '%s'\n  in:\n%s\n" "$desc" "$needle" "$haystack"
-    fi
-}
-
-assert_not_contains() {
-    local desc="$1" needle="$2" haystack="$3"
-    if printf '%s' "$haystack" | grep -qF -- "$needle"; then
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  should NOT contain: '%s'\n  in:\n%s\n" "$desc" "$needle" "$haystack"
-    else
-        PASS=$((PASS + 1))
-    fi
-}
 
 # ════════════════════════════════════════════════════════════════════════════
 # Discover the awk implementations present, and which of them are 32-bit.
@@ -287,5 +257,4 @@ if [ -z "$NARROW" ]; then
     echo "exercise it. Sections 2 to 4 are interpreter-independent."
 fi
 
-printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ] || exit 1
+summary

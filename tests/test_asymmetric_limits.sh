@@ -23,8 +23,8 @@
 # come back from a reboot policing every upload packet — a total block
 # reporting itself as a successful limit.
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 RPCD="$REPO/luci-app-trafficctl/root/usr/share/rpcd/ucode/luci.trafficctl.uc"
@@ -41,36 +41,6 @@ st_net br-lan lan1
 printf '[]' > "$RULES"
 TMP="$UC_TMP/asym"
 mkdir -p "$TMP"
-
-assert_eq() {
-    local desc="$1" expected="$2" actual="$3"
-    if [ "$expected" = "$actual" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$desc" "$expected" "$actual"
-    fi
-}
-
-assert_contains() {
-    local desc="$1" needle="$2" haystack="$3"
-    if printf '%s' "$haystack" | grep -qF -- "$needle"; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected to find: '%s'\n  in:\n%s\n" "$desc" "$needle" "$haystack"
-    fi
-}
-
-assert_not_contains() {
-    local desc="$1" needle="$2" haystack="$3"
-    if printf '%s' "$haystack" | grep -qF -- "$needle"; then
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  should NOT contain: '%s'\n  in:\n%s\n" "$desc" "$needle" "$haystack"
-    else
-        PASS=$((PASS + 1))
-    fi
-}
 
 
 mkdir -p "$TMP/sys/class/net/br-lan/brif/lan1"
@@ -581,5 +551,4 @@ assert_contains "restore: and its rule is there" 'ip daddr 192.168.1.98' "$(cat 
 # failed write and a label holding "},{" are pinned in
 # tests/test_persistence.sh.
 
-printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+summary

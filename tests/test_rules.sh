@@ -17,8 +17,8 @@
 # `ratelimit`) against an OFFLINE device, since "listed but cannot be
 # removed" would be the same bug one step later.
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 
 
 # shellcheck source=tests/lib/ucode.sh
@@ -32,15 +32,6 @@ mkdir -p "$MOCKBIN" "$STATE" "$ROOT/tmp/.uci" "$ROOT/etc/trafficctl" "$ROOT/etc/
 # The limiter checks its devices in sysfs.
 mkdir -p "$ROOT/sys/class/net/br-lan" "$ROOT/sys/class/net/eth1"
 CTX=""
-
-assert_eq() {
-    if [ "$2" = "$3" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s%s\n  expected: '%s'\n  actual:   '%s'\n" "${CTX:+[$CTX] }" "$1" "$2" "$3"
-    fi
-}
 assert_contains() {
     if printf '%s' "$3" | grep -qF -- "$2"; then
         PASS=$((PASS + 1))
@@ -393,5 +384,4 @@ assert_eq "an unknown subcommand is refused, as by the shell script" \
     "$(printf '%s\n%s' '{"ok":false,"msg":"usage: trafficctl rules [list]"}' 'rc=1')" "$OUT"
 assert_eq "no subcommand is list" "$(list)" "$(PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" tctl rules 2>/dev/null)"
 
-printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ] || exit 1
+summary

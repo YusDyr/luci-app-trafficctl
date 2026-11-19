@@ -5,30 +5,13 @@
 # PATH, and asserts on the rules the chain ends up holding, the calls made and
 # the JSON replied.
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 
 # shellcheck source=tests/lib/ucode.sh
 . "$(dirname "$0")/lib/ucode.sh"
 # shellcheck source=tests/lib/fw4_env.sh
 . "$UC_TESTLIB/fw4_env.sh"
-
-assert_eq() {
-    if [ "$2" = "$3" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$1" "$2" "$3"
-    fi
-}
-assert_contains() {
-    if printf '%s' "$3" | grep -qF -- "$2"; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected to find: '%s'\n  in:\n%s\n" "$1" "$2" "$3"
-    fi
-}
 assert_not_contains() {
     if printf '%s' "$3" | grep -qF -- "$2"; then
         FAIL=$((FAIL + 1))
@@ -268,5 +251,4 @@ assert_eq "unblock, shared legacy label: a label typed in the UI" "4" "$(handles
 assert_contains "unblock, shared legacy label: 192.168.1.42 still blocked" 'ip saddr 192.168.1.42 ' "$(fw_rules)"
 fw_flush
 
-printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ] || exit 1
+summary

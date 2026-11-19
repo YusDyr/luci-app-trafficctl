@@ -21,8 +21,8 @@
 # Also pinned here: rules.json itself. 1.30.x reads it after a downgrade and
 # writes it while an upgrade runs, so its bytes and its lock stay v1.30's.
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 
 # shellcheck source=tests/lib/ucode.sh
 . "$(dirname "$0")/lib/ucode.sh"
@@ -34,15 +34,6 @@ HOOK="$REPO_ROOT/trafficctl/files/etc/hotplug.d/iface/99-trafficctl-shapes"
 TMPDIR="$FW_T/q"
 QBIN="$TMPDIR/bin"
 mkdir -p "$QBIN"
-
-assert_eq() {
-    if [ "$2" = "$3" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$1" "$2" "$3"
-    fi
-}
 assert_contains() {
     if printf '%s' "$3" | grep -qF -- "$2"; then
         PASS=$((PASS + 1))
@@ -363,5 +354,4 @@ rmdir "$NLOCK"
 wait "$upid"
 assert_eq "lock: and writes once it is released" "192.168.1.5 tablet" "$(cat "$NAMESF")"
 
-printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+summary

@@ -12,8 +12,8 @@
 #     so every shape with its own upload ceiling (rate_kbit_up) was missing
 #     from its output, and with it from tctl_has_limit.
 
-PASS=0
-FAIL=0
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 
 
 # shellcheck source=tests/lib/ucode.sh
@@ -22,16 +22,6 @@ TMPDIR="$UC_TMP/t"
 mkdir -p "$TMPDIR/root/etc/trafficctl"
 MOCKBIN="$TMPDIR/bin"
 mkdir -p "$MOCKBIN"
-
-assert_eq() {
-    local desc="$1" expected="$2" actual="$3"
-    if [ "$expected" = "$actual" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$desc" "$expected" "$actual"
-    fi
-}
 
 assert_contains() {
     local desc="$1" needle="$2" haystack="$3"
@@ -124,5 +114,4 @@ printf '#!/bin/sh\necho "qdisc fq_codel 0: root refcnt 2"\n' > "$TMPDIR/nohtb/tc
 chmod +x "$TMPDIR/nohtb/tc"
 assert_eq "stats: no HTB root, no shapes" "[]" "$(PATH="$TMPDIR/nohtb:$MOCKBIN:$PATH" TCTL_ROOT="$TMPDIR/root" tctl shape-stats 2>&1)"
 
-printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ] || exit 1
+summary

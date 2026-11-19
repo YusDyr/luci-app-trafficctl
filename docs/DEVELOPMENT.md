@@ -289,6 +289,33 @@ A test must exercise the real script rather than a local copy of the function it
 names — see the "Writing tests" section of `CONTRIBUTING.md` for why, and use
 `tests/test_direction.sh` as the template.
 
+Every test sources the shared assertions near the top, before any `cd`
+(`$0` is relative when CI runs `bash tests/test_x.sh` from the repository root):
+
+```bash
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
+```
+
+`tests/lib/assert.sh` sets `PASS=0`/`FAIL=0` and defines `assert_eq <desc>
+<expected> <actual>`, `assert_contains` and `assert_not_contains <desc>
+<needle> <haystack>` (fixed strings), and `summary`, the last line of a test:
+it prints `N passed, M failed` and exits 1 on any failure. A test that sets
+`CTX` gets `[$CTX] ` in front of each failure, to tell the rounds of a loop
+apart. The file is POSIX sh, since `manual-release.yml` runs
+`tests/test_build_ipk.sh` under `sh`. Helpers only one test needs (`assert_rc`,
+`assert_json`, an `assert_contains` with another failure text) stay in that
+test, defined after the source line so they replace the shared one. The
+`# shellcheck source=` line lets the ShellCheck job (`-x`) follow the file.
+
+The UI tests run the view's own functions under node rather than a copy:
+`tests/lib/js_slice.sh` provides `js_slice <file> <name> [indent]`, which
+prints `function <name>(` through the closing brace at the same indent (none
+for a top-level function, `"$(printf '\t\t')"` for one nested in `render()`).
+It compares strings with `index()`/`substr()`, never a regex, so mawk in CI
+and BSD awk on macOS slice the same lines. Check that the slice is not empty
+before asserting on it.
+
 **Bot tests** (`test_telegram_bot.sh`, in the ucode job) run the bot (`trafficctl-telegram.uc`) against a curl mock that serves `getUpdates` from a queue and a CLI stub, and check:
 - Start, the disabled and unconfigured exits, the offset file, the retry after a refused poll
 - Command processing (`/devices`, `/status`, `/help`), HTML-escaped names, the keyboard labels, the 5 s device cache

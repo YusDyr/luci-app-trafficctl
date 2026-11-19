@@ -57,6 +57,11 @@ sysfs), run the real CLI through `tctl` from `tests/lib/ucode.sh`, then assert
 on the arguments the fakes recorded. One module function at a time goes
 through `tcall`.
 
+Assertions and the closing `summary` come from `tests/lib/assert.sh`, and UI
+tests slice view functions out of the JavaScript with `tests/lib/js_slice.sh`
+instead of copying them; `docs/DEVELOPMENT.md` ("Automated Tests") has the
+details.
+
 Verify your test by breaking the production code on purpose, watching the test
 go red, and restoring the file.
 

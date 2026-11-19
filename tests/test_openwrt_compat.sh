@@ -3,18 +3,8 @@
 # Runs on self-hosted runner — validates scripts parse correctly with ash/dash,
 # checks that the ipk installs cleanly, and verifies script structure.
 
-PASS=0
-FAIL=0
-
-assert_eq() {
-    local desc="$1" expected="$2" actual="$3"
-    if [ "$expected" = "$actual" ]; then
-        PASS=$((PASS + 1))
-    else
-        FAIL=$((FAIL + 1))
-        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$desc" "$expected" "$actual"
-    fi
-}
+# shellcheck source=tests/lib/assert.sh
+. "$(dirname "$0")/lib/assert.sh"
 
 assert_ok() {
     local desc="$1"
@@ -201,5 +191,4 @@ done
 
 # ── Results ────────────────────────────────────────────────────────────────
 
-printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ] || exit 1
+summary
