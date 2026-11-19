@@ -41,6 +41,20 @@ rest) are gone.
 
 ---
 
+## [2.1.6] - 2026-11-19
+
+### Other
+- shared reply, fields and nft handle deletion in lib.uc ([#186](https://github.com/YusDyr/luci-app-trafficctl/issues/186)) ([3537ab0](https://github.com/YusDyr/luci-app-trafficctl/commit/3537ab0d2c9082993f74acc0cec33bf7a547ebb4))
+  ctl, limit and shape each declared the same reply() wrapper, cut and
+  portfw built the same object inline, four modules carried their own
+  awk-style fields() split, and ctl, limit and portfw each looped over
+  "nft delete rule ... handle N". They now call lib.reply, lib.fields and
+  lib.nft_delete, documented in the lib.uc header.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v2.1.5...v2.1.6
+
+---
+
 ## [2.1.5] - 2026-11-19
 
 ### Bug Fixes
