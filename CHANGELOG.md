@@ -41,6 +41,20 @@ rest) are gone.
 
 ---
 
+## [2.1.7] - 2026-11-19
+
+### Other
+- shared LuCI module for the views' CSS loader, rpc declarations and rate formatting ([#187](https://github.com/YusDyr/luci-app-trafficctl/issues/187)) ([dd25d8e](https://github.com/YusDyr/luci-app-trafficctl/commit/dd25d8e0b9583386af667aa99bd3c57baaa6c3e5))
+  Six views each carried the same status.css loader, status.js and rules.js
+  declared the same six rpc calls, three views kept their own RPC_INT_MAX,
+  and fmtRate/fmtCeiling were copied between status.js and rules.js. They
+  now live once in resources/trafficctl/common.js, which every view loads
+  with 'require trafficctl.common as common'.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v2.1.6...v2.1.7
+
+---
+
 ## [2.1.6] - 2026-11-19
 
 ### Other
