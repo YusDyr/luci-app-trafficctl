@@ -6,9 +6,9 @@ This document describes the internal architecture of luci-app-trafficctl.
 
 ## Design Principles
 
-1. **No daemon** -- All operations are on-demand. No background process runs when the UI is closed.
-2. **No compiled code** -- Pure shell scripts and JavaScript. Runs on any architecture without compilation.
-3. **Minimal dependencies** -- Only requires `conntrack` and `luci-base`. Traffic shaping requires `tc-full` and `kmod-sched-htb` (optional).
+1. **On-demand by default** -- Monitoring and control run when called. The background services do work only for a feature that is switched on: `trafficctl-notify` and `trafficctl-telegram` start only when a sender or the bot is configured, `trafficctl-cut` only while an internet cut is engaged, and `trafficctl-history` idles until history is enabled.
+2. **No compiled code** -- A ucode backend, a few shell scripts (init, hotplug, CGI) and JavaScript. Runs on any architecture without compilation.
+3. **Minimal dependencies** -- Packages that ship with every OpenWrt image or that the packages declare. Traffic shaping additionally needs `tc-full` and `kmod-sched-htb`.
 
 ---
 
