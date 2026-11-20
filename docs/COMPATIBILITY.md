@@ -8,7 +8,9 @@ This document covers OpenWrt version support, firewall behaviour, required packa
 
 | OpenWrt Version | Release Date | Firewall | Backend | Status |
 |-----------------|-------------|----------|---------|--------|
-| 23.05.x         | Oct 2023    | fw4      | nftables | Fully supported (primary target) |
+| 25.12.x         | 2026        | fw4      | nftables | Fully supported (apk) |
+| 24.10.x         | Feb 2025    | fw4      | nftables | Fully supported |
+| 23.05.x         | Oct 2023    | fw4      | nftables | Fully supported |
 | 22.03.x         | Sep 2022    | fw4      | nftables | Supported; no byte counts under flow offload (see [Flow Offload](#flow-offload)) |
 | 21.02.x         | Sep 2021    | fw3      | iptables | Not supported; use 1.30.x |
 | Snapshots        | Rolling     | fw4      | nftables | Supported |
@@ -19,7 +21,7 @@ Version 2.0+ requires OpenWrt 22.03 or newer with firewall4/nftables. OpenWrt 21
 
 ## Architecture Support
 
-The package contains no compiled code (all shell scripts and JavaScript), so it runs on every architecture OpenWrt supports:
+The packages contain no compiled code (a ucode backend, a few shell scripts and JavaScript), so they run on every architecture OpenWrt supports:
 
 | Architecture | Tested | Notes |
 |--------------|--------|-------|

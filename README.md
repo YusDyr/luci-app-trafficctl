@@ -223,7 +223,7 @@ The router in these captures runs hardware flow offload, so devices whose traffi
 
 [![OpenWrt Compatibility](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat.yml/badge.svg?event=pull_request)](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat.yml)
 
-Runs on all architectures (no compiled code, pure shell + LuCI JavaScript).
+Runs on all architectures: no compiled code, the backend is ucode and the web interface is LuCI JavaScript.
 
 | OpenWrt Version | Firewall | Status |
 |-----------------|----------|--------|
@@ -247,7 +247,7 @@ Version 2.0+ requires OpenWrt 22.03 or newer with firewall4/nftables. OpenWrt 21
 | **25.12.4** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | | ✓ |
 | **snapshot** | ✓ | | ✓ | ✓ | | | ✓ | | |
 
-Each test builds both `.ipk` files (`trafficctl` and `luci-app-trafficctl`), runs `opkg install --force-depends` inside the real OpenWrt rootfs container for that version/arch, then verifies all files are present and all scripts pass `ash -n` syntax check.
+Each test builds the three packages (`trafficctl`, `trafficctl-telegram` and `luci-app-trafficctl`), installs them with the release's own package manager (opkg, or apk on 25.12) inside the real OpenWrt rootfs container for that version/arch, then verifies all files are present, every ucode file compiles on that release's interpreter (`ucode -c`) and the remaining shell scripts (init scripts, hooks, CGI) pass `ash -n`. Separate jobs run the limiter, shaper, internet cut and rpcd plugin live on 22.03, 24.10 and 25.12, and upgrade from the previous release.
 
 ---
 
@@ -302,7 +302,6 @@ devices) are family-independent and work regardless.
 ## Installation
 
 > **Which file do I need?**
-> - **Recommended**: v1.6.5+ (earlier releases are broken — missing status.css, invalid APK format)
 > - OpenWrt **22.03 — 24.10** → download `.ipk` (opkg)
 > - OpenWrt **25.12+** and snapshot → download `.apk` (apk)
 > - Want upgrades through `opkg upgrade` / `apk upgrade`? Add the [package feed](#package-feed-recommended) instead
@@ -682,7 +681,7 @@ flowchart LR
     LOG --> SL[(syslog)]
 ```
 
-The frontend talks to a thin rpcd dispatcher over ubus. The Telegram bot provides parallel remote control via long polling. Backend shell scripts split into two groups: **monitoring** (read-only, pulls data from conntrack, ARP, DHCP leases, and wireless subsystems) and **control** (writes firewall rules via nftables, tc classes, or WiFi MAC filters). All mutable actions are logged to a local file and optionally syslog. Rules optionally persist across reboots via hotplug scripts.
+The frontend talks to a ucode rpcd plugin over ubus, which runs the `trafficctl` CLI (ucode). The Telegram bot provides parallel remote control via long polling. The CLI's commands split into two groups: **monitoring** (read-only, pulls data from conntrack, ARP, DHCP leases, and wireless subsystems) and **control** (writes firewall rules via nftables, tc classes, or WiFi MAC filters). All mutable actions are logged to a local file and optionally syslog. Rules optionally persist across reboots via hotplug scripts.
 
 ---
 
@@ -729,14 +728,15 @@ Contributions are welcome. Please:
 
 1. Fork the repository and create a feature branch.
 2. Test on at least one real OpenWrt device.
-3. Keep the single-file JavaScript approach -- no bundlers, no npm, no transpilation.
-4. Shell scripts must be POSIX sh compatible (BusyBox ash/dash).
-5. All scripts emit JSON to stdout.
+3. Keep plain ES5 JavaScript -- no bundlers, no npm, no transpilation. Code shared between views goes in `resources/trafficctl/common.js`.
+4. The backend is ucode; the shell that is left (init scripts, hooks, CGI) must be POSIX sh compatible (BusyBox ash/dash).
+5. CLI commands emit JSON to stdout.
 
 ### Code Style
 
 - **JavaScript**: ES5 syntax (LuCI compatibility), `'use strict'`, no external dependencies.
-- **Shell**: POSIX `/bin/sh`, validate all IP input, output JSON only.
+- **ucode**: validate all IP input, output JSON only; shared helpers live in `lib.uc`.
+- **Shell**: POSIX `/bin/sh`.
 
 ---
 
