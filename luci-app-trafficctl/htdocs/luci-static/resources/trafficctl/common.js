@@ -18,7 +18,7 @@ if (!document.querySelector('link[href*="trafficctl/status.css"]')) {
 	var lnk = document.createElement('link');
 	lnk.rel = 'stylesheet';
 	lnk.type = 'text/css';
-	lnk.href = '/luci-static/resources/view/trafficctl/status.css';
+	lnk.href = L.resource('view/trafficctl/status.css');
 	document.head.appendChild(lnk);
 }
 

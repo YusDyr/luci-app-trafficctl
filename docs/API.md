@@ -1449,3 +1449,5 @@ The ACL file at `/usr/share/rpcd/acl.d/luci-app-trafficctl.json` grants executio
 Outside `luci.trafficctl`, the read grant also covers `luci-rpc getDHCPLeases` (the
 DHCPv4 and DHCPv6 leases). The device view names private destinations from it and
 from `names_list`, re-read at most once a minute, never on every poll (#172).
+It also covers `network.rrdns lookup`, which the device view calls for host names,
+so a user without the luci-mod-status grant still sees them.

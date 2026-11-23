@@ -758,7 +758,8 @@ const methods = {
 			if (v != '')
 				uset('telegram', o, v);
 		}
-		if (!snd)
+		// settings.js no longer sends the template: keep the stored one then.
+		if (!snd && exists(a, 'notify_template'))
 			uset('telegram', 'notify_template', arg(a, 'notify_template'));
 		for (let o in [ 'notify_new_device', 'notify_known_device', 'control_enabled', 'btn_block_inet',
 		                'btn_block_wifi', 'btn_limiter', 'btn_shaper' ]) {
