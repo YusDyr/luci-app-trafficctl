@@ -1148,6 +1148,10 @@ done <<< "$(printf '%s\n' "$CASES" | grep -E "^(${EQUIV_ONLY:-.*}) *\|" || true)
 # where the exec plugin got the raw JSON and answered with ok:false (or
 # coerced it). Those cases check the status; each keeps a correctly typed twin
 # below that is compared.
+#
+# v1.30.0 cleared notify_template when a save left it out; the port keeps it
+# (#190, covered by test_notify.sh). v1.30.0's settings page always sent the
+# template, so telegram-set-mask sends it too.
 LPLUGIN="$L/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
 NPLUGIN="$UC_REPO/luci-app-trafficctl/root/usr/share/rpcd/ucode/luci.trafficctl.uc"
 declare -A RPCD_REFUSED=(
@@ -1298,7 +1302,7 @@ telegram-get | json | stub | telegram_config_get | {}
 telegram-get-token | json | stub | telegram_config_get | {} | $TOKEN
 telegram-get-none | json | stub | telegram_config_get | {} | $NOTG
 telegram-set | json+$LOGF | stub | telegram_config_set | {\"enabled\":true,\"bot_token\":\"999:NEWTOKEN\",\"chat_id\":\"54321\",\"poll_interval\":5,\"notify_new_device\":false,\"notify_known_device\":true,\"control_enabled\":false,\"notify_template\":\"{{name}} joined\",\"btn_block_inet\":false,\"btn_block_wifi\":true,\"btn_limiter\":false,\"btn_shaper\":true} | $INITS
-telegram-set-mask | json+$LOGF | stub | telegram_config_set | {\"enabled\":false,\"bot_token\":\"***\",\"chat_id\":\"54321\"} | $TOKEN; $INITS
+telegram-set-mask | json+$LOGF | stub | telegram_config_set | {\"enabled\":false,\"bot_token\":\"***\",\"chat_id\":\"54321\",\"notify_template\":\"say hi to {{name}}\"} | $TOKEN; $INITS
 telegram-set-clear | json+$LOGF | stub | telegram_config_set | {\"bot_token\":\"\",\"notify_template\":\"\"} | $TOKEN; $INITS
 telegram-set-new-section | json+$LOGF | stub | telegram_config_set | {\"enabled\":true,\"chat_id\":\"1\"} | $NOTG; $INITS
 telegram-test | json+$LOGF | stub | telegram_test | {\"bot_token\":\"777:ABC\",\"chat_id\":\"4242\",\"message\":\"it's {{name}}\"}
