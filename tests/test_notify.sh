@@ -559,6 +559,13 @@ assert_eq "wanted: interval 0 is off" 1 "$?"
 unset TCTL_UBUS_SOCKET
 ubusd_start
 
+# Before the migration settings.js saves the bot without notify_template.
+reset "$LEGACY"
+rpc telegram_config_set '{"bot_token":"***","chat_id":"285437102"}' >/dev/null
+assert_eq "telegram_config_set: a save without the template keeps it" "{{name}} joined" "$(uciget telegram.notify_template)"
+rpc telegram_config_set '{"bot_token":"***","notify_template":"{{ip}}"}' >/dev/null
+assert_eq "telegram_config_set: a sent template is written" "{{ip}}" "$(uciget telegram.notify_template)"
+
 reset "config notify 'notify'
 $BOT
 config notify_telegram 'notify_telegram'

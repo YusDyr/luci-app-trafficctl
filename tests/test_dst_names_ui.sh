@@ -46,6 +46,8 @@ assert_eq "the hint links to the switch it names" "11" \
     "$(grep -c "mkToggle('tm-rdns'" "$JS")$(grep -c "'href': '#tm-rdns'" "$JS")"
 assert_eq "the read ACL grants luci-rpc getDHCPLeases" "getDHCPLeases" \
     "$(jq -r '."luci-app-trafficctl".read.ubus."luci-rpc"[]?' "$ACL" 2>/dev/null)"
+assert_eq "the read ACL grants network.rrdns lookup" "lookup" \
+    "$(jq -r '."luci-app-trafficctl".read.ubus."network.rrdns"[]?' "$ACL" 2>/dev/null)"
 assert_eq "no write grant on luci-rpc" "" \
     "$(jq -r '."luci-app-trafficctl".write.ubus."luci-rpc"[]?' "$ACL" 2>/dev/null)"
 
