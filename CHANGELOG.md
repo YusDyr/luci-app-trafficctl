@@ -41,6 +41,16 @@ rest) are gone.
 
 ---
 
+## [2.1.8] - 2026-11-23
+
+### Bug Fixes
+- keep the Telegram template on save, grant rrdns lookup, resource and page URLs from LuCI ([#190](https://github.com/YusDyr/luci-app-trafficctl/issues/190)) ([6dd9cbb](https://github.com/YusDyr/luci-app-trafficctl/commit/6dd9cbb9098b997f94b4be7b10aba8169b8bbb2e))
+  Review findings on the LuCI submission (openwrt/luci#9221).
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v2.1.7...v2.1.8
+
+---
+
 ## [2.1.7] - 2026-11-19
 
 ### Other
