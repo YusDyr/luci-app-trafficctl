@@ -8,7 +8,7 @@ This document describes the internal architecture of luci-app-trafficctl.
 
 1. **On-demand by default** -- Monitoring and control run when called. The background services do work only for a feature that is switched on: `trafficctl-notify` and `trafficctl-telegram` start only when a sender or the bot is configured, `trafficctl-cut` only while an internet cut is engaged, and `trafficctl-history` idles until history is enabled.
 2. **No compiled code** -- A ucode backend, a few shell scripts (init, hotplug, CGI) and JavaScript. Runs on any architecture without compilation.
-3. **Minimal dependencies** -- Packages that ship with every OpenWrt image or that the packages declare. The optional parts are packages of their own that only pull in their tools: `trafficctl-shaper` (tc, kmod-sched-core, kmod-ifb), `trafficctl-wifi` (iw, hostapd-utils), `trafficctl-telegram` (the bot, with curl). Their code stays in `trafficctl`, which checks for the tools at run time, because ucode's `require()` cannot load a module that a package may lack.
+3. **Minimal dependencies** -- Packages that ship with every OpenWrt image or that the packages declare. The optional parts are packages of their own that only pull in their tools: `trafficctl-shaper` (tc, kmod-sched-core, kmod-ifb), `trafficctl-wifi` (iw, hostapd-utils), `trafficctl-telegram` (the bot, with curl); `trafficctl-full` pulls in all three, and `luci-app-trafficctl` depends on it. Their code stays in `trafficctl`, which checks for the tools at run time, because ucode's `require()` cannot load a module that a package may lack.
 
 ---
 

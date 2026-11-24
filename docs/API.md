@@ -1219,7 +1219,7 @@ radio, so it is never done automatically).
 - Every `hostapd_cli` call has a 3 s timeout; an AP whose hostapd does not answer in time is treated as one without `hostapd_cli` and gets the ubus ban.
 - With several APs, `enforcement` is the weakest outcome of any of them (`none`, then `ban`, then `acl`).
 
-**Requires:** `hostapd-utils` (from `trafficctl-wifi`, which `luci-app-trafficctl` depends on). Without it only the
+**Requires:** `hostapd-utils` (from `trafficctl-wifi`, which `trafficctl-full` and with it `luci-app-trafficctl` depend on). Without it only the
 degraded `ban` path is available and every block reports `ok:false`.
 
 ---
