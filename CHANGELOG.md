@@ -62,6 +62,17 @@ rest) are gone.
 
 ---
 
+## [2.2.0] - 2026-11-24
+
+### Features
+- split trafficctl into core, shaper, wifi and telegram packages ([#191](https://github.com/YusDyr/luci-app-trafficctl/issues/191)) ([75f51f6](https://github.com/YusDyr/luci-app-trafficctl/commit/75f51f603f68fbfa24df6091226101fa95017e9d))
+  tc, kmod-sched-core, kmod-ifb and curl become optional for trafficctl
+  (the packaging follows in the next commit):
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v2.1.8...v2.2.0
+
+---
+
 ## [2.1.8] - 2026-11-23
 
 ### Bug Fixes
