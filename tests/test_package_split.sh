@@ -2,7 +2,8 @@
 # The backend and the web interface are separate packages: trafficctl (helpers,
 # config, services, hotplug, keep.d, metrics CGI), trafficctl-telegram (the
 # bot, from the same Makefile), trafficctl-shaper and trafficctl-wifi (no
-# files, the shaper's and the WiFi part's dependencies, since 2.2.0) and
+# files, the shaper's and the WiFi part's dependencies, since 2.2.0),
+# trafficctl-full (no files, every part, since 2.3.0) and
 # luci-app-trafficctl (rpcd plugin, views, menu, ACL, translations). Releases up to 1.28.x shipped all of it as
 # luci-app-trafficctl, releases up to 1.30.x the bot in trafficctl.
 #
@@ -70,7 +71,7 @@ done
 
 # The code they enable is in trafficctl, which checks for the tools at run
 # time; ucode's require() cannot load a module a package may lack.
-for pkg in trafficctl-shaper trafficctl-wifi; do
+for pkg in trafficctl-shaper trafficctl-wifi trafficctl-full; do
     assert_eq "$pkg installs no files" "true" \
         "$(mk_define "Package/$pkg/install" | sed 's/^[[:space:]]*//' | grep -v '^$')"
 done
@@ -116,10 +117,21 @@ usr/share/rpcd/ucode/luci.trafficctl.uc" "$FE_ROOT"
 
 # ── Package relationships ────────────────────────────────────────────────────
 
-# The web interface calls the helpers, so it depends on the backend, and it
-# configures the bot, which an upgrade from 1.30.x must keep.
-assert_eq "LUCI_DEPENDS starts with +trafficctl +trafficctl-telegram" "1" \
-    "$(grep -cE '^LUCI_DEPENDS:=\+trafficctl \+trafficctl-telegram( |$)' "$FE_MK")"
+# The web interface calls the helpers, so it depends on the backend, and
+# through trafficctl-full on every part: it configures the bot, which an
+# upgrade from 1.30.x must keep, and shows the shaper and WiFi controls.
+assert_eq "LUCI_DEPENDS starts with +trafficctl +trafficctl-full" "1" \
+    "$(grep -cE '^LUCI_DEPENDS:=\+trafficctl \+trafficctl-full( |$)' "$FE_MK")"
+for d in +trafficctl-telegram +trafficctl-shaper +trafficctl-wifi; do
+    assert_eq "LUCI_DEPENDS gets ${d#+} only through trafficctl-full" "0" \
+        "$(sed -n 's/^LUCI_DEPENDS:=//p' "$FE_MK" | tr ' ' '\n' | grep -cxF -- "$d")"
+done
+assert_eq "trafficctl-full depends on trafficctl and every part" \
+    "+trafficctl +trafficctl-shaper +trafficctl-wifi +trafficctl-telegram" \
+    "$(mk_define Package/trafficctl-full | sed -n 's/^[[:space:]]*DEPENDS:=//p')"
+assert_eq "trafficctl-full needs each of them of its own version or newer" \
+    'trafficctl (>=$(PKG_VERSION)), trafficctl-shaper (>=$(PKG_VERSION)), trafficctl-wifi (>=$(PKG_VERSION)), trafficctl-telegram (>=$(PKG_VERSION))' \
+    "$(mk_define Package/trafficctl-full | sed -n 's/^[[:space:]]*EXTRA_DEPENDS:=//p')"
 assert_eq "trafficctl-telegram depends on trafficctl and curl" "+trafficctl +curl" \
     "$(mk_define Package/trafficctl-telegram | sed -n 's/^[[:space:]]*DEPENDS:=//p')"
 assert_eq "trafficctl-shaper depends on trafficctl, tc, kmod-sched-core and kmod-ifb" \
@@ -150,15 +162,15 @@ for b in build-ipk.sh build-apk.sh; do
             "$(sed -n "s/^${pair%%:*}=\"\(.*\)\"$/\1/p" "$REPO_ROOT/$b" | tr -d , | tr ' ' '\n' | grep -v '^$' | LC_ALL=C sort)"
     done
 done
-assert_eq "luci-app-trafficctl needs trafficctl of its own version or newer" \
-    'trafficctl (>=$(PKG_VERSION))' "$(sed -n 's/^LUCI_EXTRA_DEPENDS:=//p' "$FE_MK")"
+assert_eq "luci-app-trafficctl needs trafficctl and trafficctl-full of its own version or newer" \
+    'trafficctl (>=$(PKG_VERSION)), trafficctl-full (>=$(PKG_VERSION))' "$(sed -n 's/^LUCI_EXTRA_DEPENDS:=//p' "$FE_MK")"
 # The backend's own dependencies are repeated on luci-app-trafficctl: without
 # them opkg removes conntrack, curl, iw and hostapd-utils as orphans of the old
 # single package in the same run that installs trafficctl. So are curl, tc and
-# iw, which trafficctl depended on up to 2.1.x, and the optional parts.
+# iw, which trafficctl depended on up to 2.1.x.
 BE_DEPS=$(mk_define Package/trafficctl | sed -n 's/^[[:space:]]*DEPENDS:=//p')
 FE_DEPS=$(sed -n 's/^LUCI_DEPENDS:=//p' "$FE_MK")
-for d in $BE_DEPS +trafficctl-shaper +trafficctl-wifi +curl +tc +iw +hostapd-utils; do
+for d in $BE_DEPS +curl +tc +iw +hostapd-utils; do
     case " $FE_DEPS " in
         *" $d "*) PASS=$((PASS + 1)) ;;
         *) FAIL=$((FAIL + 1)); printf "FAIL: LUCI_DEPENDS lacks the backend dependency %s\n" "$d" ;;
@@ -181,7 +193,7 @@ for mk in "$BE_MK" "$FE_MK"; do
     assert_eq "no CONFLICTS in ${mk#"$REPO_ROOT"/}" "0" "$(grep -cE '^[[:space:]]*(LUCI_)?CONFLICTS[[:space:]]*[:+?]?=' "$mk")"
 done
 
-for pkg in trafficctl trafficctl-shaper trafficctl-wifi trafficctl-telegram; do
+for pkg in trafficctl trafficctl-shaper trafficctl-wifi trafficctl-telegram trafficctl-full; do
     assert_eq "$pkg is architecture independent" "1" \
         "$(mk_define "Package/$pkg" | grep -cE '^[[:space:]]*PKGARCH:=all$')"
 done
@@ -189,7 +201,8 @@ assert_eq "trafficctl/Makefile ends with a BuildPackage per package" \
     '$(eval $(call BuildPackage,trafficctl))
 $(eval $(call BuildPackage,trafficctl-shaper))
 $(eval $(call BuildPackage,trafficctl-wifi))
-$(eval $(call BuildPackage,trafficctl-telegram))' "$(grep -v '^[[:space:]]*$' "$BE_MK" | tail -4)"
+$(eval $(call BuildPackage,trafficctl-telegram))
+$(eval $(call BuildPackage,trafficctl-full))' "$(grep -v '^[[:space:]]*$' "$BE_MK" | tail -5)"
 # Every openwrt/luci application Makefile ends with this comment; luci.mk makes
 # the BuildPackage call itself, so an explicit one would be a duplicate.
 assert_eq "luci-app-trafficctl ends with the buildroot signature" \

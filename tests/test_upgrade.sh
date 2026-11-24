@@ -3,7 +3,7 @@
 # Usage: sh /tests/test_upgrade.sh <old packages...> -- <new packages...>
 #   e.g. sh /tests/test_upgrade.sh /dist-old/luci-app-trafficctl.ipk \
 #            -- /dist/trafficctl.ipk /dist/trafficctl-telegram.ipk /dist/trafficctl-shaper.ipk \
-#               /dist/trafficctl-wifi.ipk /dist/luci-app-trafficctl.ipk
+#               /dist/trafficctl-wifi.ipk /dist/trafficctl-full.ipk /dist/luci-app-trafficctl.ipk
 # UPGRADE_BACKEND_FIRST=1: before the full upgrade, upgrade trafficctl alone
 # (a luci-app-trafficctl up to 1.30.x depends on any trafficctl, so the package
 # manager allows it) and check that its postinst says to upgrade the web
@@ -344,7 +344,7 @@ if [ -e /lib/upgrade/keep.d/luci-app-trafficctl ]; then
 fi
 
 # Exactly one copy of each package installed?
-for name in trafficctl trafficctl-telegram trafficctl-shaper trafficctl-wifi luci-app-trafficctl; do
+for name in trafficctl trafficctl-telegram trafficctl-shaper trafficctl-wifi trafficctl-full luci-app-trafficctl; do
     if [ "$FMT" = ipk ]; then
         COUNT=$(opkg list-installed | awk -v n="$name" '$1 == n' | wc -l)
     else
@@ -401,7 +401,8 @@ if [ "$FMT" = ipk ]; then
     echo "OK: backend dependencies kept"
 fi
 # tc, iw and curl left trafficctl for trafficctl-shaper, trafficctl-wifi and
-# trafficctl-telegram in 2.2.0; luci-app-trafficctl pulls those in, so an
+# trafficctl-telegram in 2.2.0; luci-app-trafficctl pulls those in (through
+# trafficctl-full since 2.3.0), so an
 # upgrade (apk prunes what nothing requires any more) keeps every tool.
 for dep in tc iw curl; do
     if [ "$FMT" = ipk ]; then

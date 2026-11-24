@@ -4,7 +4,8 @@
 # Usage: sh build-apk.sh <version> <release>
 # Output: dist/trafficctl_<version>-r<release>_noarch.apk (the backend),
 #         dist/trafficctl-telegram_<version>-r<release>_noarch.apk (the bot),
-#         dist/trafficctl-shaper_..., dist/trafficctl-wifi_... (dependencies only),
+#         dist/trafficctl-shaper_..., dist/trafficctl-wifi_...,
+#         dist/trafficctl-full_... (dependencies only),
 #         dist/luci-i18n-trafficctl-<lang>_<version>-r<release>_noarch.apk,
 #         dist/luci-app-trafficctl_<version>-r<release>_noarch.apk (last line)
 set -e
@@ -14,6 +15,7 @@ BE_NAME="trafficctl"
 TG_NAME="trafficctl-telegram"
 SH_NAME="trafficctl-shaper"
 WF_NAME="trafficctl-wifi"
+FL_NAME="trafficctl-full"
 # The bot's files under trafficctl/files (Package/trafficctl-telegram/install).
 TG_FILES="usr/share/ucode/trafficctl/telegram.uc usr/libexec/trafficctl/trafficctl-telegram.uc etc/init.d/trafficctl-telegram"
 PKG_VERSION="${1:-1.0.0}"
@@ -281,7 +283,7 @@ build_apk "$TG_NAME" net \
     "A Telegram bot for trafficctl: device status, and block, WiFi block, limit and shape buttons per device." \
     "${BE_NAME}=${PKG_VERSION}-r${PKG_RELEASE} curl" "$TG_DATA" "$TG_SCRIPTS" "$BE_NAME"
 
-# ── trafficctl-shaper, trafficctl-wifi: dependencies only ──────────────────
+# ── trafficctl-shaper, trafficctl-wifi, trafficctl-full: dependencies only ─
 # No files: the code they enable ships in trafficctl, which checks for the
 # tools at run time. Versioned like EXTRA_DEPENDS in trafficctl/Makefile.
 META_DATA="$WORKDIR/meta-data"
@@ -292,6 +294,10 @@ build_apk "$SH_NAME" net \
 build_apk "$WF_NAME" net \
     "WiFi support for trafficctl: the WiFi clients with their band and signal, and WiFi MAC filtering through the radio's ACL. Pulls in iw and hostapd-utils; holds no files of its own." \
     "${BE_NAME}>=${PKG_VERSION} $WF_DEPENDS" "$META_DATA" ""
+# Every part pinned to this release, like luci-app-trafficctl pins it.
+build_apk "$FL_NAME" net \
+    "trafficctl with every optional part: trafficctl-shaper, trafficctl-wifi and trafficctl-telegram. Holds no files of its own; install trafficctl and only the parts you need instead for a smaller install." \
+    "${BE_NAME}>=${PKG_VERSION} ${TG_NAME}=${PKG_VERSION}-r${PKG_RELEASE} ${SH_NAME}=${PKG_VERSION}-r${PKG_RELEASE} ${WF_NAME}=${PKG_VERSION}-r${PKG_RELEASE}" "$META_DATA" ""
 
 # ── luci-app-trafficctl: the web interface ─────────────────────────────────
 DATA="$WORKDIR/data"
@@ -325,7 +331,7 @@ chmod +x "$SCRIPTS"/*
 # The backend is pinned to the same version, as in build-ipk.sh.
 APK_FILE=$(build_apk "$PKG_NAME" luci \
     "Per-device traffic monitoring, rate limiting (nftables), traffic shaping (tc/HTB), internet blocking, WiFi MAC filtering, and Telegram bot control." \
-    "${BE_NAME}=${PKG_VERSION}-r${PKG_RELEASE} ${TG_NAME}=${PKG_VERSION}-r${PKG_RELEASE} ${SH_NAME}=${PKG_VERSION}-r${PKG_RELEASE} ${WF_NAME}=${PKG_VERSION}-r${PKG_RELEASE} $BE_DEPENDS $FE_EXTRA_DEPENDS luci-base rpcd rpcd-mod-ucode rpcd-mod-file" "$DATA" "$SCRIPTS")
+    "${BE_NAME}=${PKG_VERSION}-r${PKG_RELEASE} ${FL_NAME}=${PKG_VERSION}-r${PKG_RELEASE} $BE_DEPENDS $FE_EXTRA_DEPENDS luci-base rpcd rpcd-mod-ucode rpcd-mod-file" "$DATA" "$SCRIPTS")
 
 # --- Translations, one package per language ---
 #

@@ -29,27 +29,27 @@ LUCI_DESCRIPTION:=Per-device traffic monitoring, rate limiting (nftables), \
 # 1.28.0 does not drop it and silently turn every WiFi block into a temporary
 # ban. trafficctl on its own does not need it.
 #
-# trafficctl-telegram is the Telegram bot, a package of its own since releases
-# after 1.30.x (it was part of trafficctl). The Settings panel configures it,
-# and with it here an upgrade from 1.30.x keeps a bot that was running.
-#
-# trafficctl-shaper and trafficctl-wifi are the shaper's and the WiFi part's
-# dependencies (tc, kmod-sched-core, kmod-ifb; iw, hostapd-utils) since 2.2.0,
-# when trafficctl stopped depending on tc, iw and curl. They are here so this
-# web interface keeps every control after the upgrade; curl is repeated for
-# the notification senders. A router built without them (the upstream LuCI
-# feed's luci-app-trafficctl depends on trafficctl only) still works: the
-# view hides the Shaper and WiFi controls the backend reports it cannot do.
+# trafficctl-full pulls in every optional part: trafficctl-telegram (the
+# Telegram bot, a package of its own since releases after 1.30.x, which the
+# Settings panel configures) and, since 2.2.0, trafficctl-shaper and
+# trafficctl-wifi, the shaper's and the WiFi part's dependencies (tc,
+# kmod-sched-core, kmod-ifb; iw, hostapd-utils). With it this web interface
+# keeps every control, and an upgrade keeps a bot that was running; curl is
+# repeated for the notification senders. A smaller install without LuCI is
+# trafficctl plus the parts it needs. A router built without them (the
+# upstream LuCI feed's luci-app-trafficctl depends on trafficctl only) still
+# works: the view hides the Shaper and WiFi controls the backend reports it
+# cannot do.
 #
 # rpcd-mod-ucode runs the rpcd plugin (/usr/share/rpcd/ucode/luci.trafficctl.uc)
 # inside rpcd. Releases up to 1.30.x shipped it as an exec plugin. The plugin
 # runs the CLI through rpcd's file.exec, which is rpcd-mod-file (luci-base
 # pulls it in too).
-LUCI_DEPENDS:=+trafficctl +trafficctl-telegram +trafficctl-shaper +trafficctl-wifi +conntrack +curl +tc +iw +kmod-nft-netdev +firewall4 +ucode +ucode-mod-fs +ucode-mod-uci +ucode-mod-ubus +hostapd-utils +luci-base +rpcd +rpcd-mod-ucode +rpcd-mod-file
+LUCI_DEPENDS:=+trafficctl +trafficctl-full +conntrack +curl +tc +iw +kmod-nft-netdev +firewall4 +ucode +ucode-mod-fs +ucode-mod-uci +ucode-mod-ubus +hostapd-utils +luci-base +rpcd +rpcd-mod-ucode +rpcd-mod-file
 # Versioned: the rpcd plugin of this release calls the ucode backend, which a
 # trafficctl up to 1.30.x does not have (and 1.30.x's exec plugin sources
 # trafficctl-fw.sh, which 2.0.0 removed). luci.mk turns this into EXTRA_DEPENDS.
-LUCI_EXTRA_DEPENDS:=trafficctl (>=$(PKG_VERSION))
+LUCI_EXTRA_DEPENDS:=trafficctl (>=$(PKG_VERSION)), trafficctl-full (>=$(PKG_VERSION))
 LUCI_PKGARCH:=all
 
 include $(TOPDIR)/feeds/luci/luci.mk

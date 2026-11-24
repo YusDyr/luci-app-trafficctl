@@ -32,19 +32,22 @@ REPO=$(pwd)
 
 rm -rf dist/
 # One path per line: trafficctl first, trafficctl-telegram second, then
-# trafficctl-shaper and trafficctl-wifi, the translation packages next, the
+# trafficctl-shaper, trafficctl-wifi and trafficctl-full, the translation
+# packages next, the
 # luci-app-trafficctl package last.
 OUT=$(./build-ipk.sh 0.0.1-test 1)
 BE_IPK=$(echo "$OUT" | head -1)
 TG_IPK=$(echo "$OUT" | sed -n 2p)
 SH_IPK=$(echo "$OUT" | sed -n 3p)
 WF_IPK=$(echo "$OUT" | sed -n 4p)
+FL_IPK=$(echo "$OUT" | sed -n 5p)
 IPK=$(echo "$OUT" | tail -1)
 
 assert_eq "first output is the trafficctl ipk" "trafficctl_0.0.1-test-1_all.ipk" "$(basename "$BE_IPK")"
 assert_eq "second output is the trafficctl-telegram ipk" "trafficctl-telegram_0.0.1-test-1_all.ipk" "$(basename "$TG_IPK")"
 assert_eq "third output is the trafficctl-shaper ipk" "trafficctl-shaper_0.0.1-test-1_all.ipk" "$(basename "$SH_IPK")"
 assert_eq "fourth output is the trafficctl-wifi ipk" "trafficctl-wifi_0.0.1-test-1_all.ipk" "$(basename "$WF_IPK")"
+assert_eq "fifth output is the trafficctl-full ipk" "trafficctl-full_0.0.1-test-1_all.ipk" "$(basename "$FL_IPK")"
 assert_eq "last output is the luci-app ipk" "luci-app-trafficctl_0.0.1-test-1_all.ipk" "$(basename "$IPK")"
 
 TMPDIR=$(mktemp -d)
@@ -130,7 +133,7 @@ for f in etc/init.d/trafficctl-telegram usr/libexec/trafficctl/trafficctl-telegr
     assert_eq "tg: $f is executable" yes "$([ -x "$TMPDIR/tg/data/$f" ] && echo yes || echo no)"
 done
 
-# ── trafficctl-shaper, trafficctl-wifi: dependencies only ────────────────────
+# ── trafficctl-shaper, trafficctl-wifi, trafficctl-full: dependencies only ───
 check_meta() { # <ipk> <dir> <name> <its dependencies>
     unpack "$1" "$2"
     CTRL=$(cat "$TMPDIR/$2/ctrl/control")
@@ -143,6 +146,8 @@ check_meta() { # <ipk> <dir> <name> <its dependencies>
 }
 check_meta "$SH_IPK" sh trafficctl-shaper "tc, kmod-sched-core, kmod-ifb"
 check_meta "$WF_IPK" wf trafficctl-wifi "iw, hostapd-utils"
+# Every part of exactly this release.
+check_meta "$FL_IPK" fl trafficctl-full "trafficctl-telegram (= 0.0.1-test-1), trafficctl-shaper (= 0.0.1-test-1), trafficctl-wifi (= 0.0.1-test-1)"
 
 # ── luci-app-trafficctl ──────────────────────────────────────────────────────
 unpack "$IPK" fe
@@ -152,10 +157,12 @@ assert_contains "fe: package name" "$CTRL" "^Package: luci-app-trafficctl$"
 assert_contains "fe: version" "$CTRL" "^Version: 0.0.1-test-1$"
 assert_contains "fe: arch is all" "$CTRL" "^Architecture: all$"
 assert_contains "fe: depends on the same trafficctl" "$CTRL" "^Depends: trafficctl (= 0.0.1-test-1)"
-assert_contains "fe: depends on the same trafficctl-telegram" "$CTRL" "^Depends:.* trafficctl-telegram (= 0.0.1-test-1),"
+assert_contains "fe: depends on the same trafficctl-full" "$CTRL" "^Depends:.* trafficctl-full (= 0.0.1-test-1),"
+# The parts come through trafficctl-full, not listed again here.
+for p in trafficctl-telegram trafficctl-shaper trafficctl-wifi; do
+    assert_not_contains "fe: $p only through trafficctl-full" "$CTRL" "^Depends:.* $p ("
+done
 assert_contains "fe: depends on luci-base" "$CTRL" "^Depends:.*luci-base"
-assert_contains "fe: depends on the same trafficctl-shaper" "$CTRL" "^Depends:.* trafficctl-shaper (= 0.0.1-test-1),"
-assert_contains "fe: depends on the same trafficctl-wifi" "$CTRL" "^Depends:.* trafficctl-wifi (= 0.0.1-test-1),"
 # Kept on the web interface so an upgrade from a release that depended on them
 # (1.28.x: luci-app-trafficctl; up to 2.1.x: trafficctl) does not orphan them.
 for dep in hostapd-utils curl tc iw; do

@@ -129,9 +129,10 @@ for pkg in trafficctl luci-app-trafficctl; do
     FOUND="$FOUND $art"
 done
 
-# The bot and the dependency-only shaper and WiFi packages come from
-# trafficctl/Makefile, built with it (luci-app-trafficctl selects them).
-for pkg in trafficctl-telegram trafficctl-shaper trafficctl-wifi; do
+# The bot and the dependency-only shaper, WiFi and full packages come from
+# trafficctl/Makefile, built with it (luci-app-trafficctl selects
+# trafficctl-full, which selects the others).
+for pkg in trafficctl-telegram trafficctl-shaper trafficctl-wifi trafficctl-full; do
     art=$(find bin/ \( -name "${pkg}_[0-9]*.ipk" -o -name "${pkg}-[0-9]*.apk" \) 2>/dev/null | head -1)
     if [ -z "$art" ]; then
         echo "ERROR: no $pkg package artifact found in bin/"

@@ -487,7 +487,8 @@ else
                  'dist/trafficctl.ipk' 'dist/trafficctl.apk' \
                  'dist/trafficctl-telegram.ipk' 'dist/trafficctl-telegram.apk' \
                  'dist/trafficctl-shaper.ipk' 'dist/trafficctl-shaper.apk' \
-                 'dist/trafficctl-wifi.ipk' 'dist/trafficctl-wifi.apk'; do
+                 'dist/trafficctl-wifi.ipk' 'dist/trafficctl-wifi.apk' \
+                 'dist/trafficctl-full.ipk' 'dist/trafficctl-full.apk'; do
         for f in "$WF" "$CWF"; do
             if grep -q "ln -f .*$alias" "$f"; then
                 PASS=$((PASS + 1))

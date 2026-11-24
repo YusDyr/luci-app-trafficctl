@@ -4,9 +4,10 @@ name: Feature Build
 # floating pre-release so the download URLs stay stable across pushes.
 #
 # Release tag:  build-feature-<branch-slug>
-# Download URLs (luci-app-trafficctl, the web interface, needs all five:
+# Download URLs (luci-app-trafficctl, the web interface, needs all six:
 # trafficctl is the backend, trafficctl-telegram the bot, trafficctl-shaper
-# and trafficctl-wifi the shaper's and the WiFi part's dependencies):
+# and trafficctl-wifi the shaper's and the WiFi part's dependencies,
+# trafficctl-full pulls in all of them):
 #   …/releases/download/build-feature-<slug>/<package>.ipk
 #   …/releases/download/build-feature-<slug>/<package>.apk
 
@@ -51,7 +52,7 @@ jobs:
         run: |
           ./build-ipk.sh "0.0.0-${{ steps.meta.outputs.sha }}" 0
           ln -f dist/trafficctl_*_all.ipk dist/trafficctl.ipk
-          for p in trafficctl-telegram trafficctl-shaper trafficctl-wifi luci-app-trafficctl; do
+          for p in trafficctl-telegram trafficctl-shaper trafficctl-wifi trafficctl-full luci-app-trafficctl; do
             ln -f dist/${p}_*_all.ipk dist/$p.ipk
           done
 
@@ -64,6 +65,7 @@ jobs:
             dist/trafficctl-telegram.ipk
             dist/trafficctl-shaper.ipk
             dist/trafficctl-wifi.ipk
+            dist/trafficctl-full.ipk
             dist/luci-app-trafficctl.ipk
 
   build-apk:
@@ -130,9 +132,9 @@ jobs:
         run: |
           # The SDK names them <name>-<version>.apk; "<name>-[0-9]*" keeps
           # trafficctl from matching luci-app-trafficctl or trafficctl-telegram.
-          # trafficctl-telegram, trafficctl-shaper and trafficctl-wifi are
-          # built with trafficctl (one Makefile).
-          for pkg in trafficctl trafficctl-telegram trafficctl-shaper trafficctl-wifi luci-app-trafficctl; do
+          # trafficctl-telegram, trafficctl-shaper, trafficctl-wifi and
+          # trafficctl-full are built with trafficctl (one Makefile).
+          for pkg in trafficctl trafficctl-telegram trafficctl-shaper trafficctl-wifi trafficctl-full luci-app-trafficctl; do
             APK=$(find bin/ -name "${pkg}-[0-9]*.apk" 2>/dev/null | head -1)
             if [ -z "$APK" ]; then
               echo "::error::$pkg APK not found in SDK output"
@@ -151,6 +153,7 @@ jobs:
             trafficctl-telegram.apk
             trafficctl-shaper.apk
             trafficctl-wifi.apk
+            trafficctl-full.apk
             luci-app-trafficctl.apk
 
   publish:
@@ -183,8 +186,8 @@ jobs:
           REPO="${GITHUB_REPOSITORY}"
 
           gh release create "$TAG" \
-            dist/trafficctl.ipk dist/trafficctl-telegram.ipk dist/trafficctl-shaper.ipk dist/trafficctl-wifi.ipk dist/luci-app-trafficctl.ipk \
-            dist/trafficctl.apk dist/trafficctl-telegram.apk dist/trafficctl-shaper.apk dist/trafficctl-wifi.apk dist/luci-app-trafficctl.apk \
+            dist/trafficctl.ipk dist/trafficctl-telegram.ipk dist/trafficctl-shaper.ipk dist/trafficctl-wifi.ipk dist/trafficctl-full.ipk dist/luci-app-trafficctl.ipk \
+            dist/trafficctl.apk dist/trafficctl-telegram.apk dist/trafficctl-shaper.apk dist/trafficctl-wifi.apk dist/trafficctl-full.apk dist/luci-app-trafficctl.apk \
             --prerelease \
             --title "Dev: ${BRANCH} @ ${SHA}" \
             --notes "$(cat <<NOTES
@@ -196,14 +199,15 @@ jobs:
 
           | Files | OpenWrt version | Command |
           |------|----------------|---------|
-          | the five \`.ipk\` | 22.03 – 24.10 | \`opkg install <url>...\` |
-          | the five \`.apk\` | 25.12+ | \`apk add --allow-untrusted <url>...\` |
+          | the six \`.ipk\` | 22.03 – 24.10 | \`opkg install <url>...\` |
+          | the six \`.apk\` | 25.12+ | \`apk add --allow-untrusted <url>...\` |
 
           ### Install
 
-          All five in one command: trafficctl is the backend, trafficctl-telegram
+          All six in one command: trafficctl is the backend, trafficctl-telegram
           the bot, trafficctl-shaper and trafficctl-wifi the shaper's and the WiFi
-          part's dependencies, luci-app-trafficctl the web interface.
+          part's dependencies, trafficctl-full pulls in all of them,
+          luci-app-trafficctl is the web interface.
 
           \`\`\`sh
           # OpenWrt 22.03 – 24.10
@@ -211,6 +215,7 @@ jobs:
             https://github.com/${REPO}/releases/download/${TAG}/trafficctl-telegram.ipk \\
             https://github.com/${REPO}/releases/download/${TAG}/trafficctl-shaper.ipk \\
             https://github.com/${REPO}/releases/download/${TAG}/trafficctl-wifi.ipk \\
+            https://github.com/${REPO}/releases/download/${TAG}/trafficctl-full.ipk \\
             https://github.com/${REPO}/releases/download/${TAG}/luci-app-trafficctl.ipk
 
           # OpenWrt 25.12+
@@ -218,6 +223,7 @@ jobs:
             https://github.com/${REPO}/releases/download/${TAG}/trafficctl-telegram.apk \\
             https://github.com/${REPO}/releases/download/${TAG}/trafficctl-shaper.apk \\
             https://github.com/${REPO}/releases/download/${TAG}/trafficctl-wifi.apk \\
+            https://github.com/${REPO}/releases/download/${TAG}/trafficctl-full.apk \\
             https://github.com/${REPO}/releases/download/${TAG}/luci-app-trafficctl.apk
           \`\`\`
           NOTES
