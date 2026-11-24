@@ -2815,12 +2815,13 @@ return view.extend({
 			if (hide) shaperBtn.classList.add('tc-hidden');
 			else shaperBtn.classList.remove('tc-hidden');
 			var tip = SHAPER_TIP;
-			if (shaping === 'none')
+			if (shaping === 'none') {
 				tip = _('Traffic shaping needs tc: install the trafficctl-shaper package.');
-			else if (shaping === 'nohtb')
+			} else if (shaping === 'nohtb') {
 				tip = _('The HTB qdisc (kmod-sched-core) is not available: install the trafficctl-shaper package.');
-			else if (shaping === 'download')
+			} else if (shaping === 'download') {
 				tip = _('kmod-ifb is not installed: the shaper limits download only.');
+			}
 			shaperBtn.setAttribute('data-tip', tip);
 			if (hide && _modeSelected === 'shaper') modePick.setValue('limiter');
 		}
