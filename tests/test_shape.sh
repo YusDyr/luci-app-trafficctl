@@ -170,7 +170,7 @@ st_reset
 OUT=$(TC_NO_IFB=1 st_run add 192.168.1.60 5000)
 assert_contains "no IFB: still applied" '"ok":true' "$OUT"
 assert_contains "no IFB: says download only and what to install" \
-    "(download only — upload needs kmod-ifb: opkg/apk install kmod-ifb kmod-sched)" "$OUT"
+    "(download only — upload needs kmod-ifb: opkg/apk install kmod-ifb kmod-sched-core)" "$OUT"
 assert_eq "no IFB: the download half is in place" "dst 192.168.1.60/32 flowid 1:2" "$(filters_of br-lan)"
 OUT=$(TC_NO_IFB=1 st_run add 192.168.1.61 5000 x 1000)
 assert_contains "no IFB, asymmetric: the upload ceiling is named as NOT applied" \
@@ -192,6 +192,36 @@ rc=$?
 assert_eq "tc failure: the reply" '{"ok":false,"msg":"tc setup failed for 192.168.1.70 on br-lan"}' "$OUT"
 assert_eq "tc failure: exit status 1" "1" "$rc"
 assert_eq "tc failure: nothing is recorded" "" "$(cat "$SHAPES" 2>/dev/null)"
+
+# ════════════════════════════════════════════════════════════════════════════
+# Without tc or the HTB module: the package to install (#trafficctl-shaper)
+# ════════════════════════════════════════════════════════════════════════════
+#
+# tc, kmod-sched-core and kmod-ifb come with trafficctl-shaper, not with
+# trafficctl. A router without them refuses with that package's name instead
+# of "tc setup failed". An empty PATH hides the host's tc and the mock alike.
+
+st_reset
+rm -rf "$ROOT/sys/module/sch_htb"
+OUT=$(PATH="$MOCKBIN:$PATH" TCTL_ROOT="$ROOT" TC_FAIL='class add dev br-lan parent 1:1 classid 1:2' \
+    tctl shape add 192.168.1.70 5000 2>/dev/null)
+assert_contains "no HTB module: names the package" '"ok":false,"msg":"traffic shaping needs the HTB qdisc (kmod-sched-core), which is not available: install trafficctl-shaper' "$OUT"
+mkdir -p "$ROOT/sys/module/sch_htb"
+
+mkdir -p "$UC_TMP/notc"
+st_reset
+OUT=$(PATH="$UC_TMP/notc" TCTL_ROOT="$ROOT" tctl shape add 192.168.1.72 5000 2>/dev/null)
+rc=$?
+assert_eq "no tc: the reply" '{"ok":false,"msg":"traffic shaping needs tc, which is not installed: install trafficctl-shaper (opkg install trafficctl-shaper, or apk add trafficctl-shaper)"}' "$OUT"
+assert_eq "no tc: exit status 1" "1" "$rc"
+assert_eq "no tc: nothing is recorded" "" "$(cat "$SHAPES" 2>/dev/null)"
+OUT=$(PATH="$UC_TMP/notc" TCTL_ROOT="$ROOT" tctl shape remove 192.168.1.72 2>/dev/null)
+assert_contains "no tc: remove still drops the record" '"ok":true' "$OUT"
+printf '[{"ip":"192.168.1.20","rate_kbit":5000,"classid":"1:7"},{"ip":"192.168.1.23","rate_kbit":0,"classid":"1:5"},{"ip":"192.168.1.21","rate_kbit":800,"classid":"1:3"}]' > "$SHAPES"
+assert_eq "no tc: the restore counts each saved shape as not restored" '{"restored":0,"failed":2}' \
+    "$(PATH="$UC_TMP/notc" TCTL_ROOT="$ROOT" tcall trafficctl.shape restore | tr -d ' ')"
+assert_eq "capability without tc" 'none' "$(PATH="$UC_TMP/notc" TCTL_ROOT="$ROOT" tcall trafficctl.shape capability)"
+rm -f "$SHAPES"
 
 # A record that cannot be written: the shape is in force, the reply says
 # the restore will not know it.

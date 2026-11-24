@@ -23,6 +23,7 @@ import * as lib from 'trafficctl.lib';
 import * as net from 'trafficctl.net';
 import * as ctl from 'trafficctl.ctl';
 import * as portfw from 'trafficctl.portfw';
+import * as shape from 'trafficctl.shape';
 import { stat, lsdir, writefile, readfile } from 'fs';
 
 const CLI = '/usr/sbin/trafficctl';
@@ -921,6 +922,9 @@ function device(args) {
 		wifi_blocked,
 		wifi_block_pending: wifi_blocked && !!WIFI_TYPES[ctype],
 		wifi_filter: !length(wifs) ? 'none' : tools.hostapd_cli ? 'full' : 'temporary',
+		// none (no tc), nohtb (no HTB module), download (no IFB) or full: the
+		// view hides or qualifies the Shape control (trafficctl-shaper).
+		shaping: shape.capability(),
 		total: round0(total),
 		protocols: protos,
 		tcp_states: states,

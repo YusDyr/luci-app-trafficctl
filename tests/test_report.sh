@@ -124,6 +124,23 @@ for f in sfield dfield; do
 done
 assert_eq "summary: the NAT client is routed" "routed" "$(sfield 192.168.0.2 conn_type)"
 
+# ── shaping: what the Shape control can do here (trafficctl-shaper) ─────────
+# tc is mocked; the kernel's modules are looked for under the root.
+rm -rf "$BE_ROOT/sys/module/sch_htb" "$BE_ROOT/sys/module/ifb"
+assert_eq "device: tc but no HTB module" "nohtb" "$(dfield 192.168.1.50 shaping)"
+mkdir -p "$BE_ROOT/sys/module/sch_htb"
+assert_eq "device: HTB, no IFB: download only" "download" "$(dfield 192.168.1.50 shaping)"
+mkdir -p "$BE_ROOT/sys/module/ifb"
+assert_eq "device: HTB and IFB" "full" "$(dfield 192.168.1.50 shaping)"
+rm -rf "$BE_ROOT/sys/module/sch_htb" "$BE_ROOT/sys/module/ifb"
+mkdir -p "$BE_ROOT/lib/modules/$(uname -r)"
+: > "$BE_ROOT/lib/modules/$(uname -r)/sch_htb.ko"
+assert_eq "device: an installed but unloaded HTB module counts" "download" "$(dfield 192.168.1.50 shaping)"
+rm -rf "$BE_ROOT/lib/modules"
+mkdir -p "$T/notc"
+assert_eq "device: no tc, nothing to shape with" "none" \
+    "$(ubus_start "$BE_UBUS"; TCTL_ROOT="$BE_ROOT" PATH="$T/notc" tctl device 192.168.1.50 2>/dev/null | jq -r .shaping; ubus_stop)"
+
 # ── WiFi ────────────────────────────────────────────────────────────────────
 assert_eq "device: no wifi-iface, no WiFi filter" "none" "$(dfield 192.168.1.50 wifi_filter)"
 printf "config wifi-iface 'ap0'\n\toption macfilter 'deny'\n\tlist maclist 'AA:BB:CC:DD:EE:32'\n\tlist maclist 'aa:bb:cc:dd:ee:07'\n" \

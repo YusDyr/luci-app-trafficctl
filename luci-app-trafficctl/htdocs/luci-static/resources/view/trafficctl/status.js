@@ -2803,6 +2803,27 @@ return view.extend({
 			setValue: function(v) { _modeSelected = v; updateModeToggle(); },
 			el: modeToggle
 		};
+		// shaping is the backend's capability: "none" without tc (the
+		// package trafficctl-shaper is not installed), "nohtb" without the
+		// HTB qdisc module, "download" without kmod-ifb, "full" otherwise.
+		// Older backends send nothing, read as "full". A shape already in
+		// force keeps the Shaper choice, so it can still be changed or
+		// removed.
+		var SHAPER_TIP = shaperBtn.getAttribute('data-tip');
+		function updateShaperBtn(shaping, curShapeRate) {
+			var hide = shaping === 'none' && !(curShapeRate > 0);
+			if (hide) shaperBtn.classList.add('tc-hidden');
+			else shaperBtn.classList.remove('tc-hidden');
+			var tip = SHAPER_TIP;
+			if (shaping === 'none')
+				tip = _('Traffic shaping needs tc: install the trafficctl-shaper package.');
+			else if (shaping === 'nohtb')
+				tip = _('The HTB qdisc (kmod-sched-core) is not available: install the trafficctl-shaper package.');
+			else if (shaping === 'download')
+				tip = _('kmod-ifb is not installed: the shaper limits download only.');
+			shaperBtn.setAttribute('data-tip', tip);
+			if (hide && _modeSelected === 'shaper') modePick.setValue('limiter');
+		}
 		function getRateKbit() {
 			if (_rateSelected !== 'custom') return _rateSelected;
 			var n = parseFloat(customInput.value);
@@ -3351,6 +3372,7 @@ return view.extend({
 				self._devRate = { ip: ip, shape: curShapeRate, limit: curLimitRate };
 				var curRate = curShapeRate > 0 ? curShapeRate : curLimitRate;
 				modePick.setValue(curShapeRate > 0 ? 'shaper' : (curLimitRate > 0 ? 'limiter' : 'shaper'));
+				updateShaperBtn(data.shaping, curShapeRate);
 
 				var curRateStr = String(curRate);
 				var matched = RATE_PRESETS.some(function(p) { return p.v === curRateStr; });

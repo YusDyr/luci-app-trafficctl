@@ -244,6 +244,15 @@ assert_contains "telegram: the API's error is the result" '"msg":"API error: Bad
 assert_contains "telegram: a failure goes to syslog" "block_applied via notify_telegram failed: API error" "$(cat "$NLOG/logger")"
 rm -f "$NLOG/curl.reply"
 
+# curl is optional (trafficctl does not depend on it): a sender that needs it
+# says so, and nothing else breaks. A PATH with nothing on it hides the curl
+# of the host and the mock alike; the CLI runs from its absolute path.
+mkdir -p "$UC_TMP/nocurl"
+N=$(curls)
+OUT=$(PATH="$UC_TMP/nocurl" tctl notify emit block_applied ip=192.168.1.9)
+assert_contains "telegram: without curl the result says so" '"ok":false,"msg":"curl is not installed: opkg/apk install curl"' "$OUT"
+assert_eq "telegram: without curl no request" "$N" "$(curls)"
+
 reset "${TG/option enabled \'1\'
 	list/option enabled \'0\'
 	list}"

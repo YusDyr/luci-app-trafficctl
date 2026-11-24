@@ -19,6 +19,9 @@
 . "$UC_TESTLIB/limit_env.sh"
 
 SHAPES="$ROOT/etc/trafficctl/shapes.json"
+# The kernel has the HTB qdisc (kmod-sched-core), as the shaper's hints look
+# for it; a case removes it to be a router without the module.
+mkdir -p "$ROOT/sys/module/sch_htb"
 export TC_STATE="$STATE/tc" TC_LOG="$STATE/tc.log"
 ST_DEVS=""
 

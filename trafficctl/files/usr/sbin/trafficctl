@@ -148,9 +148,11 @@ const commands = {
 	// shape off until the next ifup. Nothing here is announced: it puts back
 	// what was there.
 	restore: () => {
-		// The LAN device can still be coming up (up to 10 seconds).
+		// The LAN device can still be coming up (up to 10 seconds). tc is
+		// optional (trafficctl-shaper), so the device is looked for in sysfs
+		// too: without tc the wait was the full 10 seconds on every ifup.
 		let dev = net.lan_device();
-		for (let i = 0; i < 20 && lib.sh('tc qdisc show dev ' + lib.q(dev)) != 0; i++)
+		for (let i = 0; i < 20 && !limit.is_dev(dev) && lib.sh('tc qdisc show dev ' + lib.q(dev)) != 0; i++)
 			sleep(500);
 		let r = { ok: true, restored: 0, failed: 0 };
 		for (let half in [ [ 'blocks', ctl.restore ], [ 'limits', limit.restore ], [ 'shapes', shape.restore ],

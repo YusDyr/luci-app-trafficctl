@@ -20,6 +20,13 @@
 //                            [rate_kbit] [label] [rate_up]: { reply, rc };
 //                            quiet (the restore): no limit_applied event
 //   restore()                every record of shapes.json (ifup lan), quiet
+//   capability()             what this router can shape: none (no tc), nohtb
+//                            (no HTB qdisc module), download (no IFB), full
+//
+// tc and the kernel modules are not dependencies of trafficctl: the package
+// trafficctl-shaper pulls them in (tc, kmod-sched-core, kmod-ifb), so a router
+// that only blocks and limits does not carry them. Without them the shaper
+// refuses with the package to install, and capability() lets the view say so.
 //
 // Download is shaped on the LAN device's egress (match ip dst), upload on an
 // IFB device fed by mirred from the ingress of every LAN port (match ip src):
@@ -27,7 +34,7 @@
 // matches nothing. Each address has one classid minor, the same on both
 // devices, allocated once and kept in shapes.json.
 
-import { dirname } from 'fs';
+import { dirname, stat } from 'fs';
 import * as lib from 'trafficctl.lib';
 import * as net from 'trafficctl.net';
 import * as limit from 'trafficctl.limit';
@@ -61,7 +68,29 @@ const WITH_CLASSID = /^\{"ip":"([^"]+)","rate_kbit":[0-9]+,"classid":"(1:[0-9a-f
 // down; shaping is declined instead.
 const REPLACEABLE = [ 'pfifo_fast', 'fq_codel', 'fq', 'noqueue', 'mq', 'pfifo', 'bfifo', 'sfq', 'codel', 'htb' ];
 
-const KMOD_IFB = 'opkg/apk install kmod-ifb kmod-sched';
+// act_mirred, which feeds the IFB, is in kmod-sched-core with sch_htb and
+// cls_u32. There is no kmod-sched-htb package.
+const KMOD_IFB = 'opkg/apk install kmod-ifb kmod-sched-core';
+const INSTALL_SHAPER = 'install trafficctl-shaper (opkg install trafficctl-shaper, or apk add trafficctl-shaper)';
+const NO_TC = 'traffic shaping needs tc, which is not installed: ' + INSTALL_SHAPER;
+const NO_HTB = 'traffic shaping needs the HTB qdisc (kmod-sched-core), which is not available: ' + INSTALL_SHAPER;
+
+let has_tc;
+function tc_missing() {
+	has_tc ??= (lib.sh('command -v tc') == 0);
+	return !has_tc;
+}
+
+let kernel_release;
+// A kernel module loaded, or installed where OpenWrt's kmods put it. Only for
+// the hints and the view: a module built into the kernel shows in neither
+// place, so nothing is refused on this alone.
+function kmod_present(name) {
+	if (stat(lib.path('/sys/module/' + name)) != null)
+		return true;
+	kernel_release ??= trim(lib.run('uname -r'));
+	return kernel_release != '' && lib.is_file('/lib/modules/' + kernel_release + '/' + name + '.ko');
+}
 
 function tc(argv) {
 	return lib.sh('tc ' + lib.qv(argv)) == 0;
@@ -288,6 +317,8 @@ function apply_locked(ip, rate, up) {
 		// survives this app), and "tc setup failed" would read as a bug.
 		if (!root_replaceable(lan))
 			return { err: 'shaping declined on ' + lan + ': another QoS setup (SQM/cake or another non-HTB qdisc) owns the root qdisc and will not be torn down. Use the limiter instead — it is a policer and coexists with SQM.' };
+		if (!kmod_present('sch_htb'))
+			return { err: NO_HTB };
 		return { err: 'tc setup failed for ' + ip + ' on ' + lan };
 	}
 	// Reported apart, so a missing kmod-ifb does not read as a total failure.
@@ -377,6 +408,10 @@ function main(args, quiet) {
 			: sprintf('usage: trafficctl shape %s <ip>', action));
 	if (!lib.valid_ip(ip))
 		return fail('invalid IP address');
+	// Remove and status still work without tc: the record goes, and a class
+	// cannot exist without it.
+	if (action == 'add' && tc_missing())
+		return fail(NO_TC);
 	if (action == 'remove')
 		return remove(ip);
 	if (action == 'status')
@@ -414,6 +449,16 @@ function restore() {
 	let res = { restored: 0, failed: 0 }, d = lib.read_records(SHAPES);
 	if (d == null)
 		return res;
+	// One line, not one per record: an upgrade that left trafficctl-shaper out
+	// (or an apk that dropped tc with it) is one cause.
+	if (tc_missing()) {
+		for (let r in d)
+			if (type(r) == 'object' && r.ip != null && r.ip != '' && rec_str(r.rate_kbit) != '' && rec_str(r.rate_kbit) != '0')
+				res.failed++;
+		if (res.failed > 0)
+			lib.logger(sprintf('%d saved shape(s) not restored: %s', res.failed, NO_TC));
+		return res;
+	}
 	for (let r in d) {
 		if (type(r) != 'object' || r.ip == null || r.ip == '')
 			continue;
@@ -437,6 +482,15 @@ function restore() {
 	return res;
 }
 
+// What `trafficctl device` reports as shaping, for the view's Shape button.
+function capability() {
+	if (tc_missing())
+		return 'none';
+	if (!kmod_present('sch_htb'))
+		return 'nohtb';
+	return (kmod_present('ifb') || lib.sh('ip link show ' + lib.q(ifb_dev())) == 0) ? 'full' : 'download';
+}
+
 // 2022-12 needs a ';' after `export function f() {}`; one list avoids it.
 export { ifb_dev, entries, lookup_classid, legacy_classid, alloc_classid, apply, remove, status,
-	main, restore };
+	main, restore, capability };
