@@ -23,10 +23,19 @@ All packages are released in lockstep with the same PKG_VERSION.
   and the metrics CGI. Its Makefile lists every file by name;
   `tests/test_package_split.sh` checks that list against `files/`. The same
   Makefile builds `trafficctl-telegram`, the bot (`telegram.uc`, its entry
-  point and its init script), with `DEPENDS:=+trafficctl +curl`.
+  point and its init script), with `DEPENDS:=+trafficctl +curl`, and since
+  2.2.0 two dependency-only packages with no files: `trafficctl-shaper`
+  (`+tc +kmod-sched-core +kmod-ifb`) and `trafficctl-wifi`
+  (`+iw +hostapd-utils`). trafficctl itself no longer depends on tc, iw or
+  curl; a table above `Package/trafficctl` says what needs each dependency.
+  The optional parts' code stays in trafficctl (ucode's `require()` cannot
+  load a module a package may lack), and checks for its tools at run time:
+  no tc → `shape add` names trafficctl-shaper, restore logs one line;
+  no curl → a sender replies `curl is not installed`. `trafficctl device`
+  reports `shaping` (none/nohtb/download/full) next to `wifi_filter`.
 - `luci-app-trafficctl/`: the web interface (`luci.mk`). Owns the views, the
   rpcd plugin, menu.d, acl.d and po/.
-  `LUCI_DEPENDS:=+trafficctl +trafficctl-telegram ...`.
+  `LUCI_DEPENDS:=+trafficctl +trafficctl-telegram +trafficctl-shaper +trafficctl-wifi ...`.
 
 Releases up to 1.28.x were one package, `luci-app-trafficctl`, holding all of
 it. The upgrade moves the backend files and the conffile to `trafficctl`:
@@ -36,10 +45,11 @@ upgrade), and both postinsts remove `/etc/config/trafficctl-opkg.backup`, the
 copy opkg leaves when a modified conffile changes owner. The backend's
 dependencies are repeated on luci-app-trafficctl: otherwise opkg removes
 conntrack, curl, iw and hostapd-utils as orphans of the old package in the same
-run that installs trafficctl (`tests/test_upgrade.sh` checks this).
-hostapd-utils is the one dependency only luci-app-trafficctl declares: it can
-only be selected with a hostapd/wpad variant, so on trafficctl it would block
-wired-only builds. Every hostapd_cli call checks `command -v` first, runs
+run that installs trafficctl (`tests/test_upgrade.sh` checks this). curl, tc
+and iw, trafficctl's dependencies up to 2.1.x, are repeated for the same reason
+(apk prunes what nothing requires). hostapd-utils is on trafficctl-wifi, never
+on trafficctl: it can only be selected with a hostapd/wpad variant, so there it
+would block wired-only builds. Every hostapd_cli call checks `command -v` first, runs
 under a 3 s timeout, and falls back to a timed ubus ban; `wifi_filter`
 (none/temporary/full, emitted by `trafficctl device`) lets the view hide or
 qualify the WiFi block button.

@@ -8,7 +8,7 @@ This document describes the internal architecture of luci-app-trafficctl.
 
 1. **On-demand by default** -- Monitoring and control run when called. The background services do work only for a feature that is switched on: `trafficctl-notify` and `trafficctl-telegram` start only when a sender or the bot is configured, `trafficctl-cut` only while an internet cut is engaged, and `trafficctl-history` idles until history is enabled.
 2. **No compiled code** -- A ucode backend, a few shell scripts (init, hotplug, CGI) and JavaScript. Runs on any architecture without compilation.
-3. **Minimal dependencies** -- Packages that ship with every OpenWrt image or that the packages declare. Traffic shaping additionally needs `tc-full` and `kmod-sched-htb`.
+3. **Minimal dependencies** -- Packages that ship with every OpenWrt image or that the packages declare. The optional parts are packages of their own that only pull in their tools: `trafficctl-shaper` (tc, kmod-sched-core, kmod-ifb), `trafficctl-wifi` (iw, hostapd-utils), `trafficctl-telegram` (the bot, with curl). Their code stays in `trafficctl`, which checks for the tools at run time, because ucode's `require()` cannot load a module that a package may lack.
 
 ---
 
@@ -428,7 +428,7 @@ This returns paths like `wireless.default_radio0`, `wireless.default_radio1`, et
 
 This approach disconnects only the target client. All other WiFi clients remain connected.
 
-`hostapd_cli` comes from `hostapd-utils`, which the `trafficctl` backend does not depend on (it can only be selected with a hostapd/wpad variant, so the dependency would block wired-only builds). Without it step 4 falls back to `ubus call hostapd.<iface> del_client` with a one-hour `ban_time`, reported as `"enforcement":"ban"`. With no wifi-iface at all the scripts answer `"no wifi interfaces found"` and touch nothing. `trafficctl device` reports `none` / `temporary` / `full` as `wifi_filter`, and the view hides or annotates the Block WiFi button from it.
+`hostapd_cli` comes from `hostapd-utils`, which `trafficctl-wifi` pulls in and the `trafficctl` backend does not depend on (it can only be selected with a hostapd/wpad variant, so the dependency would block wired-only builds). Without it step 4 falls back to `ubus call hostapd.<iface> del_client` with a one-hour `ban_time`, reported as `"enforcement":"ban"`. With no wifi-iface at all the scripts answer `"no wifi interfaces found"` and touch nothing. `trafficctl device` reports `none` / `temporary` / `full` as `wifi_filter`, and the view hides or annotates the Block WiFi button from it.
 
 The WiFi deny is `trafficctl macfilter-add` / `macfilter-remove` (`ctl.macfilter`). Every `hostapd_cli` call runs under a 3 s timeout: a hostapd that stopped answering its control socket used to hang the rpcd call until rpcd killed it, with the maclist written and nothing reported. A call that times out counts as no `hostapd_cli` for that AP, so it falls back to the ubus ban. With several APs the reply carries the weakest outcome (`none` < `ban` < `acl`): a block applied on one radio and missed on the other leaves the device a radio to join.
 
