@@ -1,8 +1,9 @@
 #!/bin/sh
 # shellcheck disable=SC2086 # $PKGS is a list of package files, split on purpose
 # Runs INSIDE an OpenWrt rootfs Docker container.
-# Usage: sh /tests/test_dependencies.sh /dist/trafficctl.ipk /dist/trafficctl-telegram.ipk /dist/luci-app-trafficctl.ipk
-#    or: sh /tests/test_dependencies.sh /dist/trafficctl.apk /dist/trafficctl-telegram.apk /dist/luci-app-trafficctl.apk
+# Usage: sh /tests/test_dependencies.sh /dist/trafficctl.ipk /dist/trafficctl-telegram.ipk \
+#            /dist/trafficctl-shaper.ipk /dist/trafficctl-wifi.ipk /dist/luci-app-trafficctl.ipk
+#    or: the same with .apk files
 # Every package file of one run has the same format. trafficctl (the backend)
 # brings conntrack and friends, luci-app-trafficctl brings luci-base, rpcd,
 # rpcd-mod-ucode and rpcd-mod-file.
@@ -107,7 +108,7 @@ echo "=== Verifying deps installed ==="
 # The backend is ucode from 2.0.0: the interpreter and the three modules it
 # imports must come with it, and rpcd-mod-ucode and rpcd-mod-file for the
 # rpcd plugin.
-for dep in trafficctl trafficctl-telegram luci-app-trafficctl conntrack curl kmod-nft-netdev rpcd \
+for dep in trafficctl trafficctl-telegram trafficctl-shaper trafficctl-wifi luci-app-trafficctl conntrack curl kmod-nft-netdev rpcd \
            rpcd-mod-ucode rpcd-mod-file luci-base ucode ucode-mod-fs ucode-mod-uci ucode-mod-ubus; do
     case "$PKG" in
         *.ipk)

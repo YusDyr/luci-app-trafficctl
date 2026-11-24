@@ -31,15 +31,20 @@ cd "$(dirname "$0")/.."
 REPO=$(pwd)
 
 rm -rf dist/
-# One path per line: trafficctl first, trafficctl-telegram second, the
-# translation packages next, the luci-app-trafficctl package last.
+# One path per line: trafficctl first, trafficctl-telegram second, then
+# trafficctl-shaper and trafficctl-wifi, the translation packages next, the
+# luci-app-trafficctl package last.
 OUT=$(./build-ipk.sh 0.0.1-test 1)
 BE_IPK=$(echo "$OUT" | head -1)
 TG_IPK=$(echo "$OUT" | sed -n 2p)
+SH_IPK=$(echo "$OUT" | sed -n 3p)
+WF_IPK=$(echo "$OUT" | sed -n 4p)
 IPK=$(echo "$OUT" | tail -1)
 
 assert_eq "first output is the trafficctl ipk" "trafficctl_0.0.1-test-1_all.ipk" "$(basename "$BE_IPK")"
 assert_eq "second output is the trafficctl-telegram ipk" "trafficctl-telegram_0.0.1-test-1_all.ipk" "$(basename "$TG_IPK")"
+assert_eq "third output is the trafficctl-shaper ipk" "trafficctl-shaper_0.0.1-test-1_all.ipk" "$(basename "$SH_IPK")"
+assert_eq "fourth output is the trafficctl-wifi ipk" "trafficctl-wifi_0.0.1-test-1_all.ipk" "$(basename "$WF_IPK")"
 assert_eq "last output is the luci-app ipk" "luci-app-trafficctl_0.0.1-test-1_all.ipk" "$(basename "$IPK")"
 
 TMPDIR=$(mktemp -d)
@@ -73,8 +78,11 @@ assert_contains "be: replaces the old single package" "$CTRL" "^Replaces: luci-a
 assert_not_contains "be: no Conflicts (it breaks the upgrade from the single package)" "$CTRL" "^Conflicts:"
 assert_contains "be: depends on conntrack" "$CTRL" "^Depends:.*conntrack"
 assert_not_contains "be: no LuCI dependency" "$CTRL" "^Depends:.*luci-base"
-# Optional, so the backend installs on wired-only builds without hostapd.
-assert_not_contains "be: hostapd-utils is optional" "$CTRL" "^Depends:.*hostapd-utils"
+# Optional parts' tools are on their own packages (2.2.0): hostapd-utils and
+# iw on trafficctl-wifi, tc on trafficctl-shaper, curl on trafficctl-telegram.
+for dep in hostapd-utils iw tc curl kmod-ifb kmod-sched-core; do
+    assert_not_contains "be: $dep is on an optional package" "$CTRL" "^Depends:.*[ ,]$dep\(,\|$\)"
+done
 assert_eq "be: conffiles" "/etc/config/trafficctl" "$(cat "$TMPDIR/be/ctrl/conffiles")"
 for s in postinst prerm; do
     assert_eq "be: $s present" "yes" "$([ -f "$TMPDIR/be/ctrl/$s" ] && echo yes || echo no)"
@@ -122,6 +130,20 @@ for f in etc/init.d/trafficctl-telegram usr/libexec/trafficctl/trafficctl-telegr
     assert_eq "tg: $f is executable" yes "$([ -x "$TMPDIR/tg/data/$f" ] && echo yes || echo no)"
 done
 
+# ── trafficctl-shaper, trafficctl-wifi: dependencies only ────────────────────
+check_meta() { # <ipk> <dir> <name> <its dependencies>
+    unpack "$1" "$2"
+    CTRL=$(cat "$TMPDIR/$2/ctrl/control")
+    assert_contains "$2: package name" "$CTRL" "^Package: $3$"
+    assert_contains "$2: version" "$CTRL" "^Version: 0.0.1-test-1$"
+    assert_contains "$2: arch is all" "$CTRL" "^Architecture: all$"
+    assert_contains "$2: depends on trafficctl of this release or newer, and $4" "$CTRL" "^Depends: trafficctl (>= 0.0.1-test), $4$"
+    assert_eq "$2: no files" "" "$(grep -vx '\./*' "$TMPDIR/$2/data.list")"
+    assert_eq "$2: no maintainer scripts" "control" "$(ls "$TMPDIR/$2/ctrl")"
+}
+check_meta "$SH_IPK" sh trafficctl-shaper "tc, kmod-sched-core, kmod-ifb"
+check_meta "$WF_IPK" wf trafficctl-wifi "iw, hostapd-utils"
+
 # ── luci-app-trafficctl ──────────────────────────────────────────────────────
 unpack "$IPK" fe
 CTRL=$(cat "$TMPDIR/fe/ctrl/control")
@@ -132,8 +154,13 @@ assert_contains "fe: arch is all" "$CTRL" "^Architecture: all$"
 assert_contains "fe: depends on the same trafficctl" "$CTRL" "^Depends: trafficctl (= 0.0.1-test-1)"
 assert_contains "fe: depends on the same trafficctl-telegram" "$CTRL" "^Depends:.* trafficctl-telegram (= 0.0.1-test-1),"
 assert_contains "fe: depends on luci-base" "$CTRL" "^Depends:.*luci-base"
-# Kept on the web interface so the upgrade from 1.28.0 does not orphan it.
-assert_contains "fe: keeps hostapd-utils" "$CTRL" "^Depends:.*hostapd-utils"
+assert_contains "fe: depends on the same trafficctl-shaper" "$CTRL" "^Depends:.* trafficctl-shaper (= 0.0.1-test-1),"
+assert_contains "fe: depends on the same trafficctl-wifi" "$CTRL" "^Depends:.* trafficctl-wifi (= 0.0.1-test-1),"
+# Kept on the web interface so an upgrade from a release that depended on them
+# (1.28.x: luci-app-trafficctl; up to 2.1.x: trafficctl) does not orphan them.
+for dep in hostapd-utils curl tc iw; do
+    assert_contains "fe: keeps $dep" "$CTRL" "^Depends:.*[ ,]$dep\(,\|$\)"
+done
 assert_not_contains "fe: no Conflicts" "$CTRL" "^Conflicts:"
 assert_eq "fe: no conffiles" "no" "$([ -f "$TMPDIR/fe/ctrl/conffiles" ] && echo yes || echo no)"
 assert_contains "fe: postinst reloads rpcd" "$(cat "$TMPDIR/fe/ctrl/postinst")" "rpcd reload"

@@ -113,11 +113,14 @@ jobs:
             ln -f dist/trafficctl_*_all.ipk dist/trafficctl_all.ipk
             ln -f dist/trafficctl_*_all.ipk dist/trafficctl.ipk
           fi
-          # The bot, its own package after 1.30.x.
-          if ls dist/trafficctl-telegram_*_all.ipk >/dev/null 2>&1; then
-            ln -f dist/trafficctl-telegram_*_all.ipk dist/trafficctl-telegram_all.ipk
-            ln -f dist/trafficctl-telegram_*_all.ipk dist/trafficctl-telegram.ipk
-          fi
+          # The bot, its own package after 1.30.x, and the shaper and WiFi
+          # dependency packages after 2.1.x.
+          for p in trafficctl-telegram trafficctl-shaper trafficctl-wifi; do
+            if ls dist/${p}_*_all.ipk >/dev/null 2>&1; then
+              ln -f dist/${p}_*_all.ipk dist/${p}_all.ipk
+              ln -f dist/${p}_*_all.ipk dist/$p.ipk
+            fi
+          done
           ls -la dist/
           cp dist/*.ipk /tmp/
 
@@ -150,11 +153,13 @@ jobs:
           find bin/ -name "luci-i18n-trafficctl-*.apk" -exec cp {} dist/ \; 2>/dev/null || true
           # The SDK names them <name>-<version>.apk; "<name>-[0-9]*" keeps
           # trafficctl from matching luci-app-trafficctl or trafficctl-telegram.
-          # The bot is a second package of trafficctl/Makefile after 1.30.x,
-          # built with it.
-          TG=
-          grep -qs 'BuildPackage,trafficctl-telegram' trafficctl/Makefile && TG=trafficctl-telegram
-          for pkg in ${{ steps.layout.outputs.packages }} $TG; do
+          # The bot (after 1.30.x) and the shaper and WiFi dependency packages
+          # (after 2.1.x) are more packages of trafficctl/Makefile, built with it.
+          SUB=
+          for p in trafficctl-telegram trafficctl-shaper trafficctl-wifi; do
+            grep -qs "BuildPackage,$p)" trafficctl/Makefile && SUB="$SUB $p"
+          done
+          for pkg in ${{ steps.layout.outputs.packages }} $SUB; do
             APK=$(find bin/ -name "${pkg}-[0-9]*.apk" 2>/dev/null | head -1)
             if [ -z "$APK" ]; then
               echo "::error::$pkg APK not found in SDK output"

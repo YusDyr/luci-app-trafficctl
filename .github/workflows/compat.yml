@@ -159,11 +159,12 @@ jobs:
       - name: Collect APK
         run: |
           mkdir -p dist
-          cp /tmp/luci-app-trafficctl*.ipk /tmp/trafficctl_*.ipk /tmp/trafficctl-telegram_*.ipk dist/ 2>/dev/null || true
-          # The web interface, the backend (trafficctl-<ver>.apk) and the bot.
-          # -name matches the whole basename, so "trafficctl-[0-9]*" cannot
-          # pick up luci-app-trafficctl-* or trafficctl-telegram-*.
-          for pkg in luci-app-trafficctl trafficctl trafficctl-telegram; do
+          cp /tmp/luci-app-trafficctl*.ipk /tmp/trafficctl_*.ipk /tmp/trafficctl-telegram_*.ipk /tmp/trafficctl-shaper_*.ipk /tmp/trafficctl-wifi_*.ipk dist/ 2>/dev/null || true
+          # The web interface, the backend (trafficctl-<ver>.apk), the bot and
+          # the dependency-only shaper and WiFi packages. -name matches the
+          # whole basename, so "trafficctl-[0-9]*" cannot pick up
+          # luci-app-trafficctl-* or trafficctl-telegram-*.
+          for pkg in luci-app-trafficctl trafficctl trafficctl-telegram trafficctl-shaper trafficctl-wifi; do
             APK=$(find bin/ -name "${pkg}-[0-9]*.apk" 2>/dev/null | head -1)
             if [ -z "$APK" ]; then
               echo "::error::$pkg APK not found in SDK output"
@@ -184,6 +185,10 @@ jobs:
           ln -f dist/trafficctl_0.0.0-test_noarch.apk dist/trafficctl.apk
           ln -f dist/trafficctl-telegram_0.0.0-test-1_all.ipk dist/trafficctl-telegram.ipk
           ln -f dist/trafficctl-telegram_0.0.0-test_noarch.apk dist/trafficctl-telegram.apk
+          ln -f dist/trafficctl-shaper_0.0.0-test-1_all.ipk dist/trafficctl-shaper.ipk
+          ln -f dist/trafficctl-shaper_0.0.0-test_noarch.apk dist/trafficctl-shaper.apk
+          ln -f dist/trafficctl-wifi_0.0.0-test-1_all.ipk dist/trafficctl-wifi.ipk
+          ln -f dist/trafficctl-wifi_0.0.0-test_noarch.apk dist/trafficctl-wifi.apk
           ls -l dist/
 
       - uses: actions/upload-artifact@v5
@@ -264,7 +269,7 @@ jobs:
             -v "$PWD/dist:/dist" \
             -v "$PWD/tests:/tests" \
             "$IMAGE" \
-            /tests/test_install.sh "/dist/trafficctl.$EXT" "/dist/trafficctl-telegram.$EXT" "/dist/luci-app-trafficctl.$EXT"
+            /tests/test_install.sh "/dist/trafficctl.$EXT" "/dist/trafficctl-telegram.$EXT" "/dist/trafficctl-shaper.$EXT" "/dist/trafficctl-wifi.$EXT" "/dist/luci-app-trafficctl.$EXT"
           rc=$?
           set -e
           # 78 means the image's package feeds were unreachable, so the test
@@ -569,10 +574,11 @@ jobs:
           OLD_PKGS="/dist-old/$(basename "$OLD_PKG")"
           # Releases up to 1.28.x are one package; later ones also ship the
           # backend as trafficctl, which then has to be part of the old install,
-          # and releases after 1.30.x the bot as trafficctl-telegram.
+          # releases after 1.30.x the bot as trafficctl-telegram, and releases
+          # after 2.1.x trafficctl-shaper and trafficctl-wifi.
           # "trafficctl[._]" and "trafficctl-telegram[._]": the bare
           # "trafficctl*" also matches the bot.
-          for p in trafficctl-telegram trafficctl; do
+          for p in trafficctl-wifi trafficctl-shaper trafficctl-telegram trafficctl; do
             OLD_P=$(find dist-old -maxdepth 1 \( -name "$p.${{ matrix.format }}" -o -name "${p}_*.${{ matrix.format }}" \) | sort | head -1)
             [ -n "$OLD_P" ] && OLD_PKGS="/dist-old/$(basename "$OLD_P") $OLD_PKGS"
           done
@@ -596,7 +602,7 @@ jobs:
             -v "$PWD/dist-old:/dist-old" \
             -v "$PWD/tests:/tests" \
             "$IMAGE" \
-            /tests/test_upgrade.sh $OLD_PKGS -- "/dist/trafficctl.$FMT" "/dist/trafficctl-telegram.$FMT" "/dist/luci-app-trafficctl.$FMT"
+            /tests/test_upgrade.sh $OLD_PKGS -- "/dist/trafficctl.$FMT" "/dist/trafficctl-telegram.$FMT" "/dist/trafficctl-shaper.$FMT" "/dist/trafficctl-wifi.$FMT" "/dist/luci-app-trafficctl.$FMT"
 
   # ──────────────────────────────────────────────────────────────────────────
   # Dependencies — verify install fails cleanly when deps are missing, and
@@ -640,4 +646,4 @@ jobs:
             -v "$PWD/dist:/dist" \
             -v "$PWD/tests:/tests" \
             "$IMAGE" \
-            /tests/test_dependencies.sh "/dist/trafficctl.$EXT" "/dist/trafficctl-telegram.$EXT" "/dist/luci-app-trafficctl.$EXT"
+            /tests/test_dependencies.sh "/dist/trafficctl.$EXT" "/dist/trafficctl-telegram.$EXT" "/dist/trafficctl-shaper.$EXT" "/dist/trafficctl-wifi.$EXT" "/dist/luci-app-trafficctl.$EXT"

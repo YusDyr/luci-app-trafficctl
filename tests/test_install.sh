@@ -1,18 +1,19 @@
 #!/bin/sh
 # Runs INSIDE an OpenWrt rootfs Docker container.
-# Usage: sh /tests/test_install.sh /dist/trafficctl.ipk /dist/trafficctl-telegram.ipk /dist/luci-app-trafficctl.ipk
-#    or: sh /tests/test_install.sh /dist/trafficctl.apk /dist/trafficctl-telegram.apk /dist/luci-app-trafficctl.apk
-# Detects format by extension. Installs the three packages in one run, verifies
+# Usage: sh /tests/test_install.sh /dist/trafficctl.ipk /dist/trafficctl-telegram.ipk \
+#            /dist/trafficctl-shaper.ipk /dist/trafficctl-wifi.ipk /dist/luci-app-trafficctl.ipk
+#    or: the same with .apk files
+# Detects format by extension. Installs the five packages in one run, verifies
 # the files and who owns them, then removes them.
 set -e
 
-[ "$#" -ge 3 ] || { echo "usage: $0 <trafficctl package> <trafficctl-telegram package> <luci-app-trafficctl package>"; exit 1; }
+[ "$#" -ge 5 ] || { echo "usage: $0 <trafficctl package> <trafficctl-telegram package> <trafficctl-shaper package> <trafficctl-wifi package> <luci-app-trafficctl package>"; exit 1; }
 PKG="$1"
 for p in "$@"; do
     [ -f "$p" ] || { echo "Package not found: $p"; exit 1; }
     [ "${p##*.}" = "${PKG##*.}" ] || { echo "Mixed package formats: $*"; exit 1; }
 done
-PKGS="trafficctl trafficctl-telegram luci-app-trafficctl"
+PKGS="trafficctl trafficctl-telegram trafficctl-shaper trafficctl-wifi luci-app-trafficctl"
 
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
@@ -317,11 +318,13 @@ case "$PKG" in
         # in opkg's DB — remove it the real way and require success.
         # The web interface first: it depends on the backend.
         opkg remove luci-app-trafficctl || { echo "REMOVAL FAILED: opkg remove luci-app-trafficctl returned non-zero"; exit 1; }
-        opkg remove trafficctl-telegram || { echo "REMOVAL FAILED: opkg remove trafficctl-telegram returned non-zero"; exit 1; }
+        for p in trafficctl-telegram trafficctl-shaper trafficctl-wifi; do
+            opkg remove "$p" || { echo "REMOVAL FAILED: opkg remove $p returned non-zero"; exit 1; }
+        done
         opkg remove trafficctl || { echo "REMOVAL FAILED: opkg remove trafficctl returned non-zero"; exit 1; }
         ;;
     *.apk)
-        apk del luci-app-trafficctl trafficctl-telegram trafficctl || {
+        apk del luci-app-trafficctl trafficctl-telegram trafficctl-shaper trafficctl-wifi trafficctl || {
             echo "REMOVAL FAILED: apk del returned non-zero"; exit 1; }
         ;;
 esac

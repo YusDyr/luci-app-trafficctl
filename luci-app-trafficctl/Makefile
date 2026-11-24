@@ -33,11 +33,19 @@ LUCI_DESCRIPTION:=Per-device traffic monitoring, rate limiting (nftables), \
 # after 1.30.x (it was part of trafficctl). The Settings panel configures it,
 # and with it here an upgrade from 1.30.x keeps a bot that was running.
 #
+# trafficctl-shaper and trafficctl-wifi are the shaper's and the WiFi part's
+# dependencies (tc, kmod-sched-core, kmod-ifb; iw, hostapd-utils) since 2.2.0,
+# when trafficctl stopped depending on tc, iw and curl. They are here so this
+# web interface keeps every control after the upgrade; curl is repeated for
+# the notification senders. A router built without them (the upstream LuCI
+# feed's luci-app-trafficctl depends on trafficctl only) still works: the
+# view hides the Shaper and WiFi controls the backend reports it cannot do.
+#
 # rpcd-mod-ucode runs the rpcd plugin (/usr/share/rpcd/ucode/luci.trafficctl.uc)
 # inside rpcd. Releases up to 1.30.x shipped it as an exec plugin. The plugin
 # runs the CLI through rpcd's file.exec, which is rpcd-mod-file (luci-base
 # pulls it in too).
-LUCI_DEPENDS:=+trafficctl +trafficctl-telegram +conntrack +curl +tc +iw +kmod-nft-netdev +firewall4 +ucode +ucode-mod-fs +ucode-mod-uci +ucode-mod-ubus +hostapd-utils +luci-base +rpcd +rpcd-mod-ucode +rpcd-mod-file
+LUCI_DEPENDS:=+trafficctl +trafficctl-telegram +trafficctl-shaper +trafficctl-wifi +conntrack +curl +tc +iw +kmod-nft-netdev +firewall4 +ucode +ucode-mod-fs +ucode-mod-uci +ucode-mod-ubus +hostapd-utils +luci-base +rpcd +rpcd-mod-ucode +rpcd-mod-file
 # Versioned: the rpcd plugin of this release calls the ucode backend, which a
 # trafficctl up to 1.30.x does not have (and 1.30.x's exec plugin sources
 # trafficctl-fw.sh, which 2.0.0 removed). luci.mk turns this into EXTRA_DEPENDS.

@@ -481,10 +481,13 @@ else
             ;;
     esac
 
-    # 5. Both builders must create the same two aliases, or "address it through
+    # 5. Both builders must create the same aliases, or "address it through
     #    the alias" only works on one of the two paths.
     for alias in 'dist/luci-app-trafficctl.ipk' 'dist/luci-app-trafficctl.apk' \
-                 'dist/trafficctl.ipk' 'dist/trafficctl.apk'; do
+                 'dist/trafficctl.ipk' 'dist/trafficctl.apk' \
+                 'dist/trafficctl-telegram.ipk' 'dist/trafficctl-telegram.apk' \
+                 'dist/trafficctl-shaper.ipk' 'dist/trafficctl-shaper.apk' \
+                 'dist/trafficctl-wifi.ipk' 'dist/trafficctl-wifi.apk'; do
         for f in "$WF" "$CWF"; do
             if grep -q "ln -f .*$alias" "$f"; then
                 PASS=$((PASS + 1))
