@@ -1210,6 +1210,9 @@ msgstr ""
 msgid "Test"
 msgstr ""
 
+msgid "The HTB qdisc (kmod-sched-core) is not available: install the trafficctl-shaper package."
+msgstr ""
+
 msgid "The accuracy of these figures could not be determined."
 msgstr ""
 
@@ -1322,6 +1325,9 @@ msgid "Traffic shaping (tc/HTB) — bypassed for offloaded flows"
 msgstr ""
 
 msgid "Traffic shaping and blocking are not affected."
+msgstr ""
+
+msgid "Traffic shaping needs tc: install the trafficctl-shaper package."
 msgstr ""
 
 msgid "Turn on rDNS"
@@ -1574,6 +1580,9 @@ msgid "kbit/s"
 msgstr ""
 
 msgid "keeping"
+msgstr ""
+
+msgid "kmod-ifb is not installed: the shaper limits download only."
 msgstr ""
 
 msgid "last flush"

@@ -634,5 +634,5 @@ function restore() {
 }
 
 // 2022-12 needs a ';' after `export function f() {}`; one list avoids it.
-export { valid_rate, rate_bytes, default_mode, comment, wan_device, ingress_devices,
+export { valid_rate, rate_bytes, default_mode, comment, wan_device, ingress_devices, is_dev,
 	add, remove, remove_legacy, ratelimit, restore };

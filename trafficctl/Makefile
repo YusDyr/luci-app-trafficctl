@@ -13,6 +13,8 @@
 #
 # The Telegram bot is a second package from this Makefile, trafficctl-telegram:
 # a resident process that a router without a bot should not carry.
+# trafficctl-shaper and trafficctl-wifi are two more, dependencies only: see
+# the table above Package/trafficctl.
 #
 # An upgrade from a release that still shipped everything in
 # luci-app-trafficctl needs nothing special here: opkg and apk both hand a
@@ -35,22 +37,75 @@ PKG_MAINTAINER:=Denis Iusupov <yusdyr@gmail.com>
 
 include $(INCLUDE_DIR)/package.mk
 
-# hostapd-utils is deliberately not a dependency: it can only be selected
-# together with a hostapd/wpad variant, so depending on it would make this
-# package unselectable on wired-only builds. The WiFi block helpers check for
-# hostapd_cli at run time and fall back to a timed ubus ban
-# (block_iface in ctl.uc; trafficctl device reports it as wifi_filter).
-# iw stays: it is selectable on every target and only reads station lists.
-# firewall4: blocks are rules in its inet fw4 table, so nftables alone is not
-# enough.
-# kmod-nft-netdev carries CONFIG_NF_TABLES_NETDEV, the nft family of the
-# limiter's table (netdev tm_ratelimit); firewall4 does not pull it in.
+# The packages built here, and why each dependency is there. trafficctl is
+# the core; each optional part is a package that only pulls in what that part
+# needs, so a router carries the combination it uses (trafficctl-shaper and
+# trafficctl-wifi hold no files of their own). Without a part the core checks
+# for its tools at run time and says which package to install; `trafficctl
+# device` reports shaping and wifi_filter, so the view hides or qualifies the
+# control.
+#
+#   package             dependency       what needs it
+#   trafficctl          firewall4        blocks, the port-forward controls and
+#                                        the cut are nft rules next to fw4's
+#                                        table; nftables alone is not enough
+#                       kmod-nft-netdev  the limiter's table, netdev
+#                                        tm_ratelimit; firewall4 does not pull
+#                                        it in
+#                       conntrack        flushing a device's flows when it is
+#                                        blocked, limited or cut, so the rule
+#                                        applies to connections already open
+#                       ucode, ucode-mod-fs, ucode-mod-uci, ucode-mod-ubus
+#                                        the CLI and every module
+#   trafficctl-shaper   tc               the shaper (tc/HTB); tc-tiny is
+#                                        enough, tc-full adds only iptables
+#                                        actions, ipset and eBPF
+#                       kmod-sched-core  sch_htb, cls_u32, sch_ingress and
+#                                        act_mirred (there is no
+#                                        kmod-sched-htb); fq_codel is built
+#                                        into OpenWrt's kernel
+#                       kmod-ifb         the upload half; without it the
+#                                        shaper applies download only and says
+#                                        so
+#   trafficctl-wifi     iw               WiFi clients, band and signal in the
+#                                        device list and the device scan
+#                       hostapd-utils    hostapd_cli: a WiFi block in the
+#                                        radio's ACL. Without it the block is a
+#                                        one-hour hostapd ban over ubus. It can
+#                                        only be selected with a hostapd/wpad
+#                                        variant, which is why it is not on
+#                                        trafficctl
+#   trafficctl-telegram curl             the bot's API calls
+#
+# curl is on no package but the bot: the ntfy, webhook and Telegram senders
+# need it, the ubus events, hotplug scripts and mail do not, and a sender
+# without it replies "curl is not installed".
 define Package/trafficctl
   SECTION:=net
   CATEGORY:=Network
   TITLE:=Per-device traffic monitoring and control
   URL:=https://github.com/YusDyr/luci-app-trafficctl
-  DEPENDS:=+conntrack +curl +tc +iw +kmod-nft-netdev +firewall4 +ucode +ucode-mod-fs +ucode-mod-uci +ucode-mod-ubus
+  DEPENDS:=+conntrack +kmod-nft-netdev +firewall4 +ucode +ucode-mod-fs +ucode-mod-uci +ucode-mod-ubus
+  PKGARCH:=all
+endef
+
+define Package/trafficctl-shaper
+  SECTION:=net
+  CATEGORY:=Network
+  TITLE:=Traffic shaping (tc/HTB) for trafficctl
+  URL:=https://github.com/YusDyr/luci-app-trafficctl
+  DEPENDS:=+trafficctl +tc +kmod-sched-core +kmod-ifb
+  EXTRA_DEPENDS:=trafficctl (>=$(PKG_VERSION))
+  PKGARCH:=all
+endef
+
+define Package/trafficctl-wifi
+  SECTION:=net
+  CATEGORY:=Network
+  TITLE:=WiFi clients and WiFi blocking for trafficctl
+  URL:=https://github.com/YusDyr/luci-app-trafficctl
+  DEPENDS:=+trafficctl +iw +hostapd-utils
+  EXTRA_DEPENDS:=trafficctl (>=$(PKG_VERSION))
   PKGARCH:=all
 endef
 
@@ -68,12 +123,25 @@ endef
 
 define Package/trafficctl/description
  Per-device traffic monitoring (conntrack), rate limiting (nftables),
- traffic shaping (tc/HTB), internet blocking, WiFi MAC filtering, a global
- internet cut, device notifications and a Prometheus exporter. The web
- interface is luci-app-trafficctl, the Telegram bot trafficctl-telegram.
- WiFi MAC filtering needs hostapd-utils, which is optional so the package can
- be installed on wired-only builds. Without it a WiFi block is a temporary
- (one hour) hostapd ban over ubus.
+ internet blocking, a global internet cut, port-forward control, device
+ notifications and a Prometheus exporter. Optional parts are packages of
+ their own: trafficctl-shaper (traffic shaping with tc/HTB), trafficctl-wifi
+ (WiFi clients and WiFi MAC filtering), trafficctl-telegram (the Telegram
+ bot). The web interface is luci-app-trafficctl. The ntfy, webhook and
+ Telegram notification senders need curl.
+endef
+
+define Package/trafficctl-shaper/description
+ Traffic shaping for trafficctl: per-device tc/HTB queues on the LAN device
+ (download) and an IFB device (upload). Pulls in tc, kmod-sched-core and
+ kmod-ifb; holds no files of its own.
+endef
+
+define Package/trafficctl-wifi/description
+ WiFi support for trafficctl: the WiFi clients with their band and signal,
+ and WiFi MAC filtering through the radio's ACL. Pulls in iw and
+ hostapd-utils; holds no files of its own. Without hostapd-utils a WiFi block
+ is a temporary (one hour) hostapd ban over ubus.
 endef
 
 define Package/trafficctl-telegram/description
@@ -294,5 +362,17 @@ define Package/trafficctl-telegram/install
 	$(INSTALL_BIN) ./files/etc/init.d/trafficctl-telegram $(1)/etc/init.d/
 endef
 
+# Dependencies only: the code they enable ships in trafficctl, which checks
+# for the tools at run time.
+define Package/trafficctl-shaper/install
+	true
+endef
+
+define Package/trafficctl-wifi/install
+	true
+endef
+
 $(eval $(call BuildPackage,trafficctl))
+$(eval $(call BuildPackage,trafficctl-shaper))
+$(eval $(call BuildPackage,trafficctl-wifi))
 $(eval $(call BuildPackage,trafficctl-telegram))

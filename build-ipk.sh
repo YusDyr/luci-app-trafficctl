@@ -7,20 +7,26 @@ PKG_RELEASE="${2:-1}"
 PKG_ARCH="all"
 
 # The packages, in the feed-compatible subdirectory layout: the backend
-# (trafficctl), the Telegram bot (trafficctl-telegram, from the same
-# directory) and the web interface that depends on both (luci-app-trafficctl).
+# (trafficctl), from the same directory the Telegram bot (trafficctl-telegram)
+# and the dependency-only trafficctl-shaper and trafficctl-wifi, and the web
+# interface that depends on all of them (luci-app-trafficctl).
 BE_NAME="trafficctl"
 TG_NAME="trafficctl-telegram"
+SH_NAME="trafficctl-shaper"
+WF_NAME="trafficctl-wifi"
 # The bot's files under trafficctl/files (Package/trafficctl-telegram/install).
 TG_FILES="usr/share/ucode/trafficctl/telegram.uc usr/libexec/trafficctl/trafficctl-telegram.uc etc/init.d/trafficctl-telegram"
 TCTL_ROOT="$(dirname "$0")"
 SRC="$TCTL_ROOT/${PKG_NAME}"
 BACKEND_SRC="$TCTL_ROOT/${BE_NAME}"
-# Runtime dependencies of the backend (DEPENDS in trafficctl/Makefile).
-# hostapd-utils is optional for the backend (wired-only builds) and is only
-# repeated on luci-app-trafficctl; see LUCI_DEPENDS in its Makefile.
-BE_DEPENDS="conntrack, curl, tc, iw, kmod-nft-netdev, firewall4, ucode, ucode-mod-fs, ucode-mod-uci, ucode-mod-ubus"
-FE_EXTRA_DEPENDS="hostapd-utils"
+# Runtime dependencies of each package (DEPENDS in trafficctl/Makefile; the
+# table above Package/trafficctl says what needs each one).
+BE_DEPENDS="conntrack, kmod-nft-netdev, firewall4, ucode, ucode-mod-fs, ucode-mod-uci, ucode-mod-ubus"
+SH_DEPENDS="tc, kmod-sched-core, kmod-ifb"
+WF_DEPENDS="iw, hostapd-utils"
+# Repeated on luci-app-trafficctl: what a release up to 2.1.x depended on,
+# see LUCI_DEPENDS in its Makefile.
+FE_EXTRA_DEPENDS="curl, tc, iw, hostapd-utils"
 
 # Overridable so tests can build without touching a developer's dist/.
 OUTDIR="${OUTDIR:-dist}"
@@ -99,11 +105,12 @@ Section: net
 Architecture: $PKG_ARCH
 Maintainer: Denis Iusupov <yusdyr@gmail.com>
 Description: Per-device traffic monitoring (conntrack), rate limiting
- (nftables), traffic shaping (tc/HTB), internet blocking, WiFi MAC
- filtering, a global internet cut, device notifications and a Prometheus
- exporter. The web interface is luci-app-trafficctl, the Telegram bot
- trafficctl-telegram. WiFi MAC filtering needs
- hostapd-utils (optional; without it a WiFi block is a temporary ban).
+ (nftables), internet blocking, a global internet cut, port-forward control,
+ device notifications and a Prometheus exporter. Optional parts are packages
+ of their own: trafficctl-shaper (traffic shaping with tc/HTB),
+ trafficctl-wifi (WiFi clients and WiFi MAC filtering), trafficctl-telegram
+ (the Telegram bot). The web interface is luci-app-trafficctl. The ntfy,
+ webhook and Telegram notification senders need curl.
 EOF
 
 # Conffiles must list ONLY files that ship in data.tar.gz and may be user-edited.
@@ -282,6 +289,31 @@ exit 0
 EOF
 chmod +x "$TG_CTRL/preinst" "$TG_CTRL/postinst" "$TG_CTRL/prerm"
 
+# ── trafficctl-shaper, trafficctl-wifi: dependencies only ──────────────────
+# No files: the code they enable ships in trafficctl, which checks for the
+# tools at run time. Versioned like EXTRA_DEPENDS in trafficctl/Makefile.
+meta_stage() { # <name> <depends> <description>
+    _st="$WORKDIR/$1"
+    mkdir -p "$_st/data" "$_st/control"
+    cat > "$_st/control/control" <<EOF
+Package: $1
+Version: ${PKG_VERSION}-${PKG_RELEASE}
+Depends: $BE_NAME (>= ${PKG_VERSION}), $2
+Source: https://github.com/YusDyr/luci-app-trafficctl
+License: Apache-2.0
+Section: net
+Architecture: $PKG_ARCH
+Maintainer: Denis Iusupov <yusdyr@gmail.com>
+Description: $3
+EOF
+}
+meta_stage "$SH_NAME" "$SH_DEPENDS" "Traffic shaping for trafficctl: per-device tc/HTB queues on the LAN
+ device (download) and an IFB device (upload). Pulls in tc, kmod-sched-core
+ and kmod-ifb; holds no files of its own."
+meta_stage "$WF_NAME" "$WF_DEPENDS" "WiFi support for trafficctl: the WiFi clients with their band and
+ signal, and WiFi MAC filtering through the radio's ACL. Pulls in iw and
+ hostapd-utils; holds no files of its own."
+
 # ── luci-app-trafficctl: the web interface ─────────────────────────────────
 STAGE="$WORKDIR/main"
 DATA="$STAGE/data"
@@ -305,11 +337,12 @@ mkdir -p "$CTRL"
 # LUCI_DEPENDS in luci-app-trafficctl/Makefile. Without them, upgrading from a
 # release up to 1.28.x makes opkg drop conntrack, curl, iw and hostapd-utils
 # as orphans of the old luci-app-trafficctl, in the same run that installs
-# trafficctl, which needs them.
+# trafficctl, which needs them. curl, tc and iw left trafficctl in 2.2.0; they
+# stay here for the same reason.
 cat > "$CTRL/control" <<EOF
 Package: $PKG_NAME
 Version: ${PKG_VERSION}-${PKG_RELEASE}
-Depends: $BE_NAME (= ${PKG_VERSION}-${PKG_RELEASE}), $TG_NAME (= ${PKG_VERSION}-${PKG_RELEASE}), $BE_DEPENDS, $FE_EXTRA_DEPENDS, luci-base, rpcd, rpcd-mod-ucode, rpcd-mod-file
+Depends: $BE_NAME (= ${PKG_VERSION}-${PKG_RELEASE}), $TG_NAME (= ${PKG_VERSION}-${PKG_RELEASE}), $SH_NAME (= ${PKG_VERSION}-${PKG_RELEASE}), $WF_NAME (= ${PKG_VERSION}-${PKG_RELEASE}), $BE_DEPENDS, $FE_EXTRA_DEPENDS, luci-base, rpcd, rpcd-mod-ucode, rpcd-mod-file
 Source: https://github.com/YusDyr/luci-app-trafficctl
 License: Apache-2.0
 Section: luci
@@ -339,6 +372,8 @@ chmod +x "$CTRL/postinst"
 # Printed first; callers taking the last line of stdout get luci-app-trafficctl.
 assemble_ipk "$BE_NAME" "$PKG_ARCH" "$BE_STAGE"
 assemble_ipk "$TG_NAME" "$PKG_ARCH" "$TG_STAGE"
+assemble_ipk "$SH_NAME" "$PKG_ARCH" "$WORKDIR/$SH_NAME"
+assemble_ipk "$WF_NAME" "$PKG_ARCH" "$WORKDIR/$WF_NAME"
 
 # Translations, one package per language, mirroring what the feed build
 # produces. Printed BEFORE luci-app-trafficctl so that callers taking the last

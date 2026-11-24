@@ -1063,6 +1063,9 @@ rmask() {
         | if type == "object" then
             (if has("timestamp") then .timestamp = 0 else . end)
             | (if has("cache_age") then .cache_age = (.cache_age >= 0) else . end)
+            # The device reply'"'"'s shaping (2.2.0) has no 1.30.0 counterpart;
+            # tests/test_report.sh covers it.
+            | (if has("wifi_filter") then del(.shaping) else . end)
           else . end' "$W/masked.json" 2>/dev/null || cat "$W/masked.json"
     echo "rc=$rc"
 }
@@ -1103,6 +1106,9 @@ while IFS='|' read -r name mode fixture legacy new setup; do
     # A usage line names the command, not the deleted script (a declared
     # difference): "usage: trafficctl-shape.sh" is "usage: trafficctl shape".
     sed -i -E 's/usage: trafficctl-([a-z-]+)\.sh/usage: trafficctl \1/g' "$W/legacy.out"
+    # Also declared (2.2.0): the kmod-ifb hint names kmod-sched-core, which
+    # holds act_mirred, where 1.30.0 named kmod-sched.
+    sed -i -E 's/install kmod-ifb kmod-sched([^-]|$)/install kmod-ifb kmod-sched-core\1/g' "$W/legacy.out"
 
     fresh_root "$fixture" "$setup"
     cli_root

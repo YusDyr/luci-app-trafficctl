@@ -58,7 +58,7 @@ qemu-system-x86_64 \
 
 Install required packages:
 ```sh
-opkg update && opkg install conntrack luci tc-full kmod-sched-core kmod-sched-htb iw-full
+opkg update && opkg install conntrack luci tc kmod-sched-core kmod-ifb iw
 ```
 
 ### Option 3: OpenWrt Build System (for .ipk packages)
@@ -125,7 +125,7 @@ luci-app-trafficctl/                     # repository
 │   │       ├── acl.d/luci-app-trafficctl.json
 │   │       └── ucode/luci.trafficctl.uc # rpcd plugin (rpcd-mod-ucode): settings in process, the rest via the CLI
 │   └── po/                              # i18n: templates/trafficctl.pot, <lang>/trafficctl.po
-├── build-ipk.sh, build-apk.sh           # Standalone builders, emit both packages
+├── build-ipk.sh, build-apk.sh           # Standalone builders, emit every package
 ├── docs/                                # Documentation
 ├── .github/workflows/                   # CI
 └── .eslintrc.json                       # ES5 linting config
@@ -403,8 +403,9 @@ a red PR can still be merged, and the release will then publish it.
 - rpcd refuses a call whose argument types differ from the plugin's declaration (`Invalid argument`): compare with `ubus -v list luci.trafficctl`. `tests/test_rpcd_contract.sh` checks the views' calls.
 
 **tc commands fail:**
-- Verify `tc-full` (not minimal `tc`): `opkg install tc-full kmod-sched-htb`
-- Check kernel module: `lsmod | grep sch_htb`
+- Install the shaper's dependencies: `opkg install trafficctl-shaper` (tc, kmod-sched-core, kmod-ifb); any `tc` variant works
+- Check the kernel module: `lsmod | grep sch_htb` (it is in `kmod-sched-core`; there is no `kmod-sched-htb`)
+- `trafficctl device` reports `shaping`: `none` (no tc), `nohtb`, `download` (no kmod-ifb) or `full`
 
 **Shaping not restored after reboot:**
 - Check `/etc/trafficctl/shapes.json` exists with valid JSON

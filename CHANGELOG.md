@@ -4,6 +4,27 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## Upgrading to 2.2.0
+
+2.2.0 splits the optional parts' dependencies off `trafficctl`. It no longer
+depends on `tc`, `iw` or `curl`; two new packages with no files of their own
+bring them:
+
+- `trafficctl-shaper`: `tc`, `kmod-sched-core` and `kmod-ifb`, for the shaper.
+- `trafficctl-wifi`: `iw` and `hostapd-utils`, for WiFi clients and WiFi blocks.
+- `trafficctl-telegram` keeps `curl`, which the ntfy and webhook senders use too.
+
+- With LuCI nothing changes: `luci-app-trafficctl` depends on all of them, so
+  `opkg upgrade luci-app-trafficctl` / `apk upgrade` installs the two new
+  packages and keeps every tool.
+- Without LuCI, add the parts the router uses to the upgrade command, e.g.
+  `apk add trafficctl trafficctl-shaper trafficctl-wifi`. apk removes packages
+  nothing requires any more, so without `trafficctl-shaper` an upgrade drops
+  `tc`: the saved shapes are then not restored (one line in the system log
+  says so) and `trafficctl shape add` names the package to install.
+
+---
+
 ## Upgrading to 2.0.0
 
 2.0.0 replaces the shell backend with one ucode CLI, `/usr/sbin/trafficctl`.

@@ -40,8 +40,8 @@
 # routers do not have fails on every `opkg update`, which is worse than no feed.
 #
 # Only the packages of this release go in (the versioned file names, which
-# cover trafficctl, trafficctl-telegram, luci-app-trafficctl and the
-# translations; the
+# cover trafficctl, trafficctl-telegram, trafficctl-shaper, trafficctl-wifi,
+# luci-app-trafficctl and the translations; the
 # <name>.ipk / _all / .apk / _noarch aliases are the same bytes).
 # That is all an upgrade needs.
 set -euo pipefail
@@ -191,13 +191,15 @@ apk update
 apk add luci-app-trafficctl
 /etc/init.d/rpcd restart</pre>
 
-<p>luci-app-trafficctl is the web interface; it pulls in trafficctl, the backend, and
-trafficctl-telegram, the Telegram bot. Without LuCI, install trafficctl, and trafficctl-telegram
-for the bot.</p>
+<p>luci-app-trafficctl is the web interface; it pulls in trafficctl, the backend,
+trafficctl-shaper (tc and the kernel modules for the shaper), trafficctl-wifi (iw and
+hostapd-utils) and trafficctl-telegram, the Telegram bot. Without LuCI, install trafficctl and
+only the parts you use: trafficctl-shaper, trafficctl-wifi, trafficctl-telegram.</p>
 <p>Upgrades: <code>opkg update &amp;&amp; opkg upgrade trafficctl luci-app-trafficctl</code>, or
 <code>apk update &amp;&amp; apk upgrade trafficctl luci-app-trafficctl</code>; up to 1.30.x the bot
-was part of trafficctl, so a router without LuCI that runs it adds
-<code>trafficctl-telegram</code> to that command.
+was part of trafficctl, and up to 2.1.x trafficctl itself depended on tc, iw and curl, so a
+router without LuCI adds the parts it uses (<code>trafficctl-shaper</code>,
+<code>trafficctl-wifi</code>, <code>trafficctl-telegram</code>) to that command.
 Upgrading from 1.28.x or earlier, when the backend was part of luci-app-trafficctl, is
 <code>opkg upgrade luci-app-trafficctl</code> / <code>apk upgrade luci-app-trafficctl</code>:
 it installs trafficctl on the way and keeps the configuration.</p>

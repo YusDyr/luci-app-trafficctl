@@ -124,6 +124,36 @@ for f in sfield dfield; do
 done
 assert_eq "summary: the NAT client is routed" "routed" "$(sfield 192.168.0.2 conn_type)"
 
+# ── shaping: what the Shape control can do here (trafficctl-shaper) ─────────
+# tc is mocked; the kernel's modules are looked for under the root. The IFB
+# device counts too: the shared ip mock answers every command, so here
+# `ip link show` finds a device only while $T/ifb-up exists.
+cp "$BE_BIN/ip" "$T/ip.orig"
+cat > "$BE_BIN/ip" <<MOCK
+#!/bin/sh
+case "\$*" in "link show tctl-ifb0") [ -e "$T/ifb-up" ]; exit ;; esac
+exec "$T/ip.orig" "\$@"
+MOCK
+chmod +x "$BE_BIN/ip"
+rm -rf "$BE_ROOT/sys/module/sch_htb" "$BE_ROOT/sys/module/ifb"
+assert_eq "device: tc but no HTB module" "nohtb" "$(dfield 192.168.1.50 shaping)"
+mkdir -p "$BE_ROOT/sys/module/sch_htb"
+assert_eq "device: HTB, no IFB: download only" "download" "$(dfield 192.168.1.50 shaping)"
+: > "$T/ifb-up"
+assert_eq "device: HTB and the IFB device already up" "full" "$(dfield 192.168.1.50 shaping)"
+rm -f "$T/ifb-up"
+mkdir -p "$BE_ROOT/sys/module/ifb"
+assert_eq "device: HTB and IFB" "full" "$(dfield 192.168.1.50 shaping)"
+rm -rf "$BE_ROOT/sys/module/sch_htb" "$BE_ROOT/sys/module/ifb"
+mkdir -p "$BE_ROOT/lib/modules/$(uname -r)"
+: > "$BE_ROOT/lib/modules/$(uname -r)/sch_htb.ko"
+assert_eq "device: an installed but unloaded HTB module counts" "download" "$(dfield 192.168.1.50 shaping)"
+rm -rf "$BE_ROOT/lib/modules"
+mkdir -p "$T/notc"
+assert_eq "device: no tc, nothing to shape with" "none" \
+    "$(ubus_start "$BE_UBUS"; TCTL_ROOT="$BE_ROOT" PATH="$T/notc" tctl device 192.168.1.50 2>/dev/null | jq -r .shaping; ubus_stop)"
+mv "$T/ip.orig" "$BE_BIN/ip"
+
 # ── WiFi ────────────────────────────────────────────────────────────────────
 assert_eq "device: no wifi-iface, no WiFi filter" "none" "$(dfield 192.168.1.50 wifi_filter)"
 printf "config wifi-iface 'ap0'\n\toption macfilter 'deny'\n\tlist maclist 'AA:BB:CC:DD:EE:32'\n\tlist maclist 'aa:bb:cc:dd:ee:07'\n" \

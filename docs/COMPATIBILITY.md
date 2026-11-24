@@ -45,16 +45,21 @@ The packages contain no compiled code (a ucode backend, a few shell scripts and 
 | `kmod-nft-netdev` | nftables `netdev` family, which the limiter's table `netdev tm_ratelimit` needs (fw4). firewall4 does not pull it in. A declared dependency | ~10 KB |
 | `luci-base` | LuCI framework (provides `view`, `fs`, rpcd) | (part of LuCI) |
 
-### For Traffic Shaping (optional)
+### For Traffic Shaping (optional: `trafficctl-shaper`)
+
+`trafficctl-shaper` holds no files; it pulls in these:
 
 | Package | Purpose | Size |
 |---------|---------|------|
-| `tc-full` | Traffic control utility | ~180 KB |
-| `kmod-sched-core` | Kernel scheduler framework | ~20 KB |
-| `kmod-sched-htb` | HTB qdisc kernel module | ~15 KB |
+| `tc` | Traffic control utility. `tc-tiny` is enough; `tc-full` only adds iptables actions, ipset and eBPF | ~180 KB |
+| `kmod-sched-core` | sch_htb, cls_u32, sch_ingress and act_mirred (there is no `kmod-sched-htb` package). fq_codel is built into OpenWrt's kernel | ~60 KB |
 | `kmod-ifb` | Intermediate device used to shape upload | ~5 KB |
 
-If `tc` is not installed, the shaping feature gracefully degrades: the UI still works but shaper actions return an error message explaining what to install.
+Without `tc` the shaper says `traffic shaping needs tc, which is not installed: install trafficctl-shaper`, saved shapes are not restored (one line in the system log says so), and the web interface hides the Shaper mode. Without the HTB qdisc the shaper names `kmod-sched-core`; without `kmod-ifb` it shapes download only. `trafficctl device` reports which of these applies as `shaping` (`none`, `nohtb`, `download`, `full`).
+
+### For WiFi (optional: `trafficctl-wifi`)
+
+`trafficctl-wifi` holds no files; it pulls in `iw` (WiFi clients, band and signal) and `hostapd-utils` (WiFi MAC filtering through the radio's ACL). hostapd-utils can only be selected with a hostapd/wpad variant, which is why `trafficctl` does not depend on it. Without it a WiFi block is a temporary (one hour) hostapd ban, and `trafficctl device` reports `wifi_filter` as `temporary`.
 
 ### For Reverse DNS
 
@@ -114,7 +119,7 @@ routed clients) takes `host:port` entries, e.g. `127.0.0.1:54`.
 
 ### Traffic Shaping
 
-6. **tc-full required** -- The `tc` binary from the `tc-full` package is required. The minimal `tc` from `iproute2` may lack HTB support.
+6. **Any `tc` variant works** -- `tc-tiny` (the default `tc` provider) handles HTB, u32 and mirred; the kernel side is `kmod-sched-core`. `trafficctl-shaper` pulls in both.
 
 7. **Bridge-only** -- Shaping assumes the LAN is bridged (`br-lan`). Routed LAN setups without a bridge will not work with the shaper.
 
@@ -167,7 +172,7 @@ Use this checklist when testing on a new OpenWrt version or backend:
 
 ### Traffic Shaping (Queue)
 
-- [ ] tc-full installed check works
+- [ ] Without `trafficctl-shaper` the Shaper mode is hidden and `trafficctl shape add` names the package
 - [ ] Apply shaper: speed test shows shaped speed
 - [ ] Backlog counter shows queued bytes under load
 - [ ] Remove shaper: full speed restores

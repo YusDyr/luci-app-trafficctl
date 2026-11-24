@@ -316,6 +316,7 @@ Returns detailed connection information for a single device.
   "wifi_blocked": false,
   "wifi_block_pending": false,
   "wifi_filter": "full",
+  "shaping": "full",
   "total": 101,
   "protocols": {"tcp": 91, "udp": 10, "other": 0},
   "tcp_states": {"established": 22, "time_wait": 3, "syn_sent": 63, "close_wait": 0},
@@ -341,11 +342,20 @@ Returns detailed connection information for a single device.
 
 `wifi_filter` says what a WiFi block can do on this router, router-wide:
 `"full"` (hostapd_cli is installed, blocks go into the running ACL),
-`"temporary"` (WiFi exists but the optional `hostapd-utils` is not installed,
+`"temporary"` (WiFi exists but `hostapd-utils`, from `trafficctl-wifi`, is not installed,
 so a block is a timed hostapd ban over ubus and `macfilter_add` reports
 `"enforcement":"ban"`), or `"none"` (no wifi-iface in uci, e.g. a wired-only
 build; `macfilter_add` answers `"no wifi interfaces found"`). The LuCI view
 hides the WiFi block button for `"none"` and marks it for `"temporary"`.
+
+`shaping` says what the shaper can do on this router, router-wide:
+`"full"` (tc, the HTB qdisc and kmod-ifb: both directions), `"download"`
+(no kmod-ifb: download only), `"nohtb"` (tc but no HTB qdisc, from
+`kmod-sched-core`; `shape_add` fails and names the package) or `"none"` (no
+tc; `shape_add` answers `traffic shaping needs tc, which is not installed:
+install trafficctl-shaper`). `trafficctl-shaper` brings all three. The LuCI
+view hides the Shaper mode for `"none"` unless the device still has a shape,
+and puts the reason on the Shaper button otherwise.
 
 Each connection's `oif` is the egress interface, resolved via
 `ip route get <dst> mark <mark>` from the connection's conntrack fwmark. It is
@@ -1209,7 +1219,7 @@ radio, so it is never done automatically).
 - Every `hostapd_cli` call has a 3 s timeout; an AP whose hostapd does not answer in time is treated as one without `hostapd_cli` and gets the ubus ban.
 - With several APs, `enforcement` is the weakest outcome of any of them (`none`, then `ban`, then `acl`).
 
-**Requires:** `hostapd-utils` (declared in `LUCI_DEPENDS`). Without it only the
+**Requires:** `hostapd-utils` (from `trafficctl-wifi`, which `luci-app-trafficctl` depends on). Without it only the
 degraded `ban` path is available and every block reports `ok:false`.
 
 ---

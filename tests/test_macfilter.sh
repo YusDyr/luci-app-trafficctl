@@ -329,15 +329,18 @@ assert_contains "view hides the WiFi button where there is no wifi" \
     "filter === 'none' && !wifiBlocked" "$(cat "$STATUS_JS")"
 assert_contains "view explains a temporary block with a translatable note" \
     "_('hostapd-utils is not installed:" "$(cat "$STATUS_JS")"
-# Makefile and builders: optional for the backend, kept on the web interface.
+# Makefile and builders: not on the backend, on trafficctl-wifi (2.2.0) and
+# kept on the web interface. tests/test_package_split.sh checks every DEPENDS.
 assert_not_contains "trafficctl does not depend on hostapd-utils" "hostapd-utils" \
-    "$(grep -E '^[[:space:]]*DEPENDS:=' "$REPO/trafficctl/Makefile")"
+    "$(awk '/^define Package\/trafficctl$/{f=1;next} f&&/^endef/{exit} f' "$REPO/trafficctl/Makefile" | grep -E '^[[:space:]]*DEPENDS:=')"
 assert_not_contains "build-ipk backend deps lack hostapd-utils" "hostapd-utils" \
     "$(grep '^BE_DEPENDS=' "$REPO/build-ipk.sh")"
 assert_not_contains "build-apk backend deps lack hostapd-utils" "hostapd-utils" \
     "$(grep '^BE_DEPENDS=' "$REPO/build-apk.sh")"
-assert_contains "the backend description names hostapd-utils for WiFi filtering" \
-    "WiFi MAC filtering needs hostapd-utils" "$(cat "$REPO/trafficctl/Makefile")"
+assert_contains "trafficctl-wifi depends on hostapd-utils" "+hostapd-utils" \
+    "$(awk '/^define Package\/trafficctl-wifi$/{f=1;next} f&&/^endef/{exit} f' "$REPO/trafficctl/Makefile" | grep -E '^[[:space:]]*DEPENDS:=')"
+assert_contains "the trafficctl-wifi description says what a block is without hostapd-utils" \
+    "Without hostapd-utils a WiFi block" "$(cat "$REPO/trafficctl/Makefile")"
 
 
 # ── the row indicator (defect 2) ─────────────────────────────────────────────

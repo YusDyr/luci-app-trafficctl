@@ -210,12 +210,12 @@ The router in these captures runs hardware flow offload, so devices whose traffi
 | `rpcd` | Backend RPC | Always required |
 | `rpcd-mod-ucode` | Runs the rpcd plugin | Always required |
 | `rpcd-mod-file` | The plugin runs the CLI through `file.exec` | Always required (luci-base pulls it in) |
-| `tc-full` + `kmod-sched-core` + `kmod-sched-htb` | Traffic shaping | For HTB/fq_codel queues |
-| `kmod-ifb` | Upload shaping | Without it the shaper applies to download only, and reports that |
-| `iw-full` | Interface detection | WiFi band identification |
-| `bridge-utils` | Interface detection | LAN port identification (brctl) |
-| `hostapd-utils` | WiFi MAC filtering | Optional for the `trafficctl` backend, so it installs on wired-only builds; `luci-app-trafficctl` still pulls it in. Without it a WiFi block is a temporary (one hour) hostapd ban |
-| `curl` + `jsonfilter` | Telegram bot, notifications | jsonfilter is part of base OpenWrt |
+| `tc` + `kmod-sched-core` | Traffic shaping | From `trafficctl-shaper`. `tc-tiny` is enough (`tc-full` only adds iptables actions, ipset and eBPF); `kmod-sched-core` holds HTB, u32, ingress and mirred (there is no `kmod-sched-htb`), and fq_codel is built into the kernel |
+| `kmod-ifb` | Upload shaping | From `trafficctl-shaper`. Without it the shaper applies to download only, and reports that |
+| `iw` | WiFi clients | From `trafficctl-wifi`: WiFi band and signal |
+| `bridge-utils` | Interface detection | Optional: LAN port identification (brctl) |
+| `hostapd-utils` | WiFi MAC filtering | From `trafficctl-wifi`. It can only be selected with a hostapd/wpad variant, so `trafficctl` installs on wired-only builds without it. Without it a WiFi block is a temporary (one hour) hostapd ban |
+| `curl` | Telegram bot, ntfy and webhook notifications | From `trafficctl-telegram`; a sender without it replies "curl is not installed" |
 | `msmtp` | Email notifications | Optional; configure `/etc/msmtprc` |
 | `rpcd-mod-rrdns` | Reverse DNS | Included with `rpcd`; enables rDNS in LuCI, Telegram, and CLI |
 
@@ -247,7 +247,7 @@ Version 2.0+ requires OpenWrt 22.03 or newer with firewall4/nftables. OpenWrt 21
 | **25.12.4** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | | ✓ |
 | **snapshot** | ✓ | | ✓ | ✓ | | | ✓ | | |
 
-Each test builds the three packages (`trafficctl`, `trafficctl-telegram` and `luci-app-trafficctl`), installs them with the release's own package manager (opkg, or apk on 25.12) inside the real OpenWrt rootfs container for that version/arch, then verifies all files are present, every ucode file compiles on that release's interpreter (`ucode -c`) and the remaining shell scripts (init scripts, hooks, CGI) pass `ash -n`. Separate jobs run the limiter, shaper, internet cut and rpcd plugin live on 22.03, 24.10 and 25.12, and upgrade from the previous release.
+Each test builds the five packages (`trafficctl`, `trafficctl-telegram`, `trafficctl-shaper`, `trafficctl-wifi` and `luci-app-trafficctl`), installs them with the release's own package manager (opkg, or apk on 25.12) inside the real OpenWrt rootfs container for that version/arch, then verifies all files are present, every ucode file compiles on that release's interpreter (`ucode -c`) and the remaining shell scripts (init scripts, hooks, CGI) pass `ash -n`. Separate jobs run the limiter, shaper, internet cut and rpcd plugin live on 22.03, 24.10 and 25.12, and upgrade from the previous release.
 
 ---
 
@@ -306,18 +306,27 @@ devices) are family-independent and work regardless.
 > - OpenWrt **25.12+** and snapshot → download `.apk` (apk)
 > - Want upgrades through `opkg upgrade` / `apk upgrade`? Add the [package feed](#package-feed-recommended) instead
 
-The app is three packages, released together with the same version:
+The app is five packages, released together with the same version:
 
 - **`trafficctl`**: the backend. The `trafficctl` CLI and helper scripts,
   `/etc/config/trafficctl`, the notification and history services, the hotplug
   hooks and the Prometheus CGI.
 - **`trafficctl-telegram`**: the Telegram bot (`/etc/init.d/trafficctl-telegram`).
   It depends on `trafficctl`. Up to 1.30.x the bot was part of `trafficctl`.
+- **`trafficctl-shaper`**: no files of its own. It pulls in `tc`,
+  `kmod-sched-core` and `kmod-ifb` for the shaper.
+- **`trafficctl-wifi`**: no files of its own. It pulls in `iw` and
+  `hostapd-utils` for the WiFi client list and WiFi blocks.
 - **`luci-app-trafficctl`**: the web interface (LuCI views and the rpcd plugin).
-  It depends on `trafficctl` and `trafficctl-telegram`.
+  It depends on all four.
 
-A router without LuCI needs only `trafficctl`, and `trafficctl-telegram` for
-the bot. Upgrading such a router from 1.30.x with only `trafficctl` stops the
+A router without LuCI needs only `trafficctl` plus the parts it uses:
+`trafficctl-shaper` to shape, `trafficctl-wifi` for WiFi, `trafficctl-telegram`
+for the bot. Without a part, the command that needs it fails and names the
+package to install, for example `traffic shaping needs tc, which is not
+installed: install trafficctl-shaper`. Up to 2.1.x `trafficctl` itself
+depended on `tc`, `iw` and `curl`; on such a router, upgrade with the parts
+it uses in the same command, or apk removes those tools as no longer needed. Upgrading such a router from 1.30.x with only `trafficctl` stops the
 bot (the postinst says so in the system log): add `trafficctl-telegram` to the
 same command to keep it. To go back to 1.30.x, remove `trafficctl-telegram`
 first (`opkg remove trafficctl-telegram` / `apk del trafficctl-telegram`):
@@ -333,12 +342,12 @@ Each release includes multiple filenames for each package:
 
 | Asset name | Purpose |
 |-----------|---------|
-| `trafficctl.ipk`, `trafficctl-telegram.ipk`, `luci-app-trafficctl.ipk` | Stable download URLs (opkg) |
-| `trafficctl_all.ipk`, `trafficctl-telegram_all.ipk`, `luci-app-trafficctl_all.ipk` | Same files, OpenWrt naming convention |
-| `trafficctl_X.Y.Z-1_all.ipk`, `trafficctl-telegram_X.Y.Z-1_all.ipk`, `luci-app-trafficctl_X.Y.Z-1_all.ipk` | Same files, version-pinned |
-| `trafficctl.apk`, `trafficctl-telegram.apk`, `luci-app-trafficctl.apk` | Stable download URLs (apk) |
-| `trafficctl_noarch.apk`, `trafficctl-telegram_noarch.apk`, `luci-app-trafficctl_noarch.apk` | Same files, OpenWrt naming convention |
-| `trafficctl_X.Y.Z-r1_noarch.apk`, `trafficctl-telegram_X.Y.Z-r1_noarch.apk`, `luci-app-trafficctl_X.Y.Z-r1_noarch.apk` | Same files, version-pinned |
+| `trafficctl.ipk`, `trafficctl-telegram.ipk`, `trafficctl-shaper.ipk`, `trafficctl-wifi.ipk`, `luci-app-trafficctl.ipk` | Stable download URLs (opkg) |
+| `trafficctl_all.ipk`, `trafficctl-telegram_all.ipk`, `trafficctl-shaper_all.ipk`, `trafficctl-wifi_all.ipk`, `luci-app-trafficctl_all.ipk` | Same files, OpenWrt naming convention |
+| `trafficctl_X.Y.Z-1_all.ipk`, `trafficctl-telegram_X.Y.Z-1_all.ipk`, `trafficctl-shaper_X.Y.Z-1_all.ipk`, `trafficctl-wifi_X.Y.Z-1_all.ipk`, `luci-app-trafficctl_X.Y.Z-1_all.ipk` | Same files, version-pinned |
+| `trafficctl.apk`, `trafficctl-telegram.apk`, `trafficctl-shaper.apk`, `trafficctl-wifi.apk`, `luci-app-trafficctl.apk` | Stable download URLs (apk) |
+| `trafficctl_noarch.apk`, `trafficctl-telegram_noarch.apk`, `trafficctl-shaper_noarch.apk`, `trafficctl-wifi_noarch.apk`, `luci-app-trafficctl_noarch.apk` | Same files, OpenWrt naming convention |
+| `trafficctl_X.Y.Z-r1_noarch.apk`, `trafficctl-telegram_X.Y.Z-r1_noarch.apk`, `trafficctl-shaper_X.Y.Z-r1_noarch.apk`, `trafficctl-wifi_X.Y.Z-r1_noarch.apk`, `luci-app-trafficctl_X.Y.Z-r1_noarch.apk` | Same files, version-pinned |
 
 The "stable URL" links below always download from the latest release — the filename stays constant across versions.
 
@@ -399,14 +408,15 @@ The single-file methods below still work and need no feed.
 ### OpenWrt 25.12+ (.apk)
 
 **Option A — LuCI web UI:**
-1. Download [`trafficctl.apk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.apk), [`trafficctl-telegram.apk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-telegram.apk) and [`luci-app-trafficctl.apk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.apk) to your computer
+1. Download [`trafficctl.apk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.apk), [`trafficctl-telegram.apk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-telegram.apk), [`trafficctl-shaper.apk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-shaper.apk), [`trafficctl-wifi.apk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-wifi.apk) and [`luci-app-trafficctl.apk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.apk) to your computer
 2. In LuCI: **System → Software → Upload Package...**
-3. Upload `trafficctl.apk` first, then `trafficctl-telegram.apk`, then `luci-app-trafficctl.apk`
+3. Upload `trafficctl.apk` first, then `trafficctl-telegram.apk`, `trafficctl-shaper.apk` and `trafficctl-wifi.apk`, then `luci-app-trafficctl.apk`
 
-**Option B — SSH (recommended):** the three files in one command, `trafficctl` first:
+**Option B — SSH (recommended):** the five files in one command, `trafficctl` first:
 
 ```sh
-cd /tmp && wget -O trafficctl.apk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.apk && wget -O trafficctl-telegram.apk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-telegram.apk && wget -O luci-app-trafficctl.apk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.apk && apk add --allow-untrusted trafficctl.apk trafficctl-telegram.apk luci-app-trafficctl.apk
+cd /tmp && for p in trafficctl trafficctl-telegram trafficctl-shaper trafficctl-wifi luci-app-trafficctl; do wget -O $p.apk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/$p.apk; done
+apk add --allow-untrusted trafficctl.apk trafficctl-telegram.apk trafficctl-shaper.apk trafficctl-wifi.apk luci-app-trafficctl.apk
 # If you get "modified conffile" on upgrade, add `--force-maintainer` to override
 ```
 
@@ -423,34 +433,34 @@ cd /tmp && wget -O trafficctl.apk https://github.com/YusDyr/luci-app-trafficctl/
 ### OpenWrt 22.03 — 24.10 (.ipk)
 
 **Option A — LuCI web UI:**
-1. Download [`trafficctl.ipk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.ipk), [`trafficctl-telegram.ipk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-telegram.ipk) and [`luci-app-trafficctl.ipk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk) to your computer
+1. Download [`trafficctl.ipk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.ipk), [`trafficctl-telegram.ipk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-telegram.ipk), [`trafficctl-shaper.ipk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-shaper.ipk), [`trafficctl-wifi.ipk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-wifi.ipk) and [`luci-app-trafficctl.ipk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk) to your computer
 2. In LuCI: **System → Software → Upload Package...**
-3. Upload `trafficctl.ipk` first, then `trafficctl-telegram.ipk`, then `luci-app-trafficctl.ipk`
+3. Upload `trafficctl.ipk` first, then `trafficctl-telegram.ipk`, `trafficctl-shaper.ipk` and `trafficctl-wifi.ipk`, then `luci-app-trafficctl.ipk`
 
 Run `opkg update` first (or **Update lists...** in LuCI): opkg keeps its package lists in RAM, so after a reboot it cannot find a dependency the router does not have yet.
 
-**Option B — SSH** (requires HTTPS support — `libustream-wolfssl` or `libustream-openssl`). The three files in one command, `trafficctl` first:
+**Option B — SSH** (requires HTTPS support — `libustream-wolfssl` or `libustream-openssl`). The five files in one command, `trafficctl` first:
 
 ```sh
-opkg update && opkg install https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-telegram.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk
+opkg update && opkg install https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-telegram.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-shaper.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-wifi.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk
 ```
 
 **Option C — SSH from your machine:**
 
 ```sh
-ssh root@router 'opkg update && opkg install https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-telegram.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk'
+ssh root@router 'opkg update && opkg install https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-telegram.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-shaper.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/trafficctl-wifi.ipk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk'
 ```
 
 ### Uninstalling
 
 ```sh
 # OpenWrt 25.12+ (apk)
-apk del luci-app-trafficctl trafficctl-telegram trafficctl
+apk del luci-app-trafficctl trafficctl-telegram trafficctl-shaper trafficctl-wifi trafficctl
 
-# OpenWrt 22.03 - 24.10 (opkg): the web interface first, then the bot, then
-# the backend
+# OpenWrt 22.03 - 24.10 (opkg): the web interface first, then the optional
+# parts, then the backend
 opkg remove luci-app-trafficctl
-opkg remove trafficctl-telegram
+opkg remove trafficctl-telegram trafficctl-shaper trafficctl-wifi
 opkg remove trafficctl
 
 # either way, reload the LuCI backend afterwards
@@ -513,24 +523,20 @@ ssh root@router 'chmod +x /usr/sbin/trafficctl /usr/libexec/trafficctl/trafficct
 # Core (always required)
 apk add conntrack luci-base rpcd rpcd-mod-ucode
 
-# For traffic shaping
-apk add tc-full kmod-sched-core kmod-sched-htb
+# For traffic shaping: tc, kmod-sched-core (HTB, u32, ingress, mirred) and
+# kmod-ifb (upload; without it the shaper applies download only and says so)
+apk add trafficctl-shaper
 
-# For upload shaping — without it the shaper applies download only and says so
-# (upload is redirected into an IFB device via act_mirred, which ships with the
-# sched core package above)
-apk add kmod-ifb
+# For WiFi: iw (clients, band, signal) and hostapd-utils (WiFi MAC deny and
+# deauthenticate; without it a WiFi block is a temporary one-hour ban)
+apk add trafficctl-wifi
 
-# For interface detection (WiFi band + LAN port)
-apk add iw-full bridge-utils
-
-# For WiFi MAC deny / deauthenticate (optional for the trafficctl backend;
-# without it a WiFi block is a temporary one-hour ban)
-apk add hostapd-utils
+# For LAN port identification (optional)
+apk add bridge-utils
 
 # rpcd-mod-rrdns is included with rpcd (no extra install needed)
 
-# For the Telegram bot (optional; luci-app-trafficctl pulls it in)
+# For the Telegram bot, with curl, which the ntfy and webhook senders use too
 apk add trafficctl-telegram
 ```
 
@@ -543,24 +549,20 @@ apk add trafficctl-telegram
 # Core (always required)
 opkg install conntrack luci-base rpcd rpcd-mod-ucode
 
-# For traffic shaping
-opkg install tc-full kmod-sched-core kmod-sched-htb
+# For traffic shaping: tc, kmod-sched-core (HTB, u32, ingress, mirred) and
+# kmod-ifb (upload; without it the shaper applies download only and says so)
+opkg install trafficctl-shaper
 
-# For upload shaping — without it the shaper applies download only and says so
-# (upload is redirected into an IFB device via act_mirred, which ships with the
-# sched core package above)
-opkg install kmod-ifb
+# For WiFi: iw (clients, band, signal) and hostapd-utils (WiFi MAC deny and
+# deauthenticate; without it a WiFi block is a temporary one-hour ban)
+opkg install trafficctl-wifi
 
-# For interface detection (WiFi band + LAN port)
-opkg install iw-full bridge-utils
-
-# For WiFi MAC deny / deauthenticate (optional for the trafficctl backend;
-# without it a WiFi block is a temporary one-hour ban)
-opkg install hostapd-utils
+# For LAN port identification (optional)
+opkg install bridge-utils
 
 # rpcd-mod-rrdns is included with rpcd (no extra install needed)
 
-# For the Telegram bot (optional; luci-app-trafficctl pulls it in)
+# For the Telegram bot, with curl, which the ntfy and webhook senders use too
 opkg install trafficctl-telegram
 ```
 
@@ -639,10 +641,10 @@ When a device is WiFi-blocked:
 - At runtime, `hostapd_cli deny_acl ADD_MAC` adds the MAC to the deny ACL and `deauthenticate` disconnects only that client. No wifi reload -- other clients stay connected.
 - The ACL is then **read back** to confirm the entry landed. The UCI entry is durable but only applies at the next wifi restart, so a runtime step that did not happen is reported as a failure rather than as a block -- see `enforcement` in [docs/API.md](docs/API.md).
 
-This needs the `hostapd-utils` package. The `trafficctl` backend does not
-depend on it, so the backend can be installed on wired-only builds (where
-hostapd-utils cannot be selected); `luci-app-trafficctl` still pulls it in. If
-it is missing, trafficctl falls back to a temporary hostapd ban over ubus, says
+This needs the `hostapd-utils` package, which `trafficctl-wifi` pulls in
+(`luci-app-trafficctl` depends on it). The `trafficctl` backend does not, so it
+can be installed on wired-only builds, where hostapd-utils cannot be selected.
+If it is missing, trafficctl falls back to a temporary hostapd ban over ubus, says
 so, and tells you to install it -- a device on the deny list that is still
 connected is shown in the table as **not applied** rather than as blocked. The
 Block WiFi button carries a note saying the block is temporary, and on a router

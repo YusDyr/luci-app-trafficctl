@@ -535,7 +535,20 @@ function http_status(code) {
 	return (n != null && n >= 200 && n < 300) ? null : 'HTTP ' + ((n != null && n > 0) ? n : 'request failed');
 }
 
+// curl is optional: trafficctl does not depend on it, so a router without it
+// still gets the ubus events, the hotplug scripts and mail. A sender that needs
+// it says so instead of failing as "request failed".
+const NO_CURL = 'curl is not installed: opkg/apk install curl';
+
+let has_curl;
+function curl_missing() {
+	has_curl ??= (lib.sh('command -v curl') == 0);
+	return !has_curl;
+}
+
 function post_status(url, headers, body) {
+	if (curl_missing())
+		return NO_CURL;
 	return http_status(lib.pipe("curl -s -m 10 -X POST -o /dev/null -w '%{http_code}' --config -",
 		lib.curl_config(url, headers, body)));
 }
@@ -545,6 +558,8 @@ const TG_CHAT_RE = /^-?[0-9]+$/;
 
 // sendMessage: null when Telegram took it, else the reason.
 function tg_send(token, chat, text) {
+	if (curl_missing())
+		return NO_CURL;
 	let out = lib.pipe('curl -s -m 10 -X POST --config -',
 		lib.curl_config('https://api.telegram.org/bot' + token + '/sendMessage', [ 'Content-Type: application/json' ],
 			'{"chat_id":' + lib.to_json(chat) + ',"text":' + lib.to_json(text) + ',"parse_mode":"HTML"}'));
