@@ -79,6 +79,21 @@ rest) are gone.
 
 ---
 
+## [2.3.0] - 2026-11-24
+
+### Features
+- trafficctl-full, every optional part in one package ([#192](https://github.com/YusDyr/luci-app-trafficctl/issues/192)) ([631b958](https://github.com/YusDyr/luci-app-trafficctl/commit/631b958fc5b2fe443a606a77b82bc1c869df7b60))
+  trafficctl-full holds no files and pulls in trafficctl-shaper,
+  trafficctl-wifi and trafficctl-telegram of the same release.
+  luci-app-trafficctl now depends on trafficctl-full instead of listing
+  the three parts, so the web interface keeps every control. Without LuCI,
+  trafficctl-full is the full install and trafficctl plus chosen parts is
+  the smaller one.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v2.2.0...v2.3.0
+
+---
+
 ## [2.2.0] - 2026-11-24
 
 ### Features
