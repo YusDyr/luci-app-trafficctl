@@ -40,6 +40,8 @@ chmod +x "$MOCKBIN/tc" "$MOCKBIN/ip"
 
 st_net() {
     lt_net "$@"
+    # lt_net rebuilds $ROOT/sys, which drops the HTB module made above.
+    mkdir -p "$ROOT/sys/module/sch_htb"
     ST_DEVS="$*"
     st_reset
 }
