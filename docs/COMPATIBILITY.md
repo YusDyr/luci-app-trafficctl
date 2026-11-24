@@ -37,6 +37,14 @@ The packages contain no compiled code (a ucode backend, a few shell scripts and 
 
 ## Required Packages
 
+Which packages a router needs depends on what it uses (README, [Which packages to install](../README.md#which-packages-to-install)):
+
+| Install | Packages |
+|---------|----------|
+| With the web interface (default) | `luci-app-trafficctl`, which pulls in `trafficctl-full` and with it everything below |
+| Everything, no LuCI | `trafficctl-full` |
+| Smaller, no LuCI | `trafficctl` plus only `trafficctl-shaper`, `trafficctl-wifi` or `trafficctl-telegram` as needed |
+
 ### Core (always required)
 
 | Package | Purpose | Size |

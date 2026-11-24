@@ -7,13 +7,15 @@ PKG_RELEASE="${2:-1}"
 PKG_ARCH="all"
 
 # The packages, in the feed-compatible subdirectory layout: the backend
-# (trafficctl), from the same directory the Telegram bot (trafficctl-telegram)
-# and the dependency-only trafficctl-shaper and trafficctl-wifi, and the web
-# interface that depends on all of them (luci-app-trafficctl).
+# (trafficctl), from the same directory the Telegram bot (trafficctl-telegram),
+# the dependency-only trafficctl-shaper and trafficctl-wifi and trafficctl-full
+# that pulls in all of them, and the web interface that depends on
+# trafficctl-full (luci-app-trafficctl).
 BE_NAME="trafficctl"
 TG_NAME="trafficctl-telegram"
 SH_NAME="trafficctl-shaper"
 WF_NAME="trafficctl-wifi"
+FL_NAME="trafficctl-full"
 # The bot's files under trafficctl/files (Package/trafficctl-telegram/install).
 TG_FILES="usr/share/ucode/trafficctl/telegram.uc usr/libexec/trafficctl/trafficctl-telegram.uc etc/init.d/trafficctl-telegram"
 TCTL_ROOT="$(dirname "$0")"
@@ -289,7 +291,7 @@ exit 0
 EOF
 chmod +x "$TG_CTRL/preinst" "$TG_CTRL/postinst" "$TG_CTRL/prerm"
 
-# ── trafficctl-shaper, trafficctl-wifi: dependencies only ──────────────────
+# ── trafficctl-shaper, trafficctl-wifi, trafficctl-full: dependencies only ─
 # No files: the code they enable ships in trafficctl, which checks for the
 # tools at run time. Versioned like EXTRA_DEPENDS in trafficctl/Makefile.
 meta_stage() { # <name> <depends> <description>
@@ -313,6 +315,10 @@ meta_stage "$SH_NAME" "$SH_DEPENDS" "Traffic shaping for trafficctl: per-device 
 meta_stage "$WF_NAME" "$WF_DEPENDS" "WiFi support for trafficctl: the WiFi clients with their band and
  signal, and WiFi MAC filtering through the radio's ACL. Pulls in iw and
  hostapd-utils; holds no files of its own."
+# Every part pinned to this release, like luci-app-trafficctl pins it.
+meta_stage "$FL_NAME" "$TG_NAME (= ${PKG_VERSION}-${PKG_RELEASE}), $SH_NAME (= ${PKG_VERSION}-${PKG_RELEASE}), $WF_NAME (= ${PKG_VERSION}-${PKG_RELEASE})" "trafficctl with every optional part: trafficctl-shaper, trafficctl-wifi
+ and trafficctl-telegram. Holds no files of its own; install trafficctl and
+ only the parts you need instead for a smaller install."
 
 # ── luci-app-trafficctl: the web interface ─────────────────────────────────
 STAGE="$WORKDIR/main"
@@ -342,7 +348,7 @@ mkdir -p "$CTRL"
 cat > "$CTRL/control" <<EOF
 Package: $PKG_NAME
 Version: ${PKG_VERSION}-${PKG_RELEASE}
-Depends: $BE_NAME (= ${PKG_VERSION}-${PKG_RELEASE}), $TG_NAME (= ${PKG_VERSION}-${PKG_RELEASE}), $SH_NAME (= ${PKG_VERSION}-${PKG_RELEASE}), $WF_NAME (= ${PKG_VERSION}-${PKG_RELEASE}), $BE_DEPENDS, $FE_EXTRA_DEPENDS, luci-base, rpcd, rpcd-mod-ucode, rpcd-mod-file
+Depends: $BE_NAME (= ${PKG_VERSION}-${PKG_RELEASE}), $FL_NAME (= ${PKG_VERSION}-${PKG_RELEASE}), $BE_DEPENDS, $FE_EXTRA_DEPENDS, luci-base, rpcd, rpcd-mod-ucode, rpcd-mod-file
 Source: https://github.com/YusDyr/luci-app-trafficctl
 License: Apache-2.0
 Section: luci
@@ -374,6 +380,7 @@ assemble_ipk "$BE_NAME" "$PKG_ARCH" "$BE_STAGE"
 assemble_ipk "$TG_NAME" "$PKG_ARCH" "$TG_STAGE"
 assemble_ipk "$SH_NAME" "$PKG_ARCH" "$WORKDIR/$SH_NAME"
 assemble_ipk "$WF_NAME" "$PKG_ARCH" "$WORKDIR/$WF_NAME"
+assemble_ipk "$FL_NAME" "$PKG_ARCH" "$WORKDIR/$FL_NAME"
 
 # Translations, one package per language, mirroring what the feed build
 # produces. Printed BEFORE luci-app-trafficctl so that callers taking the last

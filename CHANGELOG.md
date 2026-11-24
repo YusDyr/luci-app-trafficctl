@@ -4,6 +4,23 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## Upgrading to 2.3.0
+
+2.3.0 adds `trafficctl-full`, a package with no files that pulls in
+`trafficctl`, `trafficctl-shaper`, `trafficctl-wifi` and `trafficctl-telegram`
+of the same release. `luci-app-trafficctl` depends on it instead of listing the
+three parts.
+
+- With LuCI nothing changes: `opkg upgrade luci-app-trafficctl` / `apk upgrade`
+  installs `trafficctl-full` and keeps every part.
+- Without LuCI, `trafficctl-full` is the full install, and `trafficctl` plus
+  the parts the router uses stays the smaller one. README, "Which packages to
+  install", lists the combinations.
+- With downloaded files, `trafficctl-full.ipk` / `.apk` is the sixth file of
+  the install command.
+
+---
+
 ## Upgrading to 2.2.0
 
 2.2.0 splits the optional parts' dependencies off `trafficctl`. It no longer

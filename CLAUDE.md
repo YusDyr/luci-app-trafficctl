@@ -33,9 +33,15 @@ All packages are released in lockstep with the same PKG_VERSION.
   no tc → `shape add` names trafficctl-shaper, restore logs one line;
   no curl → a sender replies `curl is not installed`. `trafficctl device`
   reports `shaping` (none/nohtb/download/full) next to `wifi_filter`.
+  Since 2.3.0 a third one, `trafficctl-full`, pulls in trafficctl and all
+  three parts (`+trafficctl +trafficctl-shaper +trafficctl-wifi
+  +trafficctl-telegram`, each `>=$(PKG_VERSION)`; build-ipk/apk.sh pin the
+  parts to the exact release).
 - `luci-app-trafficctl/`: the web interface (`luci.mk`). Owns the views, the
   rpcd plugin, menu.d, acl.d and po/.
-  `LUCI_DEPENDS:=+trafficctl +trafficctl-telegram +trafficctl-shaper +trafficctl-wifi ...`.
+  `LUCI_DEPENDS:=+trafficctl +trafficctl-full ...`: the web interface always
+  comes with every part; a smaller install (trafficctl plus chosen parts) is
+  headless only. README "Which packages to install" lists the combinations.
 
 Releases up to 1.28.x were one package, `luci-app-trafficctl`, holding all of
 it. The upgrade moves the backend files and the conffile to `trafficctl`:

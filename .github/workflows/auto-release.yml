@@ -290,8 +290,8 @@ jobs:
             echo ""
             echo "### Download"
             echo ""
-            echo "Five packages. \`luci-app-trafficctl\` (the web interface) needs all of them; install"
-            echo "them in ONE command:"
+            echo "Six packages. Pick one of the combinations below and install it in ONE"
+            echo "command."
             echo ""
             echo "| Package | What it is |"
             echo "|---------|------------|"
@@ -299,11 +299,18 @@ jobs:
             echo "| \`trafficctl-shaper\` | no files: tc, kmod-sched-core and kmod-ifb for the shaper |"
             echo "| \`trafficctl-wifi\` | no files: iw and hostapd-utils for WiFi clients and WiFi blocks |"
             echo "| \`trafficctl-telegram\` | the Telegram bot (with curl) |"
-            echo "| \`luci-app-trafficctl\` | the web interface |"
+            echo "| \`trafficctl-full\` | no files: all of the above |"
+            echo "| \`luci-app-trafficctl\` | the web interface; depends on \`trafficctl-full\` |"
             echo ""
-            echo "Without LuCI, install \`trafficctl\` and only the parts you use. A missing part"
-            echo "is reported where it is needed (\`traffic shaping needs tc ...: install"
-            echo "trafficctl-shaper\`)."
+            echo "| Combination | Packages |"
+            echo "|-------------|----------|"
+            echo "| with LuCI (the default) | all six |"
+            echo "| everything, no LuCI | all but \`luci-app-trafficctl\` |"
+            echo "| smaller, no LuCI | \`trafficctl\` plus only the parts you use, e.g. \`trafficctl\` + \`trafficctl-shaper\` on a wired router that shapes |"
+            echo ""
+            echo "The web interface always comes with every part. A part left out of a"
+            echo "smaller install is reported where it is needed (\`traffic shaping needs"
+            echo "tc ...: install trafficctl-shaper\`)."
             echo ""
             echo "Or add the signed package feed once and let the package manager fetch them:"
             echo "https://yusdyr.github.io/luci-app-trafficctl/"
@@ -315,11 +322,13 @@ jobs:
             echo "wget https://github.com/${{ github.repository }}/releases/latest/download/trafficctl-telegram.ipk"
             echo "wget https://github.com/${{ github.repository }}/releases/latest/download/trafficctl-shaper.ipk"
             echo "wget https://github.com/${{ github.repository }}/releases/latest/download/trafficctl-wifi.ipk"
+            echo "wget https://github.com/${{ github.repository }}/releases/latest/download/trafficctl-full.ipk"
             echo "wget https://github.com/${{ github.repository }}/releases/latest/download/luci-app-trafficctl.ipk"
             echo "wget https://github.com/${{ github.repository }}/releases/latest/download/trafficctl.apk"
             echo "wget https://github.com/${{ github.repository }}/releases/latest/download/trafficctl-telegram.apk"
             echo "wget https://github.com/${{ github.repository }}/releases/latest/download/trafficctl-shaper.apk"
             echo "wget https://github.com/${{ github.repository }}/releases/latest/download/trafficctl-wifi.apk"
+            echo "wget https://github.com/${{ github.repository }}/releases/latest/download/trafficctl-full.apk"
             echo "wget https://github.com/${{ github.repository }}/releases/latest/download/luci-app-trafficctl.apk"
             echo "\`\`\`"
             echo ""
@@ -332,9 +341,10 @@ jobs:
             echo "or older, the backend moves from luci-app-trafficctl into trafficctl in"
             echo "the same run. trafficctl-telegram is the Telegram bot, part of trafficctl"
             echo "up to 1.30.x. Since 2.2.0 trafficctl no longer depends on tc, iw and curl:"
-            echo "trafficctl-shaper, trafficctl-wifi and trafficctl-telegram bring them, and"
-            echo "luci-app-trafficctl depends on all three. A router without LuCI keeps them"
-            echo "only if the parts it uses are installed."
+            echo "trafficctl-shaper, trafficctl-wifi and trafficctl-telegram bring them."
+            echo "Since 2.3.0 trafficctl-full pulls in all three and luci-app-trafficctl"
+            echo "depends on it. A router without LuCI keeps them only if trafficctl-full or"
+            echo "the parts it uses are installed."
             echo ""
             echo "\`\`\`sh"
             echo "cd /tmp"
@@ -346,8 +356,9 @@ jobs:
             echo "wget https://github.com/${{ github.repository }}/releases/latest/download/trafficctl-telegram.ipk"
             echo "wget https://github.com/${{ github.repository }}/releases/latest/download/trafficctl-shaper.ipk"
             echo "wget https://github.com/${{ github.repository }}/releases/latest/download/trafficctl-wifi.ipk"
+            echo "wget https://github.com/${{ github.repository }}/releases/latest/download/trafficctl-full.ipk"
             echo "wget https://github.com/${{ github.repository }}/releases/latest/download/luci-app-trafficctl.ipk"
-            echo "opkg install /tmp/trafficctl.ipk /tmp/trafficctl-telegram.ipk /tmp/trafficctl-shaper.ipk /tmp/trafficctl-wifi.ipk /tmp/luci-app-trafficctl.ipk"
+            echo "opkg install /tmp/trafficctl.ipk /tmp/trafficctl-telegram.ipk /tmp/trafficctl-shaper.ipk /tmp/trafficctl-wifi.ipk /tmp/trafficctl-full.ipk /tmp/luci-app-trafficctl.ipk"
             echo ""
             echo "# OpenWrt 25.12+ / snapshot"
             echo "apk update"
@@ -355,14 +366,15 @@ jobs:
             echo "wget https://github.com/${{ github.repository }}/releases/latest/download/trafficctl-telegram.apk"
             echo "wget https://github.com/${{ github.repository }}/releases/latest/download/trafficctl-shaper.apk"
             echo "wget https://github.com/${{ github.repository }}/releases/latest/download/trafficctl-wifi.apk"
+            echo "wget https://github.com/${{ github.repository }}/releases/latest/download/trafficctl-full.apk"
             echo "wget https://github.com/${{ github.repository }}/releases/latest/download/luci-app-trafficctl.apk"
-            echo "apk add --allow-untrusted /tmp/trafficctl.apk /tmp/trafficctl-telegram.apk /tmp/trafficctl-shaper.apk /tmp/trafficctl-wifi.apk /tmp/luci-app-trafficctl.apk"
+            echo "apk add --allow-untrusted /tmp/trafficctl.apk /tmp/trafficctl-telegram.apk /tmp/trafficctl-shaper.apk /tmp/trafficctl-wifi.apk /tmp/trafficctl-full.apk /tmp/luci-app-trafficctl.apk"
             echo ""
             echo "\`\`\`"
             echo ""
             echo "With the package feed added, the same upgrade is"
-            echo "\`opkg update && opkg install trafficctl trafficctl-telegram trafficctl-shaper trafficctl-wifi luci-app-trafficctl\`"
-            echo "(or \`apk update && apk upgrade ...\`)."
+            echo "\`opkg update && opkg install luci-app-trafficctl\`"
+            echo "(\`opkg install trafficctl-full\` without LuCI; or \`apk update && apk upgrade\`)."
             echo ""
             echo "If the install reports \`cannot find dependency\`, run \`opkg update\` and"
             echo "the same \`opkg install\` again. opkg may already have upgraded"
@@ -442,6 +454,8 @@ jobs:
           ln -f dist/trafficctl-shaper_*_all.ipk dist/trafficctl-shaper.ipk
           ln -f dist/trafficctl-wifi_*_all.ipk dist/trafficctl-wifi_all.ipk
           ln -f dist/trafficctl-wifi_*_all.ipk dist/trafficctl-wifi.ipk
+          ln -f dist/trafficctl-full_*_all.ipk dist/trafficctl-full_all.ipk
+          ln -f dist/trafficctl-full_*_all.ipk dist/trafficctl-full.ipk
           cp dist/*.ipk /tmp/
 
       # Secrets are not readable from step `if:` expressions, so detect them
@@ -517,7 +531,7 @@ jobs:
           # luci-i18n-trafficctl-* as well as the main package: build-ipk.sh
           # emits one translation package per language and the SDK action wiped
           # dist/, so a glob anchored on the main package name drops them.
-          cp /tmp/luci-*trafficctl*.ipk /tmp/trafficctl_*.ipk /tmp/trafficctl-telegram_*.ipk /tmp/trafficctl-shaper_*.ipk /tmp/trafficctl-wifi_*.ipk dist/ 2>/dev/null || true
+          cp /tmp/luci-*trafficctl*.ipk /tmp/trafficctl_*.ipk /tmp/trafficctl-telegram_*.ipk /tmp/trafficctl-shaper_*.ipk /tmp/trafficctl-wifi_*.ipk /tmp/trafficctl-full_*.ipk dist/ 2>/dev/null || true
           # The SDK builds the translation subpackages alongside the main one.
           # Renamed to the release version rather than copied verbatim: the SDK
           # names them from its own APK_VERSION, which is a date-and-commit
@@ -534,11 +548,12 @@ jobs:
             cp "$_apk" "dist/${_name}_${{ needs.prepare.outputs.new_version }}-r1_noarch.apk"
           done
           # The web interface, the backend (trafficctl-<ver>.apk), the bot and
-          # the shaper and WiFi dependency packages, under the release names. -name matches the whole basename, so
+          # the shaper, WiFi and full dependency packages, under the release
+          # names. -name matches the whole basename, so
           # "trafficctl-[0-9]*" cannot pick up luci-app-trafficctl-* or
           # trafficctl-telegram-*.
           V="${{ needs.prepare.outputs.new_version }}"
-          for pkg in luci-app-trafficctl trafficctl trafficctl-telegram trafficctl-shaper trafficctl-wifi; do
+          for pkg in luci-app-trafficctl trafficctl trafficctl-telegram trafficctl-shaper trafficctl-wifi trafficctl-full; do
             APK=$(find bin/ -name "${pkg}-[0-9]*.apk" 2>/dev/null | head -1)
             if [ -z "$APK" ]; then
               echo "::error::$pkg APK not found in SDK output"
@@ -557,6 +572,8 @@ jobs:
           ln -f "dist/trafficctl-shaper_${V}-r1_noarch.apk" dist/trafficctl-shaper.apk
           ln -f "dist/trafficctl-wifi_${V}-r1_noarch.apk" dist/trafficctl-wifi_noarch.apk
           ln -f "dist/trafficctl-wifi_${V}-r1_noarch.apk" dist/trafficctl-wifi.apk
+          ln -f "dist/trafficctl-full_${V}-r1_noarch.apk" dist/trafficctl-full_noarch.apk
+          ln -f "dist/trafficctl-full_${V}-r1_noarch.apk" dist/trafficctl-full.apk
 
       - name: Build .apk (standalone, unsigned fallback)
         if: needs.prepare.outputs.bump != 'none' && steps.apk_secrets.outputs.have != '1'

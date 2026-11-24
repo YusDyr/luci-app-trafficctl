@@ -13,8 +13,8 @@
 #
 # The Telegram bot is a second package from this Makefile, trafficctl-telegram:
 # a resident process that a router without a bot should not carry.
-# trafficctl-shaper and trafficctl-wifi are two more, dependencies only: see
-# the table above Package/trafficctl.
+# trafficctl-shaper and trafficctl-wifi are two more, dependencies only, and
+# trafficctl-full pulls in all of them: see the table above Package/trafficctl.
 #
 # An upgrade from a release that still shipped everything in
 # luci-app-trafficctl needs nothing special here: opkg and apk both hand a
@@ -76,6 +76,8 @@ include $(INCLUDE_DIR)/package.mk
 #                                        variant, which is why it is not on
 #                                        trafficctl
 #   trafficctl-telegram curl             the bot's API calls
+#   trafficctl-full     the four above   everything; what luci-app-trafficctl
+#                                        depends on and the default install
 #
 # curl is on no package but the bot: the ntfy, webhook and Telegram senders
 # need it, the ubus events, hotplug scripts and mail do not, and a sender
@@ -121,6 +123,16 @@ define Package/trafficctl-telegram
   PKGARCH:=all
 endef
 
+define Package/trafficctl-full
+  SECTION:=net
+  CATEGORY:=Network
+  TITLE:=trafficctl with every optional part
+  URL:=https://github.com/YusDyr/luci-app-trafficctl
+  DEPENDS:=+trafficctl +trafficctl-shaper +trafficctl-wifi +trafficctl-telegram
+  EXTRA_DEPENDS:=trafficctl (>=$(PKG_VERSION)), trafficctl-shaper (>=$(PKG_VERSION)), trafficctl-wifi (>=$(PKG_VERSION)), trafficctl-telegram (>=$(PKG_VERSION))
+  PKGARCH:=all
+endef
+
 define Package/trafficctl/description
  Per-device traffic monitoring (conntrack), rate limiting (nftables),
  internet blocking, a global internet cut, port-forward control, device
@@ -142,6 +154,12 @@ define Package/trafficctl-wifi/description
  and WiFi MAC filtering through the radio's ACL. Pulls in iw and
  hostapd-utils; holds no files of its own. Without hostapd-utils a WiFi block
  is a temporary (one hour) hostapd ban over ubus.
+endef
+
+define Package/trafficctl-full/description
+ trafficctl with every optional part: trafficctl-shaper, trafficctl-wifi and
+ trafficctl-telegram. Holds no files of its own; install trafficctl and only
+ the parts you need instead for a smaller install.
 endef
 
 define Package/trafficctl-telegram/description
@@ -372,7 +390,12 @@ define Package/trafficctl-wifi/install
 	true
 endef
 
+define Package/trafficctl-full/install
+	true
+endef
+
 $(eval $(call BuildPackage,trafficctl))
 $(eval $(call BuildPackage,trafficctl-shaper))
 $(eval $(call BuildPackage,trafficctl-wifi))
 $(eval $(call BuildPackage,trafficctl-telegram))
+$(eval $(call BuildPackage,trafficctl-full))
