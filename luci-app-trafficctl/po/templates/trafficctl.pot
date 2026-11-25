@@ -124,10 +124,16 @@ msgstr ""
 msgid "All devices"
 msgstr ""
 
-msgid "All devices share"
+msgid "All devices share %s between them — one bucket for the whole network."
 msgstr ""
 
-msgid "All of"
+msgid "All devices share %s between them — one bucket per direction for the whole network."
+msgstr ""
+
+msgid "All of %s share %s between them — one bucket for the whole subnet."
+msgstr ""
+
+msgid "All of %s share %s between them — one bucket per direction for the whole subnet."
 msgstr ""
 
 msgid "Always"
@@ -421,10 +427,10 @@ msgstr ""
 msgid "Every block, speed limit, shape and WiFi block the router holds, including those on devices that are offline. Each rule keeps applying while its device is away, so this is the place to find and lift it."
 msgstr ""
 
-msgid "Every device in"
+msgid "Every device in %s may use %s of its own."
 msgstr ""
 
-msgid "Every device may use"
+msgid "Every device may use %s of its own."
 msgstr ""
 
 msgid "Every device this router forwards for"
@@ -1453,18 +1459,6 @@ msgstr ""
 msgid "at least"
 msgstr ""
 
-msgid "between them — one bucket for the whole network."
-msgstr ""
-
-msgid "between them — one bucket for the whole subnet."
-msgstr ""
-
-msgid "between them — one bucket per direction for the whole network."
-msgstr ""
-
-msgid "between them — one bucket per direction for the whole subnet."
-msgstr ""
-
 msgid "bit/s"
 msgstr ""
 
@@ -1588,9 +1582,6 @@ msgstr ""
 msgid "last flush"
 msgstr ""
 
-msgid "may use"
-msgstr ""
-
 msgid "min"
 msgstr ""
 
@@ -1613,9 +1604,6 @@ msgid "nothing dropped yet"
 msgstr ""
 
 msgid "ntfy"
-msgstr ""
-
-msgid "of its own."
 msgstr ""
 
 msgid "offline"
@@ -1697,9 +1685,6 @@ msgid "saved"
 msgstr ""
 
 msgid "sending or receiving now"
-msgstr ""
-
-msgid "share"
 msgstr ""
 
 msgid "shared"

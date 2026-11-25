@@ -2663,20 +2663,25 @@ return view.extend({
 			// A split ceiling is two buckets, one per direction, so the aggregate
 			// wording changes with it.
 			var split = !!(kbitUp && kbitUp !== kbit);
-			var sharedTail = whole
-				? (split ? _('between them — one bucket per direction for the whole network.')
-				         : _('between them — one bucket for the whole network.'))
-				: (split ? _('between them — one bucket per direction for the whole subnet.')
-				         : _('between them — one bucket for the whole subnet.'));
 			if (!kbit || kbit <= 0) {
 				scopeExplain.textContent =
 					_('Pick a rate to apply it to this target, or Off to remove its limit.');
 			} else if (_scopeSelected === 'shared') {
-				scopeExplain.textContent = (whole ? _('All devices share') : _('All of') + ' ' + t + ' ' + _('share')) +
-					' ' + rateWords + ' ' + sharedTail;
+				// One format string per sentence, so a translation can put the
+				// target and the rate where its grammar wants them.
+				if (whole) {
+					scopeExplain.textContent = (split
+						? _('All devices share %s between them — one bucket per direction for the whole network.')
+						: _('All devices share %s between them — one bucket for the whole network.')).format(rateWords);
+				} else {
+					scopeExplain.textContent = (split
+						? _('All of %s share %s between them — one bucket per direction for the whole subnet.')
+						: _('All of %s share %s between them — one bucket for the whole subnet.')).format(t, rateWords);
+				}
 			} else {
-				scopeExplain.textContent = (whole ? _('Every device may use') : _('Every device in') + ' ' + t + ' ' + _('may use')) +
-					' ' + rateWords + ' ' + _('of its own.');
+				scopeExplain.textContent = whole
+					? _('Every device may use %s of its own.').format(rateWords)
+					: _('Every device in %s may use %s of its own.').format(t, rateWords);
 			}
 
 			var bad = !targetIsMonitored(t);
