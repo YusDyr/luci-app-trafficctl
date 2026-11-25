@@ -96,9 +96,6 @@ msgstr "全部活动设备"
 msgid "All devices"
 msgstr "所有设备"
 
-msgid "All of"
-msgstr "所有"
-
 msgid "App"
 msgstr "应用"
 
@@ -357,9 +354,6 @@ msgstr "已启用"
 
 msgid "Enter a custom speed value"
 msgstr "输入自定义速度值"
-
-msgid "Every device in"
-msgstr "每个设备在"
 
 msgid "Every device this router forwards for"
 msgstr "此路由器转发的每个设备"
@@ -1129,9 +1123,6 @@ msgstr "队列中活动并发连接"
 msgid "all active blocks, limits, and shapes"
 msgstr "所有活动阻断、限速和整形"
 
-msgid "between them — one bucket for the whole subnet."
-msgstr "它们之间 — 整个子网一个桶。"
-
 msgid "bit/s"
 msgstr "bit/s"
 
@@ -1222,9 +1213,6 @@ msgstr "kbit/s"
 msgid "line break"
 msgstr "换行"
 
-msgid "may use"
-msgstr "可使用"
-
 msgid "min"
 msgstr "分钟"
 
@@ -1239,9 +1227,6 @@ msgstr "nftables：Flowtables ↗"
 
 msgid "nothing dropped yet"
 msgstr "尚无丢包"
-
-msgid "of its own."
-msgstr "其自有速率。"
 
 msgid "old"
 msgstr "旧"
@@ -1306,9 +1291,6 @@ msgstr "已保存"
 msgid "sending or receiving now"
 msgstr "当前正在发送或接收"
 
-msgid "share"
-msgstr "共享"
-
 msgid "shared"
 msgstr "共享"
 
@@ -1358,14 +1340,8 @@ msgstr ""
 msgid "🆕 New device\\n{{ name }} ({{ ip }})\\nMAC: {{ mac }}\\nLink: {{ link }}"
 msgstr "🆕 新设备\\n{{ name }} ({{ ip }})\\nMAC：{{ mac }}\\nLink：{{ link }}"
 
-msgid "All devices share"
-msgstr "所有设备共享"
-
 msgid "Apply this limit now?"
 msgstr "现在应用此限制吗？"
-
-msgid "Every device may use"
-msgstr "每个设备可使用"
 
 msgid "Saved, MAC filter off"
 msgstr "已保存，MAC 过滤已关闭"
@@ -1373,8 +1349,20 @@ msgstr "已保存，MAC 过滤已关闭"
 msgid "The deny list names this device, but MAC filtering is off on that WiFi interface (macfilter is unset or \"disable\"), so the radio ignores the list. Block WiFi for the device again to switch filtering on, or remove the entry."
 msgstr "拒绝列表包含此设备，但该 WiFi 接口的 MAC 过滤已关闭（macfilter 未设置或为 \"disable\"），因此无线电会忽略该列表。再次对该设备阻止 WiFi 以开启过滤，或删除此条目。"
 
-msgid "between them — one bucket for the whole network."
-msgstr "它们之间 — 整个网络一个桶。"
+msgid "All devices share %s between them — one bucket for the whole network."
+msgstr "所有设备共享 %s — 整个网络一个桶。"
 
-msgid "between them — one bucket per direction for the whole network."
-msgstr "它们之间 — 整个网络每个方向一个桶。"
+msgid "All devices share %s between them — one bucket per direction for the whole network."
+msgstr "所有设备共享 %s — 整个网络每个方向一个桶。"
+
+msgid "All of %s share %s between them — one bucket for the whole subnet."
+msgstr "%s 中的所有设备共享 %s — 整个子网一个桶。"
+
+msgid "All of %s share %s between them — one bucket per direction for the whole subnet."
+msgstr "%s 中的所有设备共享 %s — 整个子网每个方向一个桶。"
+
+msgid "Every device may use %s of its own."
+msgstr "每个设备可独自使用 %s。"
+
+msgid "Every device in %s may use %s of its own."
+msgstr "%s 中的每个设备可独自使用 %s。"

@@ -129,8 +129,8 @@ done
 assert_eq "trafficctl-full depends on trafficctl and every part" \
     "+trafficctl +trafficctl-shaper +trafficctl-wifi +trafficctl-telegram" \
     "$(mk_define Package/trafficctl-full | sed -n 's/^[[:space:]]*DEPENDS:=//p')"
-assert_eq "trafficctl-full needs each of them of its own version or newer" \
-    'trafficctl (>=$(PKG_VERSION)), trafficctl-shaper (>=$(PKG_VERSION)), trafficctl-wifi (>=$(PKG_VERSION)), trafficctl-telegram (>=$(PKG_VERSION))' \
+assert_eq "trafficctl-full pins each of them to its own build" \
+    'trafficctl (=$(PKG_VERSION)-r$(PKG_RELEASE)), trafficctl-shaper (=$(PKG_VERSION)-r$(PKG_RELEASE)), trafficctl-wifi (=$(PKG_VERSION)-r$(PKG_RELEASE)), trafficctl-telegram (=$(PKG_VERSION)-r$(PKG_RELEASE))' \
     "$(mk_define Package/trafficctl-full | sed -n 's/^[[:space:]]*EXTRA_DEPENDS:=//p')"
 assert_eq "trafficctl-telegram depends on trafficctl and curl" "+trafficctl +curl" \
     "$(mk_define Package/trafficctl-telegram | sed -n 's/^[[:space:]]*DEPENDS:=//p')"
@@ -140,13 +140,13 @@ assert_eq "trafficctl-shaper depends on trafficctl, tc, kmod-sched-core and kmod
 assert_eq "trafficctl-wifi depends on trafficctl, iw and hostapd-utils" \
     "+trafficctl +iw +hostapd-utils" \
     "$(mk_define Package/trafficctl-wifi | sed -n 's/^[[:space:]]*DEPENDS:=//p')"
-# Versioned on the new side: luci-app-trafficctl and trafficctl-telegram of
-# this release need the ucode backend, which a trafficctl up to 1.30.x lacks,
-# and the shaper and WiFi parts need a trafficctl that checks for their tools.
-# PKG_VERSION, not a literal, as the packages move in lockstep.
+# Pinned to the exact build, as in-tree split packages do (net/bind): the
+# parts and the core come from one source and load each other's code, so
+# only the same build is a tested pair. PKG_VERSION and PKG_RELEASE, not a
+# literal, as the packages move in lockstep. build-ipk/apk.sh pin the same.
 for pkg in trafficctl-telegram trafficctl-shaper trafficctl-wifi; do
-    assert_eq "$pkg needs trafficctl of its own version or newer" \
-        'trafficctl (>=$(PKG_VERSION))' \
+    assert_eq "$pkg pins trafficctl to its own build" \
+        'trafficctl (=$(PKG_VERSION)-r$(PKG_RELEASE))' \
         "$(mk_define "Package/$pkg" | sed -n 's/^[[:space:]]*EXTRA_DEPENDS:=//p')"
 done
 # The core carries none of the optional parts' tools (2.2.0).

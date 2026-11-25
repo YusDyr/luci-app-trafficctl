@@ -97,7 +97,7 @@ define Package/trafficctl-shaper
   TITLE:=Traffic shaping (tc/HTB) for trafficctl
   URL:=https://github.com/YusDyr/luci-app-trafficctl
   DEPENDS:=+trafficctl +tc +kmod-sched-core +kmod-ifb
-  EXTRA_DEPENDS:=trafficctl (>=$(PKG_VERSION))
+  EXTRA_DEPENDS:=trafficctl (=$(PKG_VERSION)-r$(PKG_RELEASE))
   PKGARCH:=all
 endef
 
@@ -107,7 +107,7 @@ define Package/trafficctl-wifi
   TITLE:=WiFi clients and WiFi blocking for trafficctl
   URL:=https://github.com/YusDyr/luci-app-trafficctl
   DEPENDS:=+trafficctl +iw +hostapd-utils
-  EXTRA_DEPENDS:=trafficctl (>=$(PKG_VERSION))
+  EXTRA_DEPENDS:=trafficctl (=$(PKG_VERSION)-r$(PKG_RELEASE))
   PKGARCH:=all
 endef
 
@@ -117,9 +117,10 @@ define Package/trafficctl-telegram
   TITLE:=Telegram bot for trafficctl
   URL:=https://github.com/YusDyr/luci-app-trafficctl
   DEPENDS:=+trafficctl +curl
-  # Versioned, so the opkg/apk solver never pairs this bot with a trafficctl
-  # older than its own release (1.30.x has no trafficctl.uc for it to call).
-  EXTRA_DEPENDS:=trafficctl (>=$(PKG_VERSION))
+  # Pinned to the same build: the bot loads trafficctl's modules, and both
+  # come from the same source, so a newer core next to an older bot is a
+  # pairing nobody tested.
+  EXTRA_DEPENDS:=trafficctl (=$(PKG_VERSION)-r$(PKG_RELEASE))
   PKGARCH:=all
 endef
 
@@ -129,7 +130,7 @@ define Package/trafficctl-full
   TITLE:=trafficctl with every optional part
   URL:=https://github.com/YusDyr/luci-app-trafficctl
   DEPENDS:=+trafficctl +trafficctl-shaper +trafficctl-wifi +trafficctl-telegram
-  EXTRA_DEPENDS:=trafficctl (>=$(PKG_VERSION)), trafficctl-shaper (>=$(PKG_VERSION)), trafficctl-wifi (>=$(PKG_VERSION)), trafficctl-telegram (>=$(PKG_VERSION))
+  EXTRA_DEPENDS:=trafficctl (=$(PKG_VERSION)-r$(PKG_RELEASE)), trafficctl-shaper (=$(PKG_VERSION)-r$(PKG_RELEASE)), trafficctl-wifi (=$(PKG_VERSION)-r$(PKG_RELEASE)), trafficctl-telegram (=$(PKG_VERSION)-r$(PKG_RELEASE))
   PKGARCH:=all
 endef
 
