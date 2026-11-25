@@ -35,8 +35,9 @@ All packages are released in lockstep with the same PKG_VERSION.
   reports `shaping` (none/nohtb/download/full) next to `wifi_filter`.
   Since 2.3.0 a third one, `trafficctl-full`, pulls in trafficctl and all
   three parts (`+trafficctl +trafficctl-shaper +trafficctl-wifi
-  +trafficctl-telegram`, each `>=$(PKG_VERSION)`; build-ipk/apk.sh pin the
-  parts to the exact release).
+  +trafficctl-telegram`). Every part pins the others with
+  `EXTRA_DEPENDS:=... (=$(PKG_VERSION)-r$(PKG_RELEASE))`, as in-tree split
+  packages do; build-ipk/apk.sh pin the same exact release.
 - `luci-app-trafficctl/`: the web interface (`luci.mk`). Owns the views, the
   rpcd plugin, menu.d, acl.d and po/.
   `LUCI_DEPENDS:=+trafficctl +trafficctl-full ...`: the web interface always
