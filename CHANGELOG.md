@@ -79,6 +79,20 @@ rest) are gone.
 
 ---
 
+## [2.3.1] - 2026-11-25
+
+### Bug Fixes
+- whole-sentence rate-scope strings and exact pins on the optional parts ([#193](https://github.com/YusDyr/luci-app-trafficctl/issues/193)) ([cab6571](https://github.com/YusDyr/luci-app-trafficctl/commit/cab657144742c2df90f321a04c30da51bac3ddae))
+  The sentence under the rate presets was glued from fragments ("All of",
+  the target, "share", the rate, a tail), so a translation could not move
+  the target or the rate. Each sentence is now one msgid with %s for the
+  target and the rate. The zh_Hans fragments give way to the six whole
+  sentences, and the template is regenerated.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v2.3.0...v2.3.1
+
+---
+
 ## [2.3.0] - 2026-11-24
 
 ### Features
