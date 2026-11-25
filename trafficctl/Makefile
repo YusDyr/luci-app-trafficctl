@@ -139,9 +139,10 @@ define Package/trafficctl/description
  internet blocking, a global internet cut, port-forward control, device
  notifications and a Prometheus exporter. Optional parts are packages of
  their own: trafficctl-shaper (traffic shaping with tc/HTB), trafficctl-wifi
- (WiFi clients and WiFi MAC filtering), trafficctl-telegram (the Telegram
- bot). The web interface is luci-app-trafficctl. The ntfy, webhook and
- Telegram notification senders need curl.
+ (WiFi clients and WiFi MAC filtering) and trafficctl-telegram (the Telegram
+ bot), or trafficctl-full for all of them. The web interface is
+ luci-app-trafficctl. The ntfy, webhook and Telegram notification senders
+ need curl.
 endef
 
 define Package/trafficctl-shaper/description
