@@ -110,9 +110,10 @@ Description: Per-device traffic monitoring (conntrack), rate limiting
  (nftables), internet blocking, a global internet cut, port-forward control,
  device notifications and a Prometheus exporter. Optional parts are packages
  of their own: trafficctl-shaper (traffic shaping with tc/HTB),
- trafficctl-wifi (WiFi clients and WiFi MAC filtering), trafficctl-telegram
- (the Telegram bot). The web interface is luci-app-trafficctl. The ntfy,
- webhook and Telegram notification senders need curl.
+ trafficctl-wifi (WiFi clients and WiFi MAC filtering) and trafficctl-telegram
+ (the Telegram bot), or trafficctl-full for all of them. The web interface is
+ luci-app-trafficctl. The ntfy, webhook and Telegram notification senders
+ need curl.
 EOF
 
 # Conffiles must list ONLY files that ship in data.tar.gz and may be user-edited.

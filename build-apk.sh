@@ -275,7 +275,7 @@ chmod +x "$TG_SCRIPTS"/*
 # luci-app-trafficctl, over an old install. The SDK build cannot set it and
 # does not need it when both are upgraded in one transaction.
 build_apk "$BE_NAME" net \
-    "Per-device traffic monitoring (conntrack), rate limiting (nftables), internet blocking, a global internet cut, port-forward control, device notifications and a Prometheus exporter. Optional parts are packages of their own: trafficctl-shaper (traffic shaping with tc/HTB), trafficctl-wifi (WiFi clients and WiFi MAC filtering), trafficctl-telegram (the Telegram bot). The web interface is luci-app-trafficctl. The ntfy, webhook and Telegram notification senders need curl." \
+    "Per-device traffic monitoring (conntrack), rate limiting (nftables), internet blocking, a global internet cut, port-forward control, device notifications and a Prometheus exporter. Optional parts are packages of their own: trafficctl-shaper (traffic shaping with tc/HTB), trafficctl-wifi (WiFi clients and WiFi MAC filtering) and trafficctl-telegram (the Telegram bot), or trafficctl-full for all of them. The web interface is luci-app-trafficctl. The ntfy, webhook and Telegram notification senders need curl." \
     "$BE_DEPENDS" "$BE_DATA" "$BE_SCRIPTS" "$PKG_NAME"
 
 # replaces: releases up to 1.30.x shipped the bot in trafficctl.
